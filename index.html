@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>WMS 창고관리 시스템</title>
+<title>메이크창고 WMS 창고관리 시스템</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
@@ -173,48 +173,152 @@ function App(){
   var sw=useState([]),whs=sw[0],setWhs=sw[1];
   var si=useState(null),whId=si[0],setWhId=si[1];
   var sr=useState(false),ready=sr[0],setReady=sr[1];
+  var sl=useState(false),loggedIn=sl[0],setLoggedIn=sl[1];
+  var sp=useState(''),inputPw=sp[0],setInputPw=sp[1];
+  var se=useState(''),pwErr=se[0],setPwErr=se[1];
+  var sns=useState(false),needSetup=sns[0],setNeedSetup=sns[1];
+  var snp=useState(''),newPw=snp[0],setNewPw=snp[1];
+  var snp2=useState(''),newPw2=snp2[0],setNewPw2=snp2[1];
+  var spe=useState(''),setupErr=spe[0],setSetupErr=spe[1];
+
+  var STORED_ID='makechango';
 
   useEffect(function(){
-    /* 로컬 백업 먼저 표시 */
-    try{var bak=localStorage.getItem('wms_bak');if(bak){setWhs(JSON.parse(bak));}}catch(e){}
+    var savedPw=localStorage.getItem('wms_pw');
+    if(!savedPw){
+      // 비번 미설정 상태 → 설정 화면
+      setNeedSetup(true);
+      setReady(true);
+      return;
+    }
+    // 비번 있으면 로그인 화면
     setReady(true);
-    /* Firebase 폴링 */
+    // 로컬 백업 먼저 표시
+    try{var bak=localStorage.getItem('wms_bak');if(bak){setWhs(JSON.parse(bak));}}catch(e){}
     dbListen(function(data){setWhs(data||[]);});
     return function(){dbOff();};
   },[]);
 
+  function handleSetupPw(){
+    if(!newPw||newPw.length<4){setSetupErr('비밀번호는 4자리 이상으로 설정해주세요');return;}
+    if(newPw!==newPw2){setSetupErr('비밀번호가 일치하지 않습니다');return;}
+    localStorage.setItem('wms_pw',newPw);
+    setNeedSetup(false);
+    setLoggedIn(true);
+    dbListen(function(data){setWhs(data||[]);});
+  }
+
+  function handleLogin(){
+    var savedPw=localStorage.getItem('wms_pw');
+    if(inputPw===savedPw){
+      setLoggedIn(true);setPwErr('');
+    } else {
+      setPwErr('아이디 또는 비밀번호가 올바르지 않습니다');
+      setInputPw('');
+    }
+  }
+
   function persist(d){
-    setWhs(d);
-    dbSave(d);
+    setWhs(d);dbSave(d);
     try{localStorage.setItem('wms_bak',JSON.stringify(d));}catch(e){}
   }
   function upWh(id,fn){persist(whs.map(function(w){return w.id===id?fn(w):w;}));}
   var cWh=whs.find(function(w){return w.id===whId;});
 
-  if(!ready)return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}},
+  if(!ready)return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},
     h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB}},'로딩 중...'));
-  if(cWh)return h(WHView,{wh:cWh,onUpdate:function(fn){upWh(whId,fn);},onBack:function(){setWhId(null);}});
-  return h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId});
+
+  /* 비밀번호 최초 설정 화면 */
+  if(needSetup)return h('div',{style:{height:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center',padding:20}},
+    h('div',{style:{background:CARD,borderRadius:18,padding:32,width:'100%',maxWidth:380,boxShadow:'0 8px 40px rgba(0,0,0,.5)'}},
+      h('div',{style:{textAlign:'center',marginBottom:28}},
+        h('div',{style:{fontSize:44,marginBottom:10}},'📦'),
+        h('div',{style:{fontSize:20,fontWeight:700,color:TX}},'메이크창고 WMS'),
+        h('div',{style:{fontSize:12,color:SUB,marginTop:4}},'VER 01 · 최초 비밀번호를 설정해주세요')
+      ),
+      h('div',{style:{display:'flex',flexDirection:'column',gap:12}},
+        h('div',{style:{background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.2)',borderRadius:8,padding:'10px 14px',fontSize:12,color:'#93C5FD'}},
+          '아이디: ',h('strong',null,STORED_ID),' (고정)'
+        ),
+        h(Inp,{lbl:'새 비밀번호 (4자리 이상)',val:newPw,set:setNewPw,type:'password',ph:'비밀번호 입력'}),
+        h(Inp,{lbl:'비밀번호 확인',val:newPw2,set:setNewPw2,type:'password',ph:'비밀번호 재입력'}),
+        setupErr&&h('div',{style:{fontSize:12,color:'#F87171',textAlign:'center',background:'rgba(239,68,68,.08)',borderRadius:7,padding:'8px 12px'}},setupErr),
+        h('button',{style:S('#3B82F6','#fff',{padding:13,fontSize:15,width:'100%',borderRadius:9,marginTop:4}),onClick:handleSetupPw},'비밀번호 설정하고 시작하기')
+      )
+    )
+  );
+
+  /* 로그인 화면 */
+  if(!loggedIn)return h('div',{style:{height:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center',padding:20}},
+    h('div',{style:{background:CARD,borderRadius:18,padding:32,width:'100%',maxWidth:380,boxShadow:'0 8px 40px rgba(0,0,0,.5)'}},
+      h('div',{style:{textAlign:'center',marginBottom:28}},
+        h('div',{style:{fontSize:44,marginBottom:10}},'📦'),
+        h('div',{style:{fontSize:20,fontWeight:700,color:TX}},'메이크창고 WMS'),
+        h('div',{style:{fontSize:12,color:SUB,marginTop:4}},'창고관리 시스템 · VER 01')
+      ),
+      h('div',{style:{display:'flex',flexDirection:'column',gap:12}},
+        h('div',{style:{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:SUB}},
+          '아이디',
+          h('div',{style:{background:BG,border:'1px solid '+BDR,borderRadius:7,padding:'8px 10px',color:'#60A5FA',fontSize:14,fontWeight:600}},STORED_ID)
+        ),
+        h(Inp,{lbl:'비밀번호',val:inputPw,set:setInputPw,type:'password',ph:'비밀번호 입력'}),
+        pwErr&&h('div',{style:{fontSize:12,color:'#F87171',textAlign:'center',background:'rgba(239,68,68,.08)',borderRadius:7,padding:'8px 12px'}},pwErr),
+        h('button',{style:S('#3B82F6','#fff',{padding:13,fontSize:15,width:'100%',borderRadius:9,marginTop:4}),
+          onClick:handleLogin},'로그인'),
+        h('button',{style:S('transparent',SUB,{padding:'8px',fontSize:11,width:'100%',textDecoration:'underline'}),
+          onClick:function(){
+            if(confirm('비밀번호를 초기화하면 재설정 화면으로 이동합니다. 계속할까요?')){
+              localStorage.removeItem('wms_pw');
+              setNeedSetup(true);setInputPw('');setPwErr('');
+            }
+          }},'비밀번호를 잊으셨나요?')
+      )
+    )
+  );
+
+  if(cWh)return h(WHView,{wh:cWh,onUpdate:function(fn){upWh(whId,fn);},onBack:function(){setWhId(null);},onLogout:function(){setLoggedIn(false);setInputPw('');}});
+  return h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId,onLogout:function(){setLoggedIn(false);setInputPw('');}});
 }
 
 /* ════════════ MAIN VIEW ════════════ */
 function MainView(p){
-  var whs=p.whs,onPersist=p.onPersist,onEnter=p.onEnter;
+  var whs=p.whs,onPersist=p.onPersist,onEnter=p.onEnter,onLogout=p.onLogout;
   var so=useState(false),open=so[0],setOpen=so[1];
   var sn=useState(''),nm=sn[0],setNm=sn[1];
   var sr=useState('10'),rows=sr[0],setRows=sr[1];
   var sc=useState('10'),cols=sc[0],setCols=sc[1];
+  var spc=useState(false),showPwChange=spc[0],setShowPwChange=spc[1];
+  var scpw=useState(''),curPw=scpw[0],setCurPw=scpw[1];
+  var snpw=useState(''),nPw=snpw[0],setNPw=snpw[1];
+  var snpw2=useState(''),nPw2=snpw2[0],setNPw2=snpw2[1];
+  var spe=useState(''),pwChErr=spe[0],setPwChErr=spe[1];
+
   function create(){
     if(!nm.trim())return;
     var r=Math.min(Math.max(+rows||10,2),30),c=Math.min(Math.max(+cols||10,2),30);
     onPersist(whs.concat([mkWH(nm.trim(),r,c)]));
     setOpen(false);setNm('');setRows('10');setCols('10');
   }
+  function handlePwChange(){
+    var saved=localStorage.getItem('wms_pw');
+    if(curPw!==saved){setPwChErr('현재 비밀번호가 올바르지 않습니다');return;}
+    if(!nPw||nPw.length<4){setPwChErr('새 비밀번호는 4자리 이상이어야 합니다');return;}
+    if(nPw!==nPw2){setPwChErr('새 비밀번호가 일치하지 않습니다');return;}
+    localStorage.setItem('wms_pw',nPw);
+    setShowPwChange(false);setCurPw('');setNPw('');setNPw2('');setPwChErr('');
+    alert('비밀번호가 변경되었습니다.');
+  }
+
   return h('div',{style:{minHeight:'100vh',background:BG}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 16px',height:54,display:'flex',alignItems:'center',gap:10,position:'sticky',top:0,zIndex:10}},
-      h('span',{style:{fontSize:24}},'📦'),
-      h('div',{style:{flex:1}},h('div',{style:{fontWeight:700,fontSize:17}},'메이크창고 WMS 창고관리  VER 01'),h('div',{style:{fontSize:10,color:SUB}},'만든이 P.K.W')),
-      h('button',{style:S('#3B82F6','#fff'),onClick:function(){setOpen(true);}},'+ 새 창고')
+      h('span',{style:{fontSize:22}},'📦'),
+      h('div',{style:{flex:1}},
+        h('div',{style:{fontWeight:700,fontSize:15}},'메이크창고 WMS 창고관리  VER 01'),
+        h('div',{style:{fontSize:10,color:SUB}},'Copyright, (C)) 2026 박경우 All rights reserved')
+      ),
+      h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'5px 9px',fontSize:11}),onClick:function(){setShowPwChange(true);}},'🔑 비번변경'),
+      h('button',{style:S('rgba(255,255,255,.07)','#F87171',{padding:'5px 9px',fontSize:11}),onClick:function(){if(confirm('로그아웃 할까요?'))onLogout();}},'로그아웃'),
+      h('button',{style:S('#3B82F6','#fff',{padding:'5px 12px',fontSize:12}),onClick:function(){setOpen(true);}},'+ 새 창고')
     ),
     h('div',{style:{padding:16,maxWidth:960,margin:'0 auto'}},
       whs.length===0
@@ -255,13 +359,28 @@ function MainView(p){
           h('button',{style:S('#3B82F6','#fff',{padding:13,fontSize:15,width:'100%'}),onClick:create},'생성하기')
         )
       )
+    ),
+    showPwChange&&h('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.76)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:20},onClick:function(){setShowPwChange(false);setCurPw('');setNPw('');setNPw2('');setPwChErr('');}},
+      h('div',{style:{background:CARD,borderRadius:16,padding:26,width:'100%',maxWidth:380},onClick:function(e){e.stopPropagation();}},
+        h('div',{style:{fontSize:17,fontWeight:700,marginBottom:18}},'🔑 비밀번호 변경'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:11}},
+          h(Inp,{lbl:'현재 비밀번호',val:curPw,set:setCurPw,type:'password',ph:'현재 비밀번호'}),
+          h(Inp,{lbl:'새 비밀번호 (4자리 이상)',val:nPw,set:setNPw,type:'password',ph:'새 비밀번호'}),
+          h(Inp,{lbl:'새 비밀번호 확인',val:nPw2,set:setNPw2,type:'password',ph:'새 비밀번호 재입력'}),
+          pwChErr&&h('div',{style:{fontSize:12,color:'#F87171',background:'rgba(239,68,68,.08)',borderRadius:7,padding:'8px 12px'}},pwChErr),
+          h('div',{style:{display:'flex',gap:8}},
+            h('button',{style:S('#3B82F6','#fff',{flex:1,padding:12,fontSize:14}),onClick:handlePwChange},'변경'),
+            h('button',{style:S('rgba(255,255,255,.07)',SUB,{flex:1,padding:12,fontSize:14}),onClick:function(){setShowPwChange(false);setCurPw('');setNPw('');setNPw2('');setPwChErr('');}},'취소')
+          )
+        )
+      )
     )
   );
 }
 
 /* ════════════ WH VIEW ════════════ */
 function WHView(p){
-  var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack;
+  var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack,onLogout=p.onLogout;
   var st1=useState('setup'),tab=st1[0],setTab=st1[1];
   var st2=useState(1),zoom=st2[0],setZoom=st2[1];
   var st3=useState(new Set()),sel=st3[0],setSel=st3[1];
@@ -416,6 +535,7 @@ function WHView(p){
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 10px',height:50,display:'flex',alignItems:'center',gap:6,flexShrink:0}},
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:onBack},'< 목록'),
       h('div',{style:{flex:1,fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},wh.name),
+      h('button',{style:S('rgba(255,255,255,.07)','#F87171',{padding:'5px 8px',fontSize:11}),onClick:function(){if(confirm('로그아웃?'))onLogout();}},'로그아웃'),
       h('button',{style:S('rgba(16,185,129,.2)','#34D399',{padding:'5px 9px',fontSize:12}),onClick:function(){setShowExp(true);}},'내보내기'),
       h('button',{style:S('rgba(255,255,255,.07)','#FBBF24',{padding:'5px 8px',fontSize:14}),onClick:doUndo},'<'),
       h('button',{style:S('rgba(59,130,246,.2)','#60A5FA',{padding:'5px 9px',fontSize:12}),onClick:doSave},'저장'),
