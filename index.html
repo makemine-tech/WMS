@@ -72,10 +72,10 @@ function copyText(t){
 
 /* ── 상수 ── */
 var CT={
-  rack:  {lbl:'랙',    clr:'#60A5FA',bg:'rgba(59,130,246,.20)',bdr:'#3B82F6'},
-  empty: {lbl:'빈공간',clr:'#34D399',bg:'rgba(16,185,129,.11)',bdr:'#10B981'},
-  unused:{lbl:'미사용',clr:'#6B7280',bg:'rgba(100,116,139,.09)',bdr:'#475569'},
-  shelf: {lbl:'선반',  clr:'#FBBF24',bg:'rgba(245,158,11,.16)',bdr:'#F59E0B'}
+  rack:  {lbl:'랙',    clr:'#60A5FA',bg:'rgba(59,130,246,.20)', bdr:'#3B82F6'},
+  shelf: {lbl:'보관',  clr:'#FBBF24',bg:'rgba(245,158,11,.16)', bdr:'#F59E0B'},
+  empty: {lbl:'빈공간',clr:'#34D399',bg:'rgba(16,185,129,.11)', bdr:'#10B981'},
+  unused:{lbl:'미사용',clr:'#6B7280',bg:'rgba(100,116,139,.09)',bdr:'#475569'}
 };
 var PC=['#F87171','#FB923C','#FBBF24','#4ADE80','#34D399','#60A5FA','#A78BFA','#F472B6','#2DD4BF','#38BDF8'];
 var BG='#0F172A',CARD='#1E293B',BDR='#334155',TX='#E2E8F0',SUB='#64748B';
@@ -148,6 +148,34 @@ function Inp(p){
     h('input',{type:p.type||'text',value:p.val,placeholder:p.ph||'',onChange:function(e){p.set(e.target.value);},
       style:{background:BG,border:'1px solid '+BDR,borderRadius:7,padding:'8px 10px',color:TX,fontSize:14,outline:'none',width:'100%'}}));
 }
+/* 프리셋 색상 팔레트 */
+var PRESETS=['#F87171','#FB923C','#FBBF24','#4ADE80','#34D399','#60A5FA','#818CF8','#E879F9','#F472B6','#2DD4BF','#38BDF8','#94A3B8','#ffffff','#1e293b'];
+
+function ColorPicker(p){
+  return h('div',{style:{display:'flex',flexDirection:'column',gap:5}},
+    h('div',{style:{fontSize:11,color:SUB}},'색상'),
+    h('div',{style:{display:'flex',gap:3,flexWrap:'wrap',maxWidth:200}},
+      PRESETS.map(function(c){
+        var isSel=p.value===c;
+        return h('div',{key:c,onClick:function(){p.onChange(c);},
+          style:{width:20,height:20,borderRadius:4,background:c,cursor:'pointer',flexShrink:0,
+            border:isSel?'2px solid #fff':'2px solid rgba(255,255,255,.15)',
+            boxShadow:isSel?'0 0 0 1px '+c:'none',
+            transform:isSel?'scale(1.15)':'scale(1)',transition:'transform .1s'}});
+      }),
+      h('label',{style:{cursor:'pointer'},title:'직접입력'},
+        h('div',{style:{width:20,height:20,borderRadius:4,background:'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)',border:'2px solid rgba(255,255,255,.2)',cursor:'pointer',flexShrink:0}}),
+        h('input',{type:'color',value:p.value,onChange:function(e){p.onChange(e.target.value);},
+          style:{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}})
+      )
+    ),
+    h('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:2}},
+      h('div',{style:{width:18,height:18,borderRadius:4,background:p.value,border:'1px solid rgba(255,255,255,.3)',flexShrink:0}}),
+      h('div',{style:{fontSize:10,color:'#94A3B8',letterSpacing:.5}},p.value.toUpperCase())
+    )
+  );
+}
+
 function DivPicker(p){
   var sv=useState(null),hov=sv[0],setHov=sv[1];
   var hi=hov||p.val;
@@ -163,22 +191,9 @@ function DivPicker(p){
       onClick:(function(rr,cc){return function(){p.set({r:rr+1,c:cc+1});};})(r,c)
     }));
   }
-  return h('div',{style:{display:'flex',flexDirection:'column',gap:6}},
-    /* 컬러 피커 — 분할 피커 좌상단 */
-    h('div',{style:{display:'flex',alignItems:'center',gap:7}},
-      h('div',{style:{fontSize:11,color:SUB}},'색상'),
-      h('label',{style:{cursor:'pointer',display:'flex',alignItems:'center',gap:6}},
-        h('div',{style:{width:28,height:28,borderRadius:6,background:p.color,border:'2px solid rgba(255,255,255,.3)',boxShadow:'0 0 0 1px rgba(0,0,0,.4)',flexShrink:0}}),
-        h('div',{style:{fontSize:10,color:'#94A3B8',letterSpacing:.5}},p.color.toUpperCase()),
-        h('input',{type:'color',value:p.color,onChange:function(e){p.onColor(e.target.value);},
-          style:{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}})
-      )
-    ),
-    /* 분할 피커 */
-    h('div',null,
-      h('div',{style:{fontSize:11,color:SUB,marginBottom:4}},'분할 '+p.val.r+'x'+p.val.c),
-      h('div',{style:{display:'inline-grid',gridTemplateColumns:'repeat(4,22px)',gap:2}},cells)
-    )
+  return h('div',{style:{display:'flex',flexDirection:'column',gap:5}},
+    h('div',{style:{fontSize:11,color:SUB}},'분할 '+p.val.r+'x'+p.val.c),
+    h('div',{style:{display:'inline-grid',gridTemplateColumns:'repeat(4,22px)',gap:2}},cells)
   );
 }
 
