@@ -83,11 +83,11 @@ function S(bg,clr,ex){return Object.assign({background:bg,color:clr,border:'none
 
 /* ── 창고 헬퍼 ── */
 function mkSlots(r,c){var s={};for(var i=0;i<r;i++)for(var j=0;j<c;j++)s[i+'-'+j]=null;return s;}
-function mkCell(type,dr,dc){return{type:type,divR:dr,divC:dc,slots:mkSlots(dr,dc)};}
+function mkCell(type,dr,dc,color){return{type:type,divR:dr,divC:dc,slots:mkSlots(dr,dc),color:color||null};}
 function mkWH(name,rows,cols){
   var cells={};
   for(var r=0;r<rows;r++)for(var c=0;c<cols;c++)cells[r+'-'+c]={type:null,divR:1,divC:1,slots:{'0-0':null}};
-  return{id:uid(),name:name,rows:rows,cols:cols,cells:cells,inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',typeColors:{rack:'#3B82F6',shelf:'#F59E0B',empty:'#10B981',unused:'#475569'}};
+  return{id:uid(),name:name,rows:rows,cols:cols,cells:cells,inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:''};
 }
 function calcSt(wh){
   var tot=0,used=0;
@@ -397,15 +397,14 @@ function WHView(p){
   var st14=useState(null),histView=st14[0],setHistView=st14[1];
   var st15=useState(false),showExp=st15[0],setShowExp=st15[1];
   var st16=useState(false),locked=st16[0],setLocked=st16[1];
+  var st17=useState('#3B82F6'),pickColor=st17[0],setPickColor=st17[1];
 
-  /* 창고별 커스텀 색상으로 CT 재정의 */
-  var defaultTC={rack:'#3B82F6',shelf:'#F59E0B',empty:'#10B981',unused:'#475569'};
-  var TC=Object.assign({},defaultTC,wh.typeColors||{});
+  /* 타입 기본색 (색상 미지정 셀에 사용) */
   var CT={
-    rack:  {lbl:'랙',    clr:TC.rack,  bg:TC.rack+'33',  bdr:TC.rack},
-    shelf: {lbl:'선반',  clr:TC.shelf, bg:TC.shelf+'2a', bdr:TC.shelf},
-    empty: {lbl:'빈공간',clr:TC.empty, bg:TC.empty+'1e', bdr:TC.empty},
-    unused:{lbl:'미사용',clr:TC.unused,bg:TC.unused+'18',bdr:TC.unused}
+    rack:  {lbl:'랙',    clr:'#60A5FA',bg:'rgba(59,130,246,.20)', bdr:'#3B82F6'},
+    shelf: {lbl:'선반',  clr:'#FBBF24',bg:'rgba(245,158,11,.16)', bdr:'#F59E0B'},
+    empty: {lbl:'빈공간',clr:'#34D399',bg:'rgba(16,185,129,.11)', bdr:'#10B981'},
+    unused:{lbl:'미사용',clr:'#6B7280',bg:'rgba(100,116,139,.09)',bdr:'#475569'}
   };
 
   var st=calcSt(wh),pg=getPG(wh);
@@ -432,7 +431,7 @@ function WHView(p){
   function toggleSel(key){setSel(function(s){var n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});}
   function applySetup(){
     if(!sel.size)return;
-    withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c);});return w;});
+    withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c,pickColor);});return w;});
     setSel(new Set());
   }
   function submitIn(){
@@ -499,8 +498,12 @@ function WHView(p){
         (function(r,c){
           var key=r+'-'+c,cell=wh.cells[key];if(!cell)return;
           var ct=CT[cell.type],isSel=sel.has(key);
+          var cellClr=cell.color||(ct?ct.bdr:'#475569');
+          var cellBg=cell.color?(cell.color+'28'):(ct?ct.bg:'rgba(255,255,255,.03)');
           var dR=(!ops&&isSel)?sDiv.r:cell.divR,dC=(!ops&&isSel)?sDiv.c:cell.divC;
-          var isPrev=!ops&&isSel,pCT=CT[isPrev?sType:cell.type];
+          var isPrev=!ops&&isSel;
+          var prevClr=isPrev?pickColor:(cellClr);
+          var prevBg=isPrev?(pickColor+'28'):cellBg;
           var subs=[];
           for(var sr=0;sr<dR;sr++)for(var sc=0;sc<dC;sc++){
             (function(sr,sc){
@@ -513,7 +516,7 @@ function WHView(p){
                 isSS?'rgba(59,130,246,.48)':isMF?'rgba(245,158,11,.38)':
                 slot?(pClr+'3a'):(ct?ct.bg:'rgba(255,255,255,.04)');
               var kids=[];
-              if(isPrev&&idx2===0&&subH>16)kids.push(h('div',{key:'l',style:{fontSize:Math.max(6,Math.min(9,subH*.18)),color:pCT&&pCT.clr||TX,opacity:.7,fontWeight:600}},dR+'x'+dC));
+              if(isPrev&&idx2===0&&subH>16)kids.push(h('div',{key:'l',style:{fontSize:Math.max(6,Math.min(9,subH*.18)),color:pickColor,opacity:.9,fontWeight:700}},dR+'x'+dC));
               if(!isPrev&&isSS&&!slot)kids.push(h('div',{key:'n',style:{fontSize:Math.max(8,Math.min(12,subH*.25)),fontWeight:800,color:'#60A5FA'}},ssIdx+1));
               if(!isPrev&&slot){
                 kids.push(h('div',{key:'d',style:{width:Math.min(7,subW*.3),height:Math.min(7,subH*.3),borderRadius:'50%',background:pClr,flexShrink:0}}));
@@ -527,8 +530,13 @@ function WHView(p){
             })(sr,sc);
           }
           cells.push(h('div',{key:key,
-            style:{width:CSIZ,height:CSIZ,background:pCT?(pCT.bdr+'22'):'rgba(255,255,255,.03)',border:'1.5px solid '+(isSel?(pCT&&pCT.bdr||'#F1F5F9'):(ct?ct.bdr:BDR)),outline:isSel?('2px solid '+(pCT&&pCT.bdr||'#e2e8f0')):'none',borderRadius:4,overflow:'hidden',cursor:'pointer',boxSizing:'border-box',display:'grid',gridTemplateColumns:'repeat('+dC+',1fr)',gridTemplateRows:'repeat('+dR+',1fr)',gap:2,padding:2},
-            onClick:!ops?(function(k){return function(){toggleSel(k);};})(key):undefined
+            style:{width:CSIZ,height:CSIZ,
+              background:prevBg,
+              border:'1.5px solid '+(isSel?pickColor:(cell.type?cellClr:BDR)),
+              outline:isSel?('2px solid '+pickColor):'none',
+              borderRadius:4,overflow:'hidden',cursor:'pointer',boxSizing:'border-box',
+              display:'grid',gridTemplateColumns:'repeat('+dC+',1fr)',gridTemplateRows:'repeat('+dR+',1fr)',gap:2,padding:2},
+            onClick:!ops?(function(k){return function(){if(!locked)toggleSel(k);};})(key):undefined
           },subs));
         })(r,c);
       }
@@ -576,37 +584,43 @@ function WHView(p){
     /* 설정 */
     tab==='setup'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 12px',display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',flexShrink:0}},
-        /* 유형 + 컬러 피커 */
+
+        /* 유형 선택 (색상 없음) */
         h('div',null,
-          h('div',{style:{fontSize:11,color:SUB,marginBottom:6}},'유형 — 색상 바 클릭으로 변경'),
-          h('div',{style:{display:'flex',gap:6}},
+          h('div',{style:{fontSize:11,color:SUB,marginBottom:6}},'유형'),
+          h('div',{style:{display:'flex',gap:5}},
             ['rack','shelf','empty','unused'].map(function(k){
               var v=CT[k];
-              return h('div',{key:k,style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},
-                h('label',{style:{cursor:'pointer',display:'block',width:'100%'}},
-                  h('div',{style:{height:5,borderRadius:3,background:TC[k],width:'100%',minWidth:48,border:'1px solid rgba(255,255,255,.25)',marginBottom:3}}),
-                  h('input',{type:'color',value:TC[k],
-                    onChange:(function(key){return function(ev){
-                      var nc=Object.assign({},defaultTC,wh.typeColors||{});
-                      nc[key]=ev.target.value;
-                      onUpdate(function(w){return Object.assign({},w,{typeColors:nc});});
-                    };})(k),
-                    style:{display:'none'}
-                  })
-                ),
-                h('button',{onClick:function(){setSType(k);},
-                  style:S(sType===k?v.bg:'rgba(255,255,255,.05)',sType===k?v.clr:SUB,
-                    {border:'1px solid '+(sType===k?v.bdr:'transparent'),padding:'5px 10px',fontSize:12,pointerEvents:locked?'none':'auto',opacity:locked?.5:1})
-                },v.lbl)
-              );
+              return h('button',{key:k,onClick:function(){setSType(k);},
+                style:S(sType===k?'rgba(255,255,255,.12)':'rgba(255,255,255,.04)',sType===k?TX:SUB,
+                  {border:'1px solid '+(sType===k?'rgba(255,255,255,.4)':'transparent'),padding:'5px 11px',fontSize:12,
+                   opacity:locked?.4:1,pointerEvents:locked?'none':'auto'})
+              },v.lbl);
             })
           )
         ),
+
+        /* 개별 색상 선택 피커 */
+        h('div',null,
+          h('div',{style:{fontSize:11,color:SUB,marginBottom:6}},'유닛 색상'),
+          h('label',{style:{cursor:'pointer',display:'flex',alignItems:'center',gap:7}},
+            h('div',{style:{width:36,height:36,borderRadius:8,background:pickColor,border:'2px solid rgba(255,255,255,.25)',boxShadow:'0 0 0 1px rgba(0,0,0,.3)',flexShrink:0}}),
+            h('div',{style:{fontSize:11,color:TX}},pickColor.toUpperCase()),
+            h('input',{type:'color',value:pickColor,onChange:function(e){setPickColor(e.target.value);},
+              style:{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}})
+          )
+        ),
+
         h(DivPicker,{val:sDiv,set:setSDiv}),
+
+        /* 액션 버튼 */
         h('div',{style:{display:'flex',gap:5,alignItems:'flex-end',flexWrap:'wrap'}},
-          h('button',{style:S('#3B82F6','#fff',{padding:'6px 12px',fontSize:12,opacity:locked?.4:1}),onClick:locked?undefined:applySetup},'적용 ('+sel.size+'칸)'),
-          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12,opacity:locked?.4:1}),onClick:locked?undefined:function(){var a=new Set();for(var r=0;r<wh.rows;r++)for(var c=0;c<wh.cols;c++)a.add(r+'-'+c);setSel(a);}},'전체선택'),
-          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12}),onClick:function(){setSel(new Set());}},'전체해제'),
+          h('button',{style:S('#3B82F6','#fff',{padding:'6px 12px',fontSize:12,opacity:locked?.4:1}),
+            onClick:locked?undefined:applySetup},'적용 ('+sel.size+'칸)'),
+          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12,opacity:locked?.4:1}),
+            onClick:locked?undefined:function(){var a=new Set();for(var r=0;r<wh.rows;r++)for(var c=0;c<wh.cols;c++)a.add(r+'-'+c);setSel(a);}},'전체선택'),
+          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12}),
+            onClick:function(){setSel(new Set());}},'전체해제'),
           h('div',{style:{width:1,height:26,background:BDR,margin:'0 2px'}}),
           h('button',{
             style:S(locked?'rgba(239,68,68,.18)':'rgba(16,185,129,.13)',locked?'#F87171':'#34D399',
@@ -616,14 +630,14 @@ function WHView(p){
         )
       ),
       h('div',{style:{flex:1,overflow:'auto',position:'relative'}},
-        locked&&h('div',{style:{position:'absolute',inset:0,zIndex:9,cursor:'not-allowed',background:'rgba(15,23,42,.35)',display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'all'},
+        locked&&h('div',{style:{position:'absolute',inset:0,zIndex:9,cursor:'not-allowed',background:'rgba(15,23,42,.38)',display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'all'},
           onClick:function(e){e.stopPropagation();}},
-          h('div',{style:{background:'rgba(0,0,0,.75)',borderRadius:12,padding:'12px 22px',color:'#F87171',fontSize:14,fontWeight:700,letterSpacing:1}},'🔒 잠금 상태 — 설정 변경 불가')
+          h('div',{style:{background:'rgba(0,0,0,.75)',borderRadius:12,padding:'12px 22px',color:'#F87171',fontSize:14,fontWeight:700}},'🔒 잠금 상태')
         ),
         renderGrid(false)
       ),
       h('div',{style:{padding:'5px 12px',fontSize:11,color:SUB,background:CARD,borderTop:'1px solid '+BDR,flexShrink:0}},
-        '셀 탭>선택 | 유형/색상/분할 설정 후 [적용]  ',
+        '셀 탭>선택 | 유형·색상·분할 선택 후 [적용]  ',
         ['rack','shelf','empty','unused'].map(function(k){return h('span',{key:k,style:{color:CT[k].clr,marginRight:8}},'■ '+CT[k].lbl);})
       )
     ),
