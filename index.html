@@ -575,57 +575,21 @@ function WHView(p){
 
     /* 설정 */
     tab==='setup'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
-      h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 12px',display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',flexShrink:0}},
-        /* 유형 + 컬러 피커 */
+      h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 12px',display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-end',flexShrink:0}},
         h('div',null,
-          h('div',{style:{fontSize:11,color:SUB,marginBottom:6}},'유형 — 색상 바 클릭으로 변경'),
-          h('div',{style:{display:'flex',gap:6}},
-            ['rack','shelf','empty','unused'].map(function(k){
-              var v=CT[k];
-              return h('div',{key:k,style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},
-                h('label',{style:{cursor:'pointer',display:'block',width:'100%'}},
-                  h('div',{style:{height:5,borderRadius:3,background:TC[k],width:'100%',minWidth:48,border:'1px solid rgba(255,255,255,.25)',marginBottom:3}}),
-                  h('input',{type:'color',value:TC[k],
-                    onChange:(function(key){return function(ev){
-                      var nc=Object.assign({},defaultTC,wh.typeColors||{});
-                      nc[key]=ev.target.value;
-                      onUpdate(function(w){return Object.assign({},w,{typeColors:nc});});
-                    };})(k),
-                    style:{display:'none'}
-                  })
-                ),
-                h('button',{onClick:function(){setSType(k);},
-                  style:S(sType===k?v.bg:'rgba(255,255,255,.05)',sType===k?v.clr:SUB,
-                    {border:'1px solid '+(sType===k?v.bdr:'transparent'),padding:'5px 10px',fontSize:12,pointerEvents:locked?'none':'auto',opacity:locked?.5:1})
-                },v.lbl)
-              );
-            })
-          )
+          h('div',{style:{fontSize:11,color:SUB,marginBottom:5}},'유형'),
+          h('div',{style:{display:'flex',gap:5}},Object.entries(CT).map(function(e){return h('button',{key:e[0],onClick:function(){setSType(e[0]);},style:S(sType===e[0]?e[1].bg:'rgba(255,255,255,.05)',sType===e[0]?e[1].clr:SUB,{border:'1px solid '+(sType===e[0]?e[1].bdr:'transparent'),padding:'5px 10px',fontSize:12})},e[1].lbl);}))
         ),
         h(DivPicker,{val:sDiv,set:setSDiv}),
-        h('div',{style:{display:'flex',gap:5,alignItems:'flex-end',flexWrap:'wrap'}},
-          h('button',{style:S('#3B82F6','#fff',{padding:'6px 12px',fontSize:12,opacity:locked?.4:1}),onClick:locked?undefined:applySetup},'적용 ('+sel.size+'칸)'),
-          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12,opacity:locked?.4:1}),onClick:locked?undefined:function(){var a=new Set();for(var r=0;r<wh.rows;r++)for(var c=0;c<wh.cols;c++)a.add(r+'-'+c);setSel(a);}},'전체선택'),
-          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12}),onClick:function(){setSel(new Set());}},'전체해제'),
-          h('div',{style:{width:1,height:26,background:BDR,margin:'0 2px'}}),
-          h('button',{
-            style:S(locked?'rgba(239,68,68,.18)':'rgba(16,185,129,.13)',locked?'#F87171':'#34D399',
-              {padding:'6px 13px',fontSize:13,border:'1px solid '+(locked?'rgba(239,68,68,.35)':'rgba(16,185,129,.35)')}),
-            onClick:function(){setLocked(function(v){return !v;});}
-          },locked?'🔒 잠김':'🔓 잠금해제')
+        h('div',{style:{display:'flex',gap:5,alignItems:'flex-end'}},
+          h('button',{style:S('#3B82F6','#fff',{padding:'6px 12px',fontSize:12}),onClick:applySetup},'적용 ('+sel.size+'칸)'),
+          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12}),onClick:function(){var a=new Set();for(var r=0;r<wh.rows;r++)for(var c=0;c<wh.cols;c++)a.add(r+'-'+c);setSel(a);}},'전체선택'),
+          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 10px',fontSize:12}),onClick:function(){setSel(new Set());}},'전체해제')
         )
       ),
-      h('div',{style:{flex:1,overflow:'auto',position:'relative'}},
-        locked&&h('div',{style:{position:'absolute',inset:0,zIndex:9,cursor:'not-allowed',background:'rgba(15,23,42,.35)',display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'all'},
-          onClick:function(e){e.stopPropagation();}},
-          h('div',{style:{background:'rgba(0,0,0,.75)',borderRadius:12,padding:'12px 22px',color:'#F87171',fontSize:14,fontWeight:700,letterSpacing:1}},'🔒 잠금 상태 — 설정 변경 불가')
-        ),
-        renderGrid(false)
-      ),
+      h('div',{style:{flex:1,overflow:'auto'}},renderGrid(false)),
       h('div',{style:{padding:'5px 12px',fontSize:11,color:SUB,background:CARD,borderTop:'1px solid '+BDR,flexShrink:0}},
-        '셀 탭>선택 | 유형/색상/분할 설정 후 [적용]  ',
-        ['rack','shelf','empty','unused'].map(function(k){return h('span',{key:k,style:{color:CT[k].clr,marginRight:8}},'■ '+CT[k].lbl);})
-      )
+        '셀 탭>선택 | 유형/분할 설정 후 [적용]  ',Object.entries(CT).map(function(e){return h('span',{key:e[0],style:{color:e[1].clr,marginRight:8}},'■ '+e[1].lbl);}))
     ),
 
     /* 작업 */
