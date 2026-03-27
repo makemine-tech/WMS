@@ -6,9 +6,9 @@
 <title>WMS 창고관리 시스템</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<!-- Firebase compat v9 (안정 버전) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0F172A;font-family:'Noto Sans KR',system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
@@ -42,18 +42,25 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// DB 저장/불러오기 함수
+// DB 저장/불러오기 — JSON 문자열로 저장해 배열 구조 보존
 function dbSave(data) {
-  db.ref('wms/warehouses').set(data).catch(e=>console.error('저장 실패',e));
+  db.ref('wms/data').set({ json: JSON.stringify(data), ts: Date.now() })
+    .then(()=>console.log('✅ Firebase 저장 완료'))
+    .catch(e=>console.error('❌ Firebase 저장 실패:', e));
 }
 function dbListen(callback) {
-  db.ref('wms/warehouses').on('value', snap=>{
+  db.ref('wms/data').on('value', snap=>{
     const val = snap.val();
-    callback(Array.isArray(val) ? val : (val ? Object.values(val) : []));
-  });
+    if(val && val.json){
+      try{ callback(JSON.parse(val.json)); }
+      catch(e){ callback([]); }
+    } else {
+      callback([]);
+    }
+  }, e=>console.error('❌ Firebase 읽기 실패:', e));
 }
 function dbOff() {
-  db.ref('wms/warehouses').off();
+  db.ref('wms/data').off();
 }
 
 // ── 유틸 ────────────────────────────────────────────────────────
