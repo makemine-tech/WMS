@@ -1,37 +1,14 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-
-  <script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
-
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-  const firebaseConfig = {
-    apiKey: "AIzaSyAz3R9v_Om-gy6a1A1WAy8nDMeppiK-U1k",
-    authDomain: "makemine-wms.firebaseapp.com",
-    databaseURL: "https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "makemine-wms",
-    storageBucket: "makemine-wms.firebasestorage.app",
-    messagingSenderId: "932282805733",
-    appId: "1:932282805733:web:cddd8fe277a18bf3c8130c",
-    measurementId: "G-YXL4MT4169"
-  };
-
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-</script>
-  
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <title>WMS 창고관리 시스템</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0F172A;font-family:'Noto Sans KR',system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
@@ -45,6 +22,39 @@ input,button,textarea,select{font-family:inherit;}
 <script>
 'use strict';
 const {createElement:h,useState,useEffect,Fragment}=React;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ★ 여기에 본인의 Firebase 설정값을 붙여넣으세요 ★
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const firebaseConfig = {
+  apiKey: "AIzaSyAz3R9v_Om-gy6a1A1WAy8nDMeppiK-U1k",
+  authDomain: "makemine-wms.firebaseapp.com",
+  databaseURL: "https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "makemine-wms",
+  storageBucket: "makemine-wms.firebasestorage.app",
+  messagingSenderId: "932282805733",
+  appId: "1:932282805733:web:cddd8fe277a18bf3c8130c",
+  measurementId: "G-YXL4MT4169"
+};
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Firebase 초기화
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// DB 저장/불러오기 함수
+function dbSave(data) {
+  db.ref('wms/warehouses').set(data).catch(e=>console.error('저장 실패',e));
+}
+function dbListen(callback) {
+  db.ref('wms/warehouses').on('value', snap=>{
+    const val = snap.val();
+    callback(Array.isArray(val) ? val : (val ? Object.values(val) : []));
+  });
+}
+function dbOff() {
+  db.ref('wms/warehouses').off();
+}
 
 // ── 유틸 ────────────────────────────────────────────────────────
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -199,15 +209,41 @@ function App(){
   const [whs,setWhs]=useState([]);
   const [whId,setWhId]=useState(null);
   const [ready,setReady]=useState(false);
+  const [syncing,setSyncing]=useState(false);
+
   useEffect(()=>{
-    try{const d=localStorage.getItem('wms_v1');if(d)setWhs(JSON.parse(d));}catch(e){}
-    setReady(true);
+    // Firebase 실시간 리스너 — 모든 기기에서 데이터 변경 시 자동 반영
+    dbListen(data=>{
+      setWhs(data||[]);
+      if(!ready) setReady(true);
+    });
+    // 타임아웃: Firebase 연결 실패 시 localStorage 폴백
+    const t=setTimeout(()=>{
+      if(!ready){
+        try{const d=localStorage.getItem('wms_v1');if(d)setWhs(JSON.parse(d));}catch(e){}
+        setReady(true);
+      }
+    },4000);
+    return()=>{dbOff();clearTimeout(t);};
   },[]);
-  const persist=d=>{setWhs(d);try{localStorage.setItem('wms_v1',JSON.stringify(d));}catch(e){}};
+
+  const persist=d=>{
+    setWhs(d);
+    // Firebase에 저장 (모든 기기에 실시간 반영)
+    dbSave(d);
+    // localStorage에도 백업 저장
+    try{localStorage.setItem('wms_v1',JSON.stringify(d));}catch(e){}
+  };
   const upWh=(id,fn)=>persist(whs.map(w=>w.id===id?fn(w):w));
   const cWh=whs.find(w=>w.id===whId);
-  if(!ready)return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12}},
-    h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB}},'로딩 중...'));
+
+  if(!ready)return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}},
+    h('div',{style:{fontSize:48}},'📦'),
+    h('div',{style:{color:SUB,fontSize:14}},'서버 연결 중...'),
+    h('div',{style:{width:160,height:3,background:'rgba(255,255,255,.08)',borderRadius:2,overflow:'hidden',marginTop:4}},
+      h('div',{style:{height:'100%',width:'60%',background:'#3B82F6',borderRadius:2,animation:'none'}})
+    )
+  );
   if(cWh)return h(WHView,{wh:cWh,onUpdate:fn=>upWh(whId,fn),onBack:()=>setWhId(null)});
   return h(MainView,{whs,onPersist:persist,onEnter:setWhId});
 }
