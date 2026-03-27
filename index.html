@@ -6,9 +6,7 @@
 <title>WMS 창고관리 시스템</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<!-- Firebase compat v9 (안정 버전) -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<!-- Firebase SDK 불필요 — REST API 직접 사용 -->
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0F172A;font-family:'Noto Sans KR',system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
@@ -42,22 +40,48 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// DB 저장/불러오기 — JSON 문자열로 저장해 배열 구조 보존
+// DB 저장/불러오기
 function dbSave(data) {
   db.ref('wms/data').set({ json: JSON.stringify(data), ts: Date.now() })
-    .then(()=>console.log('✅ Firebase 저장 완료'))
-    .catch(e=>console.error('❌ Firebase 저장 실패:', e));
+    .then(function(){ console.log('✅ Firebase 저장 완료', data.length+'개 창고'); })
+    .catch(function(e){ console.error('❌ Firebase 저장 실패:', e.message); });
 }
 function dbListen(callback) {
-  db.ref('wms/data').on('value', snap=>{
+  // 새 경로 (wms/data) 먼저 시도
+  db.ref('wms/data').on('value', function(snap){
     const val = snap.val();
+    console.log('📡 Firebase 수신:', val);
     if(val && val.json){
-      try{ callback(JSON.parse(val.json)); }
-      catch(e){ callback([]); }
+      try{
+        const parsed = JSON.parse(val.json);
+        console.log('✅ 파싱 성공:', parsed.length+'개 창고');
+        callback(parsed);
+      }catch(e){
+        console.error('❌ JSON 파싱 실패:', e);
+        callback([]);
+      }
     } else {
-      callback([]);
+      // 구버전 경로 (wms/warehouses) 폴백
+      db.ref('wms/warehouses').once('value').then(function(snap2){
+        const val2 = snap2.val();
+        console.log('📡 구버전 경로 수신:', val2);
+        if(val2){
+          let arr = [];
+          if(Array.isArray(val2)) arr = val2.filter(Boolean);
+          else if(typeof val2 === 'object') arr = Object.values(val2).filter(Boolean);
+          if(arr.length > 0){
+            console.log('✅ 구버전 데이터 발견, 새 경로로 이전:', arr.length+'개');
+            dbSave(arr); // 새 경로로 이전
+            callback(arr);
+          } else {
+            callback([]);
+          }
+        } else {
+          callback([]);
+        }
+      });
     }
-  }, e=>console.error('❌ Firebase 읽기 실패:', e));
+  }, function(e){ console.error('❌ Firebase 리스너 오류:', e.message); });
 }
 function dbOff() {
   db.ref('wms/data').off();
