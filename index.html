@@ -198,11 +198,13 @@ function PendGroup(p){
       h('span',{style:{fontSize:11,color:'#FCD34D',fontWeight:700,flexShrink:0,minWidth:70}},lbl),
       h('span',{style:{fontSize:11,color:'#FBBF24',fontWeight:600,flex:1}},items.length+'팔 / 총 '+totalQty.toLocaleString()+'개'),
       h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},open?'▲':'▼'),
+      /* ── 수정: 전체출고 → onConfirmAll로 한번에 처리 ── */
       h('button',{style:S('#DC2626','#fff',{padding:'2px 8px',fontSize:10,flexShrink:0}),
-        onClick:function(e){e.stopPropagation();items.forEach(function(it){p.onConfirm(it.qid);});}
+        onClick:function(e){e.stopPropagation();p.onConfirmAll(items.map(function(it){return it.qid;}));}
       },'전체출고'),
+      /* ── 수정: 전체철회 → onWithdrawAll로 한번에 처리 ── */
       h('button',{style:S('rgba(255,255,255,.07)','#94A3B8',{padding:'2px 7px',fontSize:10,flexShrink:0}),
-        onClick:function(e){e.stopPropagation();items.forEach(function(it){p.onWithdraw(it.qid);});}
+        onClick:function(e){e.stopPropagation();p.onWithdrawAll(items.map(function(it){return it.qid;}));}
       },'전체철회')
     ),
     open&&h('div',{style:{padding:'4px 8px 6px'}},
@@ -322,7 +324,6 @@ function MainView(p){
 function WHView(p){
   var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack,onLogout=p.onLogout;
 
-  /* wh.pendOut를 직접 사용 (Firebase에 영속 저장됨) */
   var pendOut=wh.pendOut||[];
 
   var v1=useState('ops'),tab=v1[0],setTab=v1[1];
@@ -343,7 +344,6 @@ function WHView(p){
   var v16=useState(null),hlProd=v16[0],setHlProd=v16[1];
   var toastK=useRef(0);
 
-  /* 바로출고 (세션용, 영속불필요) */
   var o1=useState(false),outSelMode=o1[0],setOutSelMode=o1[1];
   var o2=useState(null),outMeta=o2[0],setOutMeta=o2[1];
   var o3=useState(false),immMode=o3[0],setImmMode=o3[1];
@@ -439,7 +439,7 @@ function WHView(p){
   function dblClick(cKey,sKey){if(locked||didDrag.current||pendSet.has(cKey+'||'+sKey))return;var slot=wh.cells[cKey]&&wh.cells[cKey].slots[sKey];if(slot)setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}
   function saveEdit(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=editInfo.data;return w;});setEditInfo(null);}
 
-  /* ─ 출고대기 예약 (Firebase 영속) ─ */
+  /* ─ 출고대기 단건 확정 ─ */
   function confirmPend(qid){
     onUpdate(function(w){
       var pend=w.pendOut||[];
@@ -455,11 +455,43 @@ function WHView(p){
       });
     });
   }
+
+  /* ─ 출고대기 전체 확정 (핵심 수정: 단일 onUpdate에서 모두 처리) ─ */
+  function confirmPendAll(qids){
+    onUpdate(function(w){
+      var pend=w.pendOut||[];
+      var snap={cells:deep(w.cells),inQ:w.inQ.slice()};
+      var nc=deep(w.cells);
+      var qidSet=new Set(qids);
+      pend.forEach(function(item){
+        if(qidSet.has(item.qid)){
+          if(nc[item.cKey]&&nc[item.cKey].slots){
+            nc[item.cKey].slots[item.sKey]=null;
+          }
+        }
+      });
+      return Object.assign({},w,{
+        cells:nc,
+        pendOut:pend.filter(function(x){return !qidSet.has(x.qid);}),
+        undoStack:(w.undoStack||[]).slice(-29).concat([snap])
+      });
+    });
+  }
+
+  /* ─ 출고대기 단건 철회 ─ */
   function withdrawPend(qid){
     onUpdate(function(w){return Object.assign({},w,{pendOut:(w.pendOut||[]).filter(function(x){return x.qid!==qid;})});});
   }
 
-  /* ─ 바로출고 (세션, 슬롯은 이미 제거됨) ─ */
+  /* ─ 출고대기 전체 철회 (핵심 수정: 단일 onUpdate에서 모두 처리) ─ */
+  function withdrawPendAll(qids){
+    onUpdate(function(w){
+      var qidSet=new Set(qids);
+      return Object.assign({},w,{pendOut:(w.pendOut||[]).filter(function(x){return !qidSet.has(x.qid);})});
+    });
+  }
+
+  /* ─ 바로출고 ─ */
   function confirmImm(qid){setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});}
   function cancelImm(qid){
     var item=outQ.find(function(x){return x.qid===qid;});
@@ -553,7 +585,15 @@ function WHView(p){
       ),
       pendOut.length===0
         ?h('div',{style:{fontSize:11,color:SUB,textAlign:'center',padding:'6px 0'}},'출고할 유닛을 탭하여 추가하세요')
-        :h(Fragment,null,groupOrder.map(function(gk){return h(PendGroup,{key:gk,gk:gk,items:groupMap[gk],wh:wh,onConfirm:confirmPend,onWithdraw:withdrawPend});}))
+        :h(Fragment,null,groupOrder.map(function(gk){
+            return h(PendGroup,{
+              key:gk,gk:gk,items:groupMap[gk],wh:wh,
+              onConfirm:confirmPend,
+              onConfirmAll:confirmPendAll,   /* 전체출고 */
+              onWithdraw:withdrawPend,
+              onWithdrawAll:withdrawPendAll  /* 전체철회 */
+            });
+          }))
     );
   }
 
@@ -611,7 +651,6 @@ function WHView(p){
         pg.map(function(p2){var isHl=hlProd===p2.name;return h('span',{key:p2.name,onClick:function(e){e.stopPropagation();setHlProd(isHl?null:p2.name);},style:{background:isHl?(p2.clr+'40'):(p2.clr+'1e'),color:p2.clr,border:'1px solid '+(isHl?p2.clr:(p2.clr+'44')),borderRadius:20,padding:'2px 9px',fontSize:10,fontWeight:600,cursor:'pointer',userSelect:'none',boxShadow:isHl?('0 0 0 2px '+p2.clr+'44'):'none',transition:'all .15s'}},p2.name+' '+p2.cnt+'팔 '+p2.totalQty.toLocaleString()+'개');})
       ),
       wh.inQ.length>0&&h('span',{style:{fontSize:10,color:'#FBBF24',fontWeight:600}},'대기 '+wh.inQ.length),
-      /* 출고대기 배지 - 클릭시 작업탭 이동 */
       pendOut.length>0&&h('div',{
         onClick:function(){setTab('ops');},
         style:{display:'flex',alignItems:'center',gap:5,background:'rgba(245,158,11,.12)',border:'1px solid rgba(245,158,11,.35)',borderRadius:8,padding:'3px 10px',cursor:'pointer',userSelect:'none',flexShrink:0}
