@@ -12,6 +12,19 @@ body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-t
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
 input,button,textarea{font-family:inherit;}
+
+/* 셀 호버 (잠금 해제 시) */
+.ch{transition:box-shadow .14s;}
+.ch:hover{box-shadow:inset 0 0 0 100px rgba(255,255,255,.08);}
+.ch:active{box-shadow:inset 0 0 0 100px rgba(255,255,255,.13);}
+
+/* 저장 토스트 */
+@keyframes tIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes tOut{0%{opacity:1}70%{opacity:1}100%{opacity:0}}
+.toast{position:fixed;top:54px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;
+  padding:6px 20px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;
+  pointer-events:none;white-space:nowrap;
+  animation:tIn .18s ease forwards,tOut 2s .1s forwards;}
 </style>
 </head>
 <body>
@@ -23,7 +36,6 @@ var h=React.createElement;
 var useState=React.useState;
 var useEffect=React.useEffect;
 var useRef=React.useRef;
-var useCallback=React.useCallback;
 var Fragment=React.Fragment;
 
 /* ── Firebase ── */
@@ -47,7 +59,7 @@ function getExpStatus(exp){if(!exp||exp.length!==6)return 'ok';var d=new Date('2
 var EXP_META={expired:{icon:'✕',clr:'#F87171',bg:'rgba(239,68,68,.22)',bdr:'#EF4444',label:'만료'},imminent:{icon:'⚠',clr:'#FBBF24',bg:'rgba(245,158,11,.18)',bdr:'#F59E0B',label:'임박'}};
 
 /* ── 상수 ── */
-var BASE=56; /* 기본 셀 크기(DOM px) - CSS transform 으로 스케일 */
+var BASE=56;
 var CT={rack:{lbl:'랙',clr:'#60A5FA',bg:'rgba(59,130,246,.20)',bdr:'#3B82F6'},shelf:{lbl:'보관',clr:'#FBBF24',bg:'rgba(245,158,11,.16)',bdr:'#F59E0B'},empty:{lbl:'빈공간',clr:'#94A3B8',bg:'rgba(148,163,184,.13)',bdr:'#64748B'},unused:{lbl:'미사용',clr:'#475569',bg:'rgba(51,65,85,.18)',bdr:'#334155'}};
 var PALETTE=['#B22222','#FF0000','#FF6666','#FFCCCC','#CC7A00','#FFA500','#FFC04D','#FFE5B3','#B3B300','#FFFF00','#FFFF66','#FFFFCC','#006400','#008000','#4CAF50','#C8E6C9','#00008B','#0000FF','#6666FF','#CCCCFF','#000033','#000080','#333399','#9999CC','#004D40','#008080','#4DB6AC','#B2DFDB','#4B0082','#800080','#B366B3','#E6CCE6','#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF'];
 var PALETTE_ROWS=[{lbl:'Red',clrs:['#B22222','#FF0000','#FF6666','#FFCCCC']},{lbl:'Orange',clrs:['#CC7A00','#FFA500','#FFC04D','#FFE5B3']},{lbl:'Yellow',clrs:['#B3B300','#FFFF00','#FFFF66','#FFFFCC']},{lbl:'Green',clrs:['#006400','#008000','#4CAF50','#C8E6C9']},{lbl:'Blue',clrs:['#00008B','#0000FF','#6666FF','#CCCCFF']},{lbl:'Navy',clrs:['#000033','#000080','#333399','#9999CC']},{lbl:'Teal',clrs:['#004D40','#008080','#4DB6AC','#B2DFDB']},{lbl:'Purple',clrs:['#4B0082','#800080','#B366B3','#E6CCE6']},{lbl:'Gray',clrs:['#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF']}];
@@ -56,7 +68,7 @@ function S(bg,clr,ex){return Object.assign({background:bg,color:clr,border:'none
 
 /* ── 워터마크 ── */
 var COPYRIGHT='© 2026 Makemine Design. All rights reserved.  CEO Park Kyoung-woo (PKW)';
-var Footer=h('div',{style:{position:'fixed',bottom:0,left:0,right:0,pointerEvents:'none',zIndex:9999,textAlign:'center',padding:'4px 0',background:'linear-gradient(to top,rgba(15,23,42,.92) 60%,transparent)',userSelect:'none'}},
+var Footer=h('div',{style:{position:'fixed',bottom:0,left:0,right:0,pointerEvents:'none',zIndex:9998,textAlign:'center',padding:'4px 0',background:'linear-gradient(to top,rgba(15,23,42,.92) 60%,transparent)',userSelect:'none'}},
   h('span',{style:{fontSize:9,color:'#334155',fontWeight:500,letterSpacing:'.04em'}},COPYRIGHT));
 
 /* ── 창고 헬퍼 ── */
@@ -190,87 +202,33 @@ function WHView(p){
   var st15=useState(false),showExp=st15[0],setShowExp=st15[1];
   var st16=useState(true),locked=st16[0],setLocked=st16[1];
   var st17=useState(null),colorPick=st17[0],setColorPick=st17[1];
+  /* ── 신규 상태 ── */
+  var st18=useState(false),saveFlash=st18[0],setSaveFlash=st18[1];
+  var st19=useState(null),hlProd=st19[0],setHlProd=st19[1]; /* 하이라이트 상품명 */
+  var toastKey=useRef(0);
+
+  var stData=calcSt(wh),pg=getPG(wh);
+  var hlClr=hlProd?(wh.pColors[hlProd]||'#94A3B8'):null;
 
   var rootRef=useRef(null);
   var wrapperRef=useRef(null);
   var didDrag=useRef(false);
 
-  var st=calcSt(wh),pg=getPG(wh);
-
-  /* ── Pan/Zoom event system ── */
+  /* ── Pan/Zoom ── */
   useEffect(function(){
     var root=rootRef.current; if(!root)return;
     function wr(){return wrapperRef.current;}
-
-    /* Wheel zoom (PC) */
-    function onWheel(e){
-      var w=wr(); if(!w)return;
-      if(!w.contains(e.target))return;
-      e.preventDefault();
-      var rect=w.getBoundingClientRect();
-      var cx=e.clientX-rect.left,cy=e.clientY-rect.top;
-      var f=e.deltaY<0?1.12:1/1.12;
-      setPz(function(p){var ns=Math.min(Math.max(p.s*f,0.25),7);return{s:ns,x:cx-(cx-p.x)*(ns/p.s),y:cy-(cy-p.y)*(ns/p.s)};});
-    }
-
-    /* Mouse drag (PC) */
+    function onWheel(e){var w=wr();if(!w||!w.contains(e.target))return;e.preventDefault();var rect=w.getBoundingClientRect();var cx=e.clientX-rect.left,cy=e.clientY-rect.top;var f=e.deltaY<0?1.12:1/1.12;setPz(function(p){var ns=Math.min(Math.max(p.s*f,0.25),7);return{s:ns,x:cx-(cx-p.x)*(ns/p.s),y:cy-(cy-p.y)*(ns/p.s)};});}
     var _md=false,_mlx=0,_mly=0;
-    function onMouseDown(e){
-      var w=wr(); if(!w||!w.contains(e.target)||e.button!==0)return;
-      _md=true;_mlx=e.clientX;_mly=e.clientY;
-      didDrag.current=false;
-      w.style.cursor='grabbing';
-    }
-    function onMouseMove(e){
-      if(!_md)return;
-      var dx=e.clientX-_mlx,dy=e.clientY-_mly;
-      _mlx=e.clientX;_mly=e.clientY;
-      if(Math.abs(dx)+Math.abs(dy)>3)didDrag.current=true;
-      setPz(function(p){return{s:p.s,x:p.x+dx,y:p.y+dy};});
-    }
-    function onMouseUp(){
-      if(!_md)return;_md=false;
-      var w=wr();if(w)w.style.cursor='grab';
-    }
-
-    /* Touch drag + pinch (Mobile) */
+    function onMouseDown(e){var w=wr();if(!w||!w.contains(e.target)||e.button!==0)return;_md=true;_mlx=e.clientX;_mly=e.clientY;didDrag.current=false;w.style.cursor='grabbing';}
+    function onMouseMove(e){if(!_md)return;var dx=e.clientX-_mlx,dy=e.clientY-_mly;_mlx=e.clientX;_mly=e.clientY;if(Math.abs(dx)+Math.abs(dy)>3)didDrag.current=true;setPz(function(p){return{s:p.s,x:p.x+dx,y:p.y+dy};});}
+    function onMouseUp(){if(!_md)return;_md=false;var w=wr();if(w)w.style.cursor='grab';}
     var _ldist=0,_ltx=0,_lty=0,_pinch=false;
     function tDist(t1,t2){return Math.hypot(t2.clientX-t1.clientX,t2.clientY-t1.clientY);}
     function tMid(t1,t2){return{x:(t1.clientX+t2.clientX)/2,y:(t1.clientY+t2.clientY)/2};}
-    function onTouchStart(e){
-      var w=wr(); if(!w)return;
-      didDrag.current=false;
-      if(e.touches.length>=2){
-        _pinch=true;
-        _ldist=tDist(e.touches[0],e.touches[1]);
-        var m=tMid(e.touches[0],e.touches[1]);_ltx=m.x;_lty=m.y;
-      } else {
-        _pinch=false;
-        _ltx=e.touches[0].clientX;_lty=e.touches[0].clientY;
-      }
-    }
-    function onTouchMove(e){
-      var w=wr(); if(!w)return;
-      e.preventDefault();
-      if(e.touches.length>=2){
-        var dist=tDist(e.touches[0],e.touches[1]);
-        var mid=tMid(e.touches[0],e.touches[1]);
-        var rect=w.getBoundingClientRect();
-        var cx=mid.x-rect.left,cy=mid.y-rect.top;
-        var pdx=mid.x-_ltx,pdy=mid.y-_lty;
-        var ratio=_ldist>0?dist/_ldist:1;
-        setPz(function(p){var ns=Math.min(Math.max(p.s*ratio,0.25),7);return{s:ns,x:cx-(cx-p.x)*(ns/p.s)+pdx,y:cy-(cy-p.y)*(ns/p.s)+pdy};});
-        _ldist=dist;_ltx=mid.x;_lty=mid.y;
-        didDrag.current=true;
-      } else if(!_pinch){
-        var dx=e.touches[0].clientX-_ltx,dy=e.touches[0].clientY-_lty;
-        _ltx=e.touches[0].clientX;_lty=e.touches[0].clientY;
-        if(Math.abs(dx)+Math.abs(dy)>5)didDrag.current=true;
-        setPz(function(p){return{s:p.s,x:p.x+dx,y:p.y+dy};});
-      }
-    }
+    function onTouchStart(e){didDrag.current=false;if(e.touches.length>=2){_pinch=true;_ldist=tDist(e.touches[0],e.touches[1]);var m=tMid(e.touches[0],e.touches[1]);_ltx=m.x;_lty=m.y;}else{_pinch=false;_ltx=e.touches[0].clientX;_lty=e.touches[0].clientY;}}
+    function onTouchMove(e){var w=wr();if(!w)return;e.preventDefault();if(e.touches.length>=2){var dist=tDist(e.touches[0],e.touches[1]);var mid=tMid(e.touches[0],e.touches[1]);var rect=w.getBoundingClientRect();var cx=mid.x-rect.left,cy=mid.y-rect.top;var pdx=mid.x-_ltx,pdy=mid.y-_lty;var ratio=_ldist>0?dist/_ldist:1;setPz(function(p){var ns=Math.min(Math.max(p.s*ratio,0.25),7);return{s:ns,x:cx-(cx-p.x)*(ns/p.s)+pdx,y:cy-(cy-p.y)*(ns/p.s)+pdy};});_ldist=dist;_ltx=mid.x;_lty=mid.y;didDrag.current=true;}else if(!_pinch){var dx=e.touches[0].clientX-_ltx,dy=e.touches[0].clientY-_lty;_ltx=e.touches[0].clientX;_lty=e.touches[0].clientY;if(Math.abs(dx)+Math.abs(dy)>5)didDrag.current=true;setPz(function(p){return{s:p.s,x:p.x+dx,y:p.y+dy};});}}
     function onTouchEnd(e){if(e.touches.length<2)_pinch=false;if(e.touches.length===1){_ltx=e.touches[0].clientX;_lty=e.touches[0].clientY;}}
-
     root.addEventListener('wheel',onWheel,{passive:false});
     root.addEventListener('mousedown',onMouseDown);
     window.addEventListener('mousemove',onMouseMove);
@@ -278,28 +236,23 @@ function WHView(p){
     root.addEventListener('touchstart',onTouchStart,{passive:false});
     root.addEventListener('touchmove',onTouchMove,{passive:false});
     root.addEventListener('touchend',onTouchEnd);
-    return function(){
-      root.removeEventListener('wheel',onWheel);
-      root.removeEventListener('mousedown',onMouseDown);
-      window.removeEventListener('mousemove',onMouseMove);
-      window.removeEventListener('mouseup',onMouseUp);
-      root.removeEventListener('touchstart',onTouchStart);
-      root.removeEventListener('touchmove',onTouchMove);
-      root.removeEventListener('touchend',onTouchEnd);
-    };
+    return function(){root.removeEventListener('wheel',onWheel);root.removeEventListener('mousedown',onMouseDown);window.removeEventListener('mousemove',onMouseMove);window.removeEventListener('mouseup',onMouseUp);root.removeEventListener('touchstart',onTouchStart);root.removeEventListener('touchmove',onTouchMove);root.removeEventListener('touchend',onTouchEnd);};
   },[]);
 
-  /* 줌 버튼 (센터 기준) */
-  function zoomBtn(f){
-    var w=wrapperRef.current; if(!w)return;
-    var r=w.getBoundingClientRect();var cx=r.width/2,cy=r.height/2;
-    setPz(function(p){var ns=Math.min(Math.max(p.s*f,0.25),7);return{s:ns,x:cx-(cx-p.x)*(ns/p.s),y:cy-(cy-p.y)*(ns/p.s)};});
-  }
+  function zoomBtn(f){var w=wrapperRef.current;if(!w)return;var r=w.getBoundingClientRect();var cx=r.width/2,cy=r.height/2;setPz(function(p){var ns=Math.min(Math.max(p.s*f,0.25),7);return{s:ns,x:cx-(cx-p.x)*(ns/p.s),y:cy-(cy-p.y)*(ns/p.s)};});}
   function resetPz(){setPz({s:1,x:0,y:0});}
 
   function withUndo(fn){onUpdate(function(w){var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nw=fn(Object.assign({},w,{cells:deep(w.cells)}));return Object.assign({},nw,{undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
   function doUndo(){onUpdate(function(w){if(!w.undoStack||!w.undoStack.length)return w;var stack=w.undoStack.slice(),prev=stack.pop();return Object.assign({},w,prev,{undoStack:stack});});}
-  function doSave(){onUpdate(function(w){return Object.assign({},w,{history:w.history.concat([{id:uid(),label:dayLabel(),cells:deep(w.cells),stats:calcSt(w),prods:getPG(w,w.cells)}])});});}
+
+  /* ── 저장 + 토스트 ── */
+  function doSave(){
+    onUpdate(function(w){return Object.assign({},w,{history:w.history.concat([{id:uid(),label:dayLabel(),cells:deep(w.cells),stats:calcSt(w),prods:getPG(w,w.cells)}])});});
+    toastKey.current++;
+    setSaveFlash(true);
+    setTimeout(function(){setSaveFlash(false);},2200);
+  }
+
   function changeColor(name,clr){onUpdate(function(w){return Object.assign({},w,{pColors:Object.assign({},w.pColors,{[name]:clr})});});setColorPick(null);}
   function toggleSel(key){if(didDrag.current)return;setSel(function(s){var n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});}
   function applySetup(){if(!sel.size)return;withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c);});return w;});setSel(new Set());}
@@ -325,16 +278,20 @@ function WHView(p){
       var ct=CT[cell.type],isSel=sel.has(key);
       var dR=(!ops&&isSel)?sDiv.r:cell.divR,dC=(!ops&&isSel)?sDiv.c:cell.divC;
       var isPrev=!ops&&isSel,pCT=CT[isPrev?sType:cell.type];
+
+      /* ── 하이라이트 판정 ── */
+      var hasHl=hlProd&&Object.values(cell.slots).some(function(s){return s&&s.name===hlProd;});
+      var isDimmed=hlProd&&!hasHl;
+
       var subs=[];
       for(var sr=0;sr<dR;sr++)for(var sc=0;sc<dC;sc++){(function(sr,sc){
         var sKey=sr+'-'+sc,idx2=sr*dC+sc,slot=cell.slots[sKey];
         var ssIdx=selSlots.findIndex(function(s){return s.cKey===key&&s.sKey===sKey;});
         var isSS=ssIdx>=0,isMF=moveFrom&&moveFrom.cKey===key&&moveFrom.sKey===sKey;
         var subH=BASE/dR,subW=BASE/dC;
-        /* 시각적 크기(CSS transform 반영) */
         var visH=subH*pz.s,visW=subW*pz.s;
-        var showName=visH>=36&&visW>=24;   /* 상품명만 */
-        var showFull=visH>=52&&visW>=34;   /* 상품명 + 월/일 + 수량 */
+        var showName=visH>=36&&visW>=24;
+        var showFull=visH>=52&&visW>=34;
         var pClr=slot?(wh.pColors[slot.name]||'#94A3B8'):null;
         var expSt=(!isPrev&&slot)?getExpStatus(slot.exp):'ok';
         var em=EXP_META[expSt];
@@ -346,25 +303,10 @@ function WHView(p){
         if(isPrev&&idx2===0&&subH>16)kids.push(h('div',{key:'l',style:{fontSize:Math.max(6,Math.min(9,subH*.18)),color:pCT&&pCT.clr||TX,opacity:.7,fontWeight:600}},dR+'x'+dC));
         if(!isPrev&&isSS&&!slot)kids.push(h('div',{key:'n',style:{fontSize:Math.max(7,Math.min(11,subH*.22)),fontWeight:800,color:'#60A5FA'}},ssIdx+1));
         if(!isPrev&&slot){
-          /* 컬러 도트 (항상) */
           kids.push(h('div',{key:'d',style:{width:Math.min(6,subW*.28),height:Math.min(6,subH*.28),borderRadius:'50%',background:pClr,flexShrink:0}}));
-          if(showFull){
-            /* 상품명 */
-            var maxC=Math.max(2,Math.floor(visW/9));
-            kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,maxC)));
-            /* 월/일 */
-            var expSh=fmtExpShort(slot.exp);
-            if(expSh)kids.push(h('div',{key:'ex',style:{fontSize:Math.max(5,Math.min(8,subH*.14)),color:em?em.clr:'#64748B',textAlign:'center',lineHeight:1.1,marginTop:1}},(em?em.icon+' ':'')+expSh));
-            /* 수량 */
-            kids.push(h('div',{key:'qt',style:{fontSize:Math.max(5,Math.min(8,subH*.13)),color:'#475569',textAlign:'center',lineHeight:1}},slot.qty+'개'));
-          } else if(showName){
-            var maxC2=Math.max(2,Math.floor(visW/10));
-            kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,maxC2)));
-            if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));
-          } else {
-            /* 소형: 경고 아이콘만 */
-            if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));
-          }
+          if(showFull){var maxC=Math.max(2,Math.floor(visW/9));kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,maxC)));var expSh=fmtExpShort(slot.exp);if(expSh)kids.push(h('div',{key:'ex',style:{fontSize:Math.max(5,Math.min(8,subH*.14)),color:em?em.clr:'#64748B',textAlign:'center',lineHeight:1.1,marginTop:1}},(em?em.icon+' ':'')+expSh));kids.push(h('div',{key:'qt',style:{fontSize:Math.max(5,Math.min(8,subH*.13)),color:'#475569',textAlign:'center',lineHeight:1}},slot.qty+'개'));}
+          else if(showName){var maxC2=Math.max(2,Math.floor(visW/10));kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,maxC2)));if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));}
+          else{if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));}
         }
         subs.push(h('div',{key:sKey,
           style:{background:sbg,border:'1px solid '+sBdr,borderRadius:2,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden',
@@ -373,30 +315,37 @@ function WHView(p){
           onDoubleClick:ops?(function(k,sk){return function(){dblClick(k,sk);};})(key,sKey):undefined
         },kids));
       })(sr,sc);}
+
+      /* 셀 스타일 - 하이라이트/딤 + 호버 클래스 */
+      var cellStyle={
+        width:BASE,height:BASE,
+        background:pCT?(pCT.bdr+'22'):'rgba(255,255,255,.03)',
+        border:'1.5px solid '+(isSel?(pCT&&pCT.bdr||'#F1F5F9'):(ct?ct.bdr:BDR)),
+        outline:isSel?('2px solid '+(pCT&&pCT.bdr||'#e2e8f0')):'none',
+        borderRadius:4,overflow:'hidden',
+        cursor:!ops?(locked?'default':'pointer'):'default',
+        boxSizing:'border-box',display:'grid',
+        gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',
+        gridTemplateRows:'repeat('+dR+',minmax(0,1fr))',
+        gap:2,padding:2,
+        /* 하이라이트 */
+        opacity: isDimmed?0.18:1,
+        boxShadow: hasHl?('0 0 0 2px '+hlClr+', 0 0 10px '+hlClr+'66'):'none',
+        transition:'opacity .2s,box-shadow .2s'
+      };
+
       cells.push(h('div',{key:key,
-        style:{width:BASE,height:BASE,background:pCT?(pCT.bdr+'22'):'rgba(255,255,255,.03)',
-          border:'1.5px solid '+(isSel?(pCT&&pCT.bdr||'#F1F5F9'):(ct?ct.bdr:BDR)),
-          outline:isSel?('2px solid '+(pCT&&pCT.bdr||'#e2e8f0')):'none',
-          borderRadius:4,overflow:'hidden',cursor:!ops?(locked?'default':'pointer'):'default',
-          boxSizing:'border-box',display:'grid',
-          gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',gridTemplateRows:'repeat('+dR+',minmax(0,1fr))',gap:2,padding:2},
+        className: (ops&&!locked)?'ch':'',
+        style:cellStyle,
         onClick:!ops?(function(k){return function(){if(!locked)toggleSel(k);};})(key):undefined
       },subs));
     })(r,c);}}
     return h('div',{style:{display:'inline-grid',gridTemplateColumns:'repeat('+wh.cols+','+BASE+'px)',gap:2,padding:8,userSelect:'none'}},cells);
   }
 
-  /* 팬/줌 래퍼 */
   function renderGridWrapper(ops){
-    return h('div',{
-      ref:wrapperRef,
-      style:{flex:1,overflow:'hidden',position:'relative',cursor:'grab',background:BG}
-    },
-      h('div',{
-        style:{position:'absolute',top:0,left:0,
-          transform:'translate('+pz.x+'px,'+pz.y+'px) scale('+pz.s+')',
-          transformOrigin:'0 0',willChange:'transform'}
-      },renderGrid(ops))
+    return h('div',{ref:wrapperRef,style:{flex:1,overflow:'hidden',position:'relative',cursor:'grab',background:BG}},
+      h('div',{style:{position:'absolute',top:0,left:0,transform:'translate('+pz.x+'px,'+pz.y+'px) scale('+pz.s+')',transformOrigin:'0 0',willChange:'transform'}},renderGrid(ops))
     );
   }
 
@@ -404,6 +353,10 @@ function WHView(p){
   var statusMsg=selSlots.length>0?('슬롯 '+selSlots.length+'개 선택 > 품목 탭'):opMode==='outbound'?'출고할 슬롯을 탭하세요':moveFrom?null:wh.inQ.length>0?'빈슬롯 탭(다중) > 위치지정 후 품목탭':'슬롯 탭 > 이동 / 더블탭 > 수정';
 
   return h('div',{ref:rootRef,style:{height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
+
+    /* ── 저장 토스트 ── */
+    saveFlash&&h('div',{key:toastKey.current,className:'toast'},'✓  저장 완료'),
+
     /* ── 앱바 ── */
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 8px',height:48,display:'flex',alignItems:'center',gap:5,flexShrink:0}},
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:onBack},'< 목록'),
@@ -414,24 +367,49 @@ function WHView(p){
       h('button',{style:S('rgba(255,255,255,.07)','#F87171',{padding:'5px 7px',fontSize:11}),onClick:function(){if(confirm('로그아웃?'))onLogout();}},'로그아웃'),
       h('button',{style:S('rgba(16,185,129,.2)','#34D399',{padding:'5px 8px',fontSize:11}),onClick:function(){setShowExp(true);}},'내보내기'),
       h('button',{style:S('rgba(255,255,255,.07)','#FBBF24',{padding:'5px 7px',fontSize:13}),onClick:doUndo},'↩'),
-      h('button',{style:S('rgba(59,130,246,.2)','#60A5FA',{padding:'5px 8px',fontSize:12}),onClick:doSave},'저장'),
-      /* 줌 컨트롤 */
+      /* 저장 버튼 - 플래시 시 ✓ 전환 */
+      h('button',{
+        style:S(saveFlash?'rgba(5,150,105,.35)':'rgba(59,130,246,.2)',saveFlash?'#34D399':'#60A5FA',
+          {padding:'5px 9px',fontSize:12,transition:'all .25s'}),
+        onClick:doSave
+      }, saveFlash?'✓ 저장됨':'저장'),
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 7px',fontSize:13}),onClick:function(){zoomBtn(1.25);}},'＋'),
       h('span',{style:{fontSize:9,color:SUB,minWidth:24,textAlign:'center'}},Math.round(pz.s*100)+'%'),
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 7px',fontSize:13}),onClick:function(){zoomBtn(0.8);}},'－'),
       h('button',{title:'뷰 초기화',style:S('rgba(255,255,255,.07)',SUB,{padding:'5px 7px',fontSize:12}),onClick:resetPz},'⊙')
     ),
+
     /* ── 요약바 ── */
-    (tab==='ops'||tab==='status')&&h('div',{style:{background:'rgba(15,23,42,.97)',borderBottom:'1px solid '+BDR,padding:'4px 12px',display:'flex',gap:12,alignItems:'center',flexWrap:'wrap',flexShrink:0}},
-      h('div',{style:{display:'flex',gap:10}},[['전체',st.tot,'#94A3B8'],['사용',st.used,'#60A5FA'],['여유',st.free,'#4ADE80']].map(function(x){return h('div',{key:x[0]},h('span',{style:{fontWeight:700,fontSize:14,color:x[2]}},x[1]),h('span',{style:{fontSize:10,color:SUB,marginLeft:2}},x[0]));})),
-      h('div',{style:{flex:1,display:'flex',gap:4,flexWrap:'wrap'}},pg.map(function(p2){return h('span',{key:p2.name,style:{background:p2.clr+'1e',border:'1px solid '+p2.clr+'44',color:p2.clr,borderRadius:20,padding:'2px 7px',fontSize:10,fontWeight:600}},p2.name+' '+p2.cnt+'팔 '+p2.totalQty.toLocaleString()+'개');})),
-      wh.inQ.length>0&&h('span',{style:{fontSize:10,color:'#FBBF24',fontWeight:600}},'대기 '+wh.inQ.length)
+    (tab==='ops'||tab==='status')&&h('div',{style:{background:'rgba(15,23,42,.97)',borderBottom:'1px solid '+BDR,padding:'4px 12px',display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',flexShrink:0}},
+      h('div',{style:{display:'flex',gap:10}},[['전체',stData.tot,'#94A3B8'],['사용',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0]},h('span',{style:{fontWeight:700,fontSize:14,color:x[2]}},x[1]),h('span',{style:{fontSize:10,color:SUB,marginLeft:2}},x[0]));})),
+      /* 상품 뱃지 - 클릭 시 하이라이트 토글 */
+      h('div',{style:{flex:1,display:'flex',gap:4,flexWrap:'wrap'}},
+        pg.map(function(p2){
+          var isHl=hlProd===p2.name;
+          return h('span',{key:p2.name,
+            onClick:function(e){e.stopPropagation();setHlProd(isHl?null:p2.name);},
+            style:{
+              background:isHl?(p2.clr+'40'):(p2.clr+'1e'),
+              color:p2.clr,
+              border:'1px solid '+(isHl?p2.clr:(p2.clr+'44')),
+              borderRadius:20,padding:'2px 9px',fontSize:10,fontWeight:600,
+              cursor:'pointer',userSelect:'none',
+              boxShadow:isHl?('0 0 0 2px '+p2.clr+'44'):'none',
+              transition:'all .15s'
+            }
+          },p2.name+' '+p2.cnt+'팔 '+p2.totalQty.toLocaleString()+'개');
+        })
+      ),
+      wh.inQ.length>0&&h('span',{style:{fontSize:10,color:'#FBBF24',fontWeight:600}},'대기 '+wh.inQ.length),
+      /* 하이라이트 해제 안내 */
+      hlProd&&h('span',{onClick:function(){setHlProd(null);},style:{fontSize:10,color:SUB,cursor:'pointer',textDecoration:'underline',flexShrink:0}},'해제')
     ),
+
     /* ── 탭바 ── */
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,display:'flex',alignItems:'stretch',justifyContent:'space-between',flexShrink:0}},
       h('div',{style:{display:'flex',alignItems:'stretch'}},
         [['ops','작업'],['status','현황'],['history','기록']].map(function(x){return h('button',{key:x[0],onClick:function(){setTab(x[0]);setColorPick(null);},style:tabStyle(tab===x[0])},x[1]);}),
-        h('button',{onClick:function(){setLocked(function(l){return !l;});},style:{background:locked?'rgba(239,68,68,.10)':'rgba(16,185,129,.10)',color:locked?'#F87171':'#34D399',border:'none',borderRadius:0,padding:'0 12px',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:locked?'2px solid #EF4444':'2px solid #10B981',borderLeft:'1px solid '+BDR}},locked?'🔒 잠금':'🔓 해제')
+        h('button',{onClick:function(){setLocked(function(l){if(!l)setHlProd(null);return !l;});},style:{background:locked?'rgba(239,68,68,.10)':'rgba(16,185,129,.10)',color:locked?'#F87171':'#34D399',border:'none',borderRadius:0,padding:'0 12px',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:locked?'2px solid #EF4444':'2px solid #10B981',borderLeft:'1px solid '+BDR}},locked?'🔒 잠금':'🔓 해제')
       ),
       h('button',{onClick:function(){setTab('setup');setColorPick(null);},style:Object.assign({},tabStyle(tab==='setup',true),{borderLeft:'1px solid '+BDR})},'⚙ 설정')
     ),
@@ -450,9 +428,7 @@ function WHView(p){
         )
       ),
       renderGridWrapper(false),
-      h('div',{style:{padding:'5px 12px',fontSize:11,color:SUB,background:CARD,borderTop:'1px solid '+BDR,flexShrink:0,display:'flex',gap:10,alignItems:'center'}},
-        h('span',null,'셀 탭>선택 · 드래그>이동 · 핀치>확대'),
-        h('div',{style:{display:'flex',gap:8}},Object.entries(CT).map(function(e){return h('span',{key:e[0],style:{color:e[1].clr}},e[1].lbl);})))
+      h('div',{style:{padding:'5px 12px',fontSize:11,color:SUB,background:CARD,borderTop:'1px solid '+BDR,flexShrink:0,display:'flex',gap:10,alignItems:'center'}},h('span',null,'셀 탭>선택 · 드래그>이동 · 핀치>확대'),h('div',{style:{display:'flex',gap:8}},Object.entries(CT).map(function(e){return h('span',{key:e[0],style:{color:e[1].clr}},e[1].lbl);})))
     ),
 
     /* ════ 작업 탭 ════ */
@@ -493,16 +469,10 @@ function WHView(p){
       h('div',{style:{fontWeight:700,fontSize:15,marginBottom:12}},'현황판'),
       h('div',{style:{background:CARD,borderRadius:11,padding:14,marginBottom:10}},
         h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'파렛트 슬롯'),
-        h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}},[['전체',st.tot,'#94A3B8'],['사용중',st.used,'#60A5FA'],['여유',st.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:x[2]+'15',border:'1px solid '+x[2]+'33',borderRadius:9,padding:'10px 15px',textAlign:'center',minWidth:72}},h('div',{style:{fontSize:24,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:11,color:SUB}},x[0]));})),
-        st.tot>0&&h(Fragment,null,h('div',{style:{height:10,background:'rgba(255,255,255,.06)',borderRadius:5,overflow:'hidden',marginBottom:3}},h('div',{style:{height:'100%',width:(st.used/st.tot*100)+'%',background:'linear-gradient(90deg,#3B82F6,#60A5FA)',borderRadius:5}})),h('div',{style:{fontSize:11,color:SUB,textAlign:'right'}},'사용률 '+Math.round(st.used/st.tot*100)+'%'))
+        h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}},[['전체',stData.tot,'#94A3B8'],['사용중',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:x[2]+'15',border:'1px solid '+x[2]+'33',borderRadius:9,padding:'10px 15px',textAlign:'center',minWidth:72}},h('div',{style:{fontSize:24,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:11,color:SUB}},x[0]));})),
+        stData.tot>0&&h(Fragment,null,h('div',{style:{height:10,background:'rgba(255,255,255,.06)',borderRadius:5,overflow:'hidden',marginBottom:3}},h('div',{style:{height:'100%',width:(stData.used/stData.tot*100)+'%',background:'linear-gradient(90deg,#3B82F6,#60A5FA)',borderRadius:5}})),h('div',{style:{fontSize:11,color:SUB,textAlign:'right'}},'사용률 '+Math.round(stData.used/stData.tot*100)+'%'))
       ),
-      h('div',{style:{display:'flex',gap:8,marginBottom:10,padding:'8px 12px',background:CARD,borderRadius:9,border:'1px solid '+BDR,alignItems:'center'}},
-        h('span',{style:{fontSize:11,color:SUB,marginRight:4}},'유통기한'),
-        h('span',{style:{fontSize:12,color:EXP_META.expired.clr,fontWeight:700}},'✕ 만료'),
-        h('span',{style:{fontSize:10,color:SUB}},'|'),
-        h('span',{style:{fontSize:12,color:EXP_META.imminent.clr,fontWeight:700}},'⚠ 임박(3개월 미만)'),
-        h('span',{style:{fontSize:10,color:SUB,marginLeft:'auto'}},'● 클릭 → 색상 변경')
-      ),
+      h('div',{style:{display:'flex',gap:8,marginBottom:10,padding:'8px 12px',background:CARD,borderRadius:9,border:'1px solid '+BDR,alignItems:'center'}},h('span',{style:{fontSize:11,color:SUB,marginRight:4}},'유통기한'),h('span',{style:{fontSize:12,color:EXP_META.expired.clr,fontWeight:700}},'✕ 만료'),h('span',{style:{fontSize:10,color:SUB}},'|'),h('span',{style:{fontSize:12,color:EXP_META.imminent.clr,fontWeight:700}},'⚠ 임박(3개월 미만)'),h('span',{style:{fontSize:10,color:SUB,marginLeft:'auto'}},'● 클릭 → 색상 변경')),
       h('div',{style:{background:CARD,borderRadius:11,padding:14}},
         h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'상품별 재고'),
         pg.length===0?h('div',{style:{fontSize:12,color:SUB}},'배치된 상품 없음'):
@@ -523,8 +493,7 @@ function WHView(p){
                 h('div',{style:{flex:1,fontSize:11,color:em?em.clr:SUB}},e.exp?fmtExp(e.exp):'유통기한 미기재'),
                 em&&h('span',{style:{fontSize:10,color:em.clr,fontWeight:700,background:em.bg,borderRadius:4,padding:'1px 5px',flexShrink:0}},em.label),
                 h('span',{style:{fontSize:11,color:p2.clr,fontWeight:600,minWidth:36,textAlign:'right'}},e.cnt+'팔'),
-                h('span',{style:{fontSize:11,fontWeight:700,minWidth:52,textAlign:'right'}},e.totalQty.toLocaleString()+'개')
-              );
+                h('span',{style:{fontSize:11,fontWeight:700,minWidth:52,textAlign:'right'}},e.totalQty.toLocaleString()+'개'));
             }))
           );
         })
@@ -553,8 +522,6 @@ function WHView(p){
     ),
 
     Footer,
-
-    /* 모달들 */
     showExp&&h(ExportModal,{wh:wh,onUpdate:onUpdate,onClose:function(){setShowExp(false);}}),
     histView&&h(HistModal,{wh:wh,hv:histView,onClose:function(){setHistView(null);},withUndo:withUndo}),
     showIn&&h('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.76)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:200},onClick:function(){setShowIn(false);}},
