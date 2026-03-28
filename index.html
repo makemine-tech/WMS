@@ -30,71 +30,19 @@ var useEffect=React.useEffect;
 var useRef=React.useRef;
 var Fragment=React.Fragment;
 
-/* ═══════════════════════════════════════════════
-   Firebase — 창고별 독립 경로 (Race Condition 해결)
-   wms/warehouses/{id}.json 각자 PUT → 충돌 없음
-   ═══════════════════════════════════════════════ */
-var BASE_URL='https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app/wms';
-var WH_URL  =BASE_URL+'/warehouses';
-var NOTICE_DB=BASE_URL+'/notice.json';
-var _pt=null;
-
-/* Firebase는 null 값을 필드째 삭제함 → 로드 시 반드시 정규화 */
-function normalizeWH(raw){
-  if(!raw||!raw.id)return null;
-  var wh=Object.assign({inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',pendOut:[]},raw);
-  if(!Array.isArray(wh.inQ))wh.inQ=[];
-  if(!Array.isArray(wh.history))wh.history=[];
-  if(!Array.isArray(wh.undoStack))wh.undoStack=[];
-  if(!Array.isArray(wh.pendOut))wh.pendOut=[];
-  if(!wh.pColors||typeof wh.pColors!=='object')wh.pColors={};
-  var cells={};
-  for(var r=0;r<(wh.rows||0);r++){
-    for(var c=0;c<(wh.cols||0);c++){
-      var key=r+'-'+c;
-      var cell=(wh.cells&&wh.cells[key])||{};
-      var dR=cell.divR||1,dC=cell.divC||1;
-      var slots={};
-      for(var sr=0;sr<dR;sr++)for(var sc=0;sc<dC;sc++){
-        var sk=sr+'-'+sc;
-        var sv=(cell.slots&&cell.slots[sk]!==undefined)?cell.slots[sk]:null;
-        slots[sk]=sv;
-      }
-      cells[key]={type:cell.type||null,divR:dR,divC:dC,slots:slots};
-    }
-  }
-  wh.cells=cells;
-  return wh;
-}
-
-/* 창고 1개 저장 — 다른 창고 경로에 영향 없음 */
-function dbSaveOne(wh){
-  fetch(WH_URL+'/'+wh.id+'.json',{
-    method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(wh)
-  }).catch(function(e){console.warn('dbSaveOne',e);});
-}
-/* 창고 삭제 */
-function dbDeleteOne(id){
-  fetch(WH_URL+'/'+id+'.json',{method:'DELETE'})
-    .catch(function(e){console.warn('dbDeleteOne',e);});
-}
-/* 전체 창고 목록 폴링 — 각 창고는 독립 경로이므로 덮어쓰기 충돌 없음 */
+var DB='https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app/wms/data.json';
+var NOTICE_DB='https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app/wms/notice.json';
+var _pt=null,_lt=null;
+function dbSave(d){fetch(DB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({j:JSON.stringify(d),t:Date.now()})}).catch(function(e){console.warn(e);});}
 function dbListen(cb){
-  function run(){
-    fetch(WH_URL+'.json')
-      .then(function(r){return r.json();})
-      .then(function(v){
-        if(!v){cb([]);return;}
-        var arr=Object.values(v).map(normalizeWH).filter(Boolean);
-        cb(arr);
-      }).catch(function(e){console.warn('dbListen',e);});
-  }
-  run();
-  _pt=setInterval(run,4000);
+  function run(){fetch(DB).then(function(r){return r.json();}).then(function(v){
+    if(v&&v.j&&v.t!==_lt){_lt=v.t;try{cb(JSON.parse(v.j));}catch(e){cb([]);}}
+    else if(!v||!v.j){cb([]);}
+  }).catch(function(e){console.warn(e);});}
+  run();_pt=setInterval(run,3000);
 }
 function dbOff(){if(_pt){clearInterval(_pt);_pt=null;}}
 
-/* 유틸 */
 function uid(){return Math.random().toString(36).slice(2,9);}
 function dayLabel(){var d=new Date(),W=['일','월','화','수','목','금','토'];return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate())+' ('+W[d.getDay()]+')';}
 function pad(n){return String(n).padStart(2,'0');}
@@ -137,15 +85,17 @@ var PAL_ROWS=[
 ];
 var BG='#0F172A',CARD='#1E293B',BDR='#334155',TX='#E2E8F0',SUB='#64748B';
 function S(bg,clr,ex){return Object.assign({background:bg,color:clr,border:'none',borderRadius:7,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer'},ex||{});}
+
+/* 탭 아이콘+텍스트 렌더 헬퍼 */
 function TabLabel(icon,text){
   return h('span',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2,lineHeight:1,pointerEvents:'none'}},
     h('span',{style:{fontSize:16,lineHeight:1}},icon),
     h('span',{style:{fontSize:10,letterSpacing:'.02em'}},text));
 }
+
 var Footer=h('div',{style:{position:'fixed',bottom:0,left:0,right:0,pointerEvents:'none',zIndex:9998,textAlign:'center',padding:'4px 0',background:'linear-gradient(to top,rgba(15,23,42,.92) 60%,transparent)',userSelect:'none'}},
   h('span',{style:{fontSize:9,color:'#334155',fontWeight:500,letterSpacing:'.04em'}},'© 2026 Makemine Design. All rights reserved.  CEO Park Kyoung-woo (PKW)'));
 
-/* 창고 헬퍼 */
 function mkSlots(r,c){var s={};for(var i=0;i<r;i++)for(var j=0;j<c;j++)s[i+'-'+j]=null;return s;}
 function mkCell(tp,dr,dc){return{type:tp,divR:dr,divC:dc,slots:mkSlots(dr,dc)};}
 function mkWH(name,rows,cols){
@@ -172,7 +122,8 @@ function getPG(wh,cells){
     });
   });
   return Object.values(m).map(function(p){
-    return Object.assign({},p,{exps:Object.values(p.exps).sort(function(a,b){if(!a.exp)return 1;if(!b.exp)return -1;return a.exp.localeCompare(b.exp);})});
+    var sorted=Object.values(p.exps).sort(function(a,b){if(!a.exp)return 1;if(!b.exp)return -1;return a.exp.localeCompare(b.exp);});
+    return Object.assign({},p,{exps:sorted});
   });
 }
 function pickClr(wh,name){
@@ -199,7 +150,6 @@ function buildTSV(wh,cells,stats,label){
   return rows.map(function(rr){return rr.join('\t');}).join('\n');
 }
 
-/* 공통 UI */
 function Inp(p){
   return h('label',{style:{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:SUB}},p.lbl,
     h('input',{type:p.type||'text',value:p.val,placeholder:p.ph||'',onChange:function(e){p.set(e.target.value);},
@@ -208,13 +158,15 @@ function Inp(p){
 function DivPicker(p){
   var sh=useState(null),hov=sh[0],setHov=sh[1];
   var hi=hov||p.val;var cs=[];
-  for(var r=0;r<4;r++){for(var c=0;c<4;c++){
-    var act=hi.r>=r+1&&hi.c>=c+1,sel2=p.val.r>=r+1&&p.val.c>=c+1;
-    cs.push(h('div',{key:r+'-'+c,style:{width:20,height:20,borderRadius:2,cursor:'pointer',background:act?'rgba(99,102,241,.60)':sel2?'rgba(99,102,241,.25)':'rgba(255,255,255,.06)',border:'1px solid '+(act?'#818CF8':sel2?'#6366F1':'rgba(255,255,255,.1)')},
-      onMouseEnter:(function(rr,cc){return function(){setHov({r:rr+1,c:cc+1});};})(r,c),
-      onMouseLeave:function(){setHov(null);},
-      onClick:(function(rr,cc){return function(){p.set({r:rr+1,c:cc+1});};})(r,c)}));
-  }}
+  for(var r=0;r<4;r++){
+    for(var c=0;c<4;c++){
+      var act=hi.r>=r+1&&hi.c>=c+1,sel2=p.val.r>=r+1&&p.val.c>=c+1;
+      cs.push(h('div',{key:r+'-'+c,style:{width:20,height:20,borderRadius:2,cursor:'pointer',background:act?'rgba(99,102,241,.60)':sel2?'rgba(99,102,241,.25)':'rgba(255,255,255,.06)',border:'1px solid '+(act?'#818CF8':sel2?'#6366F1':'rgba(255,255,255,.1)')},
+        onMouseEnter:(function(rr,cc){return function(){setHov({r:rr+1,c:cc+1});};})(r,c),
+        onMouseLeave:function(){setHov(null);},
+        onClick:(function(rr,cc){return function(){p.set({r:rr+1,c:cc+1});};})(r,c)}));
+    }
+  }
   return h('div',null,h('div',{style:{fontSize:10,color:SUB,marginBottom:4,fontWeight:600}},p.val.r+'x'+p.val.c+' 분할'),h('div',{style:{display:'inline-grid',gridTemplateColumns:'repeat(4,20px)',gap:2}},cs));
 }
 function ColorPicker(p){
@@ -237,7 +189,7 @@ function ColorPicker(p){
       })));
 }
 
-/* PEND GROUP */
+/* ═══ PEND GROUP ═══ */
 function PendGroup(p){
   var items=p.items,wh=p.wh;
   var sg=useState(true),open=sg[0],setOpen=sg[1];
@@ -258,7 +210,8 @@ function PendGroup(p){
     ),
     open&&h('div',{style:{padding:'4px 8px 6px'}},
       items.map(function(item){
-        var em2=EM[getExpSt(item.slot.exp)],pc2=wh.pColors[item.slot.name]||'#94A3B8';
+        var em2=EM[getExpSt(item.slot.exp)];
+        var pc2=wh.pColors[item.slot.name]||'#94A3B8';
         return h('div',{key:item.qid,style:{display:'flex',alignItems:'center',gap:5,padding:'4px 4px',borderBottom:'1px solid rgba(255,255,255,.04)'}},
           h('div',{style:{width:6,height:6,borderRadius:'50%',background:pc2,flexShrink:0}}),
           h('span',{style:{fontSize:11,color:TX,flex:1,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},item.slot.name),
@@ -285,64 +238,24 @@ function App(){
   var a9=useState(''),newPw2=a9[0],setNewPw2=a9[1];
   var a10=useState(''),setupErr=a10[0],setSetupErr=a10[1];
   var ID='makechango';
-
   useEffect(function(){
     var sv=localStorage.getItem('wms_pw');
     if(!sv){setNeedSetup(true);setReady(true);return;}
-    /* 오프라인 백업 먼저 표시 (빠른 로딩) */
-    try{var bk=localStorage.getItem('wms_bak');if(bk)setWhs(JSON.parse(bk));}catch(e){}
-    /* Firebase 실시간 폴링 시작 */
-    dbListen(function(arr){
-      setWhs(arr);
-      try{localStorage.setItem('wms_bak',JSON.stringify(arr));}catch(e){}
-    });
     setReady(true);
+    try{var bk=localStorage.getItem('wms_bak');if(bk)setWhs(JSON.parse(bk));}catch(e){}
+    dbListen(function(d){setWhs(d||[]);});
     return function(){dbOff();};
   },[]);
-
-  function doSetup(){
-    if(!newPw||newPw.length<4){setSetupErr('4자리 이상');return;}
-    if(newPw!==newPw2){setSetupErr('불일치');return;}
-    localStorage.setItem('wms_pw',newPw);setNeedSetup(false);setLoggedIn(true);
-    dbListen(function(arr){setWhs(arr);try{localStorage.setItem('wms_bak',JSON.stringify(arr));}catch(e){} });
-  }
-  function doLogin(){
-    var sv=localStorage.getItem('wms_pw');
-    if(inputPw===sv){setLoggedIn(true);setPwErr('');}
-    else{setPwErr('비밀번호가 올바르지 않습니다');setInputPw('');}
-  }
-
-  /* ─ persist: 새 창고 추가 or 삭제 ─ */
-  var whsRef=useRef(whs);
-  whsRef.current=whs;
-  function persist(nextWhs,deletedId){
-    setWhs(nextWhs);
-    if(deletedId){
-      dbDeleteOne(deletedId);
-    } else {
-      /* 신규 창고만 찾아서 저장 */
-      var curIds=new Set(whsRef.current.map(function(w){return w.id;}));
-      nextWhs.forEach(function(wh){if(!curIds.has(wh.id))dbSaveOne(wh);});
-    }
-    try{localStorage.setItem('wms_bak',JSON.stringify(nextWhs));}catch(e){}
-  }
-
-  /* ─ upWh: 창고 1개만 수정 → 해당 경로만 PUT ─ */
-  function upWh(id,fn){
-    setWhs(function(prev){
-      var next=prev.map(function(w){return w.id===id?fn(w):w;});
-      var changed=next.find(function(w){return w.id===id;});
-      if(changed)dbSaveOne(changed);
-      try{localStorage.setItem('wms_bak',JSON.stringify(next));}catch(e){}
-      return next;
-    });
-  }
-
+  function doSetup(){if(!newPw||newPw.length<4){setSetupErr('4자리 이상');return;}if(newPw!==newPw2){setSetupErr('불일치');return;}localStorage.setItem('wms_pw',newPw);setNeedSetup(false);setLoggedIn(true);dbListen(function(d){setWhs(d||[]);});}
+  function doLogin(){var sv=localStorage.getItem('wms_pw');if(inputPw===sv){setLoggedIn(true);setPwErr('');}else{setPwErr('비밀번호가 올바르지 않습니다');setInputPw('');}}
+  function persist(d){setWhs(d);dbSave(d);try{localStorage.setItem('wms_bak',JSON.stringify(d));}catch(e){}}
+  function upWh(id,fn){persist(whs.map(function(w){return w.id===id?fn(w):w;}));}
   var cWh=whs.find(function(w){return w.id===whId;});
+
   if(!ready){return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB}},'로딩 중...'),Footer);}
   if(needSetup){
     return h('div',{style:{height:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center',padding:20}},
-      h('div',{style:{background:CARD,borderRadius:18,padding:32,width:'100%',maxWidth:380}},
+      h('div',{style:{background:CARD,borderRadius:18,padding:32,width:'100%',maxWidth:380,boxShadow:'0 8px 40px rgba(0,0,0,.5)'}},
         h('div',{style:{textAlign:'center',marginBottom:28}},h('div',{style:{fontSize:44,marginBottom:10}},'📦'),h('div',{style:{fontSize:20,fontWeight:700}},'메이크창고 WMS'),h('div',{style:{fontSize:13,color:'#94A3B8',marginTop:2}},'창고관리 시스템 ver 01'),h('div',{style:{fontSize:11,color:SUB,marginTop:4}},'최초 비밀번호를 설정해주세요')),
         h('div',{style:{display:'flex',flexDirection:'column',gap:12}},
           h('div',{style:{background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.2)',borderRadius:8,padding:'10px 14px',fontSize:12,color:'#93C5FD'}},'아이디: ',h('strong',null,ID),' (고정)'),
@@ -354,7 +267,7 @@ function App(){
   }
   if(!loggedIn){
     return h('div',{style:{height:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center',padding:20}},
-      h('div',{style:{background:CARD,borderRadius:18,padding:32,width:'100%',maxWidth:380}},
+      h('div',{style:{background:CARD,borderRadius:18,padding:32,width:'100%',maxWidth:380,boxShadow:'0 8px 40px rgba(0,0,0,.5)'}},
         h('div',{style:{textAlign:'center',marginBottom:28}},h('div',{style:{fontSize:44,marginBottom:10}},'📦'),h('div',{style:{fontSize:20,fontWeight:700}},'메이크창고 WMS'),h('div',{style:{fontSize:13,color:'#94A3B8',marginTop:2}},'창고관리 시스템 ver 01'),h('div',{style:{fontSize:11,color:SUB,marginTop:3}},'제작 · 메이크창고 대표 박경우')),
         h('div',{style:{display:'flex',flexDirection:'column',gap:12}},
           h('div',{style:{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:SUB}},'아이디',h('div',{style:{background:BG,border:'1px solid '+BDR,borderRadius:7,padding:'8px 10px',color:'#60A5FA',fontSize:14,fontWeight:600}},ID)),
@@ -364,7 +277,7 @@ function App(){
           h('button',{style:S('transparent',SUB,{padding:'8px',fontSize:11,width:'100%',textDecoration:'underline'}),onClick:function(){if(confirm('초기화?')){localStorage.removeItem('wms_pw');setNeedSetup(true);setInputPw('');setPwErr('');}}},'비밀번호를 잊으셨나요?'))),
       Footer);
   }
-  if(cWh)return h(WHView,{wh:cWh,onUpdate:function(fn){upWh(whId,fn);},onBack:function(){setWhId(null);},onLogout:function(){setLoggedIn(false);setInputPw('');}});
+  if(cWh){return h(WHView,{wh:cWh,onUpdate:function(fn){upWh(whId,fn);},onBack:function(){setWhId(null);},onLogout:function(){setLoggedIn(false);setInputPw('');}});}
   return h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId,onLogout:function(){setLoggedIn(false);setInputPw('');}});
 }
 
@@ -375,38 +288,48 @@ function MainView(p){
   var m2=useState(''),nm=m2[0],setNm=m2[1];
   var m3=useState('10'),rows=m3[0],setRows=m3[1];
   var m4=useState('10'),cols=m4[0],setCols=m4[1];
+
+  /* ── 공지 메모 ── */
   var nc1=useState(false),noticeOpen=nc1[0],setNoticeOpen=nc1[1];
   var nc2=useState(''),noticeText=nc2[0],setNoticeText=nc2[1];
-
   useEffect(function(){
-    fetch(NOTICE_DB).then(function(r){return r.json();}).then(function(v){if(v&&v.text)setNoticeText(v.text);}).catch(function(){});
+    fetch(NOTICE_DB).then(function(r){return r.json();}).then(function(v){
+      if(v&&v.text)setNoticeText(v.text);
+    }).catch(function(){});
   },[]);
-
   function saveNotice(t){
     setNoticeText(t);
     fetch(NOTICE_DB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,t:Date.now()})}).catch(function(){});
   }
-  function create(){
-    if(!nm.trim())return;
-    var r=Math.min(Math.max(+rows||10,2),30),c=Math.min(Math.max(+cols||10,2),30);
-    onPersist(whs.concat([mkWH(nm.trim(),r,c)]));
-    setOpen(false);setNm('');setRows('10');setCols('10');
-  }
+
+  function create(){if(!nm.trim())return;var r=Math.min(Math.max(+rows||10,2),30),c=Math.min(Math.max(+cols||10,2),30);onPersist(whs.concat([mkWH(nm.trim(),r,c)]));setOpen(false);setNm('');setRows('10');setCols('10');}
 
   return h('div',{style:{minHeight:'100vh',background:BG,paddingBottom:36}},
+    /* 앱바 */
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 14px',height:54,display:'flex',alignItems:'center',gap:8,position:'sticky',top:0,zIndex:10}},
       h('span',{style:{fontSize:22}},'📦'),
       h('div',{style:{flex:1}},h('div',{style:{fontWeight:700,fontSize:15}},'메이크창고 WMS'),h('div',{style:{fontSize:10,color:SUB}},'창고관리 시스템 ver 01')),
       h('button',{style:S('rgba(255,255,255,.07)','#F87171',{padding:'5px 9px',fontSize:11}),onClick:function(){if(confirm('로그아웃?'))onLogout();}},'로그아웃'),
-      h('button',{style:S(noticeText?'rgba(251,191,36,.18)':'rgba(255,255,255,.07)',noticeText?'#FBBF24':TX,{padding:'5px 11px',fontSize:12,border:noticeText?'1px solid rgba(251,191,36,.4)':'1px solid transparent',position:'relative'}),onClick:function(){setNoticeOpen(true);}},
-        '📢 공지',noticeText&&h('span',{style:{position:'absolute',top:4,right:4,width:6,height:6,borderRadius:'50%',background:'#FBBF24',display:'block'}})),
+      /* 공지 버튼 */
+      h('button',{
+        style:S(noticeText?'rgba(251,191,36,.18)':'rgba(255,255,255,.07)',noticeText?'#FBBF24':TX,{padding:'5px 11px',fontSize:12,border:noticeText?'1px solid rgba(251,191,36,.4)':'1px solid transparent',position:'relative'}),
+        onClick:function(){setNoticeOpen(true);}
+      },
+        '📢 공지',
+        noticeText&&h('span',{style:{position:'absolute',top:4,right:4,width:6,height:6,borderRadius:'50%',background:'#FBBF24',display:'block'}})
+      ),
       h('button',{style:S('#3B82F6','#fff',{padding:'5px 12px',fontSize:12}),onClick:function(){setOpen(true);}},'+ 새 창고')),
 
     h('div',{style:{padding:16,maxWidth:960,margin:'0 auto'}},
-      noticeText&&h('div',{style:{background:'rgba(251,191,36,.08)',border:'1px solid rgba(251,191,36,.28)',borderRadius:10,padding:'10px 14px',marginBottom:14,display:'flex',gap:10,alignItems:'flex-start',cursor:'pointer'},onClick:function(){setNoticeOpen(true);}},
+      /* 공지 배너 (내용 있을 때) */
+      noticeText&&h('div',{
+        style:{background:'rgba(251,191,36,.08)',border:'1px solid rgba(251,191,36,.28)',borderRadius:10,padding:'10px 14px',marginBottom:14,display:'flex',gap:10,alignItems:'flex-start',cursor:'pointer'},
+        onClick:function(){setNoticeOpen(true);}
+      },
         h('span',{style:{fontSize:18,flexShrink:0,lineHeight:1.3}},'📢'),
         h('div',{style:{flex:1,fontSize:12,color:'#FCD34D',lineHeight:1.65,whiteSpace:'pre-wrap',wordBreak:'break-word'}},noticeText),
-        h('span',{style:{fontSize:10,color:SUB,flexShrink:0,marginTop:2}},'편집 ›')),
+        h('span',{style:{fontSize:10,color:SUB,flexShrink:0,marginTop:2}},'편집 ›')
+      ),
       whs.length===0?h('div',{style:{textAlign:'center',marginTop:80,color:SUB}},h('div',{style:{fontSize:56}},'🏭'),h('div',{style:{marginTop:14,fontSize:16,color:'#94A3B8'}},'등록된 창고가 없습니다')):
       h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:12,paddingTop:4}},
         whs.map(function(wh){
@@ -414,7 +337,7 @@ function MainView(p){
           return h('div',{key:wh.id,onClick:function(){onEnter(wh.id);},style:{background:CARD,borderRadius:14,padding:18,cursor:'pointer',border:'1px solid '+BDR}},
             h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}},
               h('div',null,h('div',{style:{fontSize:18,fontWeight:700}},wh.name),h('div',{style:{fontSize:11,color:SUB,marginTop:3}},wh.rows+'x'+wh.cols+' 그리드')),
-              h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 9px',fontSize:11,borderRadius:5}),onClick:function(e){e.stopPropagation();if(confirm('삭제?'))onPersist(whs.filter(function(w){return w.id!==wh.id;}),wh.id);}},'삭제')),
+              h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 9px',fontSize:11,borderRadius:5}),onClick:function(e){e.stopPropagation();if(confirm('삭제?'))onPersist(whs.filter(function(w){return w.id!==wh.id;}));}},'삭제')),
             h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:12}},
               [['전체',st.tot,'#94A3B8'],['사용',st.used,'#60A5FA'],['여유',st.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:'rgba(255,255,255,.04)',borderRadius:7,padding:'7px 4px',textAlign:'center'}},h('div',{style:{fontSize:20,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:10,color:SUB}},x[0]));})),
             pg.length>0&&h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}},pg.slice(0,4).map(function(p2){return h('span',{key:p2.name,style:{background:p2.clr+'20',color:p2.clr,border:'1px solid '+p2.clr+'44',borderRadius:20,padding:'1px 7px',fontSize:10,fontWeight:600}},p2.name+' '+p2.cnt+'팔');})),
@@ -422,6 +345,7 @@ function MainView(p){
             h('div',{style:{fontSize:10,color:SUB}},'마지막저장: '+(wh.history.length?wh.history[wh.history.length-1].label:'없음')));
         }))),
 
+    /* 새 창고 모달 */
     open&&h('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.72)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:100},onClick:function(){setOpen(false);}},
       h('div',{style:{background:CARD,borderRadius:'16px 16px 0 0',padding:22,width:'100%',maxWidth:460},onClick:function(e){e.stopPropagation();}},
         h('div',{style:{fontSize:17,fontWeight:700,marginBottom:16}},'새 창고 만들기'),
@@ -431,26 +355,37 @@ function MainView(p){
           h('div',{style:{fontSize:11,color:SUB}},'총 '+(+rows||0)*(+cols||0)+'칸'),
           h('button',{style:S('#3B82F6','#fff',{padding:13,fontSize:15,width:'100%'}),onClick:create},'생성하기')))),
 
+    /* 공지 메모 모달 */
     noticeOpen&&h('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:200},onClick:function(){setNoticeOpen(false);}},
       h('div',{style:{background:CARD,borderRadius:'18px 18px 0 0',padding:22,width:'100%',maxWidth:480,paddingBottom:32},onClick:function(e){e.stopPropagation();}},
         h('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:14}},
           h('span',{style:{fontSize:20}},'📢'),
           h('div',{style:{flex:1,fontSize:17,fontWeight:700}},'공지 메모'),
           noticeText&&h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'5px 11px',fontSize:12,marginRight:4}),onClick:function(){saveNotice('');}},'🗑 지우기'),
-          h('button',{style:S('rgba(255,255,255,.08)',TX,{padding:'5px 11px',fontSize:12}),onClick:function(){setNoticeOpen(false);}},'닫기')),
-        h('textarea',{value:noticeText,onChange:function(e){saveNotice(e.target.value);},
+          h('button',{style:S('rgba(255,255,255,.08)',TX,{padding:'5px 11px',fontSize:12}),onClick:function(){setNoticeOpen(false);}},'닫기')
+        ),
+        h('textarea',{
+          value:noticeText,
+          onChange:function(e){saveNotice(e.target.value);},
           placeholder:'공지 내용을 자유롭게 입력하세요.\n예: 오늘 오후 2시 입고 예정 / 냉동창고 점검일 등',
-          style:{width:'100%',height:180,background:BG,border:'1px solid '+(noticeText?'rgba(251,191,36,.4)':BDR),borderRadius:10,padding:'12px 14px',color:TX,fontSize:14,lineHeight:1.7,resize:'none',outline:'none',boxSizing:'border-box'}}),
+          style:{width:'100%',height:180,background:BG,border:'1px solid '+(noticeText?'rgba(251,191,36,.4)':BDR),borderRadius:10,padding:'12px 14px',color:TX,fontSize:14,lineHeight:1.7,resize:'none',outline:'none',boxSizing:'border-box',transition:'border-color .2s'}
+        }),
         h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8}},
-          h('span',{style:{fontSize:11,color:SUB}},noticeText?noticeText.length+'자 · 모든 기기에 동기화됨':'입력 즉시 모든 기기에 반영됩니다'),
-          noticeText&&h('span',{style:{fontSize:11,color:'#FBBF24',fontWeight:600}},'● 표시 중')))),
+          h('span',{style:{fontSize:11,color:SUB}},noticeText?noticeText.length+'자 입력됨':'입력 내용은 자동 저장됩니다'),
+          noticeText&&h('span',{style:{fontSize:11,color:'#FBBF24',fontWeight:600}},'● 메인 화면에 표시 중')
+        )
+      )
+    ),
+
     Footer);
 }
 
 /* ═══ WH VIEW ═══ */
 function WHView(p){
   var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack,onLogout=p.onLogout;
+
   var pendOut=wh.pendOut||[];
+
   var v1=useState('ops'),tab=v1[0],setTab=v1[1];
   var v2=useState({s:1,x:0,y:0}),pz=v2[0],setPz=v2[1];
   var v3=useState(new Set()),sel=v3[0],setSel=v3[1];
@@ -468,6 +403,7 @@ function WHView(p){
   var v15=useState(false),saveFlash=v15[0],setSaveFlash=v15[1];
   var v16=useState(null),hlProd=v16[0],setHlProd=v16[1];
   var toastK=useRef(0);
+
   var o1=useState(false),outSelMode=o1[0],setOutSelMode=o1[1];
   var o2=useState(null),outMeta=o2[0],setOutMeta=o2[1];
   var o3=useState(false),immMode=o3[0],setImmMode=o3[1];
@@ -502,6 +438,7 @@ function WHView(p){
 
   function zBtn(f){var w=wrapRef.current;if(!w)return;var rc=w.getBoundingClientRect();var cx=rc.width/2,cy=rc.height/2;setPz(function(q){var ns=Math.min(Math.max(q.s*f,0.25),7);return{s:ns,x:cx-(cx-q.x)*(ns/q.s),y:cy-(cy-q.y)*(ns/q.s)};});}
   function resetPz(){setPz({s:1,x:0,y:0});}
+
   function withUndo(fn){onUpdate(function(w){var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nw=fn(Object.assign({},w,{cells:deep(w.cells)}));return Object.assign({},nw,{undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
   function doUndo(){onUpdate(function(w){if(!w.undoStack||!w.undoStack.length)return w;var stack=w.undoStack.slice(),prev=stack.pop();return Object.assign({},w,prev,{undoStack:stack});});}
   function doSave(){onUpdate(function(w){return Object.assign({},w,{history:w.history.concat([{id:uid(),label:dayLabel(),cells:deep(w.cells),stats:calcSt(w),prods:getPG(w,w.cells)}])});});toastK.current++;setSaveFlash(true);setTimeout(function(){setSaveFlash(false);},2200);}
@@ -515,119 +452,211 @@ function WHView(p){
     withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr)});});
     setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');
   }
+
   function clickSlot(cKey,sKey){
     if(locked||didDrag.current)return;
     if(pendSet.has(cKey+'||'+sKey))return;
     var cell=wh.cells[cKey];if(!cell||!cell.type||cell.type==='unused')return;
     var slot=cell.slots[sKey];
-    if(outSelMode){if(!slot)return;var meta=outMeta;onUpdate(function(w){var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});});return;}
-    if(immMode){if(!slot)return;setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});return;}
-    if(moveFrom){if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}if(!slot){withUndo(function(w){w.cells[cKey].slots[sKey]=moveFrom.slot;w.cells[moveFrom.cKey].slots[moveFrom.sKey]=null;return w;});}setMoveFrom(null);return;}
+    if(outSelMode){
+      if(!slot)return;
+      var meta=outMeta;
+      onUpdate(function(w){
+        var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};
+        return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});
+      });
+      return;
+    }
+    if(immMode){
+      if(!slot)return;
+      setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});
+      withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});
+      return;
+    }
+    if(moveFrom){
+      if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}
+      if(!slot){withUndo(function(w){w.cells[cKey].slots[sKey]=moveFrom.slot;w.cells[moveFrom.cKey].slots[moveFrom.sKey]=null;return w;});}
+      setMoveFrom(null);return;
+    }
     if(slot&&selSlots.length===0){setMoveFrom({cKey:cKey,sKey:sKey,slot:slot});return;}
     if(!slot&&(cell.type==='rack'||cell.type==='shelf')){
       var idx=selSlots.findIndex(function(s){return s.cKey===cKey&&s.sKey===sKey;});
-      if(idx>=0)setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});
-      else setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});
+      if(idx>=0){setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});}
+      else{setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});}
     }
   }
   function assignIn(item){
-    if(selSlots.length===0){withUndo(function(w){var en=Object.entries(w.cells);for(var i=0;i<en.length;i++){var ck=en[i][0],cc=en[i][1];if(cc.type!=='rack'&&cc.type!=='shelf')continue;var sks=Object.keys(cc.slots);for(var j=0;j<sks.length;j++){if(!cc.slots[sks[j]]){cc.slots[sks[j]]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;}}}return w;});}
-    else{var t=selSlots[0],cc2=wh.cells[t.cKey];if(!cc2||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}withUndo(function(w){w.cells[t.cKey].slots[t.sKey]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;});setSelSlots(function(s){return s.slice(1);});}
+    if(selSlots.length===0){
+      withUndo(function(w){var en=Object.entries(w.cells);for(var i=0;i<en.length;i++){var ck=en[i][0],cc=en[i][1];if(cc.type!=='rack'&&cc.type!=='shelf')continue;var sks=Object.keys(cc.slots);for(var j=0;j<sks.length;j++){if(!cc.slots[sks[j]]){cc.slots[sks[j]]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;}}}return w;});
+    }else{
+      var t=selSlots[0],cc2=wh.cells[t.cKey];
+      if(!cc2||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}
+      withUndo(function(w){w.cells[t.cKey].slots[t.sKey]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;});
+      setSelSlots(function(s){return s.slice(1);});
+    }
   }
   function dblClick(cKey,sKey){if(locked||didDrag.current||pendSet.has(cKey+'||'+sKey))return;var slot=wh.cells[cKey]&&wh.cells[cKey].slots[sKey];if(slot)setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}
   function saveEdit(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=editInfo.data;return w;});setEditInfo(null);}
-  function confirmPend(qid){onUpdate(function(w){var pend=w.pendOut||[];var item=pend.find(function(x){return x.qid===qid;});if(!item)return w;var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);nc[item.cKey].slots[item.sKey]=null;return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return x.qid!==qid;}),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
-  function confirmPendAll(qids){onUpdate(function(w){var pend=w.pendOut||[];var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);var qidSet=new Set(qids);pend.forEach(function(item){if(qidSet.has(item.qid)&&nc[item.cKey]&&nc[item.cKey].slots)nc[item.cKey].slots[item.sKey]=null;});return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return !qidSet.has(x.qid);}),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
+
+  function confirmPend(qid){
+    onUpdate(function(w){
+      var pend=w.pendOut||[];
+      var item=pend.find(function(x){return x.qid===qid;});
+      if(!item)return w;
+      var snap={cells:deep(w.cells),inQ:w.inQ.slice()};
+      var nc=deep(w.cells);
+      nc[item.cKey].slots[item.sKey]=null;
+      return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return x.qid!==qid;}),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});
+    });
+  }
+  function confirmPendAll(qids){
+    onUpdate(function(w){
+      var pend=w.pendOut||[];
+      var snap={cells:deep(w.cells),inQ:w.inQ.slice()};
+      var nc=deep(w.cells);
+      var qidSet=new Set(qids);
+      pend.forEach(function(item){if(qidSet.has(item.qid)&&nc[item.cKey]&&nc[item.cKey].slots)nc[item.cKey].slots[item.sKey]=null;});
+      return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return !qidSet.has(x.qid);}),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});
+    });
+  }
   function withdrawPend(qid){onUpdate(function(w){return Object.assign({},w,{pendOut:(w.pendOut||[]).filter(function(x){return x.qid!==qid;})});});}
   function withdrawPendAll(qids){onUpdate(function(w){var qidSet=new Set(qids);return Object.assign({},w,{pendOut:(w.pendOut||[]).filter(function(x){return !qidSet.has(x.qid);})});});}
+
   function confirmImm(qid){setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});}
-  function cancelImm(qid){var item=outQ.find(function(x){return x.qid===qid;});if(!item)return;withUndo(function(w){w.cells[item.cKey].slots[item.sKey]=item.slot;return w;});setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});}
+  function cancelImm(qid){
+    var item=outQ.find(function(x){return x.qid===qid;});
+    if(!item)return;
+    withUndo(function(w){w.cells[item.cKey].slots[item.sKey]=item.slot;return w;});
+    setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});
+  }
   function confirmAllImm(){setOutQ([]);setImmMode(false);setShowOutPanel(false);}
   function cancelAllModes(){setSelSlots([]);setMoveFrom(null);setOutSelMode(false);setOutMeta(null);setImmMode(false);}
 
   function renderGrid(ops){
     var cells=[];
-    for(var r=0;r<wh.rows;r++){for(var c=0;c<wh.cols;c++){(function(r,c){
-      var key=r+'-'+c,cell=wh.cells[key];if(!cell)return;
-      var ct=CT[cell.type],isSel=sel.has(key);
-      var dR=(!ops&&isSel)?sDiv.r:cell.divR,dC=(!ops&&isSel)?sDiv.c:cell.divC;
-      var isPrev=!ops&&isSel,pCT=CT[isPrev?sType:cell.type];
-      var hasHl=hlProd&&Object.values(cell.slots).some(function(s){return s&&s.name===hlProd;});
-      var isDimmed=hlProd&&!hasHl;
-      var subs=[];
-      for(var sr=0;sr<dR;sr++){for(var sc=0;sc<dC;sc++){(function(sr,sc){
-        var sKey=sr+'-'+sc,idx2=sr*dC+sc,slot=cell.slots[sKey];
-        var ssIdx=selSlots.findIndex(function(s){return s.cKey===key&&s.sKey===sKey;});
-        var isSS=ssIdx>=0,isMF=moveFrom&&moveFrom.cKey===key&&moveFrom.sKey===sKey;
-        var subH=BASE/dR,subW=BASE/dC,visH=subH*pz.s,visW=subW*pz.s;
-        var showName=visH>=36&&visW>=24,showFull=visH>=52&&visW>=34;
-        var pClr=slot?(wh.pColors[slot.name]||'#94A3B8'):null;
-        var esSt=(!isPrev&&slot)?getExpSt(slot.exp):'ok',em=EM[esSt];
-        var isPend=pendSet.has(key+'||'+sKey),isHlSl=!!(hlProd&&slot&&slot.name===hlProd);
-        var sbg,sBdr;
-        if(isPend){sbg='rgba(245,158,11,.20)';sBdr='#F59E0B';}
-        else if(isPrev){sbg=idx2===0?(pCT&&pCT.bg||'rgba(255,255,255,.08)'):'rgba(255,255,255,.04)';sBdr=BDR;}
-        else if(isSS){sbg='rgba(59,130,246,.48)';sBdr='#60A5FA';}
-        else if(isMF){sbg='rgba(245,158,11,.38)';sBdr='#F59E0B';}
-        else if(isHlSl){sbg=hlClr+'30';sBdr=hlClr;}
-        else if(slot){sbg=em?em.bg:(pClr+'3a');sBdr=em?em.bdr:(ct?(ct.bdr+'55'):BDR);}
-        else{sbg=ct?ct.bg:'rgba(255,255,255,.04)';sBdr=ct?(ct.bdr+'55'):BDR;}
-        var kids=[];
-        if(isPend){kids.push(h('div',{key:'pi',style:{fontSize:Math.max(9,Math.min(14,subH*.26)),lineHeight:1}},'[출]'));if(showName&&slot)kids.push(h('div',{key:'pn',style:{fontSize:Math.max(6,Math.min(8,subH*.14)),color:'#FCD34D',textAlign:'center',lineHeight:1.1,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,Math.max(2,Math.floor(visW/10)))));}
-        else{
-          if(isPrev&&idx2===0&&subH>16)kids.push(h('div',{key:'l',style:{fontSize:Math.max(6,Math.min(9,subH*.18)),color:pCT&&pCT.clr||TX,opacity:.7,fontWeight:600}},dR+'x'+dC));
-          if(!isPrev&&isSS&&!slot)kids.push(h('div',{key:'n',style:{fontSize:Math.max(7,Math.min(11,subH*.22)),fontWeight:800,color:'#60A5FA'}},ssIdx+1));
-          if(!isPrev&&slot){
-            kids.push(h('div',{key:'d',style:{width:Math.min(6,subW*.28),height:Math.min(6,subH*.28),borderRadius:'50%',background:pClr,flexShrink:0}}));
-            if(showFull){var mc=Math.max(2,Math.floor(visW/9));kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,mc)));var es=fmtShort(slot.exp);if(es)kids.push(h('div',{key:'ex',style:{fontSize:Math.max(5,Math.min(8,subH*.14)),color:em?em.clr:'#64748B',textAlign:'center',lineHeight:1.1,marginTop:1}},(em?em.icon+' ':'')+es));kids.push(h('div',{key:'qt',style:{fontSize:Math.max(5,Math.min(8,subH*.13)),color:'#475569',textAlign:'center',lineHeight:1}},slot.qty+'개'));}
-            else if(showName){var mc2=Math.max(2,Math.floor(visW/10));kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,mc2)));if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));}
-            else if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));
+    for(var r=0;r<wh.rows;r++){
+      for(var c=0;c<wh.cols;c++){
+        (function(r,c){
+          var key=r+'-'+c,cell=wh.cells[key];if(!cell)return;
+          var ct=CT[cell.type],isSel=sel.has(key);
+          var dR=(!ops&&isSel)?sDiv.r:cell.divR,dC=(!ops&&isSel)?sDiv.c:cell.divC;
+          var isPrev=!ops&&isSel,pCT=CT[isPrev?sType:cell.type];
+          var hasHl=hlProd&&Object.values(cell.slots).some(function(s){return s&&s.name===hlProd;});
+          var isDimmed=hlProd&&!hasHl;
+          var subs=[];
+          for(var sr=0;sr<dR;sr++){
+            for(var sc=0;sc<dC;sc++){
+              (function(sr,sc){
+                var sKey=sr+'-'+sc,idx2=sr*dC+sc,slot=cell.slots[sKey];
+                var ssIdx=selSlots.findIndex(function(s){return s.cKey===key&&s.sKey===sKey;});
+                var isSS=ssIdx>=0,isMF=moveFrom&&moveFrom.cKey===key&&moveFrom.sKey===sKey;
+                var subH=BASE/dR,subW=BASE/dC,visH=subH*pz.s,visW=subW*pz.s;
+                var showName=visH>=36&&visW>=24,showFull=visH>=52&&visW>=34;
+                var pClr=slot?(wh.pColors[slot.name]||'#94A3B8'):null;
+                var esSt=(!isPrev&&slot)?getExpSt(slot.exp):'ok',em=EM[esSt];
+                var isPend=pendSet.has(key+'||'+sKey);
+                var isHlSl=!!(hlProd&&slot&&slot.name===hlProd);
+                var sbg,sBdr;
+                if(isPend){sbg='rgba(245,158,11,.20)';sBdr='#F59E0B';}
+                else if(isPrev){sbg=idx2===0?(pCT&&pCT.bg||'rgba(255,255,255,.08)'):'rgba(255,255,255,.04)';sBdr=BDR;}
+                else if(isSS){sbg='rgba(59,130,246,.48)';sBdr='#60A5FA';}
+                else if(isMF){sbg='rgba(245,158,11,.38)';sBdr='#F59E0B';}
+                else if(isHlSl){sbg=hlClr+'30';sBdr=hlClr;}
+                else if(slot){sbg=em?em.bg:(pClr+'3a');sBdr=em?em.bdr:(ct?(ct.bdr+'55'):BDR);}
+                else{sbg=ct?ct.bg:'rgba(255,255,255,.04)';sBdr=ct?(ct.bdr+'55'):BDR;}
+                var kids=[];
+                if(isPend){
+                  kids.push(h('div',{key:'pi',style:{fontSize:Math.max(9,Math.min(14,subH*.26)),lineHeight:1}},'[출]'));
+                  if(showName&&slot)kids.push(h('div',{key:'pn',style:{fontSize:Math.max(6,Math.min(8,subH*.14)),color:'#FCD34D',textAlign:'center',lineHeight:1.1,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,Math.max(2,Math.floor(visW/10)))));
+                }else{
+                  if(isPrev&&idx2===0&&subH>16)kids.push(h('div',{key:'l',style:{fontSize:Math.max(6,Math.min(9,subH*.18)),color:pCT&&pCT.clr||TX,opacity:.7,fontWeight:600}},dR+'x'+dC));
+                  if(!isPrev&&isSS&&!slot)kids.push(h('div',{key:'n',style:{fontSize:Math.max(7,Math.min(11,subH*.22)),fontWeight:800,color:'#60A5FA'}},ssIdx+1));
+                  if(!isPrev&&slot){
+                    kids.push(h('div',{key:'d',style:{width:Math.min(6,subW*.28),height:Math.min(6,subH*.28),borderRadius:'50%',background:pClr,flexShrink:0}}));
+                    if(showFull){var mc=Math.max(2,Math.floor(visW/9));kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,mc)));var es=fmtShort(slot.exp);if(es)kids.push(h('div',{key:'ex',style:{fontSize:Math.max(5,Math.min(8,subH*.14)),color:em?em.clr:'#64748B',textAlign:'center',lineHeight:1.1,marginTop:1}},(em?em.icon+' ':'')+es));kids.push(h('div',{key:'qt',style:{fontSize:Math.max(5,Math.min(8,subH*.13)),color:'#475569',textAlign:'center',lineHeight:1}},slot.qty+'개'));}
+                    else if(showName){var mc2=Math.max(2,Math.floor(visW/10));kids.push(h('div',{key:'nm',style:{fontSize:Math.max(6,Math.min(9,subH*.16)),color:TX,textAlign:'center',lineHeight:1.15,overflow:'hidden',width:'100%',marginTop:1,whiteSpace:'nowrap'}},slot.name.slice(0,mc2)));if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));}
+                    else if(em)kids.push(h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(9,subH*.17)),color:em.clr,lineHeight:1,fontWeight:900,marginTop:1}},em.icon));
+                  }
+                }
+                subs.push(h('div',{key:sKey,className:(ops&&!locked&&!isPend)?'ch':'',
+                  style:{background:sbg,border:'1px solid '+sBdr,outline:isHlSl?('2px solid '+hlClr):'none',outlineOffset:'-1px',borderRadius:2,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden',cursor:ops?(locked||isPend?'not-allowed':'pointer'):'default',boxSizing:'border-box',padding:1,minWidth:0,minHeight:0,transition:'background .15s'},
+                  onClick:ops&&!isPend?(function(k,sk){return function(){clickSlot(k,sk);};})(key,sKey):undefined,
+                  onDoubleClick:ops&&!isPend?(function(k,sk){return function(){dblClick(k,sk);};})(key,sKey):undefined
+                },kids));
+              })(sr,sc);
+            }
           }
-        }
-        subs.push(h('div',{key:sKey,className:(ops&&!locked&&!isPend)?'ch':'',
-          style:{background:sbg,border:'1px solid '+sBdr,outline:isHlSl?('2px solid '+hlClr):'none',outlineOffset:'-1px',borderRadius:2,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden',cursor:ops?(locked||isPend?'not-allowed':'pointer'):'default',boxSizing:'border-box',padding:1,minWidth:0,minHeight:0,transition:'background .15s'},
-          onClick:ops&&!isPend?(function(k,sk){return function(){clickSlot(k,sk);};})(key,sKey):undefined,
-          onDoubleClick:ops&&!isPend?(function(k,sk){return function(){dblClick(k,sk);};})(key,sKey):undefined},kids));
-      })(sr,sc);}}
-      cells.push(h('div',{key:key,style:{width:BASE,height:BASE,background:pCT?(pCT.bdr+'22'):'rgba(255,255,255,.03)',border:'1.5px solid '+(isSel?(pCT&&pCT.bdr||'#F1F5F9'):(ct?ct.bdr:BDR)),outline:isSel?('2px solid '+(pCT&&pCT.bdr||'#e2e8f0')):'none',borderRadius:4,overflow:'hidden',cursor:!ops?(locked?'default':'pointer'):'default',boxSizing:'border-box',display:'grid',gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',gridTemplateRows:'repeat('+dR+',minmax(0,1fr))',gap:2,padding:2,opacity:isDimmed?0.15:1,transition:'opacity .2s'},
-        onClick:!ops?(function(k){return function(){if(!locked)toggleSel(k);};})(key):undefined},subs));
-    })(r,c);}}
+          cells.push(h('div',{key:key,style:{width:BASE,height:BASE,background:pCT?(pCT.bdr+'22'):'rgba(255,255,255,.03)',border:'1.5px solid '+(isSel?(pCT&&pCT.bdr||'#F1F5F9'):(ct?ct.bdr:BDR)),outline:isSel?('2px solid '+(pCT&&pCT.bdr||'#e2e8f0')):'none',borderRadius:4,overflow:'hidden',cursor:!ops?(locked?'default':'pointer'):'default',boxSizing:'border-box',display:'grid',gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',gridTemplateRows:'repeat('+dR+',minmax(0,1fr))',gap:2,padding:2,opacity:isDimmed?0.15:1,transition:'opacity .2s'},
+            onClick:!ops?(function(k){return function(){if(!locked)toggleSel(k);};})(key):undefined
+          },subs));
+        })(r,c);
+      }
+    }
     return h('div',{style:{display:'inline-grid',gridTemplateColumns:'repeat('+wh.cols+','+BASE+'px)',gap:2,padding:8,userSelect:'none'}},cells);
   }
   function GW(ops){return h('div',{ref:wrapRef,style:{flex:1,overflow:'hidden',position:'relative',cursor:'grab',background:BG}},h('div',{style:{position:'absolute',top:0,left:0,transform:'translate('+pz.x+'px,'+pz.y+'px) scale('+pz.s+')',transformOrigin:'0 0',willChange:'transform'}},renderGrid(ops)));}
-  function tS(active,accent){var ac=accent?'#FBBF24':'#60A5FA',bd=accent?'#F59E0B':'#3B82F6';return Object.assign({},S('transparent',active?ac:SUB),{borderRadius:0,padding:'7px 12px',fontSize:11,fontWeight:600,borderBottom:active?('2px solid '+bd):'2px solid transparent',flexShrink:0});}
+
+  /* 탭 스타일 - 아이콘+텍스트를 위해 높이 확보 */
+  function tS(active,accent){
+    var ac=accent?'#FBBF24':'#60A5FA',bd=accent?'#F59E0B':'#3B82F6';
+    return Object.assign({},S('transparent',active?ac:SUB),{borderRadius:0,padding:'7px 12px',fontSize:11,fontWeight:600,borderBottom:active?('2px solid '+bd):'2px solid transparent',flexShrink:0});
+  }
 
   function renderPendPanel(){
     if(!outSelMode&&pendOut.length===0)return null;
     var groupMap={},groupOrder=[];
-    pendOut.forEach(function(item){var gk=(item.date||'')+'||'+(item.loc||'');if(!groupMap[gk]){groupMap[gk]=[];groupOrder.push(gk);}groupMap[gk].push(item);});
+    pendOut.forEach(function(item){
+      var gk=(item.date||'')+'||'+(item.loc||'');
+      if(!groupMap[gk]){groupMap[gk]=[];groupOrder.push(gk);}
+      groupMap[gk].push(item);
+    });
+    var totalPal=pendOut.length;
     return h('div',{style:{background:'rgba(10,18,30,.98)',borderTop:'2px solid #F59E0B',padding:10,maxHeight:280,overflow:'auto',flexShrink:0}},
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
-        h('span',{style:{fontSize:11,fontWeight:700,color:'#FBBF24'}},'출고대기 '+pendOut.length+'건 / '+groupOrder.length+'묶음'),
-        outSelMode&&h('span',{style:{fontSize:10,color:'#F59E0B',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.25)',borderRadius:5,padding:'2px 8px'}},outMeta?outMeta.date+'일 - '+outMeta.loc+' 선택중':'')),
-      pendOut.length===0?h('div',{style:{fontSize:11,color:SUB,textAlign:'center',padding:'6px 0'}},'출고할 유닛을 탭하여 추가하세요'):
-      h(Fragment,null,groupOrder.map(function(gk){return h(PendGroup,{key:gk,gk:gk,items:groupMap[gk],wh:wh,onConfirm:confirmPend,onConfirmAll:confirmPendAll,onWithdraw:withdrawPend,onWithdrawAll:withdrawPendAll});})));
+        h('span',{style:{fontSize:11,fontWeight:700,color:'#FBBF24'}},'출고대기 '+totalPal+'건 / '+groupOrder.length+'묶음'),
+        outSelMode&&h('span',{style:{fontSize:10,color:'#F59E0B',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.25)',borderRadius:5,padding:'2px 8px'}},outMeta?outMeta.date+'일 - '+outMeta.loc+' 선택중':'')
+      ),
+      pendOut.length===0
+        ?h('div',{style:{fontSize:11,color:SUB,textAlign:'center',padding:'6px 0'}},'출고할 유닛을 탭하여 추가하세요')
+        :h(Fragment,null,groupOrder.map(function(gk){
+            return h(PendGroup,{key:gk,gk:gk,items:groupMap[gk],wh:wh,
+              onConfirm:confirmPend,onConfirmAll:confirmPendAll,
+              onWithdraw:withdrawPend,onWithdrawAll:withdrawPendAll});
+          }))
+    );
   }
+
   function renderImmPanel(){
     if(!showOutPanel)return null;
     return h('div',{style:{background:'rgba(10,18,30,.98)',borderTop:'2px solid #EF4444',padding:10,maxHeight:220,overflow:'auto',flexShrink:0}},
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
         h('span',{style:{fontSize:11,fontWeight:700,color:'#F87171'}},'바로출고 대기 '+outQ.length+'건'),
-        h('div',{style:{display:'flex',gap:5}},outQ.length>0&&h('button',{style:S('#DC2626','#fff',{padding:'3px 10px',fontSize:10}),onClick:confirmAllImm},'일괄출고'),h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'3px 8px',fontSize:10}),onClick:function(){setShowOutPanel(false);setImmMode(false);}},'닫기'))),
+        h('div',{style:{display:'flex',gap:5}},
+          outQ.length>0&&h('button',{style:S('#DC2626','#fff',{padding:'3px 10px',fontSize:10}),onClick:confirmAllImm},'일괄출고'),
+          h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'3px 8px',fontSize:10}),onClick:function(){setShowOutPanel(false);setImmMode(false);}},'닫기')
+        )
+      ),
       outQ.length===0?h('div',{style:{fontSize:11,color:SUB,textAlign:'center',padding:'6px 0'}},immMode?'출고할 유닛을 탭하세요':'출고 대기 없음'):
-      outQ.map(function(item){var em3=EM[getExpSt(item.slot.exp)],pc3=wh.pColors[item.slot.name]||'#94A3B8';
+      outQ.map(function(item){
+        var em3=EM[getExpSt(item.slot.exp)],pc3=wh.pColors[item.slot.name]||'#94A3B8';
         return h('div',{key:item.qid,style:{display:'flex',alignItems:'center',gap:5,background:'rgba(239,68,68,.07)',border:'1px solid rgba(239,68,68,.18)',borderRadius:6,padding:'5px 8px',marginBottom:5}},
           h('div',{style:{width:6,height:6,borderRadius:'50%',background:pc3,flexShrink:0}}),
           h('span',{style:{fontSize:12,color:TX,flex:1,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},item.slot.name),
           h('span',{style:{fontSize:10,color:em3?em3.clr:SUB,flexShrink:0}},(em3?em3.icon+' ':'')+(item.slot.exp?fmtExp(item.slot.exp):'기한없음')),
           h('span',{style:{fontSize:10,color:'#60A5FA',flexShrink:0,marginLeft:3}},item.slot.qty+'개'),
           h('button',{style:S('rgba(255,255,255,.07)','#94A3B8',{padding:'2px 7px',fontSize:10,marginLeft:4,flexShrink:0}),onClick:(function(qid){return function(){cancelImm(qid);};})(item.qid)},'취소'),
-          h('button',{style:S('#DC2626','#fff',{padding:'2px 8px',fontSize:10,flexShrink:0}),onClick:(function(qid){return function(){confirmImm(qid);};})(item.qid)},'출고확정'));})
+          h('button',{style:S('#DC2626','#fff',{padding:'2px 8px',fontSize:10,flexShrink:0}),onClick:(function(qid){return function(){confirmImm(qid);};})(item.qid)},'출고확정')
+        );
+      })
     );
   }
+
   var anyMode=outSelMode||immMode||moveFrom||selSlots.length>0;
+
   return h('div',{ref:rootRef,style:{height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
     saveFlash&&h('div',{key:String(toastK.current),className:'toast'},'저장 완료'),
+
+    /* 앱바 */
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 8px',height:48,display:'flex',alignItems:'center',gap:5,flexShrink:0}},
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:onBack},'< 목록'),
       h('div',{style:{flex:1,overflow:'hidden'}},h('div',{style:{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},wh.name),h('div',{style:{fontSize:9,color:SUB,whiteSpace:'nowrap'}},'창고관리 시스템 ver 01 - 제작 TOOZ')),
@@ -638,19 +667,50 @@ function WHView(p){
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 7px',fontSize:13}),onClick:function(){zBtn(1.25);}},'＋'),
       h('span',{style:{fontSize:9,color:SUB,minWidth:24,textAlign:'center'}},Math.round(pz.s*100)+'%'),
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 7px',fontSize:13}),onClick:function(){zBtn(0.8);}},'－'),
-      h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'5px 7px',fontSize:12}),onClick:resetPz},'⊙')),
+      h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'5px 7px',fontSize:12}),onClick:resetPz},'⊙')
+    ),
+
+    /* 요약바 */
     (tab==='ops'||tab==='status')&&h('div',{style:{background:'rgba(15,23,42,.97)',borderBottom:'1px solid '+BDR,padding:'4px 12px',display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',flexShrink:0}},
-      h('div',{style:{display:'flex',gap:10}},[['전체',stData.tot,'#94A3B8'],['사용',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0]},h('span',{style:{fontWeight:700,fontSize:14,color:x[2]}},x[1]),h('span',{style:{fontSize:10,color:SUB,marginLeft:2}},x[0]));})),
-      h('div',{style:{flex:1,display:'flex',gap:4,flexWrap:'wrap'}},pg.map(function(p2){var isHl=hlProd===p2.name;return h('span',{key:p2.name,onClick:function(e){e.stopPropagation();setHlProd(isHl?null:p2.name);},style:{background:isHl?(p2.clr+'40'):(p2.clr+'1e'),color:p2.clr,border:'1px solid '+(isHl?p2.clr:(p2.clr+'44')),borderRadius:20,padding:'2px 9px',fontSize:10,fontWeight:600,cursor:'pointer',userSelect:'none',transition:'all .15s'}},p2.name+' '+p2.cnt+'팔 '+p2.totalQty.toLocaleString()+'개');})),
+      h('div',{style:{display:'flex',gap:10}},
+        [['전체',stData.tot,'#94A3B8'],['사용',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0]},h('span',{style:{fontWeight:700,fontSize:14,color:x[2]}},x[1]),h('span',{style:{fontSize:10,color:SUB,marginLeft:2}},x[0]));})
+      ),
+      h('div',{style:{flex:1,display:'flex',gap:4,flexWrap:'wrap'}},
+        pg.map(function(p2){var isHl=hlProd===p2.name;return h('span',{key:p2.name,onClick:function(e){e.stopPropagation();setHlProd(isHl?null:p2.name);},style:{background:isHl?(p2.clr+'40'):(p2.clr+'1e'),color:p2.clr,border:'1px solid '+(isHl?p2.clr:(p2.clr+'44')),borderRadius:20,padding:'2px 9px',fontSize:10,fontWeight:600,cursor:'pointer',userSelect:'none',boxShadow:isHl?('0 0 0 2px '+p2.clr+'44'):'none',transition:'all .15s'}},p2.name+' '+p2.cnt+'팔 '+p2.totalQty.toLocaleString()+'개');})
+      ),
       wh.inQ.length>0&&h('span',{style:{fontSize:10,color:'#FBBF24',fontWeight:600}},'대기 '+wh.inQ.length),
-      pendOut.length>0&&h('div',{onClick:function(){setTab('ops');},style:{display:'flex',alignItems:'center',gap:5,background:'rgba(245,158,11,.12)',border:'1px solid rgba(245,158,11,.35)',borderRadius:8,padding:'3px 10px',cursor:'pointer',flexShrink:0}},h('span',{style:{fontSize:14}},'🚛'),h('div',{style:{display:'flex',flexDirection:'column',lineHeight:1.2}},h('span',{style:{fontSize:12,color:'#FB923C',fontWeight:700}},'출고대기 '+pendOut.length+'건'),h('span',{style:{fontSize:10,color:'#FCD34D'}},'총 '+pendOut.length+'파렛트'))),
-      hlProd&&h('span',{onClick:function(){setHlProd(null);},style:{fontSize:10,color:SUB,cursor:'pointer',textDecoration:'underline'}},'해제')),
+      pendOut.length>0&&h('div',{onClick:function(){setTab('ops');},style:{display:'flex',alignItems:'center',gap:5,background:'rgba(245,158,11,.12)',border:'1px solid rgba(245,158,11,.35)',borderRadius:8,padding:'3px 10px',cursor:'pointer',userSelect:'none',flexShrink:0}},
+        h('span',{style:{fontSize:14}},'🚛'),
+        h('div',{style:{display:'flex',flexDirection:'column',lineHeight:1.2}},
+          h('span',{style:{fontSize:12,color:'#FB923C',fontWeight:700}},'출고대기 '+pendOut.length+'건'),
+          h('span',{style:{fontSize:10,color:'#FCD34D'}},'총 '+pendOut.length+'파렛트')
+        )
+      ),
+      hlProd&&h('span',{onClick:function(){setHlProd(null);},style:{fontSize:10,color:SUB,cursor:'pointer',textDecoration:'underline'}},'해제')
+    ),
+
+    /* ── 탭바 (아이콘 + 텍스트) ── */
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,display:'flex',alignItems:'stretch',justifyContent:'space-between',flexShrink:0}},
       h('div',{style:{display:'flex',alignItems:'stretch'}},
-        [['ops','📦','작업'],['status','📊','현황'],['history','📋','기록']].map(function(x){return h('button',{key:x[0],onClick:function(){setTab(x[0]);setColorPick(null);},style:tS(tab===x[0])},TabLabel(x[1],x[2]));}),
-        h('button',{onClick:function(){setLocked(function(l){if(!l)setHlProd(null);return !l;});},style:{background:locked?'rgba(239,68,68,.10)':'rgba(16,185,129,.10)',color:locked?'#F87171':'#34D399',border:'none',borderRadius:0,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:locked?'2px solid #EF4444':'2px solid #10B981',borderLeft:'1px solid '+BDR}},TabLabel(locked?'🔒':'🔓',locked?'잠금':'해제'))),
-      h('button',{onClick:function(){setTab('setup');setColorPick(null);},style:Object.assign({},tS(tab==='setup',true),{borderLeft:'1px solid '+BDR})},TabLabel('⚙️','설정'))),
+        /* 작업 / 현황 / 기록 */
+        [['ops','📦','작업'],['status','📊','현황'],['history','📋','기록']].map(function(x){
+          return h('button',{key:x[0],onClick:function(){setTab(x[0]);setColorPick(null);},style:tS(tab===x[0])},
+            TabLabel(x[1],x[2]));
+        }),
+        /* 잠금 / 해제 */
+        h('button',{
+          onClick:function(){setLocked(function(l){if(!l)setHlProd(null);return !l;});},
+          style:{background:locked?'rgba(239,68,68,.10)':'rgba(16,185,129,.10)',color:locked?'#F87171':'#34D399',border:'none',borderRadius:0,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:locked?'2px solid #EF4444':'2px solid #10B981',borderLeft:'1px solid '+BDR}
+        }, TabLabel(locked?'🔒':'🔓',locked?'잠금':'해제'))
+      ),
+      /* 설정 */
+      h('button',{
+        onClick:function(){setTab('setup');setColorPick(null);},
+        style:Object.assign({},tS(tab==='setup',true),{borderLeft:'1px solid '+BDR})
+      }, TabLabel('⚙️','설정'))
+    ),
 
+    /* 설정 탭 */
     tab==='setup'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:0,alignItems:'center',overflowX:'auto',flexShrink:0}},
         h('div',{style:{flexShrink:0,paddingRight:12}},h(DivPicker,{val:sDiv,set:setSDiv})),
@@ -660,77 +720,109 @@ function WHView(p){
         h('div',{style:{display:'flex',gap:5,flexShrink:0,alignItems:'center'}},
           h('button',{style:S('#3B82F6','#fff',{padding:'6px 11px',fontSize:12,borderRadius:6}),onClick:applySetup},'적용 ('+sel.size+'칸)'),
           h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 9px',fontSize:12,borderRadius:6}),onClick:function(){var a=new Set();for(var r=0;r<wh.rows;r++)for(var c=0;c<wh.cols;c++)a.add(r+'-'+c);setSel(a);}},'전체선택'),
-          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 9px',fontSize:12,borderRadius:6}),onClick:function(){setSel(new Set());}},'전체해제'))),
+          h('button',{style:S('rgba(255,255,255,.06)',SUB,{padding:'6px 9px',fontSize:12,borderRadius:6}),onClick:function(){setSel(new Set());}},'전체해제')
+        )
+      ),
       GW(false),
-      h('div',{style:{padding:'5px 12px',fontSize:11,color:SUB,background:CARD,borderTop:'1px solid '+BDR,flexShrink:0,display:'flex',gap:10,alignItems:'center'}},h('span',null,'셀 탭>선택 드래그>이동'),h('div',{style:{display:'flex',gap:8}},Object.entries(CT).map(function(e){return h('span',{key:e[0],style:{color:e[1].clr}},e[1].lbl);})))),
+      h('div',{style:{padding:'5px 12px',fontSize:11,color:SUB,background:CARD,borderTop:'1px solid '+BDR,flexShrink:0,display:'flex',gap:10,alignItems:'center'}},h('span',null,'셀 탭>선택 드래그>이동'),h('div',{style:{display:'flex',gap:8}},Object.entries(CT).map(function(e){return h('span',{key:e[0],style:{color:e[1].clr}},e[1].lbl);})))
+    ),
 
+    /* 작업 탭 */
     tab==='ops'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'6px 10px',display:'flex',gap:5,alignItems:'center',flexShrink:0}},
         anyMode&&h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'4px 9px',fontSize:11}),onClick:cancelAllModes},'취소'),
-        locked?h('div',{style:{flex:1,fontSize:11,color:'#F87171'}},'🔒 잠금 상태 — [해제] 버튼을 눌러주세요'):
+        locked?h('div',{style:{flex:1,fontSize:11,color:'#F87171',display:'flex',alignItems:'center',gap:5}},h('span',null,'🔒 잠금 상태 — [해제] 버튼을 눌러주세요')):
         outSelMode?h('div',{style:{flex:1,display:'flex',alignItems:'center',gap:6,overflow:'hidden'}},h('span',{style:{fontSize:11,color:'#FB923C',fontWeight:700,flexShrink:0}},'출고대기 등록중'),h('span',{style:{background:'rgba(245,158,11,.15)',color:'#FCD34D',border:'1px solid rgba(245,158,11,.4)',borderRadius:6,padding:'1px 8px',fontSize:11,fontWeight:700,flexShrink:0}},outMeta?outMeta.date+'일 - '+outMeta.loc:''),h('span',{style:{fontSize:10,color:'#F59E0B',flexShrink:0}},'→ 출고할 유닛 탭')):
-        immMode?h('div',{style:{flex:1,display:'flex',alignItems:'center',gap:6}},h('span',{style:{fontSize:11,color:'#F87171',fontWeight:700}},'바로출고 모드'),h('span',{style:{fontSize:10,color:SUB}},'→ 출고할 유닛 탭')):
-        moveFrom?h('div',{style:{flex:1,display:'flex',alignItems:'center',gap:6,overflow:'hidden',minWidth:0}},h('span',{style:{fontSize:10,color:'#F59E0B',fontWeight:600,flexShrink:0}},'이동중'),h('span',{style:{fontSize:14,fontWeight:700,color:TX,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},moveFrom.slot.name),h('span',{style:{fontSize:13,fontWeight:600,color:'#94A3B8',flexShrink:0}},moveFrom.slot.exp?fmtExp(moveFrom.slot.exp):'기한없음'),h('span',{style:{fontSize:13,fontWeight:600,color:'#60A5FA',flexShrink:0}},(moveFrom.slot.qty||0).toLocaleString()+'개'),h('span',{style:{fontSize:10,color:'#F59E0B',flexShrink:0}},'→ 빈슬롯 탭')):
-        h('div',{style:{flex:1,fontSize:11,color:selSlots.length>0?'#60A5FA':SUB,overflow:'hidden',whiteSpace:'nowrap'}},selSlots.length>0?('슬롯 '+selSlots.length+'개 선택'):wh.inQ.length>0?'빈슬롯 탭 > 위치지정 후 품목탭':'슬롯 탭 > 이동 / 더블탭 > 수정'),
+        immMode?h('div',{style:{flex:1,display:'flex',alignItems:'center',gap:6,overflow:'hidden'}},h('span',{style:{fontSize:11,color:'#F87171',fontWeight:700,flexShrink:0}},'바로출고 모드'),h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'→ 출고할 유닛 탭')):
+        moveFrom?h('div',{style:{flex:1,display:'flex',alignItems:'center',gap:6,overflow:'hidden',minWidth:0}},h('span',{style:{fontSize:10,color:'#F59E0B',fontWeight:600,flexShrink:0}},'이동중'),h('span',{style:{fontSize:14,fontWeight:700,color:TX,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},moveFrom.slot.name),h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'·'),h('span',{style:{fontSize:13,fontWeight:600,color:'#94A3B8',flexShrink:0}},moveFrom.slot.exp?fmtExp(moveFrom.slot.exp):'기한없음'),h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'·'),h('span',{style:{fontSize:13,fontWeight:600,color:'#60A5FA',flexShrink:0}},(moveFrom.slot.qty||0).toLocaleString()+'개'),h('span',{style:{fontSize:10,color:'#F59E0B',flexShrink:0,marginLeft:2}},'→ 빈슬롯 탭')):
+        h('div',{style:{flex:1,fontSize:11,color:selSlots.length>0?'#60A5FA':SUB,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},selSlots.length>0?('슬롯 '+selSlots.length+'개 선택'):wh.inQ.length>0?'빈슬롯 탭 > 위치지정 후 품목탭':'슬롯 탭 > 이동 / 더블탭 > 수정'),
         h('button',{style:S('#059669','#fff',{padding:'5px 10px',fontSize:12}),onClick:function(){setShowIn(true);}},'입고'),
         h('button',{style:S(outSelMode?'rgba(217,119,6,.7)':'rgba(245,158,11,.15)',outSelMode?'#fff':'#F59E0B',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(245,158,11,.3)'}),onClick:function(){if(outSelMode){setOutSelMode(false);setOutMeta(null);}else{setShowOutForm(true);}}},outSelMode?'선택중':'출고대기'),
-        h('button',{style:S(immMode?'#DC2626':'rgba(239,68,68,.12)',immMode?'#fff':'#F87171',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(239,68,68,.25)'}),onClick:function(){if(immMode){setImmMode(false);setShowOutPanel(true);}else{setImmMode(true);setShowOutPanel(true);setOutSelMode(false);}}},immMode?'출고중':'출고')),
+        h('button',{style:S(immMode?'#DC2626':'rgba(239,68,68,.12)',immMode?'#fff':'#F87171',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(239,68,68,.25)'}),onClick:function(){if(immMode){setImmMode(false);setShowOutPanel(true);}else{setImmMode(true);setShowOutPanel(true);setOutSelMode(false);}}},immMode?'출고중':'출고')
+      ),
       GW(true),
       wh.inQ.length>0&&h('div',{style:{background:'rgba(10,20,38,.98)',borderTop:'2px solid #3B82F6',padding:10,maxHeight:150,overflow:'auto',flexShrink:0}},
         h('div',{style:{fontSize:11,fontWeight:700,marginBottom:7,color:'#60A5FA',display:'flex',alignItems:'center',gap:8}},'입고대기 '+wh.inQ.length+'건',selSlots.length>0?h('span',{style:{color:'#4ADE80',fontWeight:700}},selSlots.length+'개 선택'):h('span',{style:{color:SUB,fontSize:10}},'빈슬롯탭 > 위치지정')),
-        h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);}},item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));}))  ),
-      renderPendPanel(),renderImmPanel()),
+        h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},
+          wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);}},item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));})
+        )
+      ),
+      renderPendPanel(),
+      renderImmPanel()
+    ),
 
+    /* 현황 탭 */
     tab==='status'&&h('div',{style:{flex:1,overflow:'auto',padding:'14px 14px 28px'},onClick:function(){if(colorPick)setColorPick(null);}},
       h('div',{style:{fontWeight:700,fontSize:15,marginBottom:12,display:'flex',alignItems:'center',justifyContent:'space-between'}},
         h('span',null,'📊 현황판'),
-        h('button',{style:S('rgba(16,185,129,.15)','#34D399',{padding:'5px 14px',fontSize:12,border:'1px solid rgba(16,185,129,.3)',borderRadius:7}),onClick:function(){
-          var BOM='\uFEFF';var rows=[['상품명','유통기한','파렛트수(슬롯)','제품수']];
-          pg.forEach(function(p2){(p2.exps||[]).forEach(function(e){rows.push([p2.name,e.exp?fmtExp(e.exp):'기한없음',e.cnt,e.totalQty]);});});
-          var csv=BOM+rows.map(function(rr){return rr.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');}).join('\r\n');
-          var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='재고현황_'+wh.name+'.csv';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},1000);}},
-          h('span',{style:{display:'flex',alignItems:'center',gap:6}},h('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none'},h('rect',{x:2,y:2,width:20,height:20,rx:3,fill:'#1D6F42'}),h('path',{d:'M7 7l3.5 5L7 17h2.5l2-3 2 3H16l-3.5-5L16 7h-2.5l-2 3-2-3H7z',fill:'#fff'})),'엑셀 다운로드'))),
+        h('button',{style:S('rgba(16,185,129,.15)','#34D399',{padding:'5px 14px',fontSize:12,border:'1px solid rgba(16,185,129,.3)',borderRadius:7}),
+          onClick:function(){
+            var BOM='\uFEFF';var rows=[['상품명','유통기한','파렛트수(슬롯)','제품수']];
+            pg.forEach(function(p2){(p2.exps||[]).forEach(function(e){rows.push([p2.name,e.exp?fmtExp(e.exp):'기한없음',e.cnt,e.totalQty]);});});
+            var csv=BOM+rows.map(function(rr){return rr.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');}).join('\r\n');
+            var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='재고현황_'+wh.name+'.csv';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},1000);
+          }},
+          h('span',{style:{display:'flex',alignItems:'center',gap:6}},
+            h('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none',style:{flexShrink:0}},h('rect',{x:2,y:2,width:20,height:20,rx:3,fill:'#1D6F42'}),h('path',{d:'M7 7l3.5 5L7 17h2.5l2-3 2 3H16l-3.5-5L16 7h-2.5l-2 3-2-3H7z',fill:'#fff'})),
+            '엑셀 다운로드'))),
       h('div',{style:{background:CARD,borderRadius:11,padding:14,marginBottom:10}},
         h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'파렛트 슬롯'),
-        h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}},[['전체',stData.tot,'#94A3B8'],['사용중',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:x[2]+'15',border:'1px solid '+x[2]+'33',borderRadius:9,padding:'10px 15px',textAlign:'center',minWidth:72}},h('div',{style:{fontSize:24,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:11,color:SUB}},x[0]));})),
-        stData.tot>0&&h(Fragment,null,h('div',{style:{height:10,background:'rgba(255,255,255,.06)',borderRadius:5,overflow:'hidden',marginBottom:3}},h('div',{style:{height:'100%',width:(stData.used/stData.tot*100)+'%',background:'linear-gradient(90deg,#3B82F6,#60A5FA)',borderRadius:5}})),h('div',{style:{fontSize:11,color:SUB,textAlign:'right'}},'사용률 '+Math.round(stData.used/stData.tot*100)+'%'))),
+        h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}},
+          [['전체',stData.tot,'#94A3B8'],['사용중',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:x[2]+'15',border:'1px solid '+x[2]+'33',borderRadius:9,padding:'10px 15px',textAlign:'center',minWidth:72}},h('div',{style:{fontSize:24,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:11,color:SUB}},x[0]));})
+        ),
+        stData.tot>0&&h(Fragment,null,h('div',{style:{height:10,background:'rgba(255,255,255,.06)',borderRadius:5,overflow:'hidden',marginBottom:3}},h('div',{style:{height:'100%',width:(stData.used/stData.tot*100)+'%',background:'linear-gradient(90deg,#3B82F6,#60A5FA)',borderRadius:5}})),h('div',{style:{fontSize:11,color:SUB,textAlign:'right'}},'사용률 '+Math.round(stData.used/stData.tot*100)+'%'))
+      ),
       h('div',{style:{display:'flex',gap:8,marginBottom:10,padding:'8px 12px',background:CARD,borderRadius:9,border:'1px solid '+BDR,alignItems:'center'}},h('span',{style:{fontSize:11,color:SUB,marginRight:4}},'유통기한'),h('span',{style:{fontSize:12,color:EM.expired.clr,fontWeight:700}},'만료'),h('span',{style:{fontSize:10,color:SUB}},'|'),h('span',{style:{fontSize:12,color:EM.imminent.clr,fontWeight:700}},'임박(3개월 미만)'),h('span',{style:{fontSize:10,color:SUB,marginLeft:'auto'}},'● 클릭 → 색상 변경')),
       h('div',{style:{background:CARD,borderRadius:11,padding:14}},
         h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'상품별 재고'),
         pg.length===0?h('div',{style:{fontSize:12,color:SUB}},'배치된 상품 없음'):
-        pg.map(function(p2){var isPickOpen=colorPick===p2.name;
+        pg.map(function(p2){
+          var isPickOpen=colorPick===p2.name;
           return h('div',{key:p2.name,style:{marginBottom:14,background:'rgba(255,255,255,.03)',borderRadius:9,overflow:'hidden',border:'1px solid '+p2.clr+'33'}},
             h('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',background:p2.clr+'0f'}},
-              h('div',{onClick:function(e){e.stopPropagation();setColorPick(isPickOpen?null:p2.name);},style:{width:16,height:16,borderRadius:'50%',background:p2.clr,flexShrink:0,cursor:'pointer',border:'2px solid '+p2.clr+'99',boxShadow:isPickOpen?'0 0 0 2px #fff':'none'}}),
+              h('div',{onClick:function(e){e.stopPropagation();setColorPick(isPickOpen?null:p2.name);},style:{width:16,height:16,borderRadius:'50%',background:p2.clr,flexShrink:0,cursor:'pointer',border:'2px solid '+p2.clr+'99',boxShadow:isPickOpen?'0 0 0 2px #fff':'none',transition:'box-shadow .15s'}}),
               h('div',{style:{flex:1,fontSize:13,fontWeight:700}},p2.name),
               h('span',{style:{background:p2.clr+'22',border:'1px solid '+p2.clr+'44',color:p2.clr,borderRadius:6,padding:'2px 8px',fontSize:12,fontWeight:700}},p2.cnt+'팔'),
               h('span',{style:{background:'rgba(255,255,255,.07)',borderRadius:6,padding:'2px 8px',fontSize:12,fontWeight:700}},p2.totalQty.toLocaleString()+'개')),
-            isPickOpen&&h(ColorPicker,{currentClr:p2.clr,onPick:function(clr){chgClr(p2.name,clr);}}),
+            isPickOpen&&h(ColorPicker,{currentClr:p2.clr,onPick:function(clr){chgClr(p2.name,clr);},onClose:function(){setColorPick(null);}}),
             h('div',{style:{padding:'6px 8px',display:'flex',flexDirection:'column',gap:4}},
-              p2.exps.map(function(e){var esSt=getExpSt(e.exp),em5=EM[esSt];
+              p2.exps.map(function(e){
+                var esSt=getExpSt(e.exp),em5=EM[esSt];
                 return h('div',{key:e.exp||'_',style:{display:'flex',alignItems:'center',gap:7,background:em5?em5.bg:'rgba(255,255,255,.03)',border:'1px solid '+(em5?(em5.bdr+'77'):'rgba(255,255,255,.06)'),borderRadius:6,padding:'5px 9px'}},
                   em5&&h('span',{style:{fontSize:13,color:em5.clr,fontWeight:900,flexShrink:0}},em5.icon),
                   h('div',{style:{flex:1,fontSize:11,color:em5?em5.clr:SUB}},e.exp?fmtExp(e.exp):'유통기한 미기재'),
                   em5&&h('span',{style:{fontSize:10,color:em5.clr,fontWeight:700,background:em5.bg,borderRadius:4,padding:'1px 5px',flexShrink:0}},em5.label),
                   h('span',{style:{fontSize:11,color:p2.clr,fontWeight:600,minWidth:36,textAlign:'right'}},e.cnt+'팔'),
-                  h('span',{style:{fontSize:11,fontWeight:700,minWidth:52,textAlign:'right'}},e.totalQty.toLocaleString()+'개'));})))})) ),
+                  h('span',{style:{fontSize:11,fontWeight:700,minWidth:52,textAlign:'right'}},e.totalQty.toLocaleString()+'개'));
+              })));
+        }))
+    ),
 
+    /* 기록 탭 */
     tab==='history'&&h('div',{style:{flex:1,overflow:'auto',padding:'14px 14px 28px'}},
       h('div',{style:{fontWeight:700,fontSize:15,marginBottom:4}},'📋 히스토리'),
-      h('div',{style:{fontSize:12,color:SUB,marginBottom:12}},'저장 버튼으로 스냅샷 저장 / 항목 클릭 → 배치도'),
+      h('div',{style:{fontSize:12,color:SUB,marginBottom:12}},'저장 버튼으로 저장 / 항목 클릭 → 배치도'),
       wh.history.length===0?h('div',{style:{color:SUB,fontSize:13,marginTop:40,textAlign:'center'}},'저장된 히스토리가 없습니다'):
-      wh.history.slice().reverse().map(function(h2){var hP=h2.prods||[];
+      wh.history.slice().reverse().map(function(h2){
+        var hP=h2.prods||[];
         return h('div',{key:h2.id,style:{background:CARD,borderRadius:11,padding:14,marginBottom:8,border:'1px solid '+BDR,cursor:'pointer'},onClick:function(){setHistView(h2);}},
           h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}},
             h('div',null,h('div',{style:{fontWeight:700,fontSize:14}},h2.label),h('div',{style:{fontSize:11,color:SUB,marginTop:2}},'슬롯 '+(h2.stats&&h2.stats.tot||0)+' / 사용 '+(h2.stats&&h2.stats.used||0)+' / 여유 '+(h2.stats&&h2.stats.free||0))),
             h('div',{style:{display:'flex',gap:5},onClick:function(e){e.stopPropagation();}},
               h('button',{style:S('rgba(99,102,241,.2)','#A5B4FC',{padding:'4px 9px',fontSize:11}),onClick:function(){setHistView(h2);}},'배치도'),
               h('button',{style:S('rgba(59,130,246,.15)','#60A5FA',{padding:'4px 8px',fontSize:11}),onClick:function(){if(confirm('복원?'))withUndo(function(){return Object.assign({},wh,{cells:deep(h2.cells)});});}},'복원'),
-              h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 8px',fontSize:11}),onClick:function(){onUpdate(function(w){return Object.assign({},w,{history:w.history.filter(function(x){return x.id!==h2.id;})});});}},'삭제'))),
-          hP.length>0?h('div',null,hP.map(function(p2){return h('div',{key:p2.name,style:{marginBottom:6}},
-            h('div',{style:{display:'flex',alignItems:'center',gap:7,marginBottom:2}},h('div',{style:{width:8,height:8,borderRadius:'50%',background:p2.clr,flexShrink:0}}),h('span',{style:{flex:1,fontSize:12,fontWeight:600}},p2.name),h('span',{style:{fontSize:11,color:p2.clr}},p2.cnt+'팔'),h('span',{style:{fontSize:11,marginLeft:4}},(p2.totalQty||0).toLocaleString()+'개')),
-            h('div',{style:{paddingLeft:16,display:'flex',flexWrap:'wrap',gap:'2px 8px'}},(p2.exps||[]).map(function(e){var esSt=getExpSt(e.exp),em6=EM[esSt];return h('span',{key:e.exp||'_',style:{fontSize:10,color:em6?em6.clr:'#64748B'}},(em6?em6.icon+' ':'')+(e.exp?fmtExp(e.exp):'기한없음')+' '+e.cnt+'팔 '+e.totalQty.toLocaleString()+'개');})));
-          })):h('div',{style:{fontSize:11,color:SUB}},'상품 없음'));})),
+              h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 8px',fontSize:11}),onClick:function(){onUpdate(function(w){return Object.assign({},w,{history:w.history.filter(function(x){return x.id!==h2.id;})});});}},'삭제')
+            )
+          ),
+          hP.length>0?h('div',null,hP.map(function(p2){
+            return h('div',{key:p2.name,style:{marginBottom:6}},
+              h('div',{style:{display:'flex',alignItems:'center',gap:7,marginBottom:2}},h('div',{style:{width:8,height:8,borderRadius:'50%',background:p2.clr,flexShrink:0}}),h('span',{style:{flex:1,fontSize:12,fontWeight:600}},p2.name),h('span',{style:{fontSize:11,color:p2.clr}},p2.cnt+'팔'),h('span',{style:{fontSize:11,marginLeft:4}},(p2.totalQty||0).toLocaleString()+'개')),
+              h('div',{style:{paddingLeft:16,display:'flex',flexWrap:'wrap',gap:'2px 8px'}},
+                (p2.exps||[]).map(function(e){var esSt=getExpSt(e.exp),em6=EM[esSt];return h('span',{key:e.exp||'_',style:{fontSize:10,color:em6?em6.clr:'#64748B'}},(em6?em6.icon+' ':'')+(e.exp?fmtExp(e.exp):'기한없음')+' '+e.cnt+'팔 '+e.totalQty.toLocaleString()+'개');})));
+          })):h('div',{style:{fontSize:11,color:SUB}},'상품 없음')
+        );
+      })
+    ),
 
     Footer,
     showExp&&h(ExportModal,{wh:wh,onUpdate:onUpdate,onClose:function(){setShowExp(false);}}),
@@ -773,27 +865,39 @@ function WHView(p){
   );
 }
 
-/* HIST MODAL */
+/* ═══ HIST MODAL ═══ */
 function HistModal(p){
   var wh=p.wh,hv=p.hv,onClose=p.onClose,withUndo=p.withUndo;
   var sh=useState(0.8),hz=sh[0],setHz=sh[1];
   var CSIZ=Math.round(BASE*hz);
   var cells=[];
-  for(var r=0;r<wh.rows;r++){for(var c=0;c<wh.cols;c++){(function(r,c){
-    var key=r+'-'+c,cell=hv.cells[key];if(!cell)return;
-    var ct=CT[cell.type],dR=cell.divR||1,dC=cell.divC||1;
-    var subs=[];
-    for(var sr=0;sr<dR;sr++){for(var sc=0;sc<dC;sc++){(function(sr,sc){
-      var sKey=sr+'-'+sc,slot=cell.slots&&cell.slots[sKey];
-      var pClr=slot?(wh.pColors[slot.name]||'#94A3B8'):null;
-      var subH=CSIZ/dR,subW=CSIZ/dC;
-      var esSt=slot?getExpSt(slot.exp):'ok',em=EM[esSt];
-      var showD=subH>=28&&subW>=20;
-      subs.push(h('div',{key:sKey,style:{background:slot?(em?em.bg:(pClr+'3a')):(ct?ct.bg:'rgba(255,255,255,.04)'),border:'1px solid '+(em?em.bdr:(ct?(ct.bdr+'55'):BDR)),borderRadius:2,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden',boxSizing:'border-box',padding:1,minWidth:0,minHeight:0}},
-        slot&&h(Fragment,null,h('div',{key:'d',style:{width:Math.min(5,subW*.28),height:Math.min(5,subH*.28),borderRadius:'50%',background:pClr,flexShrink:0}}),showD&&h('div',{key:'n',style:{fontSize:Math.max(6,Math.min(8,subH*.15)),color:TX,textAlign:'center',lineHeight:1.1,overflow:'hidden',width:'100%',marginTop:1}},slot.name.slice(0,Math.max(2,Math.floor(subW/8)))),showD&&fmtShort(slot.exp)&&h('div',{key:'ex',style:{fontSize:Math.max(5,Math.min(7,subH*.13)),color:em?em.clr:'#64748B',textAlign:'center',lineHeight:1}},fmtShort(slot.exp)),em&&h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(8,subH*.15)),color:em.clr,lineHeight:1,fontWeight:900}},em.icon))));
-    })(sr,sc);}}
-    cells.push(h('div',{key:key,style:{width:CSIZ,height:CSIZ,background:ct?(ct.bdr+'22'):'rgba(255,255,255,.03)',border:'1.5px solid '+(ct?ct.bdr:BDR),borderRadius:4,overflow:'hidden',boxSizing:'border-box',display:'grid',gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',gridTemplateRows:'repeat('+dR+',minmax(0,1fr))',gap:2,padding:2}},subs));
-  })(r,c);}}
+  for(var r=0;r<wh.rows;r++){
+    for(var c=0;c<wh.cols;c++){
+      (function(r,c){
+        var key=r+'-'+c,cell=hv.cells[key];if(!cell)return;
+        var ct=CT[cell.type],dR=cell.divR||1,dC=cell.divC||1;
+        var subs=[];
+        for(var sr=0;sr<dR;sr++){
+          for(var sc=0;sc<dC;sc++){
+            (function(sr,sc){
+              var sKey=sr+'-'+sc,slot=cell.slots&&cell.slots[sKey];
+              var pClr=slot?(wh.pColors[slot.name]||'#94A3B8'):null;
+              var subH=CSIZ/dR,subW=CSIZ/dC;
+              var esSt=slot?getExpSt(slot.exp):'ok',em=EM[esSt];
+              var showD=subH>=28&&subW>=20;
+              subs.push(h('div',{key:sKey,style:{background:slot?(em?em.bg:(pClr+'3a')):(ct?ct.bg:'rgba(255,255,255,.04)'),border:'1px solid '+(em?em.bdr:(ct?(ct.bdr+'55'):BDR)),borderRadius:2,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden',boxSizing:'border-box',padding:1,minWidth:0,minHeight:0}},
+                slot&&h(Fragment,null,
+                  h('div',{key:'d',style:{width:Math.min(5,subW*.28),height:Math.min(5,subH*.28),borderRadius:'50%',background:pClr,flexShrink:0}}),
+                  showD&&h('div',{key:'n',style:{fontSize:Math.max(6,Math.min(8,subH*.15)),color:TX,textAlign:'center',lineHeight:1.1,overflow:'hidden',width:'100%',marginTop:1}},slot.name.slice(0,Math.max(2,Math.floor(subW/8)))),
+                  showD&&fmtShort(slot.exp)&&h('div',{key:'ex',style:{fontSize:Math.max(5,Math.min(7,subH*.13)),color:em?em.clr:'#64748B',textAlign:'center',lineHeight:1}},fmtShort(slot.exp)),
+                  em&&h('div',{key:'ei',style:{fontSize:Math.max(6,Math.min(8,subH*.15)),color:em.clr,lineHeight:1,fontWeight:900}},em.icon))));
+            })(sr,sc);
+          }
+        }
+        cells.push(h('div',{key:key,style:{width:CSIZ,height:CSIZ,background:ct?(ct.bdr+'22'):'rgba(255,255,255,.03)',border:'1.5px solid '+(ct?ct.bdr:BDR),borderRadius:4,overflow:'hidden',boxSizing:'border-box',display:'grid',gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',gridTemplateRows:'repeat('+dR+',minmax(0,1fr))',gap:2,padding:2}},subs));
+      })(r,c);
+    }
+  }
   return h('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.88)',display:'flex',flexDirection:'column',zIndex:300}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexShrink:0}},
       h('div',{style:{flex:1}},h('div',{style:{fontWeight:700,fontSize:15}},'배치도 - '+hv.label)),
@@ -805,7 +909,7 @@ function HistModal(p){
     Footer);
 }
 
-/* EXPORT MODAL */
+/* ═══ EXPORT MODAL ═══ */
 function ExportModal(p){
   var wh=p.wh,onUpdate=p.onUpdate,onClose=p.onClose;
   var sheets=[{label:'현재상태',cells:wh.cells,stats:calcSt(wh)}].concat(wh.history.slice().reverse().map(function(h2){return{label:h2.label,cells:h2.cells,stats:h2.stats};}));
@@ -823,7 +927,7 @@ function ExportModal(p){
         h('div',{style:{background:'rgba(16,185,129,.07)',border:'1px solid rgba(16,185,129,.25)',borderRadius:10,padding:14,marginBottom:14}},
           h('div',{style:{fontSize:12,fontWeight:700,color:'#34D399',marginBottom:8}},'STEP 1 - 복사 후 구글시트 A1에 Ctrl+V'),
           h('textarea',{readOnly:true,value:tsv,onFocus:function(e){e.target.select();},style:{width:'100%',height:110,background:'#0D1117',border:'1px solid '+BDR,borderRadius:7,padding:10,color:'#7EE787',fontSize:10,fontFamily:'monospace',lineHeight:1.5,resize:'none',outline:'none',boxSizing:'border-box'}}),
-          h('button',{style:S(copied?'#059669':'#3B82F6','#fff',{padding:10,fontSize:14,width:'100%',borderRadius:8,marginTop:8}),onClick:function(){if(copyText(tsv))setCopied(true);}},copied?'복사완료':'데이터 복사하기'),
+          h('button',{style:S(copied?'#059669':'#3B82F6','#fff',{padding:10,fontSize:14,width:'100%',borderRadius:8,marginTop:8}),onClick:function(){if(copyText(tsv))setCopied(true);else alert('텍스트박스 클릭후 Ctrl+A, Ctrl+C로 복사');}},copied?'복사완료':'데이터 복사하기'),
           copied&&h('div',{style:{marginTop:8,fontSize:12,color:'#34D399',textAlign:'center'}},'구글시트 A1 클릭 > Ctrl+V')),
         h(Inp,{lbl:'구글 Apps Script URL',val:url,set:setUrl,ph:'https://script.google.com/macros/s/.../exec'}),
         h('button',{style:S('#3B82F6','#fff',{padding:10,fontSize:13,width:'100%',borderRadius:8,marginTop:8}),onClick:function(){if(!url.includes('script.google.com')){alert('올바른 URL이 아닙니다');return;}onUpdate(function(w){return Object.assign({},w,{sheetsUrl:url.trim()});});setUrlSaved(true);}},'URL 저장'),
