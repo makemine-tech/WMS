@@ -401,7 +401,7 @@ function WHView(p){
   }
 
   function tabStyle(active,accent){var ac=accent?'#FBBF24':'#60A5FA',bd=accent?'#F59E0B':'#3B82F6';return Object.assign({},S('transparent',active?ac:SUB),{borderRadius:0,padding:'10px 14px',fontSize:12,fontWeight:600,borderBottom:active?('2px solid '+bd):'2px solid transparent',flexShrink:0});}
-  var statusMsg=selSlots.length>0?('슬롯 '+selSlots.length+'개 선택 > 품목 탭'):opMode==='outbound'?'출고할 슬롯을 탭하세요':moveFrom?('이동중: "'+moveFrom.slot.name+'" > 빈슬롯 탭'):wh.inQ.length>0?'빈슬롯 탭(다중) > 위치지정 후 품목탭':'슬롯 탭 > 이동 / 더블탭 > 수정';
+  var statusMsg=selSlots.length>0?('슬롯 '+selSlots.length+'개 선택 > 품목 탭'):opMode==='outbound'?'출고할 슬롯을 탭하세요':moveFrom?null:wh.inQ.length>0?'빈슬롯 탭(다중) > 위치지정 후 품목탭':'슬롯 탭 > 이동 / 더블탭 > 수정';
 
   return h('div',{ref:rootRef,style:{height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
     /* ── 앱바 ── */
@@ -459,7 +459,17 @@ function WHView(p){
     tab==='ops'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'6px 12px',display:'flex',gap:6,alignItems:'center',flexShrink:0}},
         (opMode!=='idle'||moveFrom||selSlots.length>0)&&h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'4px 9px',fontSize:12}),onClick:function(){setOpMode('idle');setSelSlots([]);setMoveFrom(null);}},'취소'),
-        locked?h('div',{style:{flex:1,fontSize:11,color:'#F87171',display:'flex',alignItems:'center',gap:5}},h('span',null,'🔒'),h('span',null,'잠금 상태 — [해제] 버튼을 눌러주세요')):h('div',{style:{flex:1,fontSize:11,color:selSlots.length>0?'#60A5FA':opMode==='outbound'?'#F87171':moveFrom?'#F59E0B':SUB,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},statusMsg),
+        locked?h('div',{style:{flex:1,fontSize:11,color:'#F87171',display:'flex',alignItems:'center',gap:5}},h('span',null,'🔒'),h('span',null,'잠금 상태 — [해제] 버튼을 눌러주세요')):
+        moveFrom?h('div',{style:{flex:1,display:'flex',alignItems:'center',gap:6,overflow:'hidden',minWidth:0}},
+          h('span',{style:{fontSize:10,color:'#F59E0B',fontWeight:600,flexShrink:0}},'이동중'),
+          h('span',{style:{fontSize:14,fontWeight:700,color:TX,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},moveFrom.slot.name),
+          h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'·'),
+          h('span',{style:{fontSize:13,fontWeight:600,color:'#94A3B8',flexShrink:0}},(moveFrom.slot.exp?fmtExp(moveFrom.slot.exp):'기한없음')),
+          h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'·'),
+          h('span',{style:{fontSize:13,fontWeight:600,color:'#60A5FA',flexShrink:0}},(moveFrom.slot.qty||0).toLocaleString()+'개'),
+          h('span',{style:{fontSize:10,color:'#F59E0B',flexShrink:0,marginLeft:2}},'→ 빈슬롯 탭')
+        ):
+        h('div',{style:{flex:1,fontSize:11,color:selSlots.length>0?'#60A5FA':opMode==='outbound'?'#F87171':SUB,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},statusMsg),
         h('button',{style:S('#059669','#fff',{padding:'5px 11px',fontSize:12}),onClick:function(){setShowIn(true);}},'입고'),
         h('button',{style:S(opMode==='outbound'?'#DC2626':'rgba(239,68,68,.2)',opMode==='outbound'?'#fff':'#F87171',{padding:'5px 11px',fontSize:12}),onClick:function(){if(opMode==='outbound'){setOpMode('idle');setShowOut(false);}else{setOpMode('outbound');setShowOut(true);setSelSlots([]);setMoveFrom(null);}}},'출고')
       ),
