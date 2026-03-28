@@ -427,6 +427,55 @@ function MainView(p){
   );
 }
 
+/* ═══════════ PEND GROUP (출고대기 그룹) ═══════════ */
+function PendGroup(p){
+  var items=p.items,wh=p.wh,gk=p.gk;
+  var sg=useState(true),open=sg[0],setOpen=sg[1];
+  var first=items[0];
+  var lbl=(first.date||'')+(first.loc?('-'+first.loc):'');
+  var totalPal=items.length;
+  var totalQty=items.reduce(function(acc,x){return acc+(x.slot.qty||0);},0);
+
+  return h('div',{style:{marginBottom:6,border:'1px solid rgba(245,158,11,.25)',borderRadius:7,overflow:'hidden'}},
+    /* 그룹 헤더 (클릭으로 펼침/닫힘) */
+    h('div',{
+      onClick:function(){setOpen(function(v){return !v;});},
+      style:{display:'flex',alignItems:'center',gap:6,padding:'6px 10px',background:'rgba(245,158,11,.10)',cursor:'pointer'}
+    },
+      h('span',{style:{fontSize:11,color:'#FCD34D',fontWeight:700,flexShrink:0,minWidth:70}},lbl),
+      h('span',{style:{fontSize:11,color:'#FBBF24',fontWeight:600,flex:1}},totalPal+'팔 / 총 '+totalQty.toLocaleString()+'개'),
+      h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},open?'▲':'▼'),
+      h('button',{style:S('#DC2626','#fff',{padding:'2px 8px',fontSize:10,flexShrink:0}),
+        onClick:function(e){
+          e.stopPropagation();
+          items.forEach(function(item){p.onConfirm(item.qid);});
+        }
+      },'전체출고'),
+      h('button',{style:S('rgba(255,255,255,.07)','#94A3B8',{padding:'2px 7px',fontSize:10,flexShrink:0}),
+        onClick:function(e){
+          e.stopPropagation();
+          items.forEach(function(item){p.onWithdraw(item.qid);});
+        }
+      },'전체철회')
+    ),
+    /* 펼쳐진 상태: 개별 아이템 */
+    open&&h('div',{style:{padding:'4px 8px 6px'}},
+      items.map(function(item){
+        var em2=EM[getExpSt(item.slot.exp)];
+        var pc2=wh.pColors[item.slot.name]||'#94A3B8';
+        return h('div',{key:item.qid,style:{display:'flex',alignItems:'center',gap:5,padding:'4px 4px',borderBottom:'1px solid rgba(255,255,255,.04)'}},
+          h('div',{style:{width:6,height:6,borderRadius:'50%',background:pc2,flexShrink:0}}),
+          h('span',{style:{fontSize:11,color:TX,flex:1,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},item.slot.name),
+          h('span',{style:{fontSize:10,color:em2?em2.clr:SUB,flexShrink:0}},(em2?em2.icon+' ':'')+(item.slot.exp?fmtExp(item.slot.exp):'기한없음')),
+          h('span',{style:{fontSize:10,color:'#60A5FA',flexShrink:0,marginLeft:3}},item.slot.qty+'개'),
+          h('button',{style:S('rgba(255,255,255,.07)','#94A3B8',{padding:'1px 6px',fontSize:10,marginLeft:4,flexShrink:0}),onClick:(function(qid){return function(){p.onWithdraw(qid);};})(item.qid)},'철회'),
+          h('button',{style:S('#DC2626','#fff',{padding:'1px 6px',fontSize:10,flexShrink:0}),onClick:(function(qid){return function(){p.onConfirm(qid);};})(item.qid)},'확정')
+        );
+      })
+    )
+  );
+}
+
 /* ═══════════ WH VIEW ═══════════ */
 function WHView(p){
   var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack,onLogout=p.onLogout;
@@ -811,32 +860,31 @@ function WHView(p){
   /* 패널 렌더 헬퍼 함수들 */
   function renderPendPanel(){
     if(!outSelMode&&pendOut.length===0)return null;
+
+    /* 날짜+입고지 기준으로 그룹화 */
+    var groupMap={};
+    var groupOrder=[];
+    pendOut.forEach(function(item){
+      var gk=(item.date||'')+'||'+(item.loc||'');
+      if(!groupMap[gk]){groupMap[gk]=[];groupOrder.push(gk);}
+      groupMap[gk].push(item);
+    });
+
     var header=h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
-      h('span',{style:{fontSize:11,fontWeight:700,color:'#FBBF24'}},'출고대기 '+pendOut.length+'건'),
+      h('span',{style:{fontSize:11,fontWeight:700,color:'#FBBF24'}},'출고대기 '+pendOut.length+'건 / '+groupOrder.length+'묶음'),
       outSelMode&&h('span',{style:{fontSize:10,color:'#F59E0B',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.25)',borderRadius:5,padding:'2px 8px'}},
         outMeta?outMeta.date+'일 - '+outMeta.loc+' 선택중':'')
     );
+
     var body;
     if(pendOut.length===0){
       body=h('div',{style:{fontSize:11,color:SUB,textAlign:'center',padding:'6px 0'}},'출고할 유닛을 탭하여 추가하세요');
     }else{
-      var rows=pendOut.map(function(item){
-        var em2=EM[getExpSt(item.slot.exp)];
-        var pc2=wh.pColors[item.slot.name]||'#94A3B8';
-        return h('div',{key:item.qid,style:{display:'flex',alignItems:'center',gap:5,background:'rgba(245,158,11,.06)',border:'1px solid rgba(245,158,11,.18)',borderRadius:6,padding:'5px 8px',marginBottom:5}},
-          h('div',{style:{width:6,height:6,borderRadius:'50%',background:pc2,flexShrink:0}}),
-          h('span',{style:{fontSize:11,color:'#FCD34D',fontWeight:600,flexShrink:0,minWidth:58}},(item.date||'')+(item.loc?('-'+item.loc):'')),
-          h('span',{style:{fontSize:12,color:TX,flex:1,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},item.slot.name),
-          h('span',{style:{fontSize:10,color:em2?em2.clr:SUB,flexShrink:0}},(em2?em2.icon+' ':'')+(item.slot.exp?fmtExp(item.slot.exp):'기한없음')),
-          h('span',{style:{fontSize:10,color:'#94A3B8',flexShrink:0,marginLeft:3}},'1팔'),
-          h('span',{style:{fontSize:10,color:'#60A5FA',flexShrink:0,marginLeft:3}},item.slot.qty+'개'),
-          h('button',{style:S('rgba(255,255,255,.07)','#94A3B8',{padding:'2px 7px',fontSize:10,marginLeft:4,flexShrink:0}),onClick:(function(qid){return function(){withdrawPend(qid);};})(item.qid)},'철회'),
-          h('button',{style:S('#DC2626','#fff',{padding:'2px 8px',fontSize:10,flexShrink:0}),onClick:(function(qid){return function(){confirmPend(qid);};})(item.qid)},'출고확정')
-        );
-      });
-      body=h(Fragment,null,rows);
+      body=h(Fragment,null,groupOrder.map(function(gk){
+        return h(PendGroup,{key:gk,gk:gk,items:groupMap[gk],wh:wh,onConfirm:confirmPend,onWithdraw:withdrawPend});
+      }));
     }
-    return h('div',{style:{background:'rgba(10,18,30,.98)',borderTop:'2px solid #F59E0B',padding:10,maxHeight:220,overflow:'auto',flexShrink:0}},header,body);
+    return h('div',{style:{background:'rgba(10,18,30,.98)',borderTop:'2px solid #F59E0B',padding:10,maxHeight:260,overflow:'auto',flexShrink:0}},header,body);
   }
 
   function renderImmPanel(){
@@ -944,7 +992,11 @@ function WHView(p){
         })
       ),
       wh.inQ.length>0&&h('span',{style:{fontSize:10,color:'#FBBF24',fontWeight:600}},'대기 '+wh.inQ.length),
-      pendOut.length>0&&h('span',{style:{fontSize:10,color:'#FB923C',fontWeight:600}},'출고대기 '+pendOut.length),
+      pendOut.length>0&&h('span',{style:{fontSize:13,color:'#FB923C',fontWeight:700,display:'flex',alignItems:'center',gap:4}},
+        '🚛',
+        h('span',null,'출고대기 '+pendOut.length+'건'),
+        h('span',{style:{fontSize:11,color:'#FCD34D'}},'- 총 '+pendOut.length+'파렛트')
+      ),
       hlProd&&h('span',{onClick:function(){setHlProd(null);},style:{fontSize:10,color:SUB,cursor:'pointer',textDecoration:'underline'}},'해제')
     ),
 
