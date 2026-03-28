@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>WMS 창고관리 시스템</title>
+<title>메이크창고 WMS · 창고관리 시스템</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
@@ -69,7 +69,28 @@ var CT={
   empty: {lbl:'빈공간',clr:'#94A3B8',bg:'rgba(148,163,184,.13)', bdr:'#64748B'},
   unused:{lbl:'미사용',clr:'#475569',bg:'rgba(51,65,85,.18)',     bdr:'#334155'}
 };
-var PALETTE=['#F87171','#FB923C','#FBBF24','#4ADE80','#34D399','#10B981','#60A5FA','#3B82F6','#818CF8','#A78BFA','#F472B6','#E879F9','#2DD4BF','#38BDF8','#94A3B8','#FDE68A','#6EE7B7','#C4B5FD','#FCA5A5','#67E8F9'];
+var PALETTE=[
+  '#B22222','#FF0000','#FF6666','#FFCCCC',
+  '#CC7A00','#FFA500','#FFC04D','#FFE5B3',
+  '#B3B300','#FFFF00','#FFFF66','#FFFFCC',
+  '#006400','#008000','#4CAF50','#C8E6C9',
+  '#00008B','#0000FF','#6666FF','#CCCCFF',
+  '#000033','#000080','#333399','#9999CC',
+  '#004D40','#008080','#4DB6AC','#B2DFDB',
+  '#4B0082','#800080','#B366B3','#E6CCE6',
+  '#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF'
+];
+var PALETTE_ROWS=[
+  {lbl:'Red',    clrs:['#B22222','#FF0000','#FF6666','#FFCCCC']},
+  {lbl:'Orange', clrs:['#CC7A00','#FFA500','#FFC04D','#FFE5B3']},
+  {lbl:'Yellow', clrs:['#B3B300','#FFFF00','#FFFF66','#FFFFCC']},
+  {lbl:'Green',  clrs:['#006400','#008000','#4CAF50','#C8E6C9']},
+  {lbl:'Blue',   clrs:['#00008B','#0000FF','#6666FF','#CCCCFF']},
+  {lbl:'Navy',   clrs:['#000033','#000080','#333399','#9999CC']},
+  {lbl:'Teal',   clrs:['#004D40','#008080','#4DB6AC','#B2DFDB']},
+  {lbl:'Purple', clrs:['#4B0082','#800080','#B366B3','#E6CCE6']},
+  {lbl:'Gray',   clrs:['#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF']}
+];
 var BG='#0F172A',CARD='#1E293B',BDR='#334155',TX='#E2E8F0',SUB='#64748B';
 function S(bg,clr,ex){return Object.assign({background:bg,color:clr,border:'none',borderRadius:7,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer'},ex||{});}
 
@@ -147,17 +168,24 @@ function DivPicker(p){
 
 /* ── 색상 피커 컴포넌트 ── */
 function ColorPicker(p){
-  /* p: {currentClr, onPick, onClose} */
-  return h('div',{style:{padding:'8px 12px',background:'rgba(0,0,0,.25)',borderTop:'1px solid rgba(255,255,255,.07)'}},
-    h('div',{style:{fontSize:10,color:SUB,marginBottom:6,fontWeight:600}},'색상 선택'),
-    h('div',{style:{display:'flex',gap:5,flexWrap:'wrap'}},
-      PALETTE.map(function(clr){
-        var active=p.currentClr===clr;
-        return h('div',{key:clr,onClick:function(){p.onPick(clr);},
-          style:{width:22,height:22,borderRadius:'50%',background:clr,cursor:'pointer',flexShrink:0,
-            border:active?'2.5px solid #fff':'2.5px solid transparent',
-            boxShadow:active?('0 0 0 1.5px '+clr):'none',
-            transform:active?'scale(1.15)':'scale(1)',transition:'transform .1s'}});
+  return h('div',{style:{padding:'8px 12px 10px',background:'rgba(0,0,0,.30)',borderTop:'1px solid rgba(255,255,255,.07)'},onClick:function(e){e.stopPropagation();}},
+    h('div',{style:{fontSize:10,color:SUB,marginBottom:7,fontWeight:600}},'색상 선택'),
+    h('div',{style:{display:'flex',flexDirection:'column',gap:4}},
+      PALETTE_ROWS.map(function(row){
+        return h('div',{key:row.lbl,style:{display:'flex',alignItems:'center',gap:4}},
+          h('div',{style:{fontSize:9,color:SUB,width:38,flexShrink:0,textAlign:'right',paddingRight:4}},row.lbl),
+          h('div',{style:{display:'flex',gap:3}},
+            row.clrs.map(function(clr){
+              var active=p.currentClr===clr;
+              var isDark=clr==='#000000'||clr==='#000033'||clr==='#00008B'||clr==='#006400'||clr==='#004D40'||clr==='#4B0082'||clr==='#333333'||clr==='#B22222'||clr==='#B3B300'||clr==='#CC7A00';
+              return h('div',{key:clr,onClick:function(){p.onPick(clr);},title:clr,
+                style:{width:20,height:20,borderRadius:4,background:clr,cursor:'pointer',flexShrink:0,
+                  border:active?('2px solid '+(isDark?'#fff':'#222')):'2px solid rgba(255,255,255,.12)',
+                  boxShadow:active?('0 0 0 1.5px rgba(255,255,255,.5)'):'none',
+                  transform:active?'scale(1.18)':'scale(1)',transition:'transform .1s'}});
+            })
+          )
+        );
       })
     )
   );
@@ -247,7 +275,7 @@ function MainView(p){
   return h('div',{style:{minHeight:'100vh',background:BG}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 16px',height:54,display:'flex',alignItems:'center',gap:10,position:'sticky',top:0,zIndex:10}},
       h('span',{style:{fontSize:22}},'📦'),
-      h('div',{style:{flex:1}},h('div',{style:{fontWeight:700,fontSize:15}},'메이크창고 WMS  VER 03'),h('div',{style:{fontSize:10,color:SUB}},'만든이 P.K.W')),
+      h('div',{style:{flex:1}},h('div',{style:{fontWeight:700,fontSize:15}},'메이크창고 WMS'),h('div',{style:{fontSize:10,color:SUB}},'창고관리 시스템 ver 01 · 메이크창고 대표 박경우')),
       h('button',{style:S('rgba(255,255,255,.07)',SUB,{padding:'5px 9px',fontSize:11}),onClick:function(){setShowPwChange(true);}},'🔑 비번변경'),
       h('button',{style:S('rgba(255,255,255,.07)','#F87171',{padding:'5px 9px',fontSize:11}),onClick:function(){if(confirm('로그아웃 할까요?'))onLogout();}},'로그아웃'),
       h('button',{style:S('#3B82F6','#fff',{padding:'5px 12px',fontSize:12}),onClick:function(){setOpen(true);}},'+ 새 창고')
