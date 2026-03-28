@@ -31,6 +31,7 @@ var useRef=React.useRef;
 var Fragment=React.Fragment;
 
 var DB='https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app/wms/data.json';
+var NOTICE_DB='https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app/wms/notice.json';
 var _pt=null,_lt=null;
 function dbSave(d){fetch(DB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({j:JSON.stringify(d),t:Date.now()})}).catch(function(e){console.warn(e);});}
 function dbListen(cb){
@@ -292,9 +293,14 @@ function MainView(p){
   var nc1=useState(false),noticeOpen=nc1[0],setNoticeOpen=nc1[1];
   var nc2=useState(''),noticeText=nc2[0],setNoticeText=nc2[1];
   useEffect(function(){
-    try{var v=localStorage.getItem('wms_notice');if(v)setNoticeText(v);}catch(e){}
+    fetch(NOTICE_DB).then(function(r){return r.json();}).then(function(v){
+      if(v&&v.text)setNoticeText(v.text);
+    }).catch(function(){});
   },[]);
-  function saveNotice(t){setNoticeText(t);try{localStorage.setItem('wms_notice',t);}catch(e){}}
+  function saveNotice(t){
+    setNoticeText(t);
+    fetch(NOTICE_DB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,t:Date.now()})}).catch(function(){});
+  }
 
   function create(){if(!nm.trim())return;var r=Math.min(Math.max(+rows||10,2),30),c=Math.min(Math.max(+cols||10,2),30);onPersist(whs.concat([mkWH(nm.trim(),r,c)]));setOpen(false);setNm('');setRows('10');setCols('10');}
 
