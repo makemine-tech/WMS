@@ -84,30 +84,41 @@ function normalizeWH(raw){
   return wh;
 }
 
-/* 창고 1개 저장 — 다른 창고 경로에 영향 없음 */
-function dbSaveOne(wh){
-  fetch(WH_URL+'/'+wh.id+'.json',{
-    method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(wh)
-  }).catch(function(e){console.warn('dbSaveOne',e);});
+/* 인증 토큰 가져오기 */
+async function getToken(){
+  try{var u=fbAuth.currentUser;return u?await u.getIdToken():'';
+  }catch(e){return '';}
+}
+
+/* 창고 1개 저장 */
+async function dbSaveOne(wh){
+  try{
+    var tk=await getToken();
+    await fetch(WH_URL+'/'+wh.id+'.json?auth='+tk,{
+      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(wh)
+    });
+  }catch(e){console.warn('dbSaveOne',e);}
 }
 /* 창고 삭제 */
-function dbDeleteOne(id){
-  fetch(WH_URL+'/'+id+'.json',{method:'DELETE'})
-    .catch(function(e){console.warn('dbDeleteOne',e);});
+async function dbDeleteOne(id){
+  try{
+    var tk=await getToken();
+    await fetch(WH_URL+'/'+id+'.json?auth='+tk,{method:'DELETE'});
+  }catch(e){console.warn('dbDeleteOne',e);}
 }
-/* 전체 창고 목록 폴링 — 각 창고는 독립 경로이므로 덮어쓰기 충돌 없음 */
+/* 전체 창고 목록 폴링 */
 function dbListen(cb){
-  function run(){
-    fetch(WH_URL+'.json')
-      .then(function(r){return r.json();})
-      .then(function(v){
-        if(!v){cb([]);return;}
-        var arr=Object.values(v).map(normalizeWH).filter(Boolean);
-        cb(arr);
-      }).catch(function(e){console.warn('dbListen',e);});
+  async function run(){
+    try{
+      var tk=await getToken();
+      var r=await fetch(WH_URL+'.json?auth='+tk);
+      var v=await r.json();
+      if(!v){cb([]);return;}
+      var arr=Object.values(v).map(normalizeWH).filter(Boolean);
+      cb(arr);
+    }catch(e){console.warn('dbListen',e);}
   }
-  run();
-  _pt=setInterval(run,4000);
+  run();_pt=setInterval(run,4000);
 }
 function dbOff(){if(_pt){clearInterval(_pt);_pt=null;}}
 
@@ -291,11 +302,14 @@ function PendGroup(p){
 
 /* 창고 1개만 폴링 (일반 사용자용) */
 function dbListenOne(wid,cb){
-  function run(){
-    fetch(WH_URL+'/'+wid+'.json')
-      .then(function(r){return r.json();})
-      .then(function(v){if(v)cb([normalizeWH(v)]);else cb([]);})
-      .catch(function(e){console.warn('dbListenOne',e);});
+  async function run(){
+    try{
+      var tk=await getToken();
+      var r=await fetch(WH_URL+'/'+wid+'.json?auth='+tk);
+      var v=await r.json();
+      if(v&&!v.error){cb([normalizeWH(v)]);}
+      else{cb([]);}
+    }catch(e){console.warn('dbListenOne',e);}
   }
   run();_pt=setInterval(run,4000);
 }
@@ -374,7 +388,7 @@ function App(){
     });
   }
 
-  var cWh=whs.find(function(w){return w.id===whId;});
+  var cWh=whId?whs.find(function(w){return w&&w.id===whId;})||null:null;
 
   /* 로딩 화면 */
   if(authSt==='loading'){
@@ -416,12 +430,22 @@ function MainView(p){
   var nc2=useState(''),noticeText=nc2[0],setNoticeText=nc2[1];
 
   useEffect(function(){
-    fetch(NOTICE_DB).then(function(r){return r.json();}).then(function(v){if(v&&v.text)setNoticeText(v.text);}).catch(function(){});
+    getToken().then(function(tk){
+      fetch(NOTICE_DB+(tk?'?auth='+tk:''))
+        .then(function(r){return r.json();})
+        .then(function(v){if(v&&v.text)setNoticeText(v.text);})
+        .catch(function(){});
+    });
   },[]);
 
   function saveNotice(t){
     setNoticeText(t);
-    fetch(NOTICE_DB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,t:Date.now()})}).catch(function(){});
+    getToken().then(function(tk){
+      fetch(NOTICE_DB+(tk?'?auth='+tk:''),{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:t,t:Date.now()})
+      }).catch(function(){});
+    });
   }
   function create(){
     if(!nm.trim())return;
