@@ -84,41 +84,51 @@ function normalizeWH(raw){
   return wh;
 }
 
-/* 인증 토큰 가져오기 */
-async function getToken(){
-  try{var u=fbAuth.currentUser;return u?await u.getIdToken():'';
-  }catch(e){return '';}
-}
+var WH_PATH ='wms/warehouses';
+var NOTICE_PATH='wms/notice';
+var _listeners=[];
 
-/* 창고 1개 저장 */
-async function dbSaveOne(wh){
-  try{
-    var tk=await getToken();
-    await fetch(WH_URL+'/'+wh.id+'.json?auth='+tk,{
-      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(wh)
-    });
-  }catch(e){console.warn('dbSaveOne',e);}
+/* 인증 토큰 — SDK 방식에서는 불필요, 호환용으로만 유지 */
+function getToken(){return Promise.resolve('');}
+
+/* 창고 1개 저장 — SDK PUT */
+function dbSaveOne(wh){
+  fbDb.ref(WH_PATH+'/'+wh.id).set(wh)
+    .catch(function(e){console.warn('dbSaveOne',e);});
 }
-/* 창고 삭제 */
-async function dbDeleteOne(id){
-  try{
-    var tk=await getToken();
-    await fetch(WH_URL+'/'+id+'.json?auth='+tk,{method:'DELETE'});
-  }catch(e){console.warn('dbDeleteOne',e);}
+/* 창고 삭제 — SDK remove */
+function dbDeleteOne(id){
+  fbDb.ref(WH_PATH+'/'+id).remove()
+    .catch(function(e){console.warn('dbDeleteOne',e);});
 }
-/* 전체 창고 목록 폴링 */
+/* 전체 창고 구독 (슈퍼관리자용) */
 function dbListen(cb){
-  async function run(){
-    try{
-      var tk=await getToken();
-      var r=await fetch(WH_URL+'.json?auth='+tk);
-      var v=await r.json();
-      if(!v){cb([]);return;}
-      var arr=Object.values(v).map(normalizeWH).filter(Boolean);
-      cb(arr);
-    }catch(e){console.warn('dbListen',e);}
-  }
-  run();_pt=setInterval(run,4000);
+  dbOff();
+  var ref=fbDb.ref(WH_PATH);
+  ref.on('value',function(snap){
+    var v=snap.val();
+    if(!v){cb([]);return;}
+    var arr=Object.values(v).map(normalizeWH).filter(Boolean);
+    cb(arr);
+  },function(e){console.warn('dbListen',e);});
+  _listeners.push({ref:ref,evt:'value'});
+}
+/* 창고 1개 구독 (일반 사용자용) */
+function dbListenOne(wid,cb){
+  dbOff();
+  var ref=fbDb.ref(WH_PATH+'/'+wid);
+  ref.on('value',function(snap){
+    var v=snap.val();
+    if(v&&!v.error){cb([normalizeWH(v)]);}
+    else{cb([]);}
+  },function(e){console.warn('dbListenOne',e);});
+  _listeners.push({ref:ref,evt:'value'});
+}
+/* 구독 해제 */
+function dbOff(){
+  _listeners.forEach(function(l){l.ref.off(l.evt);});
+  _listeners=[];
+  if(_pt){clearInterval(_pt);_pt=null;}
 }
 function dbOff(){if(_pt){clearInterval(_pt);_pt=null;}}
 
@@ -300,18 +310,16 @@ function PendGroup(p){
   );
 }
 
-/* 창고 1개만 폴링 (일반 사용자용) */
+/* 창고 1개만 구독 (일반 사용자용) */
 function dbListenOne(wid,cb){
-  async function run(){
-    try{
-      var tk=await getToken();
-      var r=await fetch(WH_URL+'/'+wid+'.json?auth='+tk);
-      var v=await r.json();
-      if(v&&!v.error){cb([normalizeWH(v)]);}
-      else{cb([]);}
-    }catch(e){console.warn('dbListenOne',e);}
-  }
-  run();_pt=setInterval(run,4000);
+  dbOff();
+  var ref=fbDb.ref(WH_PATH+'/'+wid);
+  ref.on('value',function(snap){
+    var v=snap.val();
+    if(v&&!v.error){cb([normalizeWH(v)]);}
+    else{cb([]);}
+  },function(e){console.warn('dbListenOne',e);});
+  _listeners.push({ref:ref,evt:'value'});
 }
 
 /* ═══ APP ═══ */
@@ -430,22 +438,15 @@ function MainView(p){
   var nc2=useState(''),noticeText=nc2[0],setNoticeText=nc2[1];
 
   useEffect(function(){
-    getToken().then(function(tk){
-      fetch(NOTICE_DB+(tk?'?auth='+tk:''))
-        .then(function(r){return r.json();})
-        .then(function(v){if(v&&v.text)setNoticeText(v.text);})
-        .catch(function(){});
-    });
+    fbDb.ref(NOTICE_PATH).get()
+      .then(function(snap){var v=snap.val();if(v&&v.text)setNoticeText(v.text);})
+      .catch(function(){});
   },[]);
 
   function saveNotice(t){
     setNoticeText(t);
-    getToken().then(function(tk){
-      fetch(NOTICE_DB+(tk?'?auth='+tk:''),{
-        method:'PUT',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:t,t:Date.now()})
-      }).catch(function(){});
-    });
+    fbDb.ref(NOTICE_PATH).set({text:t,t:Date.now()})
+      .catch(function(){});
   }
   function create(){
     if(!nm.trim())return;
