@@ -80,7 +80,8 @@ function showLogin(errMsg){
 }
 
 /* ── 창고 설정 화면 (최초 1회) ── */
-function showSetup(user){
+function showSetup(user, wmsPath){
+  var _wmsPath=wmsPath||'wms.html';
   idChecked=false;
   var photo=user.photoURL?'<img src="'+user.photoURL+'" style="width:36px;height:36px;border-radius:50%;border:2px solid #334155;" onerror="this.style.display=\'none\'"/>':'<div style="width:36px;height:36px;border-radius:50%;background:#334155;display:flex;align-items:center;justify-content:center;font-size:18px;">👤</div>';
   r('<div class="card">'+
@@ -118,7 +119,8 @@ function showSetup(user){
 }
 
 /* ── 슈퍼관리자 창고 선택 화면 ── */
-function showAdminView(user, warehouses){
+function showAdminView(user, warehouses, wmsPath){
+  var _wmsPath=wmsPath||'wms.html';
   var whHtml='';
   if(!warehouses||Object.keys(warehouses).length===0){
     whHtml='<div style="text-align:center;color:#64748B;padding:20px;font-size:13px;">등록된 창고가 없습니다</div>';
@@ -147,7 +149,8 @@ function showAdminView(user, warehouses){
 
 function enterWarehouse(wid){
   localStorage.setItem('wms_adminWhId', wid);
-  window.location.href='wms.html';
+  var path=window.location.pathname.replace('index.html','')+'wms.html';
+  window.location.href=path;
 }
 
 /* ── 창고 ID 중복 확인 ── */
@@ -190,7 +193,7 @@ async function createWarehouse(){
     });
     await db.ref('warehouseIndex/'+id).set(true);
     await db.ref('userWarehouse/'+user.uid).set(id);
-    window.location.href='wms.html';
+    window.location.href=_wmsPath;
   }catch(e){
     alert('생성 실패: '+e.message);
     btn.disabled=false;btn.textContent='생성하기';
@@ -203,6 +206,7 @@ async function joinWarehouse(){
   var status=document.getElementById('joinStatus');
   if(!id){status.innerHTML='<span class="err">창고 ID를 입력하세요</span>';return;}
   status.innerHTML='<span class="info">확인 중...</span>';
+  var _wmsPath=window.location.pathname.replace('index.html','')+'wms.html';
   try{
     var snap=await db.ref('warehouseIndex/'+id).get();
     if(!snap.exists()){status.innerHTML='<span class="err">❌ 존재하지 않는 창고 ID입니다</span>';return;}
@@ -221,36 +225,46 @@ async function doLogout(){
   await auth.signOut();
 }
 
-/* ── 구글 로그인 ── */
+/* ── 구글 로그인 (redirect 방식 — GitHub Pages 호환) ── */
 async function googleLogin(){
   var provider=new firebase.auth.GoogleAuthProvider();
-  showLoading('로그인 중...');
   try{
-    await auth.signInWithPopup(provider);
+    await auth.signInWithRedirect(provider);
   }catch(e){
-    if(e.code!=='auth/popup-closed-by-user')showLogin('로그인 실패: '+e.message);
-    else showLogin();
+    showLogin('로그인 실패: '+e.message);
   }
 }
 
 /* ── Auth 상태 감지 (핵심 진입점) ── */
 auth.onAuthStateChanged(async function(user){
-  if(!user){showLogin();return;}
+  if(!user){
+    /* redirect 결과 먼저 처리 */
+    try{
+      var result=await auth.getRedirectResult();
+      if(!result||!result.user){showLogin();return;}
+      user=result.user;
+    }catch(e){
+      showLogin(e.code!=='auth/no-current-user'?'오류: '+e.message:'');
+      return;
+    }
+  }
   showLoading('정보를 확인하는 중...');
   try{
     /* 슈퍼관리자 확인 */
     var adminSnap=await db.ref('superadmins/'+user.uid).get();
+    var BASE_PATH=window.location.pathname.replace('index.html','');
+    var WMS_PATH=BASE_PATH+'wms.html';
     if(adminSnap.exists()){
       /* 관리자는 창고 목록 선택 화면 */
       var whSnap=await db.ref('warehouses').get();
-      showAdminView(user, whSnap.val()||{});
+      showAdminView(user, whSnap.val()||{}, WMS_PATH);
       return;
     }
     /* 일반 사용자 — 이미 창고 있으면 바로 이동 */
     var whSnap=await db.ref('userWarehouse/'+user.uid).get();
-    if(whSnap.exists()){window.location.href='wms.html';return;}
+    if(whSnap.exists()){window.location.href=WMS_PATH;return;}
     /* 신규 사용자 — 창고 설정 화면 */
-    showSetup(user);
+    showSetup(user, WMS_PATH);
   }catch(e){showLogin('오류가 발생했습니다: '+e.message);}
 });
 </script>
