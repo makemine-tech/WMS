@@ -162,7 +162,7 @@ async function checkId(){
   if(!/^[a-z0-9-]+$/.test(id)){status.innerHTML='<span class="err">영문 소문자·숫자·하이픈만 사용 가능합니다</span>';return;}
   status.innerHTML='<span class="info">확인 중...</span>';
   try{
-    var snap=await db.ref('wms/warehouseIndex/'+id).get();
+    var snap=await db.ref('warehouseIndex/'+id).get();
     if(snap.exists()){
       status.innerHTML='<span class="err">❌ 이미 사용 중인 ID입니다</span>';
       idChecked=false;
@@ -186,14 +186,14 @@ async function createWarehouse(){
     var now=Date.now();
     var cells={};
     for(var row=0;row<10;row++)for(var col=0;col<10;col++)cells[row+'-'+col]={type:null,divR:1,divC:1};
-    await db.ref('wms/warehouses/'+id).set({
+    await db.ref('warehouses/'+id).set({
       id:id,name:name,rows:10,cols:10,cells:cells,
       info:{name:name,createdAt:now,ownerUid:user.uid},
       members:{[user.uid]:{name:user.displayName||'',email:user.email,photo:user.photoURL||'',joinedAt:now}},
       sheetsUrl:'',pendOut:[]
     });
-    await db.ref('wms/warehouseIndex/'+id).set(true);
-    await db.ref('wms/userWarehouse/'+user.uid).set(id);
+    await db.ref('warehouseIndex/'+id).set(true);
+    await db.ref('userWarehouse/'+user.uid).set(id);
     window.location.href=_wmsPath;
   }catch(e){
     alert('생성 실패: '+e.message);
@@ -209,14 +209,14 @@ async function joinWarehouse(){
   status.innerHTML='<span class="info">확인 중...</span>';
   var _wmsPath=window.location.pathname.replace('index.html','')+'wms.html';
   try{
-    var snap=await db.ref('wms/warehouseIndex/'+id).get();
+    var snap=await db.ref('warehouseIndex/'+id).get();
     if(!snap.exists()){status.innerHTML='<span class="err">❌ 존재하지 않는 창고 ID입니다</span>';return;}
     var user=auth.currentUser;
     var now=Date.now();
-    await db.ref('wms/warehouses/'+id+'/members/'+user.uid).set({
+    await db.ref('warehouses/'+id+'/members/'+user.uid).set({
       name:user.displayName||'',email:user.email,photo:user.photoURL||'',joinedAt:now
     });
-    await db.ref('wms/userWarehouse/'+user.uid).set(id);
+    await db.ref('userWarehouse/'+user.uid).set(id);
     window.location.href='wms.html';
   }catch(e){status.innerHTML='<span class="err">참가 실패: '+e.message+'</span>';}
 }
