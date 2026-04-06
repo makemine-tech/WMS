@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PDF 텍스트 진단</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Courier New',monospace;background:#0f1117;color:#e8eaf0;padding:1.5rem;font-size:.85rem}
+h1{color:#4af0a8;margin-bottom:1rem;font-size:1.2rem}
+.dz{border:2px dashed #252b3b;border-radius:8px;padding:2rem;text-align:center;cursor:pointer;background:#161b26;position:relative;margin-bottom:1rem}
+.dz input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dz:hover{border-color:#4af0a8}
+.ctrl{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+.btn{padding:.4rem .9rem;border-radius:5px;border:none;font-size:.8rem;cursor:pointer;font-family:monospace;font-weight:700}
+.bg{background:#4af0a8;color:#0f1117}
+.bs{background:#1e2333;color:#e8eaf0;border:1px solid #252b3b}
+select{padding:.38rem .65rem;border-radius:5px;border:1px solid #252b3b;background:#1e2333;color:#e8eaf0;font-family:monospace;font-size:.8rem}
+.output{background:#0a0d14;border:1px solid #252b3b;border-radius:8px;padding:1rem;max-height:75vh;overflow-y:auto;white-space:pre-wrap;word-break:break-all;line-height:2;font-size:.82rem}
+.item-row{display:flex;gap:.5rem;margin-bottom:.15rem;padding:.1rem .3rem;border-radius:3px}
+.item-row:hover{background:#1e2333}
+.idx{color:#7c8399;min-width:38px;text-align:right;flex-shrink:0}
+.str{flex:1}
+.coords{color:#7c8399;font-size:.72rem;min-width:200px;flex-shrink:0}
+/* 하이라이트 */
+.h-qty{background:rgba(240,196,74,.2);border-left:3px solid #f0c44a}
+.h-arr{background:rgba(74,240,168,.2);border-left:3px solid #4af0a8}
+.h-reg{background:rgba(240,88,88,.2);border-left:3px solid #f05858}
+.h-num{background:rgba(192,132,252,.15);border-left:3px solid #c084fc}
+.legend{display:flex;gap:1rem;margin-bottom:.75rem;flex-wrap:wrap;font-size:.75rem}
+.ld{display:flex;align-items:center;gap:.35rem}
+.lc{width:12px;height:12px;border-radius:2px;flex-shrink:0}
+.msg{padding:.5rem .8rem;border-radius:5px;background:#1e2333;color:#5b9cf6;border:1px solid #5b9cf6;margin-bottom:.7rem}
+.sp{display:inline-block;width:10px;height:10px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.3rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<h1>🔍 PDF 텍스트 진단 도구 — pdfjs 읽기 순서 그대로</h1>
+
+<div class="dz" id="dz">
+  <input type="file" id="f0" accept=".pdf">
+  📄 PDF 드래그 또는 클릭
+</div>
+
+<div class="ctrl" id="ctrl" style="display:none">
+  <span style="color:#7c8399">페이지:</span>
+  <select id="pgSel" onchange="showPage()"></select>
+  <button class="btn bg" onclick="showPage()">새로고침</button>
+  <button class="btn bs" onclick="showJoined()">join(' ') 결과 보기</button>
+  <button class="btn bs" onclick="showZone()">총수량~등기번호 구간만</button>
+  <span id="pgInfo" style="color:#7c8399;font-size:.75rem"></span>
+</div>
+
+<div class="legend" id="legend" style="display:none">
+  <div class="ld"><div class="lc" style="background:#f0c44a"></div>총수량 라인</div>
+  <div class="ld"><div class="lc" style="background:#4af0a8"></div>▶ 포함</div>
+  <div class="ld"><div class="lc" style="background:#f05858"></div>등기번호</div>
+  <div class="ld"><div class="lc" style="background:#c084fc"></div>숫자만</div>
+</div>
+
+<div id="msg" class="msg" style="display:none"></div>
+<div class="output" id="out">PDF를 업로드하면 pdfjs가 읽는 텍스트를 순서대로 보여줍니다.</div>
+
+<script>
+var pdfjsOk=false;
+function loadPdfjs(cb){
+  if(pdfjsOk){cb();return;}
+  var s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+  s.onload=function(){
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    pdfjsOk=true;cb();
+  };
+  document.head.appendChild(s);
+}
+
+var pdfDoc=null;
+var pageCache={};
+
+document.getElementById('f0').onchange=function(e){
+  var f=e.target.files[0];if(!f)return;
+  document.getElementById('msg').style.display='block';
+  document.getElementById('msg').innerHTML='<span class="sp"></span>로딩 중...';
+  loadPdfjs(function(){
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var bytes=new Uint8Array(ev.target.result);
+      pdfjsLib.getDocument({data:bytes}).promise.then(function(doc){
+        pdfDoc=doc;pageCache={};
+        var sel=document.getElementById('pgSel');
+        sel.innerHTML='';
+        for(var i=1;i<=doc.numPages;i++){
+          var opt=document.createElement('option');
+          opt.value=i;opt.textContent='페이지 '+i;
+          sel.appendChild(opt);
+        }
+        document.getElementById('ctrl').style.display='flex';
+        document.getElementById('legend').style.display='flex';
+        document.getElementById('pgInfo').textContent='총 '+doc.numPages+'페이지';
+        document.getElementById('msg').style.display='none';
+        showPage();
+      }).catch(function(e){
+        document.getElementById('msg').innerHTML='❌ '+e.message;
+      });
+    };
+    reader.readAsArrayBuffer(f);
+  });
+};
+
+function getItems(pgNum, cb){
+  if(pageCache[pgNum]){cb(pageCache[pgNum]);return;}
+  pdfDoc.getPage(pgNum).then(function(page){
+    return page.getTextContent();
+  }).then(function(tc){
+    var items=tc.items.map(function(it,idx){
+      return {
+        idx:idx,
+        str:(it.str||''),
+        tx:Math.round(it.transform[4]),
+        ty:Math.round(it.transform[5]),
+        w:Math.round(it.width||0),
+        h:Math.round(Math.abs(it.transform[3])||it.height||0)
+      };
+    });
+    pageCache[pgNum]=items;
+    cb(items);
+  });
+}
+
+function showPage(){
+  var pgNum=parseInt(document.getElementById('pgSel').value);
+  document.getElementById('msg').style.display='block';
+  document.getElementById('msg').innerHTML='<span class="sp"></span>텍스트 추출 중...';
+  getItems(pgNum,function(items){
+    document.getElementById('msg').style.display='none';
+    renderItems(items,'📋 pdfjs tc.items 순서 그대로 (idx, str, tx, ty, w, h)');
+  });
+}
+
+function showJoined(){
+  var pgNum=parseInt(document.getElementById('pgSel').value);
+  getItems(pgNum,function(items){
+    var joined=items.map(function(it){return it.str;}).join(' ');
+    var out=document.getElementById('out');
+    out.innerHTML='';
+    out.appendChild(makeTitle('📝 join(\" \") 결과 — 파싱에 사용되는 텍스트'));
+    var div=document.createElement('div');
+    div.style.cssText='background:#1e2333;padding:.75rem;border-radius:5px;margin-top:.5rem;white-space:pre-wrap;word-break:break-all;line-height:1.8;color:#e8eaf0';
+    div.textContent=joined;
+    out.appendChild(div);
+    
+    /* 구간 분리 */
+    var qi=joined.indexOf('총수량');
+    var ri=joined.indexOf('등기번호');
+    if(qi>=0){
+      var info=document.createElement('div');
+      info.style.cssText='margin-top:.75rem;color:#7c8399;font-size:.75rem';
+      info.innerHTML=
+        '총수량 위치: <b style="color:#f0c44a">'+qi+'</b>자 | '+
+        '등기번호 위치: <b style="color:#f05858">'+ri+'</b>자 | '+
+        (ri>qi?'<b style="color:#4af0a8">구간 정상 (총수량이 먼저)</b>':'<b style="color:#f05858">⚠️ 등기번호가 총수량보다 앞에 있음!</b>');
+      out.appendChild(info);
+      
+      if(ri>qi){
+        var zone=joined.substring(qi,ri);
+        var zdiv=document.createElement('div');
+        zdiv.style.cssText='margin-top:.5rem;background:rgba(74,240,168,.06);border:1px solid #4af0a8;padding:.65rem;border-radius:5px;white-space:pre-wrap;word-break:break-all;line-height:1.8';
+        zdiv.innerHTML='<div style="color:#4af0a8;font-size:.72rem;margin-bottom:.3rem">▼ 총수량~등기번호 구간</div>'+escHtml(zone);
+        out.appendChild(zdiv);
+      }
+    }
+  });
+}
+
+function showZone(){
+  var pgNum=parseInt(document.getElementById('pgSel').value);
+  getItems(pgNum,function(items){
+    /* 구간 items: 총수량 포함 item ~ 등기번호 포함 item */
+    var start=-1,end=-1;
+    for(var i=0;i<items.length;i++){
+      if(start<0&&items[i].str.indexOf('총수량')>=0)start=i;
+      if(items[i].str.indexOf('등기번호')>=0){end=i;break;}
+    }
+    
+    var out=document.getElementById('out');
+    out.innerHTML='';
+    out.appendChild(makeTitle('🎯 총수량~등기번호 구간 items (start='+start+', end='+end+')'));
+    
+    if(start<0){
+      var p=document.createElement('div');p.style.color='#f05858';p.textContent='총수량 없음 → 연속 페이지';
+      out.appendChild(p);return;
+    }
+    
+    var zoneItems=items.slice(start, end>=0?end+1:start+20);
+    zoneItems.forEach(function(it,i){
+      var row=makeRow(it,start+i);
+      out.appendChild(row);
+    });
+    
+    /* ▶ 분리 시뮬레이션 */
+    var joined=zoneItems.map(function(it){return it.str;}).join(' ');
+    var sep=document.createElement('div');
+    sep.style.cssText='margin-top:1rem;padding-top:.75rem;border-top:1px solid #252b3b;color:#7c8399;font-size:.72rem;margin-bottom:.4rem';
+    sep.textContent='▼ 위 구간을 join(" ")한 후 ▶ 기준으로 분리:';
+    out.appendChild(sep);
+    
+    var parts=joined.split('▶');
+    parts.forEach(function(p,i){
+      if(!p.trim())return;
+      var d=document.createElement('div');
+      d.style.cssText='padding:.22rem .5rem;margin:.12rem 0;border-radius:3px;'+(i>0?'background:rgba(74,240,168,.08);border-left:3px solid #4af0a8':'');
+      d.innerHTML='<span style="color:#7c8399">['+(i===0?'앞':'▶'+(i))+'] </span>'+escHtml(p.substring(0,120))+(p.length>120?'…':'');
+      out.appendChild(d);
+    });
+  });
+}
+
+function makeTitle(t){
+  var d=document.createElement('div');
+  d.style.cssText='color:#4af0a8;margin-bottom:.5rem;font-size:.8rem;font-weight:700';
+  d.textContent=t;return d;
+}
+
+function makeRow(it,idx){
+  var s=it.str;
+  var cls='item-row';
+  if(s.indexOf('총수량')>=0)cls+=' h-qty';
+  else if(s.indexOf('▶')>=0)cls+=' h-arr';
+  else if(s.indexOf('등기번호')>=0)cls+=' h-reg';
+  else if(/^\d+$/.test(s.trim()))cls+=' h-num';
+  
+  var row=document.createElement('div');
+  row.className=cls;
+  row.innerHTML=
+    '<span class="idx">'+idx+'</span>'+
+    '<span class="str">'+escHtml(s.substring(0,80))+(s.length>80?'…':'')+'</span>'+
+    '<span class="coords">tx='+it.tx+' ty='+it.ty+' w='+it.w+' h='+it.h+'</span>';
+  return row;
+}
+
+function renderItems(items,title){
+  var out=document.getElementById('out');
+  out.innerHTML='';
+  out.appendChild(makeTitle(title+' (총 '+items.length+'개)'));
+  items.forEach(function(it){out.appendChild(makeRow(it,it.idx));});
+}
+
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+</script>
+</body>
+</html>

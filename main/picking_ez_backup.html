@@ -1,0 +1,968 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>이지어드민 피킹 시스템 v1</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--s1:#161b26;--s2:#1e2333;--br:#252b3b;
+  --g:#4af0a8;--y:#f0c44a;--b:#5b9cf6;--r:#f05858;--p:#c084fc;
+  --tx:#e8eaf0;--mu:#7c8399;--mo:'Courier New',monospace
+}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding:1.5rem 1rem 5rem}
+.app{max-width:980px;margin:0 auto}
+.hd{text-align:center;margin-bottom:1.4rem}
+.badge{font-family:var(--mo);font-size:.62rem;color:var(--g);border:1px solid rgba(74,240,168,.3);padding:.18rem .75rem;border-radius:2px;display:inline-block;margin-bottom:.5rem;letter-spacing:.1em}
+h1{font-size:1.6rem;font-weight:900;margin-bottom:.2rem}
+h1 em{color:var(--g);font-style:normal}
+.hs{color:var(--mu);font-size:.81rem}
+/* STEPS */
+.steps{display:flex;border:1px solid var(--br);border-radius:8px;overflow:hidden;margin-bottom:1.6rem}
+.step{flex:1;padding:.55rem .4rem;text-align:center;font-size:.7rem;font-weight:700;color:var(--mu);border-right:1px solid var(--br);background:var(--s1)}
+.step:last-child{border-right:none}
+.step.on{background:rgba(74,240,168,.08);color:var(--g)}
+.step.done{color:var(--g);background:rgba(74,240,168,.03)}
+.step-n{font-family:var(--mo);font-size:.56rem;display:block;margin-bottom:.05rem;opacity:.6}
+/* PAGES */
+.pg{display:none}.pg.on{display:block}
+.pg-t{font-size:1.1rem;font-weight:900;margin-bottom:.25rem}
+.pg-s{color:var(--mu);font-size:.8rem;margin-bottom:1.2rem}
+/* MSG */
+.msg{border-radius:7px;padding:.58rem .95rem;font-size:.82rem;margin:.55rem 0}
+.ok{background:rgba(74,240,168,.08);border:1px solid var(--g);color:var(--g)}
+.er{background:rgba(240,88,88,.1);border:1px solid var(--r);color:var(--r)}
+.inf{background:rgba(91,156,246,.08);border:1px solid var(--b);color:var(--b)}
+/* DROPZONE */
+.dz{border:2px dashed var(--br);border-radius:10px;padding:2.5rem;text-align:center;cursor:pointer;background:var(--s1);position:relative;transition:all .2s}
+.dz:hover,.dz.drag{border-color:var(--g);background:rgba(74,240,168,.04)}
+.dz input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dz-i{font-size:2.5rem;display:block;margin-bottom:.5rem}
+.dz-m{font-weight:700;font-size:1rem;margin-bottom:.2rem}
+.dz-s{font-size:.72rem;color:var(--mu);font-family:var(--mo)}
+/* FORMAT INFO */
+.fmt-box{background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.85rem 1.1rem;margin-top:1.2rem;font-size:.8rem;line-height:1.9}
+.fmt-box b{color:var(--g)}
+.fmt-code{font-family:var(--mo);background:var(--bg);border:1px solid var(--br);border-radius:4px;padding:.35rem .65rem;display:inline-block;margin:.2rem 0;color:var(--y);font-size:.78rem}
+/* PROGRESS */
+.prg{margin:.6rem 0}.prg-l{font-size:.7rem;color:var(--mu);font-family:var(--mo);margin-bottom:.25rem}
+.prg-b{background:var(--br);border-radius:3px;height:5px}
+.prg-f{height:100%;background:var(--g);border-radius:3px;transition:width .08s;width:0%}
+.sp{display:inline-block;width:10px;height:10px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .7s linear infinite;margin-right:.28rem;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-bottom:1.3rem}
+.sc{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.62rem .8rem}
+.sc-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.18rem}
+.sc-v{font-size:1.5rem;font-weight:900}
+/* PICK TABLE */
+.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;padding-bottom:.48rem;border-bottom:1px solid var(--br)}
+.st{font-size:.95rem;font-weight:700}
+.sbdg{font-size:.6rem;font-family:var(--mo);padding:.12rem .42rem;border-radius:3px}
+.frow{display:flex;gap:.4rem;margin-bottom:.8rem;flex-wrap:wrap;align-items:center}
+.fb{padding:.28rem .78rem;border-radius:20px;border:1px solid var(--br);background:var(--s1);color:var(--mu);font-size:.75rem;cursor:pointer;font-weight:700;transition:all .15s}
+.fb.on{background:var(--g);color:#0f1117;border-color:var(--g)}
+.pick-wrap{border:1px solid var(--br);border-radius:9px;overflow:hidden;margin-bottom:1.2rem}
+.plist{max-height:560px;overflow-y:auto}
+.prow{padding:.7rem .92rem;border-bottom:1px solid rgba(37,43,59,.45);align-items:center;font-size:.9rem;display:grid}
+.prow.multi{background:rgba(240,196,74,.025)}
+.tg{display:inline-block;padding:.1rem .38rem;border-radius:3px;font-family:var(--mo);font-size:.67rem;font-weight:700}
+.tg-l{background:rgba(74,240,168,.14);color:var(--g)}.tg-m{background:rgba(240,196,74,.18);color:var(--y)}.tg-s{background:rgba(37,43,59,.9);color:var(--mu)}
+/* BUTTONS */
+.btn{padding:.6rem 1.2rem;border-radius:7px;border:none;font-size:.87rem;font-weight:700;cursor:pointer;transition:all .15s}
+.btn-g{background:var(--g);color:#0f1117}.btn-g:hover:not(:disabled){background:#6affc0;transform:translateY(-1px)}
+.btn-s{background:var(--s2);color:var(--tx);border:1px solid var(--br)}.btn-s:hover{border-color:var(--mu)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+.brow{display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap;align-items:center}
+.home-btn{
+  position:fixed;bottom:1.4rem;right:1.4rem;z-index:999;
+  display:flex;align-items:center;gap:.45rem;
+  font-family:'Courier New',monospace;font-size:.72rem;font-weight:700;
+  color:#0f1117;background:var(--g);
+  border:none;border-radius:4px;
+  padding:.52rem 1.1rem;cursor:pointer;
+  box-shadow:0 4px 18px rgba(74,240,168,.35);
+  text-decoration:none;
+  transition:background .15s,transform .15s;
+}
+.home-btn:hover{background:#6affc0;transform:translateY(-2px)}
+/* GROUP CARDS */
+.grp-card{background:var(--s1);border:1.5px solid var(--br);border-radius:9px;padding:.7rem 1rem;display:flex;align-items:flex-start;gap:.75rem;transition:border-color .15s;margin-bottom:.5rem;position:relative}
+.grp-card.checked{border-color:var(--g);background:rgba(74,240,168,.04)}
+.grp-chk{width:18px;height:18px;cursor:pointer;flex-shrink:0;margin-top:.2rem;accent-color:var(--g)}
+.grp-body{flex:1;min-width:0}
+.grp-prt{padding:.38rem .85rem;border-radius:6px;border:1.5px solid var(--g);background:transparent;color:var(--g);font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--mo);flex-shrink:0;white-space:nowrap}
+.grp-prt:hover{background:rgba(74,240,168,.12)}
+/* STAMP */
+.stamp{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-15deg);border:4px solid rgba(240,88,88,.8);border-radius:8px;color:rgba(240,88,88,.85);font-size:1.3rem;font-weight:900;padding:.3rem 1rem;white-space:nowrap;pointer-events:none;font-family:var(--mo);letter-spacing:.12em;z-index:10;background:rgba(15,17,23,.5);display:none}
+/* DEBUG RAW */
+.raw-toggle{font-size:.68rem;color:var(--mu);cursor:pointer;padding:.3rem 0;user-select:none}
+.raw-box{font-family:var(--mo);font-size:.7rem;color:var(--mu);word-break:break-all;line-height:1.6;max-height:120px;overflow-y:auto;background:var(--s2);padding:.5rem;border-radius:4px;margin-top:.3rem;display:none;border:1px solid var(--br)}
+</style>
+</head>
+<body>
+<!-- 세션 복원 배너 -->
+<div id="restoreBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9998;background:#1a2a1a;border-bottom:2px solid var(--g);padding:.75rem 1.2rem;display:none;align-items:center;gap:.8rem;flex-wrap:wrap">
+  <span style="font-size:1.1rem">💾</span>
+  <div style="flex:1;min-width:180px">
+    <div style="font-size:.82rem;font-weight:700;color:var(--g)">이전 세션 데이터가 있습니다</div>
+    <div id="restoreInfo" style="font-size:.7rem;color:var(--mu);font-family:var(--mo)"></div>
+  </div>
+  <button onclick="restoreSession()" style="padding:.38rem .9rem;border-radius:4px;border:1.5px solid var(--g);background:transparent;color:var(--g);font-size:.78rem;font-weight:700;cursor:pointer">↩ 복원하기</button>
+  <button onclick="dismissBanner()" style="padding:.38rem .9rem;border-radius:4px;border:1px solid var(--mu);background:transparent;color:var(--mu);font-size:.78rem;cursor:pointer">무시</button>
+</div>
+
+<!-- PDF 재업로드 고정 배너 (세션 복원 후 인쇄 필요시) -->
+<div id="reuploadBox" style="display:none;position:fixed;bottom:4.5rem;left:50%;transform:translateX(-50%);z-index:9997;width:calc(100% - 2rem);max-width:760px;background:#1a1a0a;border:2px solid var(--y);border-radius:10px;padding:.85rem 1.2rem;box-shadow:0 8px 32px rgba(0,0,0,.7)">
+  <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+    <span style="font-size:1.3rem">⚠️</span>
+    <div style="flex:1;min-width:160px">
+      <div style="font-size:.85rem;font-weight:700;color:var(--y)">인쇄하려면 PDF를 다시 업로드해야 합니다</div>
+      <div id="reuploadStatus" style="font-size:.72rem;color:var(--mu);font-family:var(--mo);margin-top:.18rem">복원된 세션입니다 — 같은 PDF 파일을 선택하세요</div>
+    </div>
+    <label style="padding:.48rem 1.1rem;border-radius:6px;background:var(--y);color:#0f1117;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">
+      📂 PDF 선택
+      <input type="file" id="reuploadInput" accept=".pdf" style="display:none" onchange="reloadPDF(this)">
+    </label>
+    <button onclick="document.getElementById('reuploadBox').style.display='none'" style="background:transparent;border:none;color:var(--mu);font-size:1.1rem;cursor:pointer;padding:.2rem .4rem;flex-shrink:0">✕</button>
+  </div>
+</div>
+
+<div class="app">
+<div class="hd">
+  <div class="badge">이지어드민 PICKING SYSTEM v1 · AUTO PARSE</div>
+  <h1>송장 <em>피킹</em> 시스템</h1>
+  <p class="hs">등기번호: 기준 자동 추출 · ▶수량개▶[로케이션]상품명 패턴</p>
+</div>
+
+<div class="steps">
+  <div class="step on" id="st0"><span class="step-n">STEP 1</span>업로드</div>
+  <div class="step"   id="st1"><span class="step-n">STEP 2</span>피킹리스트</div>
+  <div class="step"   id="st2"><span class="step-n">STEP 3</span>그룹 인쇄</div>
+</div>
+
+<!-- STEP 1 : 업로드 -->
+<div class="pg on" id="pg0">
+  <div class="pg-t">전체 송장 PDF 업로드</div>
+  <div class="pg-s">이지어드민 출력 PDF를 한 번에 업로드하세요</div>
+  <div class="dz" id="dz0">
+    <input type="file" id="f0" accept=".pdf">
+    <span class="dz-i">📦</span>
+    <div class="dz-m">전체 송장 PDF 드래그 또는 클릭</div>
+    <div class="dz-s">서버 전송 없음 · 로컬 처리만</div>
+  </div>
+  <div class="prg" id="pw0" style="display:none">
+    <div class="prg-l" id="pl0">로딩 중...</div>
+    <div class="prg-b"><div class="prg-f" id="pf0"></div></div>
+  </div>
+  <div id="m0"></div>
+
+  <div class="fmt-box">
+    <b>▶ 이지어드민 인식 패턴</b><br>
+    <span class="fmt-code">등기번호: XXXXXXXXX</span> → 송장번호<br>
+    <span class="fmt-code">▶1개▶[A-01]곡물도감 추가송장</span> → 수량 1 / 로케이션 A-01 / 상품명<br>
+    <span class="fmt-code">▶2개▶상품명</span> → 로케이션 없는 경우도 자동 인식<br>
+    <span style="color:var(--mu);font-size:.75rem">※ 구분자 ▶ 기준으로 자동 분리 · 수동 설정 불필요</span>
+  </div>
+</div>
+
+<!-- STEP 2 : 피킹리스트 -->
+<div class="pg" id="pg1">
+  <div class="pg-t">피킹리스트</div>
+  <div class="pg-s">상품+로케이션별 합산 수량 · 합포(2개+) 먼저</div>
+  <div class="prg" id="pw1" style="display:none">
+    <div class="prg-l" id="pl1">분석 중...</div>
+    <div class="prg-b"><div class="prg-f" id="pf1"></div></div>
+  </div>
+  <div id="dbgMsg" style="display:none"></div>
+
+  <div class="stats">
+    <div class="sc"><div class="sc-l">전체 송장</div><div class="sc-v" id="si">—</div></div>
+    <div class="sc"><div class="sc-l">합포 (2개+)</div><div class="sc-v" style="color:var(--y)" id="sm">—</div></div>
+    <div class="sc"><div class="sc-l">단포 (1개)</div><div class="sc-v" id="ss">—</div></div>
+    <div class="sc"><div class="sc-l">상품 종류</div><div class="sc-v" style="color:var(--g)" id="sl">—</div></div>
+    <div class="sc"><div class="sc-l">총 수량</div><div class="sc-v" style="color:var(--b)" id="sq">—</div></div>
+  </div>
+
+  <div class="sh">
+    <div class="st">피킹리스트</div>
+    <span class="sbdg" style="background:rgba(74,240,168,.1);color:var(--g)">로케이션+상품명 합산</span>
+  </div>
+  <div class="frow">
+    <button class="fb on" onclick="setFlt('all',this)">전체</button>
+    <button class="fb" onclick="setFlt('multi',this)">합포만</button>
+    <button class="fb" onclick="setFlt('single',this)">단포만</button>
+    <button class="btn btn-s" style="margin-left:auto;font-size:.72rem;padding:.24rem .72rem" onclick="window.print()">🖨 인쇄</button>
+    <button class="btn btn-s" style="font-size:.72rem;padding:.24rem .72rem" onclick="doCSV()">CSV</button>
+  </div>
+  <div class="pick-wrap">
+    <div id="pickHdr" style="padding:.6rem .92rem;border-bottom:1px solid var(--br);background:var(--bg);font-size:.78rem;font-family:var(--mo);color:var(--mu);font-weight:700;position:sticky;top:0;z-index:2;display:grid"></div>
+    <div class="plist" id="pickList"></div>
+  </div>
+
+  <!-- 파싱 디버그 -->
+  <div class="raw-toggle" onclick="toggleDbg()">▶ 파싱 샘플 보기/숨기기</div>
+  <div class="raw-box" id="rawDbg"></div>
+
+  <div class="brow">
+    <button class="btn btn-g" onclick="goTo(2)">그룹 인쇄 →</button>
+    <button class="btn btn-s" onclick="goTo(0);resetAll()">← 다시 업로드</button>
+  </div>
+</div>
+
+<!-- STEP 3 : 그룹 인쇄 -->
+<div class="pg" id="pg2">
+  <div class="pg-t">그룹 인쇄</div>
+  <div class="pg-s">같은 상품 구성끼리 묶음 · 건수 많은 순</div>
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    <div class="sc"><div class="sc-l">전체 송장</div><div class="sc-v" id="pb0">—</div></div>
+    <div class="sc"><div class="sc-l">합포</div><div class="sc-v" style="color:var(--y)" id="pb1">—</div></div>
+    <div class="sc"><div class="sc-l">단포</div><div class="sc-v" id="pb2">—</div></div>
+    <div class="sc"><div class="sc-l">전체 페이지</div><div class="sc-v" style="color:var(--b)" id="pb3">—</div></div>
+  </div>
+  <div class="frow">
+    <button class="fb on" id="gf-all"    onclick="setGFlt('all',this)">전체</button>
+    <button class="fb"    id="gf-multi"  onclick="setGFlt('multi',this)">합포만</button>
+    <button class="fb"    id="gf-single" onclick="setGFlt('single',this)">단포만</button>
+    <label style="font-size:.75rem;color:var(--mu);cursor:pointer;display:flex;align-items:center;gap:.3rem;margin-left:auto">
+      <input type="checkbox" id="chkAll" onchange="toggleAllChk(this.checked)" style="cursor:pointer;accent-color:var(--g)">전체선택
+    </label>
+    <button class="btn btn-g" onclick="printChecked()" style="font-size:.8rem;padding:.45rem 1rem">🖨 체크 인쇄</button>
+  </div>
+  <div id="grpList"></div>
+  <div id="mpdf" class="msg" style="display:none"></div>
+
+  <div class="brow" style="margin-top:1.2rem;border-top:1px solid var(--br);padding-top:1.1rem">
+    <button class="btn btn-s" onclick="goTo(1)">← 피킹리스트</button>
+    <button class="btn btn-s" onclick="location.reload()">처음부터</button>
+    <button onclick="clearSession()" style="margin-left:auto;padding:.45rem 1rem;border-radius:6px;border:1.5px solid var(--r);background:transparent;color:var(--r);font-size:.78rem;font-weight:700;cursor:pointer">🗑 세션 완전삭제</button>
+  </div>
+</div>
+</div><!-- .app -->
+
+<a class="home-btn" href="picking.html">⌂ 홈으로</a>
+
+<script>
+/* ─────────────── 전역 상태 ─────────────── */
+var rawBuffer = null;
+var pdfDoc    = null;
+var invoices  = [];      // { invNum, totalQty, pages[], items[] }
+var locGroups = [];      // 피킹리스트
+var grpGroups = [];      // 그룹 인쇄
+var printCount = {};
+var curFlt = 'all', grpFlt = 'all';
+var SESSION_KEY = 'ez_picking_v1';
+
+/* ─────────────── 세션 저장/복원 ─────────────── */
+function saveSession() {
+  try {
+    var data = {
+      ts: Date.now(),
+      invoices:  JSON.parse(JSON.stringify(invoices)),
+      locGroups: JSON.parse(JSON.stringify(locGroups)),
+      grpGroups: JSON.parse(JSON.stringify(grpGroups)),
+      printCount: JSON.parse(JSON.stringify(printCount))
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  } catch(e){ console.warn('세션 저장 실패:', e); }
+}
+
+function loadSessionData() {
+  try {
+    var raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e){ return null; }
+}
+
+function restoreSession() {
+  var data = loadSessionData();
+  if (!data) return;
+  invoices   = data.invoices   || [];
+  locGroups  = data.locGroups  || [];
+  grpGroups  = data.grpGroups  || [];
+  printCount = data.printCount || {};
+  document.getElementById('restoreBanner').style.display = 'none';
+  goTo(2);
+  renderGrpPage();
+  renderPick();
+  /* PDF 없으므로 재업로드 박스 표시 */
+  document.getElementById('reuploadBox').style.display = 'block';
+  /* 인쇄완료 상태 UI 반영 */
+  setTimeout(function(){
+    Object.keys(printCount).forEach(function(idx){
+      var i = parseInt(idx);
+      var card = document.getElementById('gg-'+i);
+      if (card) card.classList.add('printed');
+      var stamp = document.getElementById('stamp-'+i);
+      if (stamp){ stamp.style.display='block'; stamp.textContent='인쇄완료('+(printCount[i])+'회)'; }
+      var chk = document.getElementById('chk-'+i);
+      if (chk){ chk.checked=false; chk.disabled=true; }
+      var prt = document.getElementById('prt-'+i);
+      if (prt) prt.style.display='none';
+      var dup = document.getElementById('dup-'+i);
+      if (dup) dup.style.display='block';
+    });
+    setMsg('dbgMsg','ok','↩ 세션 복원 완료 · '+invoices.length+'건 · 아래에서 PDF 재업로드 후 출력 가능');
+    document.getElementById('dbgMsg').style.display='';
+  }, 300);
+}
+
+/* ─── PDF 재업로드 (세션 복원 후 인쇄용) ─── */
+function reloadPDF(input) {
+  var file = input.files[0]; if (!file) return;
+  var status = document.getElementById('reuploadStatus');
+  status.style.color = 'var(--mu)';
+  status.textContent = '⏳ 로딩 중...';
+  loadPdfjs(function(){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      rawBuffer = e.target.result.slice(0);
+      pdfjsLib.getDocument({data: new Uint8Array(e.target.result.slice(0))}).promise.then(function(doc){
+        pdfDoc = doc;
+        status.style.color = 'var(--g)';
+        status.textContent = '✅ ' + file.name + ' (' + doc.numPages + '페이지) — 인쇄 버튼을 누르세요';
+        document.getElementById('reuploadBox').style.borderColor = 'var(--g)';
+        document.getElementById('reuploadBox').style.background = 'rgba(10,26,10,.95)';
+        /* 3초 후 자동으로 배너 닫기 */
+        setTimeout(function(){ document.getElementById('reuploadBox').style.display='none'; }, 3000);
+      }).catch(function(err){
+        status.style.color = 'var(--r)';
+        status.textContent = '❌ ' + err.message;
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function clearSession() {
+  if (!confirm('세션 데이터를 완전히 삭제합니다.\n모든 인쇄 기록이 사라집니다. 진행하시겠습니까?')) return;
+  localStorage.removeItem(SESSION_KEY);
+  alert('✅ 세션 삭제 완료');
+  location.reload();
+}
+
+function dismissBanner() {
+  document.getElementById('restoreBanner').style.display = 'none';
+}
+
+/* 페이지 로드 시 저장 세션 확인 */
+(function checkSavedSession(){
+  var data = loadSessionData();
+  if (!data || !data.invoices || !data.invoices.length) return;
+  var banner = document.getElementById('restoreBanner');
+  var d = new Date(data.ts);
+  var timeStr = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+
+                String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  var printed = Object.keys(data.printCount||{}).length;
+  var total   = (data.grpGroups||[]).length;
+  document.getElementById('restoreInfo').textContent =
+    timeStr+' · '+data.invoices.length+'건 송장 · 그룹 '+printed+'/'+total+' 인쇄완료';
+  banner.style.display = 'flex';
+  /* 배너 높이만큼 본문 내려주기 */
+  setTimeout(function(){ document.querySelector('.app').style.paddingTop='60px'; }, 50);
+})();
+
+/* ─────────────── 라이브러리 로더 ─────────────── */
+var pdfjsOk = false, pdfjsQ = [];
+function loadPdfjs(cb) {
+  if (pdfjsOk) { cb(); return; }
+  pdfjsQ.push(cb); if (pdfjsQ.length > 1) return;
+  var s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+  s.onload = function() {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    pdfjsOk = true; pdfjsQ.forEach(function(f){ f(); }); pdfjsQ = [];
+  };
+  s.onerror = function(){ setMsg('m0','er','❌ PDF.js 로딩 실패'); };
+  document.head.appendChild(s);
+}
+
+var pdfLibOk = false, pdfLibQ = [];
+function loadPdfLib(cb) {
+  if (pdfLibOk) { cb(); return; }
+  pdfLibQ.push(cb); if (pdfLibQ.length > 1) return;
+  var s = document.createElement('script');
+  s.src = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+  s.onload = function(){ pdfLibOk = true; pdfLibQ.forEach(function(f){ f(); }); pdfLibQ = []; };
+  document.head.appendChild(s);
+}
+
+/* ─────────────── 네비게이션 ─────────────── */
+function goTo(n) {
+  ['pg0','pg1','pg2'].forEach(function(id,i){
+    document.getElementById(id).className = 'pg' + (i===n?' on':'');
+  });
+  ['st0','st1','st2'].forEach(function(id,i){
+    document.getElementById(id).className = 'step' + (i===n?' on':i<n?' done':'');
+  });
+  if (n===2) renderGrpPage();
+}
+function setMsg(id, cls, html) {
+  var el = document.getElementById(id);
+  el.className = 'msg ' + cls; el.innerHTML = html; el.style.display = '';
+}
+function resetAll() {
+  rawBuffer = null; pdfDoc = null;
+  invoices = []; locGroups = []; grpGroups = []; printCount = {};
+}
+
+/* ─────────────── 드롭존 ─────────────── */
+(function(){
+  var dz = document.getElementById('dz0');
+  document.getElementById('f0').onchange = function(e){ if(e.target.files[0]) loadFile(e.target.files[0]); };
+  dz.ondragover  = function(e){ e.preventDefault(); dz.classList.add('drag'); };
+  dz.ondragleave = function(){ dz.classList.remove('drag'); };
+  dz.ondrop = function(e){
+    e.preventDefault(); dz.classList.remove('drag');
+    var f = e.dataTransfer.files[0];
+    if (f && f.name.toLowerCase().endsWith('.pdf')) loadFile(f);
+  };
+})();
+
+/* ─────────────── PDF 로딩 ─────────────── */
+function loadFile(file) {
+  var pw=document.getElementById('pw0'), pf=document.getElementById('pf0'), pl=document.getElementById('pl0');
+  pw.style.display='block'; pf.style.width='0%';
+  setMsg('m0','inf','<span class="sp"></span>로딩 중...');
+  loadPdfjs(function(){
+    pl.textContent='PDF 파싱 중...'; pf.style.width='30%';
+    var reader = new FileReader();
+    reader.onload = function(e){
+      rawBuffer = e.target.result.slice(0);
+      var bytes = new Uint8Array(e.target.result.slice(0));
+      pdfjsLib.getDocument({data: bytes}).promise.then(function(doc){
+        pdfDoc = doc; pf.style.width='60%'; pl.textContent='페이지 분석 중...';
+        processAllPages(doc, pw, pf, pl);
+      }).catch(function(err){
+        pw.style.display='none'; setMsg('m0','er','❌ '+err.message);
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/* ─────────────── 전체 페이지 처리 ─────────────── */
+function processAllPages(doc, pw, pf, pl) {
+  var total = doc.numPages;
+  var pageTexts = [];
+  var chain = Promise.resolve();
+
+  for (var i = 1; i <= total; i++) {
+    (function(pn){
+      chain = chain.then(function(){
+        if (pn % 5 === 0 || pn===1 || pn===total) {
+          pf.style.width = (60 + pn/total*35) + '%';
+          pl.textContent = '분석 중... (' + pn + '/' + total + ')';
+        }
+        return doc.getPage(pn).then(function(p){ return p.getTextContent(); }).then(function(tc){
+          /* 공백 없이 전체 조인 */
+          var raw = tc.items.map(function(it){ return it.str||''; }).join('');
+          pageTexts.push({ idx: pn-1, raw: raw });
+        });
+      });
+    })(i);
+  }
+
+  chain.then(function(){
+    pf.style.width='100%'; pl.textContent='완료!';
+    setTimeout(function(){ pw.style.display='none'; }, 300);
+
+    buildInvoices(pageTexts);
+    buildLocGroups();
+    buildGrpGroups();
+    saveSession(); /* ← 자동 저장 */
+
+    var msg = '✅ '+pdfDoc.numPages+'페이지 · '+invoices.length+'건 송장 인식';
+    if (invoices.length === 0) msg += ' ⚠️ 0건 - 등기번호: 텍스트를 찾지 못했습니다';
+    setMsg('m0','ok', msg);
+
+    setTimeout(function(){
+      goTo(1);
+      renderPick();
+      renderRawDbg(pageTexts);
+    }, 400);
+  }).catch(function(err){
+    pw.style.display='none'; setMsg('m0','er','❌ '+err.message); console.error(err);
+  });
+}
+
+/* ─────────────────────────────────────────
+   핵심 파서 : 이지어드민 포맷
+   패턴: 등기번호: XXXX ... ▶N개▶[LOC]상품명 ...
+──────────────────────────────────────────*/
+function parseEasyAdmin(raw) {
+  var result = { invNum: null, items: [], totalQty: 0 };
+
+  /* 1. 등기번호 추출 */
+  var invM = raw.match(/등기번호\s*[：:]\s*([\d\-]+)/);
+  if (!invM) return result;
+  result.invNum = invM[1];
+
+  /* 2. 등기번호: 이후 구간 잘라내기 */
+  var startPos = raw.indexOf(invM[0]);
+  var zone = raw.substring(startPos);
+
+  /* 3. 끝 경계: 주문인: / 고객주문처: / 접수국 등 */
+  var endMarkers = ['주문인:', '고객주문처:', '접수국', '수취인:', '보내는'];
+  var endPos = zone.length;
+  endMarkers.forEach(function(m){
+    var p = zone.indexOf(m);
+    if (p > 10 && p < endPos) endPos = p;
+  });
+  zone = zone.substring(0, endPos);
+
+  /* 4. ▶N개▶ 패턴으로 아이템 파싱
+         ▶2개▶[A-01]곡물도감
+         ▶1개▶곡물도감 (로케이션 없음)
+  */
+  var re = /▶(\d+)개▶([^▶]*)/g;
+  var m;
+  while ((m = re.exec(zone)) !== null) {
+    var qty = parseInt(m[1], 10);
+    var rest = m[2].trim();
+    var loc = '—', prd = rest;
+
+    /* [로케이션] 있는 경우 */
+    var locM = rest.match(/^\[([^\]]*)\](.*)/);
+    if (locM) {
+      loc = locM[1].trim() || '—';
+      prd = locM[2].trim();
+    }
+
+    /* 상품명 끝 정리: - 가 나오면 거기서 잘라냄 (- 포함 이후 제거) */
+    var dashIdx = prd.indexOf('-');
+    if (dashIdx > 0) prd = prd.substring(0, dashIdx);
+    prd = prd
+      .replace(/\s*[\★\☆\*]+\s*$/, '')
+      .replace(/\s*\d{12,14}\s*$/, '')  /* 뒤에 붙은 바코드 */
+      .trim() || '—';
+
+    /* 바코드 (12~14자리 숫자) */
+    var bcM = rest.match(/(\d{12,14})/);
+    var bc = bcM ? bcM[1] : '—';
+
+    if (qty > 0) {
+      result.items.push({ qty: qty, loc: loc, prd: prd, bc: bc });
+    }
+  }
+
+  /* 아이템이 없으면 총수량 키워드로 보완 */
+  if (result.items.length === 0) {
+    var qm = zone.match(/총수량\s*[：:]\s*(\d+)/);
+    var qty2 = qm ? parseInt(qm[1], 10) : 1;
+    result.items = [{ qty: qty2, loc: '—', prd: '—', bc: '—' }];
+  }
+
+  result.totalQty = result.items.reduce(function(s,it){ return s+it.qty; }, 0);
+  return result;
+}
+
+/* ─────────────── 송장 빌드 ─────────────── */
+function buildInvoices(pageTexts) {
+  invoices = [];
+  var invMap = {}, lastInv = null;
+
+  pageTexts.forEach(function(pg){
+    var parsed = parseEasyAdmin(pg.raw);
+    if (parsed.invNum !== null) {
+      lastInv = parsed.invNum;
+      if (!invMap[parsed.invNum]) {
+        invMap[parsed.invNum] = {
+          invNum: parsed.invNum,
+          totalQty: parsed.totalQty,
+          pages: [pg.idx],
+          allRaw: pg.raw
+        };
+      } else {
+        invMap[parsed.invNum].pages.push(pg.idx);
+        invMap[parsed.invNum].allRaw += ' ' + pg.raw;
+        if (!invMap[parsed.invNum].totalQty && parsed.totalQty)
+          invMap[parsed.invNum].totalQty = parsed.totalQty;
+      }
+    } else if (lastInv !== null && invMap[lastInv]) {
+      invMap[lastInv].pages.push(pg.idx);
+      invMap[lastInv].allRaw += ' ' + pg.raw;
+    }
+  });
+
+  /* 각 송장을 allRaw 기준으로 최종 파싱 */
+  invoices = Object.keys(invMap).map(function(k){
+    var inv = invMap[k];
+    var p = parseEasyAdmin(inv.allRaw);
+    inv.items = p.items.length ? p.items : [{ qty:1, loc:'—', prd:'—', bc:'—' }];
+    if (!inv.totalQty) inv.totalQty = inv.items.reduce(function(s,i){ return s+i.qty; }, 0);
+    delete inv.allRaw;
+    return inv;
+  });
+}
+
+/* ─────────────── 로케이션 그룹 (피킹리스트) ─────────────── */
+function buildLocGroups() {
+  var map = {};
+  var sorted = invoices.slice().sort(function(a,b){
+    var qa=(a.totalQty||0), qb=(b.totalQty||0);
+    var ma=qa>=2, mb=qb>=2;
+    if(ma&&!mb) return -1; if(!ma&&mb) return 1;
+    if(ma&&mb&&qb!==qa) return qb-qa;
+    return String(a.invNum)<String(b.invNum)?-1:1;
+  });
+
+  sorted.forEach(function(inv){
+    var isM = (inv.totalQty||0)>=2 || inv.items.length>=2;
+    inv.items.forEach(function(it){
+      var key = (it.loc||'—') + '|||' + (it.prd||'—');
+      if (!map[key]) map[key] = { loc:it.loc||'—', prd:it.prd||'—', bc:it.bc||'—', totalQty:0, isMulti:false };
+      map[key].totalQty += (it.qty||1);
+      if (isM) map[key].isMulti = true;
+    });
+  });
+
+  locGroups = Object.keys(map).map(function(k){ return map[k]; });
+  locGroups.sort(function(a,b){
+    if(a.isMulti && !b.isMulti) return -1;
+    if(!a.isMulti && b.isMulti) return 1;
+    var aL = a.loc && a.loc!=='—', bL = b.loc && b.loc!=='—';
+    if(aL&&!bL) return -1; if(!aL&&bL) return 1;
+    if(aL&&bL){
+      if(a.loc!==b.loc) return a.loc<b.loc?-1:1;
+    }
+    return a.prd<b.prd?-1:1;
+  });
+}
+
+/* ─────────────── 그룹 인쇄용 그룹 ─────────────── */
+function buildGrpGroups() {
+  var sorted = invoices.slice().sort(function(a,b){
+    var qa=(a.totalQty||0),qb=(b.totalQty||0);
+    var ma=qa>=2,mb=qb>=2;
+    if(ma&&!mb) return -1; if(!ma&&mb) return 1;
+    return qb-qa;
+  });
+
+  var gmap = {};
+  sorted.forEach(function(inv){
+    var k = inv.items.map(function(it){
+      return (it.loc||'—')+'|'+(it.prd||'—')+'|'+(it.qty||1);
+    }).sort().join(';;');
+    if(!gmap[k]) gmap[k] = { key:k, items:inv.items, invoices:[], isMulti:(inv.totalQty||0)>=2 };
+    gmap[k].invoices.push(inv);
+  });
+
+  grpGroups = Object.keys(gmap).map(function(k){ return gmap[k]; });
+  grpGroups.sort(function(a,b){ return b.invoices.length - a.invoices.length; });
+}
+
+/* ─────────────── 피킹리스트 렌더 ─────────────── */
+function renderPick() {
+  var total = invoices.length;
+  var multi  = invoices.filter(function(i){ return (i.totalQty||0)>=2; }).length;
+  var totalQ = invoices.reduce(function(s,i){ return s+i.items.reduce(function(s2,it){ return s2+(it.qty||1); },0); }, 0);
+
+  document.getElementById('si').textContent = total;
+  document.getElementById('sm').textContent = multi;
+  document.getElementById('ss').textContent = total - multi;
+  document.getElementById('sl').textContent = locGroups.length;
+  document.getElementById('sq').textContent = totalQ;
+
+  var hasLoc = locGroups.some(function(g){ return g.loc && g.loc!=='—'; });
+  var hdr = document.getElementById('pickHdr');
+  if (hasLoc) {
+    hdr.style.gridTemplateColumns = '130px 1fr 160px 68px';
+    hdr.innerHTML = '<div>로케이션</div><div>상품명</div><div>바코드</div><div style="text-align:center">수량</div>';
+  } else {
+    hdr.style.gridTemplateColumns = '1fr 68px';
+    hdr.innerHTML = '<div>상품명</div><div style="text-align:center">수량</div>';
+  }
+  renderPickTable();
+}
+
+function setFlt(type, btn) {
+  curFlt = type;
+  document.querySelectorAll('.fb').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  renderPickTable();
+}
+
+function renderPickTable() {
+  var data = locGroups;
+  if (curFlt==='multi')  data = data.filter(function(g){ return g.isMulti; });
+  if (curFlt==='single') data = data.filter(function(g){ return !g.isMulti; });
+
+  var list = document.getElementById('pickList');
+  list.innerHTML = '';
+  var hasLoc = locGroups.some(function(g){ return g.loc && g.loc!=='—'; });
+
+  data.forEach(function(grp){
+    var row = document.createElement('div');
+    row.className = 'prow' + (grp.isMulti?' multi':'');
+    if (hasLoc) {
+      row.style.gridTemplateColumns = '130px 1fr 160px 68px';
+      row.innerHTML =
+        '<div><span class="tg tg-l" style="font-size:.78rem">'+escH(grp.loc)+'</span></div>'+
+        '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.87rem">'+escH(grp.prd)+'</div>'+
+        '<div style="font-family:var(--mo);font-size:.75rem;color:var(--p);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(grp.bc)+'</div>'+
+        '<div style="text-align:center;font-family:var(--mo);font-size:1rem;font-weight:900;color:'+(grp.isMulti?'var(--y)':'var(--tx)')+'">'+grp.totalQty+'</div>';
+    } else {
+      row.style.gridTemplateColumns = '1fr 68px';
+      row.innerHTML =
+        '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.87rem">'+escH(grp.prd)+'</div>'+
+        '<div style="text-align:center;font-family:var(--mo);font-size:1rem;font-weight:900;color:'+(grp.isMulti?'var(--y)':'var(--tx)')+'">'+grp.totalQty+'</div>';
+    }
+    list.appendChild(row);
+  });
+}
+
+/* ─────────────── CSV ─────────────── */
+function doCSV() {
+  var data = locGroups;
+  if (curFlt==='multi')  data = data.filter(function(g){ return g.isMulti; });
+  if (curFlt==='single') data = data.filter(function(g){ return !g.isMulti; });
+  var csv = '\uFEFF로케이션,상품명,바코드,수량,구분\n';
+  data.forEach(function(g){
+    csv += '"'+esc2(g.loc)+'","'+esc2(g.prd)+'","'+esc2(g.bc)+'",'+g.totalQty+','+(g.isMulti?'합포':'단포')+'\n';
+  });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download = '피킹리스트.csv'; a.click();
+}
+
+/* ─────────────── 디버그 샘플 ─────────────── */
+function renderRawDbg(pageTexts) {
+  var box = document.getElementById('rawDbg');
+  var sample = pageTexts.slice(0,3).map(function(pg){
+    var parsed = parseEasyAdmin(pg.raw);
+    return '[페이지 '+(pg.idx+1)+'] 등기번호:'+parsed.invNum+
+           ' 수량:'+parsed.totalQty+
+           ' 아이템:'+JSON.stringify(parsed.items).substring(0,120);
+  }).join('\n\n');
+  box.textContent = sample || '(샘플 없음)';
+}
+function toggleDbg() {
+  var box = document.getElementById('rawDbg');
+  box.style.display = box.style.display==='none'||!box.style.display ? 'block':'none';
+}
+
+/* ─────────────── 그룹 인쇄 렌더 ─────────────── */
+function renderGrpPage() {
+  var multi = invoices.filter(function(i){ return (i.totalQty||0)>=2; }).length;
+  var pages = invoices.reduce(function(s,i){ return s+i.pages.length; }, 0);
+  document.getElementById('pb0').textContent = invoices.length;
+  document.getElementById('pb1').textContent = multi;
+  document.getElementById('pb2').textContent = invoices.length - multi;
+  document.getElementById('pb3').textContent = pages;
+  grpFlt = 'all';
+  ['gf-all','gf-multi','gf-single'].forEach(function(id){
+    document.getElementById(id).classList.remove('on');
+  });
+  document.getElementById('gf-all').classList.add('on');
+  renderGrpList();
+}
+
+function setGFlt(type, btn) {
+  grpFlt = type;
+  ['gf-all','gf-multi','gf-single'].forEach(function(id){
+    document.getElementById(id).classList.remove('on');
+  });
+  btn.classList.add('on');
+  renderGrpList();
+}
+
+function renderGrpList() {
+  var data = grpGroups;
+  if (grpFlt==='multi')  data = data.filter(function(g){ return g.isMulti; });
+  if (grpFlt==='single') data = data.filter(function(g){ return !g.isMulti; });
+
+  var container = document.getElementById('grpList');
+  container.innerHTML = '';
+  data.forEach(function(grp, idx){
+    var isM = grp.isMulti, cnt = grp.invoices.length;
+    var card = document.createElement('div');
+    card.className = 'grp-card'; card.id = 'gg-'+idx;
+
+    var ih = grp.items.map(function(it){
+      var p = [];
+      if (it.loc && it.loc!=='—') p.push('<span class="tg tg-l" style="font-size:.67rem">'+escH(it.loc)+'</span>');
+      p.push('<span style="font-size:.84rem">'+escH(it.prd||'—')+'</span>');
+      if (it.qty>1) p.push('<b style="color:var(--y);font-family:var(--mo)">×'+it.qty+'</b>');
+      return '<div style="display:flex;align-items:center;gap:.35rem;padding:.1rem 0">'+p.join('')+'</div>';
+    }).join('');
+
+    card.innerHTML =
+      '<input class="grp-chk" type="checkbox" id="chk-'+idx+'" data-idx="'+idx+'" onchange="onChkChange(this)">'+
+      '<div class="grp-body" style="position:relative">'+
+        '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
+          '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>'+
+        '</div>'+
+        '<div>'+ih+'</div>'+
+        '<div id="stamp-'+idx+'" class="stamp">인쇄완료</div>'+
+      '</div>'+
+      '<div style="display:flex;flex-direction:column;align-items:center;gap:.4rem;flex-shrink:0;min-width:80px">'+
+        '<div style="text-align:center">'+
+          '<div style="font-family:var(--mo);font-size:2.2rem;font-weight:900;color:'+(isM?'var(--y)':'var(--tx)')+';line-height:1">'+cnt+'</div>'+
+          '<div style="font-size:.63rem;color:var(--mu);font-family:var(--mo)">건</div>'+
+        '</div>'+
+        '<button class="grp-prt" id="prt-'+idx+'" onclick="printGrp('+idx+',this)">🖨 인쇄</button>'+
+        '<button id="dup-'+idx+'" style="display:none;padding:.32rem .7rem;border-radius:5px;border:1px solid var(--y);background:transparent;color:var(--y);font-size:.7rem;cursor:pointer;font-family:var(--mo);pointer-events:auto" onclick="dupPrint('+idx+')">⚠️ 중복인쇄</button>'+
+      '</div>';
+    container.appendChild(card);
+  });
+}
+
+function onChkChange(el) {
+  var c = document.getElementById('gg-'+el.dataset.idx);
+  if (c) c.classList.toggle('checked', el.checked);
+}
+function toggleAllChk(checked) {
+  document.querySelectorAll('.grp-chk').forEach(function(c){
+    if (c.disabled) return;
+    c.checked = checked;
+    var card = document.getElementById('gg-'+c.dataset.idx);
+    if (card) card.classList.toggle('checked', checked);
+  });
+}
+
+/* ─────────────── 107×168mm 크롭 ─────────────── */
+/* PDF 좌표계: 원점=좌하단, y축 위로 증가
+   → 상단 168mm = pageHeight 기준 위에서 잘라냄  */
+function cropToInvoice(page) {
+  var W_PT = Math.round(168 / 25.4 * 72 * 100) / 100; /* 476.2pt */
+  var H_PT = Math.round(107 / 25.4 * 72 * 100) / 100; /* 303.3pt */
+  var origH = page.getSize().height;
+  /* 좌상단 기준 107×168 영역 = PDF 좌표상 [0, origH-H_PT, W_PT, H_PT] */
+  page.setMediaBox(0, origH - H_PT, W_PT, H_PT);
+}
+
+/* ─────────────── 개별 그룹 인쇄 ─────────────── */
+function printGrp(idx, btn) {
+  var grp = grpGroups[idx];
+  if (!grp || !rawBuffer) return;
+  btn.textContent = '⏳';
+  loadPdfLib(function(){
+    PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
+      return PDFLib.PDFDocument.create().then(function(out){
+        var tot=src.getPageCount(), added={}, chain=Promise.resolve();
+        grp.invoices.forEach(function(inv){
+          inv.pages.forEach(function(pg){
+            if (pg<tot && !added[pg]) {
+              added[pg]=1;
+              chain=chain.then(function(){
+                return out.copyPages(src,[pg]).then(function(ps){ cropToInvoice(ps[0]); out.addPage(ps[0]); });
+              });
+            }
+          });
+        });
+        return chain.then(function(){ return out.save(); });
+      });
+    }).then(function(bytes){
+      var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
+      var done=function(){
+        printCount[idx]=(printCount[idx]||0)+1;
+        var c=document.getElementById('gg-'+idx);    if(c) c.classList.add('printed');
+        var stamp=document.getElementById('stamp-'+idx); if(stamp) stamp.style.display='block';
+        var chk=document.getElementById('chk-'+idx);     if(chk){chk.checked=false;chk.disabled=true;}
+        var prtBtn=document.getElementById('prt-'+idx);   if(prtBtn) prtBtn.style.display='none';
+        var dup=document.getElementById('dup-'+idx);      if(dup) dup.style.display='block';
+        saveSession(); /* ← 인쇄완료 즉시 저장 */
+      };
+      if(location.protocol==='file:'){
+        var a=document.createElement('a'); a.href=url;
+        a.download='그룹'+(idx+1)+'_'+grp.invoices.length+'건.pdf'; a.click();
+        setTimeout(function(){URL.revokeObjectURL(url);done();},1000);
+      } else {
+        var w=window.open(url,'_blank');
+        if(w) w.onload=function(){ w.print(); done(); setTimeout(function(){URL.revokeObjectURL(url);},3000); };
+      }
+    }).catch(function(e){ btn.textContent='❌'; console.error(e); });
+  });
+}
+
+/* ─────────────── 중복 인쇄 ─────────────── */
+function dupPrint(idx) {
+  var n=(printCount[idx]||1)+1;
+  if (!confirm(n+'번째 중복 출력입니다. 주의! 진행하시겠습니까?')) return;
+  var grp=grpGroups[idx]; if(!grp||!rawBuffer) return;
+  loadPdfLib(function(){
+    PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
+      return PDFLib.PDFDocument.create().then(function(out){
+        var tot=src.getPageCount(),added={},chain=Promise.resolve();
+        grp.invoices.forEach(function(inv){
+          inv.pages.forEach(function(pg){
+            if(pg<tot&&!added[pg]){added[pg]=1;chain=chain.then(function(){return out.copyPages(src,[pg]).then(function(ps){cropToInvoice(ps[0]);out.addPage(ps[0]);});});}
+          });
+        });
+        return chain.then(function(){return out.save();});
+      });
+    }).then(function(bytes){
+      var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
+      printCount[idx]=(printCount[idx]||1)+1;
+      var stamp=document.getElementById('stamp-'+idx);
+      if(stamp) stamp.textContent='인쇄완료('+printCount[idx]+'회)';
+      saveSession(); /* ← 중복인쇄 저장 */
+      if(location.protocol==='file:'){
+        var a=document.createElement('a');a.href=url;a.download='중복'+printCount[idx]+'회_그룹'+(idx+1)+'.pdf';a.click();
+        setTimeout(function(){URL.revokeObjectURL(url);},1000);
+      } else {
+        var w=window.open(url,'_blank');
+        if(w) w.onload=function(){w.print();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
+      }
+    }).catch(function(e){console.error(e);});
+  });
+}
+
+/* ─────────────── 체크 선택 인쇄 ─────────────── */
+function printChecked() {
+  var checked=[];
+  document.querySelectorAll('.grp-chk:checked').forEach(function(c){
+    var g=grpGroups[parseInt(c.dataset.idx)];
+    if(g) checked.push({idx:parseInt(c.dataset.idx),grp:g});
+  });
+  if(!checked.length){alert('선택 필요');return;}
+  var totalInv=checked.reduce(function(s,c){return s+c.grp.invoices.length;},0);
+  var msg=document.getElementById('mpdf');
+  msg.style.display='block'; msg.className='msg inf';
+  msg.innerHTML='<span class="sp"></span>'+totalInv+'건 생성 중...';
+  loadPdfLib(function(){
+    PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
+      return PDFLib.PDFDocument.create().then(function(out){
+        var tot=src.getPageCount(),added={},chain=Promise.resolve();
+        checked.forEach(function(c){
+          c.grp.invoices.forEach(function(inv){
+            inv.pages.forEach(function(pg){
+              if(pg<tot&&!added[pg]){added[pg]=1;chain=chain.then(function(){return out.copyPages(src,[pg]).then(function(ps){cropToInvoice(ps[0]);out.addPage(ps[0]);});});}
+            });
+          });
+        });
+        return chain.then(function(){return out.save();});
+      });
+    }).then(function(bytes){
+      var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
+      var markAll=function(){
+        checked.forEach(function(c){
+          var card=document.getElementById('gg-'+c.idx); if(card) card.classList.add('printed');
+          var stamp=document.getElementById('stamp-'+c.idx); if(stamp) stamp.style.display='block';
+          var chk=document.getElementById('chk-'+c.idx); if(chk){chk.checked=false;chk.disabled=true;}
+          var prt=document.getElementById('prt-'+c.idx); if(prt) prt.style.display='none';
+          var dup=document.getElementById('dup-'+c.idx); if(dup) dup.style.display='block';
+          printCount[c.idx]=(printCount[c.idx]||0)+1;
+        });
+        msg.className='msg ok'; msg.textContent='✅ '+totalInv+'건 완료';
+        saveSession(); /* ← 일괄인쇄 저장 */
+      };
+      if(location.protocol==='file:'){
+        var a=document.createElement('a');a.href=url;a.download='선택_'+totalInv+'건.pdf';a.click();
+        setTimeout(function(){URL.revokeObjectURL(url);markAll();},1000);
+      } else {
+        var w=window.open(url,'_blank');
+        if(w) w.onload=function(){w.print();markAll();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
+      }
+    }).catch(function(e){msg.className='msg er';msg.textContent='❌ '+e.message;});
+  });
+}
+
+/* ─────────────── 유틸 ─────────────── */
+function escH(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc2(s){ return String(s||'').replace(/"/g,'""'); }
+</script>
+</body>
+</html>

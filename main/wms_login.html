@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>메이크창고 WMS — 로그인</title>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.card{background:#1E293B;border-radius:20px;padding:32px 28px;width:100%;max-width:420px;box-shadow:0 8px 48px rgba(0,0,0,.5);}
+.inp{width:100%;background:#0F172A;border:1px solid #334155;border-radius:8px;padding:10px 12px;color:#E2E8F0;font-size:14px;outline:none;font-family:inherit;}
+.inp:focus{border-color:#3B82F6;}
+.label{display:block;font-size:11px;color:#64748B;margin-bottom:5px;font-weight:600;letter-spacing:.04em;}
+.section-box{background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:12px;padding:18px;}
+.btn-google{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#1a1a1a;border:none;border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .15s;}
+.btn-google:hover{opacity:.9;}
+.btn-google:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{width:100%;background:#2563EB;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:700;cursor:pointer;}
+.btn-secondary{width:100%;background:rgba(59,130,246,.15);color:#60A5FA;border:1px solid rgba(59,130,246,.3);border-radius:8px;padding:11px;font-size:14px;font-weight:700;cursor:pointer;}
+.err{color:#F87171;font-size:11px;}
+.ok{color:#34D399;font-size:11px;}
+.info{color:#64748B;font-size:11px;}
+
+/* ── 홈 버튼 ── */
+.home-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  text-decoration:none;
+  color:#475569;
+  font-size:11px;font-weight:600;letter-spacing:.04em;
+  padding:5px 13px;
+  border:1px solid #1E3A5F;
+  border-radius:20px;
+  transition:color .2s,border-color .2s,background .2s;
+  margin-bottom:20px;
+}
+.home-btn:hover{color:#94A3B8;border-color:#334155;background:rgba(255,255,255,.04);}
+.home-btn svg{opacity:.5;transition:opacity .2s;}
+.home-btn:hover svg{opacity:.85;}
+
+footer{position:fixed;bottom:0;left:0;right:0;text-align:center;padding:8px;font-size:9px;color:#1E293B;pointer-events:none;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{width:20px;height:20px;border:2px solid #334155;border-top-color:#3B82F6;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto;}
+/* 모달 오버레이 */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:flex-end;justify-content:center;z-index:100;}
+.modal-box{background:#1E293B;border-radius:16px 16px 0 0;padding:24px;width:100%;max-width:420px;}
+/* 인앱브라우저 안내 */
+.inapp-guide{background:#1E293B;border-radius:20px;padding:32px 28px;width:100%;max-width:420px;box-shadow:0 8px 48px rgba(0,0,0,.5);}
+.inapp-step{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px;}
+.inapp-step-num{background:#2563EB;color:#fff;width:24px;height:24px;border-radius:50%;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
+.inapp-copy-btn{width:100%;background:#2563EB;color:#fff;border:none;border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;transition:opacity .15s;}
+.inapp-copy-btn:hover{opacity:.9;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal"></div>
+<footer>© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo</footer>
+<script>
+
+/* ────────────────────────────────────────────
+   인앱브라우저 감지 및 외부 브라우저 유도
+──────────────────────────────────────────── */
+(function(){
+  var ua = navigator.userAgent;
+  var isInApp = /KAKAOTALK|Line\/|Instagram|FBAV|FBAN|Twitter|Snapchat|NaverApp|Naver Blog|DaumApp|whale/i.test(ua);
+  if(!isInApp) return;
+
+  var isIOS = /iphone|ipad|ipod/i.test(ua);
+  var isAndroid = /android/i.test(ua);
+  var currentUrl = encodeURIComponent(window.location.href);
+
+  if(isAndroid){
+    try{
+      window.location.href =
+        'intent://' + window.location.host + window.location.pathname + window.location.search
+        + '#Intent;scheme=https;package=com.android.chrome;end';
+    }catch(e){}
+  }
+
+  var appEl = document.getElementById('app');
+  var iosSteps = isIOS
+    ? '<div class="inapp-step"><div class="inapp-step-num">1</div><div style="font-size:13px;color:#CBD5E1;line-height:1.6;">화면 오른쪽 하단 <strong style="color:#fff;">···</strong> 버튼을 눌러주세요</div></div>'
+    + '<div class="inapp-step"><div class="inapp-step-num">2</div><div style="font-size:13px;color:#CBD5E1;line-height:1.6;"><strong style="color:#fff;">Safari로 열기</strong> 또는 <strong style="color:#fff;">기본 브라우저로 열기</strong>를 선택하세요</div></div>'
+    + '<div class="inapp-step"><div class="inapp-step-num">3</div><div style="font-size:13px;color:#CBD5E1;line-height:1.6;">열린 Safari에서 Google 로그인을 진행해주세요</div></div>'
+    : '<div class="inapp-step"><div class="inapp-step-num">1</div><div style="font-size:13px;color:#CBD5E1;line-height:1.6;">화면 오른쪽 상단 <strong style="color:#fff;">⋮</strong> 메뉴를 눌러주세요</div></div>'
+    + '<div class="inapp-step"><div class="inapp-step-num">2</div><div style="font-size:13px;color:#CBD5E1;line-height:1.6;"><strong style="color:#fff;">다른 앱으로 열기</strong> 또는 <strong style="color:#fff;">Chrome으로 열기</strong>를 선택하세요</div></div>'
+    + '<div class="inapp-step"><div class="inapp-step-num">3</div><div style="font-size:13px;color:#CBD5E1;line-height:1.6;">Chrome에서 Google 로그인을 진행해주세요</div></div>';
+
+  appEl.innerHTML =
+    '<div class="inapp-guide">'
+    + '<div style="text-align:center;margin-bottom:28px;">'
+    + '<div style="font-size:48px;line-height:1;margin-bottom:12px;">📦</div>'
+    + '<div style="font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:6px;">메이크창고 WMS</div>'
+    + '<div style="display:inline-block;background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.35);border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;color:#FBBF24;margin-top:4px;">⚠️ 외부 브라우저 필요</div>'
+    + '</div>'
+    + '<div style="background:rgba(255,255,255,.04);border:1px solid #334155;border-radius:12px;padding:18px;margin-bottom:20px;">'
+    + '<div style="font-size:13px;font-weight:700;color:#94A3B8;margin-bottom:14px;">Google 로그인은 카카오톡 내에서<br>지원되지 않습니다. 아래 순서를 따라주세요</div>'
+    + iosSteps
+    + '</div>'
+    + '<button class="inapp-copy-btn" onclick="copyUrlAndGuide(this)">'
+    + '🔗 링크 복사하기</button>'
+    + '<div id="copyMsg" style="text-align:center;min-height:20px;margin-top:10px;font-size:12px;color:#34D399;"></div>'
+    + '</div>';
+
+  window.copyUrlAndGuide = function(btn){
+    var url = window.location.href;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(function(){
+        document.getElementById('copyMsg').textContent = '✅ 링크가 복사되었습니다. Chrome 또는 Safari 주소창에 붙여넣기 해주세요.';
+      }).catch(fallbackCopy);
+    }else{
+      fallbackCopy();
+    }
+    function fallbackCopy(){
+      var ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);
+      ta.select();
+      try{document.execCommand('copy');document.getElementById('copyMsg').textContent='✅ 링크가 복사되었습니다. Chrome 또는 Safari 주소창에 붙여넣기 해주세요.';}
+      catch(e){document.getElementById('copyMsg').textContent='주소창에 직접 입력해주세요: '+url;}
+      document.body.removeChild(ta);
+    }
+  };
+
+  throw new Error('INAPP_BROWSER_BLOCKED');
+})();
+
+/* ────────────────────────────────────────────
+   Firebase 초기화
+──────────────────────────────────────────── */
+firebase.initializeApp({
+  apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
+  authDomain:"makewon.com",
+  databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"makechango-wms",
+  storageBucket:"makechango-wms.firebasestorage.app",
+  messagingSenderId:"333385336098",
+  appId:"1:333385336098:web:94f07492421965ab32917b"
+});
+var auth=firebase.auth();
+var db=firebase.database();
+var appEl=document.getElementById('app');
+var modalEl=document.getElementById('modal');
+var _currentUser=null;
+var _currentGroups={};
+
+/* ── 홈 버튼 HTML 상수 ── */
+var HOME_BTN='<div style="text-align:center;">'
+  +'<a href="https://makewon.com" class="home-btn">'
+  +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+  +'<path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/>'
+  +'<path d="M9 21V12h6v9"/>'
+  +'</svg>'
+  +'MAKEWON.COM 홈으로가기</a></div>';
+
+function getWmsPath(){return window.location.origin+'/wms.html';}
+function r(html){appEl.innerHTML=html;}
+function closeModal(){modalEl.innerHTML='';}
+
+function showLoading(msg){
+  r('<div style="text-align:center;">'
+   +'<div class="spinner" style="margin-bottom:16px;"></div>'
+   +'<div style="color:#64748B;font-size:13px;">'+(msg||'로딩 중...')+'</div>'
+   +'</div>');
+}
+
+function showLogin(errMsg){
+  r(HOME_BTN
+   +'<div class="card">'
+   +'<div style="text-align:center;margin-bottom:32px;">'
+   +'<div style="font-size:56px;margin-bottom:12px;line-height:1;">📦</div>'
+   +'<div style="font-size:22px;font-weight:800;letter-spacing:-.3px;">메이크창고 WMS</div>'
+   +'<div style="font-size:12px;color:#94A3B8;margin-top:5px;">창고관리 시스템 ver 01</div>'
+   +'<div style="font-size:11px;color:#475569;margin-top:2px;">제작 · 메이크창고 대표 박경우</div>'
+   +'</div>'
+   +(errMsg?'<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 12px;font-size:12px;color:#F87171;margin-bottom:14px;">'+errMsg+'</div>':'')
+   +'<button id="googleBtn" class="btn-google" onclick="googleLogin()">'
+   +'<svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 002.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 01-7.18-2.54H1.83v2.07A8 8 0 008.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 010-3.04V5.41H1.83a8 8 0 000 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 001.83 5.4L4.5 7.49a4.77 4.77 0 014.48-3.31z"/></svg>'
+   +'Google 계정으로 로그인</button>'
+   +'<div style="margin-top:14px;font-size:11px;color:#475569;text-align:center;">팝업이 차단된 경우 브라우저 팝업 허용 후 재시도하세요</div>'
+   +'</div>');
+}
+
+/* ── 슈퍼관리자: 그룹 목록 ── */
+function showAdminView(user, groups){
+  _currentUser=user;
+  _currentGroups=groups||{};
+  var groupHtml='';
+  if(!groups||Object.keys(groups).length===0){
+    groupHtml='<div style="text-align:center;color:#64748B;padding:20px;font-size:13px;">등록된 그룹이 없습니다<br><span style="font-size:11px;">아래 버튼으로 새 그룹을 만드세요</span></div>';
+  }else{
+    Object.entries(groups).forEach(function(entry){
+      var gid=entry[0];
+      var whCount=Object.keys(entry[1]).filter(function(k){return k!=='_init';}).length;
+      groupHtml+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+      +'<div onclick="enterGroup(\''+gid+'\')" style="flex:1;display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid #334155;border-radius:10px;cursor:pointer;" onmouseover="this.style.background=\'rgba(59,130,246,.1)\'" onmouseout="this.style.background=\'rgba(255,255,255,.04)\'">'
+      +'<span style="font-size:20px;">🏢</span>'
+      +'<div style="flex:1;"><div style="font-weight:700;font-size:15px;">'+gid+'</div>'
+      +'<div style="font-size:11px;color:#64748B;">창고 '+whCount+'개</div></div>'
+      +'<span style="color:#64748B;font-size:16px;">›</span></div>'
+      +'<button onclick="confirmDeleteGroup(\''+gid+'\')" style="background:rgba(239,68,68,.15);color:#F87171;border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:8px 10px;font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;">삭제</button>'
+      +'</div>';
+    });
+  }
+  r(HOME_BTN
+   +'<div class="card">'
+   +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #334155;">'
+   +'<div style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:#F87171;">🛡️ 슈퍼관리자</div>'
+   +'<div style="flex:1;"><div style="font-weight:700;font-size:13px;">'+(user.displayName||'')+'</div>'
+   +'<div style="font-size:11px;color:#64748B;">'+user.email+'</div></div>'
+   +'<button onclick="doLogout()" style="background:none;border:none;color:#64748B;font-size:12px;cursor:pointer;text-decoration:underline;">로그아웃</button></div>'
+   +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">'
+   +'<div style="font-size:14px;font-weight:700;">그룹 선택</div>'
+   +'<button onclick="showCreateGroupModal()" style="background:#2563EB;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;">+ 새 그룹</button>'
+   +'</div>'
+   +groupHtml+'</div>');
+}
+
+/* ── 새 그룹 생성 모달 ── */
+function showCreateGroupModal(){
+  modalEl.innerHTML='<div class="modal-bg" onclick="closeModal()">'
+   +'<div class="modal-box" onclick="event.stopPropagation()">'
+   +'<div style="font-size:17px;font-weight:700;margin-bottom:6px;">새 그룹 만들기</div>'
+   +'<div style="font-size:11px;color:#64748B;margin-bottom:18px;">그룹 ID는 영문 소문자·숫자·하이픈만 사용 가능합니다</div>'
+   +'<div class="label">그룹 ID</div>'
+   +'<input id="newGroupId" class="inp" placeholder="예: lk-logistics" style="margin-bottom:6px;"'
+   +' oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,\'\');document.getElementById(\'groupStatus\').innerHTML=\'\'"/>'
+   +'<div id="groupStatus" style="min-height:16px;margin-bottom:14px;font-size:11px;"></div>'
+   +'<button onclick="createGroup()" style="width:100%;background:#2563EB;color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;">생성하기</button>'
+   +'<button onclick="closeModal()" style="width:100%;background:none;border:none;color:#64748B;font-size:12px;cursor:pointer;padding:8px;text-decoration:underline;">취소</button>'
+   +'</div></div>';
+}
+
+async function createGroup(){
+  var gid=(document.getElementById('newGroupId').value||'').trim();
+  var status=document.getElementById('groupStatus');
+  if(!gid||gid.length<2){status.innerHTML='<span style="color:#F87171;">2자리 이상 입력하세요</span>';return;}
+  if(!/^[a-z0-9-]+$/.test(gid)){status.innerHTML='<span style="color:#F87171;">영문 소문자·숫자·하이픈만 사용 가능합니다</span>';return;}
+  if(_currentGroups[gid]){status.innerHTML='<span style="color:#F87171;">❌ 이미 존재하는 그룹 ID입니다</span>';return;}
+  status.innerHTML='<span style="color:#64748B;">생성 중...</span>';
+  try{
+    await db.ref('groups/'+gid+'/_init').set(true);
+    closeModal();
+    var groupsSnap=await db.ref('groups').get();
+    showAdminView(_currentUser, groupsSnap.val()||{});
+  }catch(e){status.innerHTML='<span style="color:#F87171;">생성 실패: '+e.message+'</span>';}
+}
+
+function confirmDeleteGroup(gid){
+  if(!confirm('그룹 "'+gid+'"을 삭제하시겠습니까?\n\n⚠️ 그룹만 삭제되며 창고 데이터는 유지됩니다.')){return;}
+  deleteGroup(gid);
+}
+
+async function deleteGroup(gid){
+  try{
+    await db.ref('groups/'+gid).remove();
+    var groupsSnap=await db.ref('groups').get();
+    showAdminView(_currentUser, groupsSnap.val()||{});
+  }catch(e){alert('삭제 실패: '+e.message);}
+}
+
+function enterGroup(gid){
+  localStorage.setItem('wms_adminGroupId', gid);
+  localStorage.removeItem('wms_adminWhId');
+  window.location.replace(getWmsPath());
+}
+
+/* ── 신규 사용자: 초대 코드 입력 ── */
+function showSetup(user){
+  var photo=user.photoURL
+    ?'<img src="'+user.photoURL+'" style="width:36px;height:36px;border-radius:50%;border:2px solid #334155;" onerror="this.style.display=\'none\'"/>'
+    :'<div style="width:36px;height:36px;border-radius:50%;background:#334155;display:flex;align-items:center;justify-content:center;font-size:18px;">👤</div>';
+  r(HOME_BTN
+   +'<div class="card">'
+   +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid #334155;">'
+   +photo+'<div><div style="font-weight:700;font-size:14px;">'+(user.displayName||'사용자')+'</div>'
+   +'<div style="font-size:11px;color:#64748B;">'+user.email+'</div></div></div>'
+   +'<div style="font-size:13px;color:#94A3B8;margin-bottom:16px;font-weight:500;">관리자에게 받은 초대 코드를 입력하세요</div>'
+   +'<div class="section-box">'
+   +'<div style="font-size:13px;font-weight:700;margin-bottom:14px;">🔑 초대 코드 입력</div>'
+   +'<div class="label">초대 코드 (6자리)</div>'
+   +'<input id="inviteCodeInput" class="inp" placeholder="예: XK9F2A"'
+   +' oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,\'\').slice(0,6);document.getElementById(\'codeStatus\').innerHTML=\'\'"'
+   +' style="margin-bottom:6px;letter-spacing:4px;font-size:18px;font-weight:700;text-align:center;"/>'
+   +'<div id="codeStatus" style="min-height:16px;margin-bottom:10px;text-align:center;"></div>'
+   +'<button class="btn-secondary" onclick="useInviteCode()">참가하기</button>'
+   +'</div>'
+   +'<button onclick="doLogout()" style="width:100%;background:none;border:none;color:#475569;font-size:12px;margin-top:14px;cursor:pointer;padding:8px;text-decoration:underline;">로그아웃</button>'
+   +'</div>');
+}
+
+async function useInviteCode(){
+  var code=(document.getElementById('inviteCodeInput').value||'').trim().toUpperCase();
+  var status=document.getElementById('codeStatus');
+  if(!code||code.length!==6){status.innerHTML='<span class="err">6자리 코드를 입력하세요</span>';return;}
+  status.innerHTML='<span class="info">확인 중...</span>';
+  try{
+    var snap=await db.ref('inviteCodes/'+code).get();
+    if(!snap.exists()){status.innerHTML='<span style="color:#F87171;font-size:11px;">❌ 유효하지 않은 초대 코드입니다</span>';return;}
+    var codeData=snap.val();
+    if(codeData.usedBy){status.innerHTML='<span style="color:#F87171;font-size:11px;">❌ 이미 사용된 초대 코드입니다</span>';return;}
+    if(codeData.expiresAt&&Date.now()>codeData.expiresAt){status.innerHTML='<span style="color:#F87171;font-size:11px;">❌ 만료된 초대 코드입니다</span>';return;}
+    var user=auth.currentUser;
+    var gid=codeData.groupId;
+    await db.ref('userGroup/'+user.uid).set(gid);
+    await db.ref('inviteCodes/'+code+'/usedBy').set(user.uid);
+    status.innerHTML='<span style="color:#34D399;font-size:11px;">✅ 참가 완료!</span>';
+    setTimeout(function(){window.location.replace(getWmsPath());},500);
+  }catch(e){status.innerHTML='<span style="color:#F87171;font-size:11px;">오류: '+e.message+'</span>';}
+}
+
+async function doLogout(){await auth.signOut();showLogin();}
+
+async function googleLogin(){
+  var btn=document.getElementById('googleBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner" style="width:18px;height:18px;margin:0;"></div><span>로그인 중...</span>';}
+  var provider=new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({'prompt':'select_account'});
+  try{
+    var result=await auth.signInWithPopup(provider);
+    if(result&&result.user){await handleUser(result.user);}
+  }catch(e){
+    if(e.code==='auth/popup-blocked'||e.code==='auth/popup-closed-by-user'){
+      showLogin('팝업이 차단되었습니다. 브라우저 주소창 우측의 팝업 차단 아이콘을 클릭해 허용해주세요.');
+    }else{showLogin('로그인 실패: '+e.message);}
+  }
+}
+
+async function handleUser(user){
+  showLoading('정보 확인 중...');
+  try{
+    var adminSnap=await db.ref('superadmins/'+user.uid).get();
+    if(adminSnap.exists()){
+      var groupsSnap=await db.ref('groups').get();
+      showAdminView(user, groupsSnap.val()||{});
+      return;
+    }
+    var groupSnap=await db.ref('userGroup/'+user.uid).get();
+    if(groupSnap.exists()){
+      window.location.replace(getWmsPath());
+      return;
+    }
+    showSetup(user);
+  }catch(e){showLogin('오류: '+e.message);}
+}
+
+showLoading('초기화 중...');
+auth.onAuthStateChanged(function(user){
+  if(user){handleUser(user);}
+  else{showLogin();}
+});
+</script>
+</body>
+</html>

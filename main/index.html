@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MAKECHANGO · WMS & PICKING HUB</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Outfit:wght@200;400;600;700;900&display=swap');
+
+:root{
+  --white:       #ffffff;
+  --white-88:    rgba(255,255,255,.88);
+  --white-60:    rgba(255,255,255,.60);
+  --white-38:    rgba(255,255,255,.38);
+  --white-20:    rgba(255,255,255,.20);
+  --white-10:    rgba(255,255,255,.10);
+  --white-06:    rgba(255,255,255,.06);
+  --white-03:    rgba(255,255,255,.03);
+  --accent:      rgba(255,255,255,.55);
+  --border:      rgba(255,255,255,.10);
+  --border-hi:   rgba(255,255,255,.22);
+  --mono:        'Share Tech Mono', monospace;
+  --sans:        'Outfit', system-ui, sans-serif;
+  --max:         660px;
+  --pad:         1.5rem;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{height:100%;background:#000}
+body{
+  font-family:var(--sans);background:#000;color:var(--white);
+  min-height:100vh;overflow-x:hidden;position:relative;
+}
+
+/* ─── AURORA ─── */
+#aurora{position:fixed;inset:0;z-index:0;pointer-events:none;}
+.vignette{
+  position:fixed;inset:0;z-index:1;
+  background:radial-gradient(ellipse 80% 80% at 50% 50%,
+    transparent 0%,rgba(0,0,0,.45) 55%,rgba(0,0,0,.95) 100%);
+  pointer-events:none;
+}
+
+/* ─── LAYOUT ─── */
+.page{
+  position:relative;z-index:2;
+  max-width:var(--max);
+  margin:0 auto;
+  padding:4rem var(--pad) 5rem;
+  display:flex;flex-direction:column;
+  align-items:stretch;
+  gap:0;
+}
+
+/* ─── LOGO BLOCK ─── */
+.logo-block{
+  text-align:center;
+  margin-bottom:3.5rem;
+  opacity:0;animation:up .8s ease .05s forwards;
+}
+.logo-eyebrow{
+  font-family:var(--mono);font-size:.54rem;letter-spacing:.5em;
+  color:var(--white-20);text-transform:uppercase;
+  margin-bottom:2.2rem;display:block;
+}
+.logo-make{
+  font-family:var(--sans);font-weight:200;
+  font-size:clamp(1.5rem,4.5vw,2.4rem);letter-spacing:.7em;
+  color:var(--white-38);display:block;margin-bottom:.15rem;
+}
+.logo-chango{
+  font-family:var(--sans);font-weight:900;
+  font-size:clamp(4.5rem,14vw,9rem);letter-spacing:-.03em;
+  line-height:.88;display:block;color:var(--white);
+  transition:text-shadow .5s ease;
+}
+.logo-rule{
+  display:flex;align-items:center;justify-content:center;gap:1rem;
+  margin:1.6rem 0 .8rem;
+}
+.lr-line{height:1px;width:52px;background:var(--white-10)}
+.lr-dot{width:3px;height:3px;border-radius:50%;background:var(--white-20)}
+.logo-tagline{
+  font-family:var(--mono);font-size:.55rem;letter-spacing:.4em;
+  color:rgba(255,255,255,.13);display:block;
+}
+
+/* ─── NOTICE ─── */
+.notice{
+  position:relative;overflow:hidden;
+  border:1px solid var(--border-hi);
+  background:rgba(255,255,255,.045);
+  padding:1.5rem 1.8rem;
+  margin-bottom:1.8rem;
+  display:flex;gap:1.3rem;align-items:flex-start;
+  opacity:0;animation:up .7s ease .3s forwards;
+}
+.notice::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.6) 30%,rgba(255,255,255,.6) 70%,transparent 100%);
+}
+.notice-bar{width:2px;background:rgba(255,255,255,.3);flex-shrink:0;border-radius:1px;min-height:100%;}
+.notice-inner{flex:1;}
+.notice-top{
+  display:flex;align-items:center;gap:.7rem;margin-bottom:.7rem;
+}
+.notice-badge{
+  font-family:var(--mono);font-size:.48rem;letter-spacing:.28em;
+  color:var(--white-60);border:1px solid var(--border-hi);
+  padding:3px 10px;border-radius:2px;flex-shrink:0;
+}
+.notice-dot{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--white);opacity:.55;
+  animation:blink 2.8s ease-in-out infinite;flex-shrink:0;
+}
+.notice-title{
+  font-family:var(--sans);font-size:1.05rem;font-weight:700;
+  letter-spacing:-.01em;color:var(--white-88);
+}
+.notice-body{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;
+  color:var(--white-38);line-height:2.1;
+}
+.notice-body em{
+  font-style:normal;color:rgba(255,255,255,.8);
+  border-bottom:1px solid rgba(255,255,255,.3);padding-bottom:1px;
+}
+.notice-tag{
+  display:inline-block;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.15);border-radius:2px;
+  padding:1px 8px;font-size:.53rem;letter-spacing:.12em;
+  color:var(--white-38);margin-left:.4rem;vertical-align:middle;
+}
+
+/* ─── WMS PRIMARY BUTTON ─── */
+.wms-wrap{
+  margin-bottom:1.8rem;
+  opacity:0;animation:up .7s ease .42s forwards;
+}
+.wms-btn{
+  display:flex;align-items:center;justify-content:space-between;
+  text-decoration:none;color:var(--white);
+  background:#000;border:1px solid var(--border-hi);
+  padding:2.2rem 2rem;
+  position:relative;overflow:hidden;
+  transition:background .3s,border-color .35s;
+  gap:1.5rem;
+}
+.wms-btn::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:transparent;transition:background .4s;
+}
+.wms-btn:hover::before{
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);
+}
+.wms-btn:hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.3);}
+.wms-left{}
+.wms-badge{
+  font-family:var(--mono);font-size:.48rem;letter-spacing:.35em;
+  color:var(--white-38);margin-bottom:.9rem;display:block;
+}
+.wms-title{
+  font-family:var(--sans);font-size:clamp(1.4rem,4.5vw,2rem);
+  font-weight:900;letter-spacing:-.025em;margin-bottom:.35rem;
+}
+.wms-sub{
+  font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;
+  color:var(--white-38);line-height:1.8;
+}
+.wms-right{
+  display:flex;flex-direction:column;align-items:flex-end;
+  gap:.5rem;flex-shrink:0;
+}
+.wms-url{
+  font-family:var(--mono);font-size:.55rem;letter-spacing:.12em;
+  color:var(--white-20);transition:color .25s;
+}
+.wms-btn:hover .wms-url{color:var(--white-60);}
+.wms-arrow{
+  font-size:1.8rem;font-weight:200;color:var(--white-20);
+  transition:transform .3s,color .25s;line-height:1;
+}
+.wms-btn:hover .wms-arrow{transform:translateX(7px);color:var(--white-60);}
+
+/* ─── SECTION HEADER ─── */
+.pick-header{
+  margin-bottom:1.2rem;
+  opacity:0;animation:up .6s ease .54s forwards;
+}
+.pick-header-rule{
+  display:flex;align-items:center;gap:.8rem;margin-bottom:1.2rem;
+}
+.ph-line{flex:1;height:1px;background:var(--white-06)}
+.ph-text{
+  font-family:var(--mono);font-size:.46rem;letter-spacing:.32em;
+  color:rgba(255,255,255,.18);white-space:nowrap;
+}
+.pick-sys-name{
+  font-family:var(--sans);font-size:clamp(.95rem,2.5vw,1.15rem);
+  font-weight:700;letter-spacing:-.02em;
+  color:var(--white-60);margin-bottom:.4rem;
+}
+.pick-sys-eng{
+  font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;
+  color:var(--white-20);line-height:1.7;
+}
+
+/* ─── PICKING CARDS ─── */
+.cards{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;
+  background:var(--border);
+  border:1px solid var(--border);
+  margin-bottom:2.5rem;
+  opacity:0;animation:up .7s ease .62s forwards;
+}
+@media(max-width:500px){
+  .cards{grid-template-columns:1fr;}
+}
+
+.card{
+  display:flex;flex-direction:column;
+  text-decoration:none;color:var(--white);
+  background:#000;
+  padding:1.8rem 1.6rem 1.6rem;
+  position:relative;overflow:hidden;
+  transition:background .25s;
+}
+.card:first-child{border-right:1px solid var(--border);}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:transparent;transition:background .4s;
+}
+.card:hover::before{
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
+}
+.card:hover{background:rgba(255,255,255,.025);}
+
+.card-num{
+  font-family:var(--mono);font-size:.44rem;letter-spacing:.28em;
+  color:rgba(255,255,255,.15);margin-bottom:1rem;
+}
+.card-name{
+  font-family:var(--sans);font-size:1.25rem;font-weight:900;
+  letter-spacing:-.025em;color:var(--white-88);
+  margin-bottom:.35rem;line-height:1.2;
+}
+.card-eng{
+  font-family:var(--mono);font-size:.56rem;letter-spacing:.08em;
+  color:var(--white-20);margin-bottom:.9rem;line-height:1.6;
+}
+
+/* 특징 태그 */
+.card-tags{
+  display:flex;flex-wrap:wrap;gap:.4rem;
+  margin-bottom:1.4rem;
+}
+.tag{
+  font-family:var(--mono);font-size:.48rem;letter-spacing:.1em;
+  color:var(--white-38);
+  border:1px solid var(--border);
+  padding:3px 9px;border-radius:2px;
+  background:rgba(255,255,255,.03);
+}
+
+/* 카드 구분선 */
+.card-divider{height:1px;background:var(--white-06);margin-bottom:1.4rem;}
+
+/* 버튼 행 */
+.card-actions{
+  margin-top:auto;
+  display:flex;flex-direction:column;gap:.65rem;
+}
+.btn-access{
+  display:flex;align-items:center;justify-content:space-between;
+  text-decoration:none;color:var(--white);
+  background:rgba(255,255,255,.07);
+  border:1px solid var(--border-hi);
+  padding:.75rem 1rem;
+  font-family:var(--sans);font-size:.85rem;font-weight:700;
+  letter-spacing:-.005em;
+  transition:background .2s,border-color .2s;
+}
+.btn-access:hover{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.35);}
+.btn-access-arrow{
+  font-size:1rem;color:var(--white-60);
+  transition:transform .2s;
+}
+.btn-access:hover .btn-access-arrow{transform:translateX(4px);}
+
+.btn-tut{
+  display:flex;align-items:center;justify-content:center;gap:.6rem;
+  text-decoration:none;color:var(--white-60);
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--border-hi);
+  padding:.78rem 1rem;
+  font-family:var(--sans);font-size:.92rem;font-weight:700;letter-spacing:-.01em;
+  transition:color .2s,border-color .2s,background .2s;
+}
+.btn-tut:hover{
+  color:var(--white);border-color:rgba(255,255,255,.35);
+  background:rgba(255,255,255,.07);
+}
+.btn-tut-icon{font-size:1rem;font-weight:700;opacity:.7;}
+
+
+/* ─── TOOLS ─── */
+.tools-wrap{
+  margin-bottom:1.8rem;
+  opacity:0;animation:up .7s ease .74s forwards;
+}
+.tool-card{
+  display:flex;align-items:center;
+  text-decoration:none;color:var(--white);
+  background:#000;border:1px solid var(--border-hi);
+  padding:1.3rem 1.6rem;
+  position:relative;overflow:hidden;
+  transition:background .25s,border-color .3s;
+  gap:1.2rem;
+}
+.tool-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:transparent;transition:background .4s;
+}
+.tool-card:hover::before{
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);
+}
+.tool-card:hover{background:rgba(255,255,255,.035);border-color:rgba(255,255,255,.28);}
+.tool-icon{
+  width:44px;height:44px;flex-shrink:0;
+  border:1px solid var(--border-hi);
+  display:flex;align-items:center;justify-content:center;
+  color:rgba(255,255,255,.55);
+}
+.tool-icon svg{width:20px;height:20px;}
+.tool-body{flex:1;min-width:0;}
+.tool-name{
+  font-family:var(--sans);font-size:1rem;font-weight:700;
+  letter-spacing:-.01em;color:var(--white-88);margin-bottom:.3rem;
+}
+.tool-desc{
+  font-family:var(--mono);font-size:.58rem;letter-spacing:.04em;
+  color:var(--white-38);line-height:1.75;
+}
+.tool-eng{color:rgba(255,255,255,.2);font-size:.52rem;letter-spacing:.08em;}
+.tool-arrow{
+  font-size:1.4rem;font-weight:200;color:var(--white-20);
+  transition:transform .25s,color .25s;flex-shrink:0;line-height:1;
+}
+.tool-card:hover .tool-arrow{transform:translateX(5px);color:var(--white-60);}
+
+/* ─── FOOTER ─── */
+.site-footer{
+  display:flex;align-items:center;justify-content:center;
+  flex-wrap:wrap;gap:.6rem;
+  font-family:var(--mono);font-size:.46rem;letter-spacing:.1em;
+  color:rgba(255,255,255,.15);
+  padding-top:1.5rem;
+  border-top:1px solid var(--white-06);
+  opacity:0;animation:up .6s ease .9s forwards;
+}
+.footer-brand{color:rgba(255,255,255,.28);font-weight:700;letter-spacing:.12em;}
+.footer-sep{opacity:.3;}
+.footer-copy{opacity:.7;}
+
+/* ─── STATUS BAR ─── */
+.status{
+  display:flex;align-items:center;justify-content:center;
+  gap:2rem;flex-wrap:wrap;
+  font-family:var(--mono);font-size:.5rem;letter-spacing:.12em;
+  color:rgba(255,255,255,.18);
+  opacity:0;animation:up .6s ease .84s forwards;
+}
+.s-live{display:flex;align-items:center;gap:.45rem;color:var(--white-38);}
+.s-dot{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--white);opacity:.5;
+  animation:blink 2.5s ease-in-out infinite;
+}
+.s-sep{opacity:.2;}
+
+/* ─── KEYFRAMES ─── */
+@keyframes up{
+  from{opacity:0;transform:translateY(18px)}
+  to{opacity:1;transform:none}
+}
+@keyframes blink{0%,100%{opacity:.5}50%{opacity:.08}}
+</style>
+</head>
+<body>
+
+<canvas id="aurora"></canvas>
+<div class="vignette"></div>
+
+<div class="page">
+
+  <!-- ── LOGO ── -->
+  <div class="logo-block">
+    <span class="logo-eyebrow">Warehouse Management · Solution</span>
+    <span class="logo-make">MAKE</span>
+    <span class="logo-chango" id="logo">CHANGO</span>
+    <div class="logo-rule">
+      <div class="lr-line"></div><div class="lr-dot"></div><div class="lr-line"></div>
+    </div>
+    <span class="logo-tagline">WMS &amp; PICKING HUB · SELECT SYSTEM</span>
+  </div>
+
+  <!-- ── NOTICE ── -->
+  <div class="notice">
+    <div class="notice-bar"></div>
+    <div class="notice-inner">
+      <div class="notice-top">
+        <span class="notice-badge">◈ NOTICE</span>
+        <span class="notice-dot"></span>
+        <span class="notice-title">서비스 운영 안내</span>
+      </div>
+      <div class="notice-body">
+        현재 본 서비스는 <em>오픈 액세스</em> 상태로 누구나 자유롭게 이용 가능합니다.<span class="notice-tag">FREE</span><br>
+        추후 운영 정책에 따라 <em>회원제 기반의 유료 서비스</em>로 전환될 수 있으며,<br>
+        전환 시 <em>사전 공지</em> 후 순차적으로 진행될 예정입니다.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── WMS PRIMARY ── -->
+  <div class="wms-wrap">
+    <a class="wms-btn" href="https://makewon.com/wms_login.html" target="_blank" rel="noopener">
+      <div class="wms-left">
+        <span class="wms-badge">CORE · WAREHOUSE MANAGEMENT SYSTEM</span>
+        <div class="wms-title">창고 관리 시스템</div>
+        <div class="wms-sub">재고 · 입출고 · 랙 배치 통합 관리<br>INVENTORY · INBOUND · OUTBOUND · RACK LAYOUT</div>
+      </div>
+      <div class="wms-right">
+        <span class="wms-url">makewon.com</span>
+        <span class="wms-arrow">→</span>
+      </div>
+    </a>
+  </div>
+
+  <!-- ── PICKING SECTION HEADER ── -->
+  <div class="pick-header">
+    <div class="pick-header-rule">
+      <div class="ph-line"></div>
+      <span class="ph-text">PICKING ENGINE · SELECT</span>
+      <div class="ph-line"></div>
+    </div>
+    <div class="pick-sys-name">PDF 송장출력 기반 업로드 피킹 및 그룹출력 시스템</div>
+    <div class="pick-sys-eng">PDF INVOICE UPLOAD · AUTO PICKING · GROUP PRINT SYSTEM</div>
+  </div>
+
+  <!-- ── PICKING CARDS ── -->
+  <div class="cards">
+
+    <!-- 이벗 -->
+    <div class="card">
+      <div class="card-num">UNIT · 01</div>
+      <div class="card-name">이벗<br>피킹 시스템</div>
+      <div class="card-eng">E-BUT ENGINE</div>
+      <div class="card-tags">
+        <span class="tag">수동 세그먼트</span>
+        <span class="tag">다양한 PDF 대응</span>
+        <span class="tag">높은 정확도</span>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-actions">
+        <a class="btn-access" href="picking_ebut.html">
+          이벗 PDF용 로그인
+          <span class="btn-access-arrow">→</span>
+        </a>
+        <a class="btn-tut" href="tutorial_ebut.html">
+          <span class="btn-tut-icon">?</span>
+          튜토리얼 · 기능 안내
+        </a>
+      </div>
+    </div>
+
+    <!-- 이지어드민 -->
+    <div class="card">
+      <div class="card-num">UNIT · 02</div>
+      <div class="card-name">이지어드민<br>피킹 시스템</div>
+      <div class="card-eng">EZ-ADMIN ENGINE</div>
+      <div class="card-tags">
+        <span class="tag">자동 파싱</span>
+        <span class="tag">★ 수량 자동처리</span>
+        <span class="tag">대량 처리</span>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-actions">
+        <a class="btn-access" href="picking_ez.html">
+          이지어드민 PDF용 로그인
+          <span class="btn-access-arrow">→</span>
+        </a>
+        <a class="btn-tut" href="tutorial_ez.html">
+          <span class="btn-tut-icon">?</span>
+          튜토리얼 · 기능 안내
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+
+  <!-- ── TOOLS ── -->
+  <div class="tools-wrap">
+    <div class="pick-header-rule" style="margin-bottom:1rem;">
+      <div class="ph-line"></div>
+      <span class="ph-text">TOOLS · UTILITIES</span>
+      <div class="ph-line"></div>
+    </div>
+    <a class="tool-card" href="excel_merge.html">
+      <div class="tool-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <path d="M3 9h18M9 21V9"/>
+          <path d="M15 14l-3 3-3-3M12 17V12"/>
+        </svg>
+      </div>
+      <div class="tool-body">
+        <div class="tool-name">엑셀 합치기</div>
+        <div class="tool-desc">여러 엑셀 파일을 하나로 합치는 로컬 도구<br><span class="tool-eng">EXCEL MERGE · .xlsx .xls .csv · NO SERVER</span></div>
+      </div>
+      <div class="tool-arrow">→</div>
+    </a>
+  </div>
+
+  <!-- ── STATUS ── -->
+  <div class="status">
+    <span class="s-live"><span class="s-dot"></span>SYSTEM ONLINE</span>
+    <span class="s-sep">·</span>
+    <span>LOCAL NODE ONLY</span>
+    <span class="s-sep">·</span>
+    <span>NO DATA LEAKAGE</span>
+    <span class="s-sep">·</span>
+    <span id="clock"></span>
+  </div>
+
+
+  <!-- ── FOOTER ── -->
+  <div class="site-footer">
+    <span class="footer-brand">Makemine Design · PKW</span>
+    <span class="footer-sep">·</span>
+    <span class="footer-copy">© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo</span>
+  </div>
+
+</div>
+
+<script>
+/* CLOCK */
+(function(){
+  function tick(){
+    var d=new Date();
+    document.getElementById('clock').textContent=
+      d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
+      String(d.getDate()).padStart(2,'0')+' '+
+      String(d.getHours()).padStart(2,'0')+':'+
+      String(d.getMinutes()).padStart(2,'0')+':'+
+      String(d.getSeconds()).padStart(2,'0');
+  }
+  tick();setInterval(tick,1000);
+})();
+
+/* AURORA */
+(function(){
+  var canvas=document.getElementById('aurora');
+  var ctx=canvas.getContext('2d');
+  var logo=document.getElementById('logo');
+  var mx=.5,my=.5,tx=.5,ty=.5;
+
+  window.addEventListener('mousemove',function(e){
+    tx=e.clientX/window.innerWidth;ty=e.clientY/window.innerHeight;
+  });
+  window.addEventListener('touchmove',function(e){
+    tx=e.touches[0].clientX/window.innerWidth;
+    ty=e.touches[0].clientY/window.innerHeight;
+  },{passive:true});
+
+  function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+  resize();window.addEventListener('resize',resize);
+
+  var layers=[
+    {h1:168,h2:195,spd:.00000040,amp:.20,frq:.65,ph:0,   al:.50,yb:.44},
+    {h1:225,h2:255,spd:.00000030,amp:.15,frq:.85,ph:2.0, al:.42,yb:.50},
+    {h1:152,h2:172,spd:.00000050,amp:.13,frq:1.05,ph:4.2,al:.38,yb:.37},
+    {h1:295,h2:325,spd:.00000022,amp:.10,frq:.58,ph:1.4, al:.22,yb:.54},
+    {h1:205,h2:235,spd:.00000018,amp:.24,frq:.48,ph:3.6, al:.30,yb:.60},
+    {h1:190,h2:210,spd:.00000058,amp:.07,frq:1.4,ph:0.8, al:.18,yb:.40},
+  ];
+
+  function drawLayer(L,w,h,ts){
+    var yOff=(my-.5)*.07,phOff=(mx-.5)*0.6,hShift=(mx-.5)*22,aShift=1+(my-.5)*.18,PTS=220;
+    ctx.beginPath();
+    for(var i=0;i<=PTS;i++){
+      var n=i/PTS,baseY=h*(L.yb+yOff),amp=h*L.amp*aShift,t=ts*L.spd*1000;
+      var y=baseY
+        +Math.sin(n*Math.PI*L.frq    +t      +L.ph+phOff)*amp
+        +Math.sin(n*Math.PI*L.frq*1.8+t*.38  +L.ph*1.3  )*amp*.45
+        +Math.sin(n*Math.PI*L.frq*.75+t*.52  +L.ph*.65  )*amp*.28
+        +Math.sin(n*Math.PI*L.frq*2.6+t*.22  +L.ph*2.1  )*amp*.15;
+      i===0?ctx.moveTo(i*(w/PTS),y):ctx.lineTo(i*(w/PTS),y);
+    }
+    ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.closePath();
+    var topY=h*(L.yb+yOff)-h*L.amp*aShift*2.2;
+    var grad=ctx.createLinearGradient(0,topY,0,h);
+    var hA=L.h1+hShift,hB=L.h2+hShift;
+    grad.addColorStop(0,  'hsla('+hA+',88%,72%,'+L.al+')');
+    grad.addColorStop(.30,'hsla('+hB+',78%,62%,'+(L.al*.75)+')');
+    grad.addColorStop(.65,'hsla('+hA+',65%,50%,'+(L.al*.35)+')');
+    grad.addColorStop(1,  'hsla('+hB+',55%,38%,0)');
+    ctx.fillStyle=grad;ctx.fill();
+  }
+
+  function drawCenterGlow(w,h){
+    var cx=w*(.35+mx*.3),cy=h*(.3+my*.2),r=Math.min(w,h)*(.45+mx*.15);
+    var hue=170+mx*50+my*30;
+    var g=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    g.addColorStop(0,'hsla('+hue+',80%,65%,.09)');
+    g.addColorStop(.4,'hsla('+(hue+30)+',70%,55%,.04)');
+    g.addColorStop(1,'transparent');
+    ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+  }
+
+  var lastGlow=0;
+  function updateGlow(ts){
+    if(ts-lastGlow<60)return;lastGlow=ts;
+    var h1=Math.round(158+mx*65),h2=Math.round(195+my*55);
+    logo.style.textShadow=
+      '0 0 60px hsla('+h1+',100%,78%,.30),'
+      +'0 0 120px hsla('+h2+',90%,65%,.15),'
+      +'0 0 220px hsla('+(h1+20)+',80%,60%,.07)';
+  }
+
+  function frame(ts){
+    mx+=(tx-mx)*.004;my+=(ty-my)*.004;
+    var w=canvas.width,h=canvas.height;
+    ctx.clearRect(0,0,w,h);
+    for(var i=0;i<layers.length;i++)drawLayer(layers[i],w,h,ts);
+    drawCenterGlow(w,h);updateGlow(ts);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
