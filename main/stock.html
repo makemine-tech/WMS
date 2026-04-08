@@ -348,7 +348,7 @@ footer{margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border)}
   <div class="search-row">
     <div class="search-wrap">
       <svg class="search-icon" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="4.5" stroke="white" stroke-width="1.3"/><path d="M10 10L14 14" stroke="white" stroke-width="1.3" stroke-linecap="round"/></svg>
-      <input class="search-input" id="search-input" type="text" placeholder="종목명 검색 (예: 삼성전자, 에코프로, HLB, NAVER)"
+      <input class="search-input" id="search-input" type="text" placeholder="종목명 검색 — 거래량 상위 400개 (예: 삼성전자, 에코프로, HLB)"
         oninput="onSearch(this.value)" onblur="setTimeout(closeSearch,200)" onfocus="onSearch(this.value)">
       <button class="search-clear" id="search-clear" onclick="clearSearch()">✕</button>
       <div class="search-results" id="search-results"></div>
@@ -465,11 +465,11 @@ footer{margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border)}
     <div class="card">
       <div class="card-hd"><span class="cht">사용 방법</span></div>
       <div class="cb" style="display:flex;flex-direction:column;gap:10px">
-        <div class="hitem"><span class="hnum">01</span><span>종목 검색 또는 코드 직접 입력 (코스피/코스닥 선택)</span></div>
+        <div class="hitem"><span class="hnum">01</span><span>종목명 검색 (거래량 상위 400개) 또는 코드 직접 입력</span></div>
         <div class="hitem"><span class="hnum">02</span><span>투자 심리 점수 선택 (5=매우 긍정, 1=매우 부정)</span></div>
         <div class="hitem"><span class="hnum">03</span><span><strong style="color:var(--accent)">프롬프트 복사</strong> → 본인 AI에 붙여넣기</span></div>
         <div class="hitem"><span class="hnum">04</span><span>AI가 한국어로 전문 분석 제공</span></div>
-        <div class="tip">💡 코스피(KS) · 코스닥(KQ) 구분이 자동으로 프롬프트에 반영됩니다<br>직접 입력 시 시장 버튼(코스피/코스닥) 반드시 선택</div>
+        <div class="tip">💡 거래량 상위 400개 종목 즉시 검색 가능<br>미등록 종목은 6자리 코드 입력 → 코스피/코스닥 선택 → 조회</div>
       </div>
     </div>
   </div>
@@ -495,160 +495,28 @@ footer{margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border)}
 </div>
 
 <script>
-// ── STOCKS DB: .KS=코스피 / .KQ=코스닥 (150개+) ──────
-const STOCKS=[
-  /* ══ 반도체·전자 ══ */
-  {name:'삼성전자',     sym:'005930.KS',sector:'반도체',market:'KOSPI'},
-  {name:'SK하이닉스',   sym:'000660.KS',sector:'반도체',market:'KOSPI'},
-  {name:'삼성전기',     sym:'009150.KS',sector:'반도체',market:'KOSPI'},
-  {name:'DB하이텍',     sym:'000990.KS',sector:'반도체',market:'KOSPI'},
-  {name:'LG이노텍',     sym:'011070.KS',sector:'반도체',market:'KOSPI'},
-  {name:'SK스퀘어',     sym:'402340.KS',sector:'반도체',market:'KOSPI'},
-  {name:'리노공업',     sym:'058470.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'HPSP',         sym:'403870.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'이오테크닉스', sym:'039030.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'하나마이크론', sym:'067310.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'동진쎄미켐',   sym:'005290.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'원익IPS',      sym:'240810.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'피에스케이홀딩스',sym:'031980.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'유진테크',     sym:'084370.KQ',sector:'반도체',market:'KOSDAQ'},
-  {name:'테크윙',       sym:'089030.KQ',sector:'반도체',market:'KOSDAQ'},
+// ── STOCKS: stocks.json에서 동적 로드 ───────────────
+// 거래량 상위 500개 코스피·코스닥 종목 (stocks.json)
+let STOCKS = [];
+let STOCKS_MAP = {};
+const DATA_CACHE = {};
 
-  /* ══ IT·플랫폼·게임 ══ */
-  {name:'NAVER',        sym:'035420.KS',sector:'IT',market:'KOSPI'},
-  {name:'카카오',       sym:'035720.KS',sector:'IT',market:'KOSPI'},
-  {name:'카카오뱅크',   sym:'323410.KS',sector:'IT',market:'KOSPI'},
-  {name:'카카오페이',   sym:'377300.KS',sector:'IT',market:'KOSPI'},
-  {name:'크래프톤',     sym:'259960.KS',sector:'IT',market:'KOSPI'},
-  {name:'하이브',       sym:'352820.KS',sector:'IT',market:'KOSPI'},
-  {name:'카카오게임즈', sym:'293490.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'펄어비스',     sym:'263750.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'셀바스AI',     sym:'108860.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'위메이드',     sym:'112040.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'에스엠',       sym:'041510.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'JYP엔터',      sym:'035900.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'와이지엔터테인먼트',sym:'122870.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'더블유게임즈', sym:'192080.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'컴투스',       sym:'078340.KQ',sector:'IT',market:'KOSDAQ'},
-  {name:'실리콘투',     sym:'257720.KQ',sector:'IT',market:'KOSDAQ'},
+async function loadStocks(){
+  try{
+    const res = await fetch('stocks.json');
+    const raw = await res.json();
+    // JSON 형식 변환: {n,s,m,c} → {name,sym,market,sector}
+    STOCKS = raw.map(r=>({name:r.n, sym:r.s, market:r.m, sector:r.c}));
+    STOCKS.forEach(s=>{ STOCKS_MAP[s.sym]=s; });
+    buildFilters();
+    buildGrid();
+    setSbar('ok','준비 완료 — 거래량 상위 '+STOCKS.length+'개 종목 로드됨');
+  }catch(e){
+    setSbar('err','종목 데이터 로드 실패 — 새로고침 해주세요');
+    console.error('stocks.json 로드 실패:', e);
+  }
+}
 
-  /* ══ 2차전지 ══ */
-  {name:'LG에너지솔루션',sym:'373220.KS',sector:'2차전지',market:'KOSPI'},
-  {name:'삼성SDI',      sym:'006400.KS',sector:'2차전지',market:'KOSPI'},
-  {name:'LG화학',       sym:'051910.KS',sector:'2차전지',market:'KOSPI'},
-  {name:'포스코퓨처엠', sym:'003670.KS',sector:'2차전지',market:'KOSPI'},
-  {name:'에코프로',     sym:'086520.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'에코프로비엠', sym:'247540.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'엘앤에프',     sym:'066970.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'나노신소재',   sym:'121600.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'코스모신소재', sym:'005070.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'에코프로에이치엔',sym:'383310.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'더블유씨피',   sym:'393890.KQ',sector:'2차전지',market:'KOSDAQ'},
-  {name:'천보',         sym:'278280.KQ',sector:'2차전지',market:'KOSDAQ'},
-
-  /* ══ 바이오·제약·헬스케어 ══ */
-  {name:'삼성바이오로직스',sym:'207940.KS',sector:'바이오',market:'KOSPI'},
-  {name:'셀트리온',     sym:'068270.KS',sector:'바이오',market:'KOSPI'},
-  {name:'유한양행',     sym:'000100.KS',sector:'바이오',market:'KOSPI'},
-  {name:'한미약품',     sym:'128940.KS',sector:'바이오',market:'KOSPI'},
-  {name:'종근당',       sym:'185750.KS',sector:'바이오',market:'KOSPI'},
-  {name:'대웅제약',     sym:'069620.KS',sector:'바이오',market:'KOSPI'},
-  {name:'동아에스티',   sym:'170900.KS',sector:'바이오',market:'KOSPI'},
-  {name:'HLB',          sym:'028300.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'알테오젠',     sym:'196170.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'에스티팜',     sym:'237690.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'휴젤',         sym:'145020.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'파마리서치',   sym:'214450.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'클래시스',     sym:'214150.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'오스코텍',     sym:'039200.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'펩트론',       sym:'087010.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'리가켐바이오', sym:'141080.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'메디톡스',     sym:'086900.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'씨젠',         sym:'096530.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'오리온홀딩스', sym:'001800.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'케어젠',       sym:'214370.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'바이오니아',   sym:'064550.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'오스템임플란트',sym:'048260.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'덴티움',       sym:'145720.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'파크시스템스', sym:'140860.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'레고켐바이오', sym:'141080.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'HLB생명과학',  sym:'067630.KQ',sector:'바이오',market:'KOSDAQ'},
-  {name:'녹십자',       sym:'006280.KS',sector:'바이오',market:'KOSPI'},
-
-  /* ══ 자동차 ══ */
-  {name:'현대차',       sym:'005380.KS',sector:'자동차',market:'KOSPI'},
-  {name:'기아',         sym:'000270.KS',sector:'자동차',market:'KOSPI'},
-  {name:'현대모비스',   sym:'012330.KS',sector:'자동차',market:'KOSPI'},
-  {name:'현대위아',     sym:'011210.KS',sector:'자동차',market:'KOSPI'},
-  {name:'HL만도',       sym:'204320.KS',sector:'자동차',market:'KOSPI'},
-  {name:'한온시스템',   sym:'018880.KS',sector:'자동차',market:'KOSPI'},
-
-  /* ══ 방산·우주 ══ */
-  {name:'한화에어로스페이스',sym:'012450.KS',sector:'방산',market:'KOSPI'},
-  {name:'한화시스템',   sym:'272210.KS',sector:'방산',market:'KOSPI'},
-  {name:'LIG넥스원',    sym:'079550.KS',sector:'방산',market:'KOSPI'},
-  {name:'현대로템',     sym:'064350.KS',sector:'방산',market:'KOSPI'},
-  {name:'한국항공우주', sym:'047810.KS',sector:'방산',market:'KOSPI'},
-  {name:'이노스페이스', sym:'462350.KQ',sector:'방산',market:'KOSDAQ'},
-
-  /* ══ 금융·보험 ══ */
-  {name:'KB금융',       sym:'105560.KS',sector:'금융',market:'KOSPI'},
-  {name:'신한지주',     sym:'055550.KS',sector:'금융',market:'KOSPI'},
-  {name:'하나금융지주', sym:'086790.KS',sector:'금융',market:'KOSPI'},
-  {name:'우리금융지주', sym:'316140.KS',sector:'금융',market:'KOSPI'},
-  {name:'삼성생명',     sym:'032830.KS',sector:'금융',market:'KOSPI'},
-  {name:'삼성화재',     sym:'000810.KS',sector:'금융',market:'KOSPI'},
-  {name:'메리츠금융지주',sym:'138040.KS',sector:'금융',market:'KOSPI'},
-  {name:'키움증권',     sym:'039490.KQ',sector:'금융',market:'KOSDAQ'},
-
-  /* ══ 소재·화학·에너지 ══ */
-  {name:'POSCO홀딩스',  sym:'005490.KS',sector:'소재',market:'KOSPI'},
-  {name:'고려아연',     sym:'010130.KS',sector:'소재',market:'KOSPI'},
-  {name:'OCI홀딩스',    sym:'010060.KS',sector:'소재',market:'KOSPI'},
-  {name:'SKC',          sym:'011790.KS',sector:'소재',market:'KOSPI'},
-  {name:'한화솔루션',   sym:'009830.KS',sector:'소재',market:'KOSPI'},
-  {name:'롯데케미칼',   sym:'011170.KS',sector:'소재',market:'KOSPI'},
-  {name:'효성첨단소재', sym:'298050.KS',sector:'소재',market:'KOSPI'},
-
-  /* ══ 소비·유통·식품 ══ */
-  {name:'삼성물산',     sym:'028260.KS',sector:'소비',market:'KOSPI'},
-  {name:'LG생활건강',   sym:'051900.KS',sector:'소비',market:'KOSPI'},
-  {name:'아모레퍼시픽', sym:'090430.KS',sector:'소비',market:'KOSPI'},
-  {name:'CJ제일제당',   sym:'097950.KS',sector:'소비',market:'KOSPI'},
-  {name:'오리온',       sym:'271560.KS',sector:'소비',market:'KOSPI'},
-  {name:'롯데쇼핑',     sym:'023530.KS',sector:'소비',market:'KOSPI'},
-  {name:'이마트',       sym:'139480.KS',sector:'소비',market:'KOSPI'},
-  {name:'신세계',       sym:'004170.KS',sector:'소비',market:'KOSPI'},
-  {name:'F&F',          sym:'383220.KS',sector:'소비',market:'KOSPI'},
-  {name:'한섬',         sym:'020000.KS',sector:'소비',market:'KOSPI'},
-
-  /* ══ 로봇·AI ══ */
-  {name:'레인보우로보틱스',sym:'277810.KQ',sector:'로봇·AI',market:'KOSDAQ'},
-  {name:'두산로보틱스', sym:'454910.KS',sector:'로봇·AI',market:'KOSPI'},
-  {name:'코그넥스코리아',sym:'036670.KQ',sector:'로봇·AI',market:'KOSDAQ'},
-  {name:'티로보틱스',   sym:'388850.KQ',sector:'로봇·AI',market:'KOSDAQ'},
-  {name:'뉴로메카',     sym:'348740.KQ',sector:'로봇·AI',market:'KOSDAQ'},
-
-  /* ══ 건설·부동산 ══ */
-  {name:'삼성엔지니어링',sym:'028050.KS',sector:'건설',market:'KOSPI'},
-  {name:'현대건설',     sym:'000720.KS',sector:'건설',market:'KOSPI'},
-  {name:'GS건설',       sym:'006360.KS',sector:'건설',market:'KOSPI'},
-  {name:'DL이앤씨',     sym:'375500.KS',sector:'건설',market:'KOSPI'},
-
-  /* ══ ETF ══ */
-  {name:'KODEX 200',    sym:'069500.KS',sector:'ETF',market:'KOSPI'},
-  {name:'TIGER 반도체', sym:'091160.KS',sector:'ETF',market:'KOSPI'},
-  {name:'TIGER 2차전지테마',sym:'305720.KS',sector:'ETF',market:'KOSPI'},
-  {name:'KODEX K방산&우주',sym:'490090.KS',sector:'ETF',market:'KOSPI'},
-  {name:'TIGER 헬스케어',sym:'143460.KS',sector:'ETF',market:'KOSPI'},
-  {name:'KODEX 코스닥150',sym:'229200.KS',sector:'ETF',market:'KOSPI'},
-  {name:'TIGER 코스닥150',sym:'232080.KS',sector:'ETF',market:'KOSPI'},
-  {name:'KODEX AI반도체핵심장비',sym:'472320.KS',sector:'ETF',market:'KOSPI'},
-  {name:'TIGER 미국S&P500',sym:'360750.KS',sector:'ETF',market:'KOSPI'},
-  {name:'KODEX 미국나스닥100',sym:'133690.KS',sector:'ETF',market:'KOSPI'},
-];
-
-// ETFS_MAP에 새 섹터 추가
 const ETFS_MAP={
   '반도체':[{n:'TIGER 반도체',c:'091160.KS'},{n:'KODEX 200',c:'069500.KS'},{n:'TIGER AI반도체핵심',c:'472320.KS'}],
   'IT':[{n:'KODEX IT',c:'266360.KS'},{n:'KODEX 코스닥150',c:'229200.KS'},{n:'KODEX 200',c:'069500.KS'}],
@@ -673,11 +541,6 @@ const NEWS=[
 ];
 
 // ── STATE ──────────────────────────────────────────────
-// 심볼 → 종목 빠른 조회 맵 (검색 결과 onclick에서 사용)
-const STOCKS_MAP={};
-STOCKS.forEach(s=>{STOCKS_MAP[s.sym]=s;});
-// 차트/가격 캐시 — STOCKS 배열 항목을 오염시키지 않도록 분리
-const DATA_CACHE={};
 
 let curStock=null,chartInst=null;
 let activeMarket='전체',activeSector='전체',sentiment=0,inputMkt='KS';
