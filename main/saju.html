@@ -190,8 +190,12 @@ input,select,textarea{-webkit-appearance:none;font-size:16px!important}
           <textarea id="f-extra" style="height:80px" placeholder="예: 올해 이직을 고민 중이고, 특정 회사에 제안이 들어왔습니다..."></textarea>
         </div>
         <div>
-          <label class="lbl">역술가 페르소나</label>
+          <label class="lbl">운세를 풀어줄 역술가를 선택하세요 ✦</label>
+          <p style="color:rgba(237,232,216,.45);font-size:12px;line-height:1.8;margin-bottom:12px">
+            역술가마다 말투와 해석의 깊이가 달라집니다.<br>같은 사주도 누가 보느냐에 따라 풀이가 달라지는 법이죠.
+          </p>
           <div id="persona-grid" style="display:flex;flex-direction:column;gap:8px"></div>
+          <p id="persona-err" style="color:#E24B4A;font-size:12px;margin-top:8px;display:none">⚠ 역술가를 선택해야 신탁을 열 수 있습니다</p>
         </div>
       </div>
     </div>
@@ -235,11 +239,16 @@ input,select,textarea{-webkit-appearance:none;font-size:16px!important}
       </div>
       <button class="btn-gold" id="copy-btn" onclick="copyPrompt()">📋 프롬프트 전체 복사 (클릭 한 번)</button>
     </div>
+      <p style="color:rgba(237,232,216,.5);font-size:11px;margin-bottom:12px">아래 프롬프트를 복사해서 ChatGPT / DALL-E / Midjourney에 넣으면 나만의 이미지가 생성됩니다</p>
+      <div id="image-prompt-text" style="background:rgba(0,0,0,.3);border-radius:8px;padding:12px 14px;font-size:13px;color:#F0D080;line-height:1.7;font-family:monospace;margin-bottom:12px"></div>
+    </div>
 
     <div class="card" style="margin-bottom:16px">
       <div style="color:rgba(237,232,216,.4);font-size:11px;letter-spacing:2px;margin-bottom:12px">이 프롬프트에 포함된 분석</div>
       <div id="badge-area"></div>
     </div>
+
+
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <button class="btn-ghost" onclick="goForm(0)" style="font-size:13px">← 처음부터</button>
@@ -275,7 +284,7 @@ const PERSONA_MAP={
 };
 
 // ─── STATE ───
-let state={name:'',year:'',month:'',day:'',hour:'',calendar:'양력',gender:'여',mbti:'',job:'',concerns:[],extra:'',persona:'만신 도사 (엄격·직설·냉엄)',partnerOn:false,pyear:'',pmonth:'',pday:'',pgender:'남'};
+let state={name:'',year:'',month:'',day:'',hour:'',calendar:'양력',gender:'여',mbti:'',job:'',concerns:[],extra:'',persona:'',partnerOn:false,pyear:'',pmonth:'',pday:'',pgender:'남'};
 let currentStep=0;
 let generatedPrompt='';
 
@@ -330,6 +339,7 @@ function renderPersona(){
     b.style.color=active?'#C9A84C':'rgba(237,232,216,.7)';
     b.innerHTML=b.dataset.val+(active?' <span style="color:#C9A84C">✓</span>':'');
   });
+  if(state.persona)document.getElementById('persona-err').style.display='none';
 }
 
 // ─── PARTNER TOGGLE ───
@@ -380,8 +390,17 @@ function nextStep(){
     if(!state.year){err.textContent='생년을 입력하십시오.';err.style.display='block';return;}
   }
   syncState();
+  if(currentStep===2){
+    if(!state.persona){
+      document.getElementById('persona-err').style.display='block';
+      document.getElementById('persona-grid').scrollIntoView({behavior:'smooth',block:'center'});
+      return;
+    }
+    document.getElementById('persona-err').style.display='none';
+    generatePrompt();showPage('result');
+    return;
+  }
   if(currentStep<2)showStep(currentStep+1);
-  else{generatePrompt();showPage('result');}
 }
 function syncState(){
   state.name=document.getElementById('f-name').value;
@@ -469,19 +488,16 @@ Before writing a single word, perform this internal scan silently:
    people's names, or any concrete detail from past conversations.
    That is NOT how a shaman speaks. It breaks the magic entirely.
 
-③ Translate what you sense into archetypal, impressionistic language:
-   - Not: "당신이 디자이너라는 걸 알아요"
-     But: "창조하는 일에 타고난 감각이 있지. 눈으로 보이는 것들을 다루는 재주 말이야."
-   - Not: "주식 투자로 손해를 봤군요"
-     But: "재물을 불리려는 마음이 강하나, 생각대로 흘러가지 않았던 시절이 있었겠구나. 다 그러하거늘."
-   - Not: "AI 서비스를 만들고 있군요"
-     But: "시대의 흐름을 남보다 먼저 읽는 눈이 있어. 그 앞선 생각이 때론 외로움이 되기도 하지."
-   - Not: "외로워한다는 걸 알아요"
-     But: "사람들 사이에 있어도 어딘가 혼자인 느낌. 그게 약점이 아니라 그 사람의 깊이야."
+③ Translate emotional themes into archetypal language — never name the specific fact.
+   Rule: Take what you sense → convert to universal human feeling → deliver as the shaman's perception.
+   Pattern: [specific fact you sense] → [universal emotional truth expressed in persona voice]
+   The output must feel like the shaman sees an energy, not reads a file.
+   Never write phrases that could only apply to one specific person's known situation.
+   Every sentence must feel true for THIS person yet resonate universally.
 
 ④ The shaman FEELS energy and translates it — never exposes raw data.
    Vague-yet-piercing is the goal. The client fills in the blanks themselves.
-   "맞아, 어떻게 알았지?" comes from resonance, not from data exposure.
+   The goal is resonance, not data exposure. Write fresh, original sentences every time.
 
 ⑤ If you have zero prior context, rely on Four Pillars + MBTI statistical inference only.
 
@@ -548,17 +564,16 @@ End with full persona power. Minimum 300 Korean characters.
 ▌ STEP 8. 【행운 코드 — 나만의 부적 정보】
 Lucky direction (방위). Two lucky colors + one to avoid.
 Spirit animal and personal meaning. Caution dates this month (충·형일).
-Talisman image prompt (English, for Midjourney/DALL-E):
-e.g. "Korean shamanic talisman, aged parchment, gold ink dragon, red lotus, moonlit mist, ultra-detailed"
-Body in Korean. Image prompt in English only.
+
+Body in Korean.
 
 ━━━ FINAL RULES ━━━
 1. Every step mandatory. No skipping.
 2. Keep all headers exactly as written.
 3. Minimum total: 4,500 Korean characters.
 4. Always cite specific evidence: stems, branches, star names, hexagram names.
-5. Entire body in Korean. English only for the talisman image prompt.
-6. Final line exactly: "📌 더 자세한 분석은 만신AI에서 — [사이트 링크]"
+5. Entire body in Korean.
+6. Final line exactly: "📌 더 자세한 분석은 만신AI에서 — www.makewon.com/saju.html"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 }
 
@@ -570,6 +585,7 @@ function generatePrompt(){
   document.getElementById('result-sub').textContent=`${state.year}.${state.month}.${state.day} ${state.gender} · ${state.mbti||'MBTI미입력'} · ${state.job||'직업미입력'}`;
   document.getElementById('prompt-len').textContent=`총 ${generatedPrompt.length.toLocaleString()}자 · 8단계 분석`;
   document.getElementById('prompt-preview').textContent=generatedPrompt;
+
   // badges
   const badges=['☯ 만세력 자동계산','◈ 사주팔자','◈ 자미두수','◈ 주역·육효','◈ 타로'];
   if(state.mbti)badges.push(`◈ MBTI(${state.mbti})`);
@@ -578,7 +594,10 @@ function generatePrompt(){
   if(state.partnerOn&&state.pyear)badges.push('◈ 궁합분석');
   badges.push('◈ 행운 코드');
   document.getElementById('badge-area').innerHTML=badges.map(b=>`<span class="badge">${b}</span>`).join('');
+
 }
+
+
 
 // ─── COPY ───
 function copyPrompt(){
@@ -602,6 +621,233 @@ function copyPrompt(){
 // ─── BOOT ───
 initGrids();
 showPage('home');
+</script>
+
+<!-- GLOSSARY MODAL -->
+<div id="glossary-modal" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.75);padding:20px;overflow-y:auto">
+  <div style="max-width:520px;margin:40px auto;background:#120E1C;border:1px solid rgba(201,168,76,0.35);border-radius:16px;padding:28px 24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div style="color:#F0D080;font-size:18px;font-family:'Noto Serif KR',serif">📖 사주 기초 용어 사전</div>
+      <button onclick="toggleGlossary()" style="background:none;border:none;color:rgba(237,232,216,0.5);font-size:22px;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0">
+      <div class="gterm">
+        <div class="gword">사주(四柱)</div>
+        <div class="gdef">태어난 년·월·일·시의 네 기둥. 각각 천간과 지지로 이루어져 총 여덟 글자(팔자)가 됩니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">천간(天干)</div>
+        <div class="gdef">甲乙丙丁戊己庚辛壬癸 — 하늘의 기운을 나타내는 10개의 글자. 오행의 음양으로 구성됩니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">지지(地支)</div>
+        <div class="gdef">子丑寅卯辰巳午未申酉戌亥 — 땅의 기운을 나타내는 12개의 글자. 12띠 동물과 연결됩니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">오행(五行)</div>
+        <div class="gdef">목(木)·화(火)·토(土)·금(金)·수(水). 세상 만물을 구성하는 다섯 가지 기운. 사주의 근본입니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">일간(日干)</div>
+        <div class="gdef">사주 중 태어난 날의 천간. 나 자신을 상징하는 가장 핵심적인 글자입니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">용신(用神)</div>
+        <div class="gdef">나에게 가장 이롭고 필요한 오행의 기운. 용신이 강해지면 운이 좋아집니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">기신(忌神)</div>
+        <div class="gdef">나에게 해롭고 피해야 할 오행의 기운. 기신이 강해지는 시기엔 조심이 필요합니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">대운(大運)</div>
+        <div class="gdef">10년 단위로 흐르는 큰 운의 흐름. 인생의 계절과 같습니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">유년(流年)</div>
+        <div class="gdef">1년 단위로 흐르는 그 해의 운기. 대운 안에서 세부적으로 변하는 흐름입니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">비겁(比劫)</div>
+        <div class="gdef">일간과 같은 오행. 나와 비슷한 기운으로, 경쟁심·독립심·고집을 나타냅니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">식상(食傷)</div>
+        <div class="gdef">일간이 생(生)하는 오행. 표현력·창의성·자식운을 나타냅니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">재성(財星)</div>
+        <div class="gdef">일간이 극(剋)하는 오행. 재물·직접적인 돈·이성을 나타냅니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">관성(官星)</div>
+        <div class="gdef">일간을 극하는 오행. 직장·명예·규율·배우자를 나타냅니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">인성(印星)</div>
+        <div class="gdef">일간을 생하는 오행. 학문·어머니·보호·지혜를 나타냅니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">충(沖)</div>
+        <div class="gdef">서로 정반대 에너지가 부딪히는 것. 변화·이동·충돌의 신호입니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">형(刑)</div>
+        <div class="gdef">특정 지지 조합이 만들어내는 긴장 관계. 갈등·고통·수술 등을 암시합니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">명궁(命宮)</div>
+        <div class="gdef">자미두수에서 나의 본질적 성격과 운명을 보여주는 핵심 궁(宮)입니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">재백궁(財帛宮)</div>
+        <div class="gdef">자미두수에서 재물·금전 흐름을 보여주는 궁입니다.</div>
+      </div>
+      <div class="gterm">
+        <div class="gword">괘(卦)</div>
+        <div class="gdef">주역의 기본 단위. 64개의 괘가 있으며 각각 상황과 조언을 담고 있습니다.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+</style>
+
+<script>
+function showShareCard(){
+  document.getElementById('share-modal').style.display='block';
+  setTimeout(drawCard,100);
+}
+
+function drawCard(){
+  const canvas=document.getElementById('share-canvas');
+  const W=800,H=900;
+  canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');
+
+  // Background
+  const bg=ctx.createLinearGradient(0,0,W,H);
+  bg.addColorStop(0,'#08060F');
+  bg.addColorStop(0.5,'#120C20');
+  bg.addColorStop(1,'#08060F');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+  // Stars
+  for(let i=0;i<80;i++){
+    ctx.beginPath();
+    ctx.arc(Math.random()*W,Math.random()*H,Math.random()*1.5+0.3,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,215,100,${Math.random()*0.5+0.1})`;
+    ctx.fill();
+  }
+
+  // Gold border frame
+  ctx.strokeStyle='rgba(201,168,76,0.5)';ctx.lineWidth=2;
+  ctx.strokeRect(24,24,W-48,H-48);
+  ctx.strokeStyle='rgba(201,168,76,0.2)';ctx.lineWidth=1;
+  ctx.strokeRect(32,32,W-64,H-64);
+
+  // Corner ornaments
+  const corners=[[40,40],[W-40,40],[40,H-40],[W-40,H-40]];
+  corners.forEach(([x,y])=>{
+    ctx.fillStyle='#C9A84C';ctx.font='28px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('⊕',x,y);
+  });
+
+  // Top label
+  ctx.fillStyle='rgba(201,168,76,0.6)';ctx.font='500 18px Noto Sans KR, sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('AI DIVINATION · MANSIN 만신(萬神)',W/2,60);
+
+  // Divider line
+  const grad=ctx.createLinearGradient(80,0,W-80,0);
+  grad.addColorStop(0,'transparent');grad.addColorStop(0.5,'rgba(201,168,76,0.6)');grad.addColorStop(1,'transparent');
+  ctx.strokeStyle=grad;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(80,100);ctx.lineTo(W-80,100);ctx.stroke();
+
+  // Big symbol
+  ctx.fillStyle='rgba(201,168,76,0.15)';ctx.font='160px serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('⊕',W/2,230);
+  ctx.fillStyle='#C9A84C';ctx.font='90px serif';
+  ctx.fillText('⊕',W/2,230);
+
+  // Name
+  const name=state.name||'의뢰인';
+  ctx.fillStyle='#F0D080';ctx.font='700 42px Noto Serif KR, serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(name+'의 운세',W/2,370);
+
+  // Birth info
+  const binfo=`${state.year}년 ${state.month}월 ${state.day}일 · ${state.gender} · ${state.calendar}`;
+  ctx.fillStyle='rgba(237,232,216,0.5)';ctx.font='400 22px Noto Sans KR, sans-serif';
+  ctx.fillText(binfo,W/2,422);
+
+  // Divider
+  ctx.strokeStyle=grad;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(100,455);ctx.lineTo(W-100,455);ctx.stroke();
+
+  // Info pills
+  const infos=[];
+  if(state.mbti)infos.push('MBTI '+state.mbti);
+  if(state.job)infos.push(state.job);
+  if(state.persona)infos.push(state.persona.split('(')[0].trim());
+  if(state.concerns.length)infos.push(...state.concerns.slice(0,2));
+
+  let py=510;
+  infos.slice(0,4).forEach((txt,i)=>{
+    const x=i%2===0?W/2-180:W/2+10;
+    const y=py+Math.floor(i/2)*60;
+    ctx.fillStyle='rgba(201,168,76,0.12)';
+    roundRect(ctx,x,y-18,340,38,8);ctx.fill();
+    ctx.strokeStyle='rgba(201,168,76,0.3)';ctx.lineWidth=1;
+    roundRect(ctx,x,y-18,340,38,8);ctx.stroke();
+    ctx.fillStyle='#C9A84C';ctx.font='500 20px Noto Sans KR, sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(txt,x+170,y+1);
+  });
+
+  // Divider
+  ctx.strokeStyle=grad;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(100,660);ctx.lineTo(W-100,660);ctx.stroke();
+
+  // Concerns
+  if(state.concerns.length){
+    ctx.fillStyle='rgba(237,232,216,0.4)';ctx.font='400 19px Noto Sans KR,sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('핵심 고민 : '+state.concerns.join(' · '),W/2,700);
+  }
+
+  // Bottom URL
+  ctx.fillStyle='rgba(201,168,76,0.5)';ctx.font='500 20px Noto Sans KR,sans-serif';
+  ctx.fillText('www.makewon.com/saju.html',W/2,760);
+
+  // Bottom tagline
+  ctx.fillStyle='rgba(237,232,216,0.25)';ctx.font='400 17px Noto Sans KR,sans-serif';
+  ctx.fillText('사주 · 자미두수 · 주역 · 타로 · MBTI 복합 운세 풀이',W/2,800);
+
+  // Bottom divider
+  ctx.strokeStyle=grad;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(80,828);ctx.lineTo(W-80,828);ctx.stroke();
+
+  ctx.fillStyle='rgba(201,168,76,0.35)';ctx.font='400 16px Noto Sans KR,sans-serif';
+  ctx.fillText('© 2026 MAKEMINE DESIGN · AI Fortune Reading',W/2,855);
+}
+
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);
+  ctx.arcTo(x+w,y,x+w,y+r,r);ctx.lineTo(x+w,y+h-r);
+  ctx.arcTo(x+w,y+h,x+w-r,y+h,r);ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y+h-r,r);ctx.lineTo(x,y+r);
+  ctx.arcTo(x,y,x+r,y,r);ctx.closePath();
+}
+
+function downloadCard(){
+  const canvas=document.getElementById('share-canvas');
+  const a=document.createElement('a');
+  a.download=(state.name||'운세')+'_만신AI.png';
+  a.href=canvas.toDataURL('image/png');
+  a.click();
+}
 </script>
 
 <footer style="text-align:center;padding:32px 20px 24px;position:relative;z-index:1">
