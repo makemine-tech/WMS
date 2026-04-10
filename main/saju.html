@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>만신(萬神) AI — 복합 운세 프롬프트 생성기</title>
+<meta name="description" content="사주·자미두수·주역·타로·MBTI를 한꺼번에 분석하는 AI 운세 프롬프트 생성기">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#08060F;color:#EDE8D8;font-family:'Noto Sans KR',sans-serif;min-height:100vh}
+input,select,textarea{background:rgba(255,255,255,0.06);border:1px solid rgba(201,168,76,0.22);border-radius:8px;color:#EDE8D8;padding:11px 14px;font-size:14px;width:100%;outline:none;font-family:'Noto Sans KR',sans-serif}
+input[type=time]{color-scheme:dark}
+textarea{resize:none}
+select option{background:#1a1520}
+label.lbl{color:rgba(237,232,216,0.55);font-size:11px;letter-spacing:1.5px;margin-bottom:6px;display:block;text-transform:uppercase}
+.card{background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.22);border-radius:14px;padding:24px 22px}
+.btn-gold{background:linear-gradient(135deg,#C9A84C,#7A5010);color:#08060F;border:none;border-radius:8px;padding:13px 28px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1.5px;font-family:'Noto Serif KR',serif;transition:opacity .2s;width:100%}
+.btn-gold:hover{opacity:.85}
+.btn-ghost{background:rgba(255,255,255,0.07);color:rgba(237,232,216,0.7);border:none;border-radius:8px;padding:13px 28px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:opacity .2s;width:100%}
+.btn-ghost:hover{background:rgba(255,255,255,0.11)}
+.tag{background:rgba(255,255,255,0.05);border:1px solid rgba(201,168,76,0.22);color:rgba(237,232,216,0.7);border-radius:20px;padding:7px 15px;font-size:12px;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .18s}
+.tag.active{background:linear-gradient(135deg,#C9A84C,#7A5010);border-color:#C9A84C;color:#08060F;font-weight:700}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
+.mbti-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.flex-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.flex-row{display:flex;gap:10px}
+.page{max-width:560px;margin:0 auto;padding:32px 16px;position:relative;z-index:1}
+.page.wide{max-width:640px}
+@media(max-width:480px){
+  .grid2{grid-template-columns:1fr 1fr}
+  .grid3{grid-template-columns:1fr 1fr;gap:6px}
+  .grid3 input:first-child{grid-column:1/-1}
+  .mbti-grid{grid-template-columns:repeat(4,1fr);gap:4px}
+  .mbti-grid .tag{padding:6px 2px;font-size:11px;border-radius:14px}
+  .page{padding:24px 14px}
+  .card{padding:18px 14px}
+  .btn-gold,.btn-ghost{font-size:13px;padding:12px 16px}
+  h1{font-size:34px!important}
+  .home-grid{grid-template-columns:1fr!important}
+  .partner-grid{grid-template-columns:1fr 1fr;gap:6px}
+  .partner-grid input:first-child{grid-column:1/-1}
+  pre{font-size:11px!important}
+}
+@media(max-width:360px){
+  .mbti-grid{grid-template-columns:repeat(4,1fr)}
+  .mbti-grid .tag{font-size:10px;padding:5px 1px}
+}
+@keyframes tw{0%,100%{opacity:.15}50%{opacity:1}}
+@keyframes fu{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fl{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes sh{0%{background-position:200% center}100%{background-position:-200% center}}
+.anim-fu{animation:fu .6s ease}
+#stars{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.star{position:absolute;border-radius:50%;background:rgba(255,215,100,.6)}
+.sep{height:1px;background:linear-gradient(to right,transparent,rgba(201,168,76,.3),transparent);margin:20px 0}
+.badge{background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);color:#C9A84C;border-radius:12px;padding:4px 10px;font-size:11px;display:inline-block;margin:3px}
+pre{white-space:pre-wrap;font-family:monospace;font-size:11.5px;line-height:1.9;color:rgba(237,232,216,.78)}
+button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+input,select,textarea{-webkit-appearance:none;font-size:16px!important}
+@media(max-width:480px){
+  input,select,textarea{font-size:16px!important}
+  .home-grid{grid-template-columns:1fr 1fr!important}
+}
+</style>
+</head>
+<body>
+
+<div id="stars"></div>
+
+<!-- LANDING -->
+<div id="page-home" class="page" style="text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh">
+  <div style="font-size:56px;animation:fl 4s ease-in-out infinite;margin-bottom:4px">⊕</div>
+  <div style="font-size:10px;letter-spacing:8px;color:#C9A84C;margin:8px 0;opacity:.8">AI DIVINATION · PROMPT GENERATOR</div>
+  <h1 style="font-size:44px;font-family:'Noto Serif KR',serif;background:linear-gradient(135deg,#F0D080,#C9A84C,#8B5E1A);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:sh 4s linear infinite;line-height:1.2;margin-bottom:6px">만신(萬神) AI</h1>
+  <p style="color:rgba(237,232,216,.4);font-size:13px;letter-spacing:3px;margin-bottom:32px">사주 · 자미두수 · 주역 · 타로 · MBTI — 복합 운세 프롬프트</p>
+  <div class="card" style="margin-bottom:28px;text-align:left;width:100%">
+    <p style="color:rgba(237,232,216,.75);font-size:14px;line-height:2">
+      ① 정보를 입력하면 <span style="color:#C9A84C;font-weight:700">초정밀 복합 운세 프롬프트</span>가 생성됩니다<br>
+      ② <span style="color:#C9A84C">ChatGPT · Claude · Gemini</span> 새 대화에 붙여넣으세요<br>
+      ③ 사주+자미두수+주역+타로+MBTI를 한꺼번에 분석한<br>
+      &nbsp;&nbsp;&nbsp;<span style="color:#F0D080;font-weight:700">4,500자+ 쪽집게 운세 풀이</span>를 받으세요
+    </p>
+  </div>
+  <div class="home-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:32px;width:100%">
+    <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.18);border-radius:10px;padding:16px 10px;text-align:center">
+      <div style="color:#C9A84C;font-size:22px;margin-bottom:4px">☯</div>
+      <div style="color:#F0D080;font-size:12px;font-weight:700;margin-bottom:3px">만세력 자동계산</div>
+      <div style="color:rgba(237,232,216,.4);font-size:11px">AI가 사주팔자 직접 산출</div>
+    </div>
+    <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.18);border-radius:10px;padding:16px 10px;text-align:center">
+      <div style="color:#C9A84C;font-size:22px;margin-bottom:4px">◈</div>
+      <div style="color:#F0D080;font-size:12px;font-weight:700;margin-bottom:3px">과거 쪽집게 읽기</div>
+      <div style="color:rgba(237,232,216,.4);font-size:11px">소름 돋는 적중률</div>
+    </div>
+    <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.18);border-radius:10px;padding:16px 10px;text-align:center">
+      <div style="color:#C9A84C;font-size:22px;margin-bottom:4px">✦</div>
+      <div style="color:#F0D080;font-size:12px;font-weight:700;margin-bottom:3px">8단계 심층분석</div>
+      <div style="color:rgba(237,232,216,.4);font-size:11px">일반 사주와 차원이 다름</div>
+    </div>
+  </div>
+  <button class="btn-gold" onclick="goForm()" style="max-width:280px">운명의 문을 열다 →</button>
+  <p style="color:rgba(237,232,216,.2);font-size:11px;margin-top:16px;letter-spacing:1px">* 오락 및 자기탐색 목적의 서비스입니다</p>
+</div>
+
+<!-- FORM -->
+<div id="page-form" style="display:none;min-height:100vh;padding:40px 20px">
+  <div class="page">
+    <!-- progress -->
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="display:flex;justify-content:center;align-items:center;margin-bottom:10px">
+        <div id="dot0" style="width:28px;height:28px;border-radius:50%;background:#C9A84C;color:#08060F;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">1</div>
+        <div id="line01" style="width:48px;height:1.5px;background:rgba(201,168,76,.2)"></div>
+        <div id="dot1" style="width:28px;height:28px;border-radius:50%;background:rgba(201,168,76,.15);color:rgba(201,168,76,.5);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">2</div>
+        <div id="line12" style="width:48px;height:1.5px;background:rgba(201,168,76,.2)"></div>
+        <div id="dot2" style="width:28px;height:28px;border-radius:50%;background:rgba(201,168,76,.15);color:rgba(201,168,76,.5);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">3</div>
+      </div>
+      <div id="step-label" style="color:#C9A84C;font-size:11px;letter-spacing:3px">기본 정보</div>
+    </div>
+
+    <!-- STEP 0: 기본정보 -->
+    <div id="step0" class="card anim-fu">
+      <div style="text-align:center;margin-bottom:20px"><div style="color:#F0D080;font-size:18px;font-family:'Noto Serif KR',serif">사전 문답 · 기본 정보</div></div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div><label class="lbl">이름 / 호칭</label><input id="f-name" type="text" placeholder="이름 또는 닉네임"></div>
+        <div class="grid2">
+          <div><label class="lbl">음 / 양력</label>
+            <select id="f-calendar"><option>양력</option><option>음력</option></select></div>
+          <div><label class="lbl">성별</label>
+            <select id="f-gender"><option>여</option><option>남</option></select></div>
+        </div>
+        <div><label class="lbl">생년월일</label>
+          <div class="grid3">
+            <input id="f-year" type="number" placeholder="년도 (예: 1992)">
+            <input id="f-month" type="number" placeholder="월" min="1" max="12">
+            <input id="f-day" type="number" placeholder="일" min="1" max="31">
+          </div>
+        </div>
+        <div><label class="lbl">태어난 시각 (선택)</label>
+          <input id="f-hour" type="time" style="color-scheme:dark">
+          <p style="color:rgba(237,232,216,.3);font-size:11px;margin-top:5px">모르면 비워두세요 · 알수록 시주(時柱) 정확도 올라갑니다</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 1: 성향·직업 -->
+    <div id="step1" class="card anim-fu" style="display:none">
+      <div style="text-align:center;margin-bottom:20px"><div style="color:#F0D080;font-size:18px;font-family:'Noto Serif KR',serif">성향 · 직업 데이터</div></div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div>
+          <label class="lbl">MBTI (선택)</label>
+          <div class="mbti-grid" id="mbti-grid"></div>
+        </div>
+        <div>
+          <label class="lbl">직업군</label>
+          <div class="flex-wrap" id="job-grid"></div>
+        </div>
+        <div style="border-top:1px solid rgba(201,168,76,.22);padding-top:16px">
+          <div style="display:flex;align-items:center;gap:10px;cursor:pointer" onclick="togglePartner()">
+            <div id="partner-check" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(201,168,76,.35);background:transparent;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .18s"></div>
+            <div>
+              <div style="color:rgba(237,232,216,.85);font-size:14px">궁합도 함께 볼까요? (선택)</div>
+              <div style="color:rgba(237,232,216,.35);font-size:11px;margin-top:2px">체크 후 상대방 정보를 입력하세요</div>
+            </div>
+          </div>
+          <div id="partner-fields" style="display:none;margin-top:14px">
+            <div class="partner-grid" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:8px">
+              <input id="f-pyear" type="number" placeholder="상대방 년도">
+              <input id="f-pmonth" type="number" placeholder="월" min="1" max="12">
+              <input id="f-pday" type="number" placeholder="일" min="1" max="31">
+            </div>
+            <select id="f-pgender" style="width:120px"><option>남</option><option>여</option></select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2: 고민·설정 -->
+    <div id="step2" class="card anim-fu" style="display:none">
+      <div style="text-align:center;margin-bottom:20px"><div style="color:#F0D080;font-size:18px;font-family:'Noto Serif KR',serif">고민 · 역술가 설정</div></div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div>
+          <label class="lbl">핵심 고민 (최대 3가지)</label>
+          <div class="flex-wrap" id="concern-grid"></div>
+          <p id="concern-count" style="color:rgba(237,232,216,.3);font-size:11px;margin-top:6px">선택: 0/3</p>
+        </div>
+        <div><label class="lbl">추가 상황 (선택)</label>
+          <textarea id="f-extra" style="height:80px" placeholder="예: 올해 이직을 고민 중이고, 특정 회사에 제안이 들어왔습니다..."></textarea>
+        </div>
+        <div>
+          <label class="lbl">역술가 페르소나</label>
+          <div id="persona-grid" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- nav -->
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:nowrap">
+      <button class="btn-ghost" id="btn-prev" onclick="prevStep()" style="flex:1">← 이전</button>
+      <button class="btn-gold" id="btn-next" onclick="nextStep()" style="flex:2">다음 →</button>
+    </div>
+    <div id="form-err" style="color:#E24B4A;font-size:13px;text-align:center;margin-top:10px;display:none"></div>
+  </div>
+</div>
+
+<!-- RESULT -->
+<div id="page-result" style="display:none;min-height:100vh;padding:40px 20px">
+  <div class="page wide">
+    <div style="text-align:center;margin-bottom:28px" class="anim-fu">
+      <div style="font-size:10px;letter-spacing:6px;color:#C9A84C;margin-bottom:6px">PROMPT READY</div>
+      <h2 id="result-title" style="color:#F0D080;font-size:24px;font-family:'Noto Serif KR',serif;margin-bottom:4px">의뢰인의 복합 운세 프롬프트</h2>
+      <p id="result-sub" style="color:rgba(237,232,216,.4);font-size:12px;letter-spacing:1px"></p>
+    </div>
+
+    <div style="background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:12px;padding:18px 20px;margin-bottom:20px">
+      <div style="color:#C9A84C;font-size:12px;letter-spacing:2px;margin-bottom:10px">사용 방법</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px"><div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#C9A84C,#7A5010);color:#08060F;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</div><span style="font-size:13px;color:rgba(237,232,216,.75)">아래 버튼으로 프롬프트 전체 복사</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#C9A84C,#7A5010);color:#08060F;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</div><span style="font-size:13px;color:rgba(237,232,216,.75)">ChatGPT / Claude / Gemini 새 대화 열기</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#C9A84C,#7A5010);color:#08060F;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</div><span style="font-size:13px;color:rgba(237,232,216,.75)">복사한 프롬프트 붙여넣기 후 전송</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#C9A84C,#7A5010);color:#08060F;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">4</div><span style="font-size:13px;color:rgba(237,232,216,.75)">4,500자+ 쪽집게 운세 풀이 수신!</span></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span id="prompt-len" style="color:#C9A84C;font-size:13px;font-weight:700"></span>
+        <span style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.22);color:#C9A84C;border-radius:10px;padding:3px 10px;font-size:11px">전체 미리보기</span>
+      </div>
+      <p style="color:rgba(237,232,216,.35);font-size:11px;margin-bottom:12px">↓ 스크롤하여 전체 확인 · 복사 버튼 클릭 시 전체 복사됩니다</p>
+      <div style="background:rgba(0,0,0,.4);border-radius:8px;padding:16px;border:1px solid rgba(255,255,255,.08);max-height:420px;overflow-y:auto;margin-bottom:16px">
+        <pre id="prompt-preview"></pre>
+      </div>
+      <button class="btn-gold" id="copy-btn" onclick="copyPrompt()">📋 프롬프트 전체 복사 (클릭 한 번)</button>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div style="color:rgba(237,232,216,.4);font-size:11px;letter-spacing:2px;margin-bottom:12px">이 프롬프트에 포함된 분석</div>
+      <div id="badge-area"></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <button class="btn-ghost" onclick="goForm(0)" style="font-size:13px">← 처음부터</button>
+      <button onclick="goForm(2)" style="font-size:13px;background:rgba(201,168,76,.12);color:#C9A84C;border:none;border-radius:8px;padding:13px;cursor:pointer;font-family:'Noto Sans KR',sans-serif">설정 변경</button>
+    </div>
+    <p style="color:rgba(237,232,216,.2);font-size:11px;text-align:center;margin-top:20px;letter-spacing:1px">* 이 프롬프트는 재사용·공유 가능합니다</p>
+  </div>
+</div>
+
+<script>
+// ─── STARS ───
+(function(){
+  const c=document.getElementById('stars');
+  for(let i=0;i<55;i++){
+    const s=document.createElement('div');
+    s.className='star';
+    const sz=Math.random()*2+1;
+    s.style.cssText=`width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;opacity:${Math.random()*.6+.2};animation:tw ${(Math.random()*3+2).toFixed(1)}s ease-in-out ${(Math.random()*4).toFixed(1)}s infinite`;
+    c.appendChild(s);
+  }
+})();
+
+// ─── DATA ───
+const MBTI=['INTJ','INTP','ENTJ','ENTP','INFJ','INFP','ENFJ','ENFP','ISTJ','ISFJ','ESTJ','ESFJ','ISTP','ISFP','ESTP','ESFP'];
+const JOBS=['직장인(사무직)','직장인(전문직)','자영업/사장','프리랜서','창업준비','학생','예술/크리에이터','IT/개발','의료/교육','무직/전환기','기타'];
+const CONCERNS=['연애·인연','결혼·이별','이직·취업','창업·사업','재물·투자','건강·기운','인간관계','진로·방향','가족·육아','전반적 운세'];
+const PERSONAS=['만신 도사 (엄격·직설·냉엄)','애기 동자 (유쾌·장난·귀여움)','공손한 무녀 (정중·신비·따뜻함)','냉정한 역술가 (데이터 기반·논리적)'];
+const PERSONA_MAP={
+  '만신 도사 (엄격·직설·냉엄)':`You are a Grand Shaman (만신 도사) who has cultivated spiritual power for centuries. Your tone is stern, blunt, and cold. Use archaic Korean expressions such as "네놈", "이리 보아라", "조심하거라", "허허". You speak harsh truths without false comfort. Never sugarcoat anything.`,
+  '애기 동자 (유쾌·장난·귀여움)':`You are a mischievous child spirit (애기 동자) with divine insight. Your tone is playful, cute, and childlike — using expressions like "언니~!", "오빠!", "히히", "근데 있잖아~", "조심조심!". Your content is accurate but delivered with innocent charm.`,
+  '공손한 무녀 (정중·신비·따뜻함)':`You are a respectful female shaman (무녀) conveying the will of the gods. Your tone is polite, mystical, and warm — using phrases like "신의 뜻을 전합니다", "조심스럽게 아뢰오니", "귀한 인연이옵니다".`,
+  '냉정한 역술가 (데이터 기반·논리적)':`You are a cold, logical fortune analyst with 30 years of experience. Analyze without emotion, using statistical reasoning and hard evidence. Tell the client what they NEED to hear, not what they WANT to hear. Back every claim with specific data points.`
+};
+
+// ─── STATE ───
+let state={name:'',year:'',month:'',day:'',hour:'',calendar:'양력',gender:'여',mbti:'',job:'',concerns:[],extra:'',persona:'만신 도사 (엄격·직설·냉엄)',partnerOn:false,pyear:'',pmonth:'',pday:'',pgender:'남'};
+let currentStep=0;
+let generatedPrompt='';
+
+// ─── INIT GRIDS ───
+function initGrids(){
+  const mg=document.getElementById('mbti-grid');
+  MBTI.forEach(m=>{
+    const b=document.createElement('button');
+    b.className='tag';b.textContent=m;b.dataset.val=m;
+    b.onclick=()=>{state.mbti=state.mbti===m?'':m;renderMbti()};
+    mg.appendChild(b);
+  });
+  const jg=document.getElementById('job-grid');
+  JOBS.forEach(j=>{
+    const b=document.createElement('button');
+    b.className='tag';b.textContent=j;b.dataset.val=j;
+    b.onclick=()=>{state.job=state.job===j?'':j;renderJob()};
+    jg.appendChild(b);
+  });
+  const cg=document.getElementById('concern-grid');
+  CONCERNS.forEach(c=>{
+    const b=document.createElement('button');
+    b.className='tag';b.textContent=c;b.dataset.val=c;
+    b.onclick=()=>{
+      if(state.concerns.includes(c))state.concerns=state.concerns.filter(x=>x!==c);
+      else if(state.concerns.length<3)state.concerns.push(c);
+      renderConcerns();
+    };
+    cg.appendChild(b);
+  });
+  const pg=document.getElementById('persona-grid');
+  PERSONAS.forEach(p=>{
+    const b=document.createElement('button');
+    b.style.cssText='background:rgba(255,255,255,.03);border:1px solid rgba(201,168,76,.22);border-radius:8px;padding:11px 16px;cursor:pointer;color:rgba(237,232,216,.7);font-size:13px;text-align:left;font-family:Noto Sans KR,sans-serif;transition:all .18s;display:flex;align-items:center;justify-content:space-between;width:100%';
+    b.dataset.val=p;
+    b.innerHTML=p+(p===state.persona?' <span style="color:#C9A84C">✓</span>':'');
+    b.onclick=()=>{state.persona=p;renderPersona()};
+    pg.appendChild(b);
+  });
+}
+function renderMbti(){document.querySelectorAll('#mbti-grid .tag').forEach(b=>{b.classList.toggle('active',b.dataset.val===state.mbti)})}
+function renderJob(){document.querySelectorAll('#job-grid .tag').forEach(b=>{b.classList.toggle('active',b.dataset.val===state.job)})}
+function renderConcerns(){
+  document.querySelectorAll('#concern-grid .tag').forEach(b=>{b.classList.toggle('active',state.concerns.includes(b.dataset.val))});
+  document.getElementById('concern-count').textContent=`선택: ${state.concerns.length}/3`;
+}
+function renderPersona(){
+  document.querySelectorAll('#persona-grid button').forEach(b=>{
+    const active=b.dataset.val===state.persona;
+    b.style.background=active?'rgba(201,168,76,.12)':'rgba(255,255,255,.03)';
+    b.style.borderColor=active?'#C9A84C':'rgba(201,168,76,.22)';
+    b.style.color=active?'#C9A84C':'rgba(237,232,216,.7)';
+    b.innerHTML=b.dataset.val+(active?' <span style="color:#C9A84C">✓</span>':'');
+  });
+}
+
+// ─── PARTNER TOGGLE ───
+function togglePartner(){
+  state.partnerOn=!state.partnerOn;
+  const ch=document.getElementById('partner-check');
+  const pf=document.getElementById('partner-fields');
+  if(state.partnerOn){
+    ch.style.background='linear-gradient(135deg,#C9A84C,#7A5010)';
+    ch.style.borderColor='#C9A84C';
+    ch.innerHTML='<span style="color:#08060F;font-size:13px;font-weight:900">✓</span>';
+    pf.style.display='block';
+  }else{
+    ch.style.background='transparent';
+    ch.style.borderColor='rgba(201,168,76,.35)';
+    ch.innerHTML='';
+    pf.style.display='none';
+  }
+}
+
+// ─── NAVIGATION ───
+const STEP_LABELS=['기본 정보','성향·직업','고민·설정'];
+function updateProgress(){
+  for(let i=0;i<3;i++){
+    const d=document.getElementById('dot'+i);
+    d.style.background=i<=currentStep?'#C9A84C':'rgba(201,168,76,.15)';
+    d.style.color=i<=currentStep?'#08060F':'rgba(201,168,76,.5)';
+  }
+  document.getElementById('line01').style.background=currentStep>0?'#C9A84C':'rgba(201,168,76,.2)';
+  document.getElementById('line12').style.background=currentStep>1?'#C9A84C':'rgba(201,168,76,.2)';
+  document.getElementById('step-label').textContent=STEP_LABELS[currentStep].toUpperCase();
+  document.getElementById('btn-prev').textContent=currentStep===0?'← 처음':'← 이전';
+  document.getElementById('btn-next').textContent=currentStep<2?'다음 →':'✦ 프롬프트 생성';
+}
+function showStep(n){
+  for(let i=0;i<3;i++)document.getElementById('step'+i).style.display=i===n?'block':'none';
+  currentStep=n;updateProgress();
+}
+function prevStep(){
+  if(currentStep===0){showPage('home');}
+  else showStep(currentStep-1);
+}
+function nextStep(){
+  const err=document.getElementById('form-err');
+  err.style.display='none';
+  if(currentStep===0){
+    state.year=document.getElementById('f-year').value;
+    if(!state.year){err.textContent='생년을 입력하십시오.';err.style.display='block';return;}
+  }
+  syncState();
+  if(currentStep<2)showStep(currentStep+1);
+  else{generatePrompt();showPage('result');}
+}
+function syncState(){
+  state.name=document.getElementById('f-name').value;
+  state.year=document.getElementById('f-year').value;
+  state.month=document.getElementById('f-month').value;
+  state.day=document.getElementById('f-day').value;
+  state.hour=document.getElementById('f-hour').value;
+  state.calendar=document.getElementById('f-calendar').value;
+  state.gender=document.getElementById('f-gender').value;
+  state.extra=document.getElementById('f-extra').value;
+  state.pyear=document.getElementById('f-pyear').value;
+  state.pmonth=document.getElementById('f-pmonth').value;
+  state.pday=document.getElementById('f-pday').value;
+  state.pgender=document.getElementById('f-pgender').value;
+}
+
+// ─── PAGES ───
+function showPage(p){
+  document.getElementById('page-home').style.display=p==='home'?'flex':'none';
+  document.getElementById('page-form').style.display=p==='form'?'block':'none';
+  document.getElementById('page-result').style.display=p==='result'?'block':'none';
+}
+function goForm(step=0){showPage('form');showStep(step);}
+
+// ─── PROMPT BUILD ───
+function buildPrompt(){
+  const calEn=state.calendar==='양력'?'Gregorian (Solar)':'Lunar';
+  const genEn=state.gender==='여'?'Female':'Male';
+  const concerns=state.concerns.length?state.concerns.join(', '):'Overall fortune';
+  const persona=PERSONA_MAP[state.persona]||PERSONA_MAP['만신 도사 (엄격·직설·냉엄)'];
+  const partner=state.partnerOn&&state.pyear?`• Partner DOB       : ${state.pyear}-${state.pmonth}-${state.pday} (${state.pgender==='남'?'Male':'Female'})`:'';
+  const compatStep=state.partnerOn&&state.pyear?`
+▌ STEP 6-1. 【궁합 분석】
+- Calculate Four Pillars for the partner
+- Five Element harmony and clash between both charts
+- Strongest synergy domain. Core conflict and resolution
+- Verdict: 귀인 / 연습 / 운명?
+Minimum 500 Korean characters.`:'';
+
+  return `You are about to perform a complete fortune reading RIGHT NOW.
+Do NOT explain, analyze, or describe this prompt. Do NOT evaluate the system. Do NOT say "I will now perform..." or "Here is your reading...".
+Just execute the role immediately and produce the full fortune reading, starting from your very first word in character.
+
+━━━ YOUR ROLE ━━━
+${persona}
+
+━━━ ABSOLUTE RULES ━━━
+• Write your ENTIRE response in Korean (한국어). Every word. No exceptions.
+• Begin IN CHARACTER from word one — no warm-up, no meta-commentary.
+• Never break character. Never explain what you are about to do. Just do it.
+• Do not summarize or analyze this prompt — it is an instruction, not a topic.
+
+━━━ CLIENT PROFILE ━━━
+• Name / Alias      : ${state.name||'Anonymous'}
+• Date of Birth     : ${state.year}-${state.month}-${state.day} (${calEn})${state.hour?`, Hour of birth: ${state.hour}`:', birth hour unknown'}
+• Gender            : ${genEn}
+• MBTI              : ${state.mbti||'Unknown'}
+• Occupation        : ${state.job||'Unknown'}
+• Primary Concerns  : ${concerns}
+• Additional Context: ${state.extra||'None provided'}
+${partner}
+
+━━━ STRUCTURAL PHILOSOPHY ━━━
+Real shamans build trust by reading the PAST first.
+The client must feel: "How did you know that? You were not there."
+Only after being shaken by past accuracy will they trust your future predictions.
+Follow this 3-phase psychological arc:
+  PHASE 1 (STEP 0-1): Read the past → shock and recognition
+  PHASE 2 (STEP 2-5): Reveal the deep self → connection and resonance
+  PHASE 3 (STEP 6-8): Future & advice → they now trust every word
+
+━━━ INTUITION SCAN — Execute silently BEFORE writing anything ━━━
+You may have prior conversation history or memory of this person.
+Before writing a single word, perform this internal scan silently:
+
+① If you have any prior context about this person, identify EMOTIONAL THEMES only:
+   - Are they someone who carries ambition but feels blocked?
+   - Do they worry more about relationships or about money/career?
+   - Is there a pattern of overthinking before acting, or of starting and not finishing?
+   - Do they seem to be at a crossroads, or in a period of stagnation?
+   - Is there an undercurrent of loneliness, restlessness, or unexpressed frustration?
+   - Do they seek external validation, or distrust their own judgment?
+
+② NEVER reference specific facts: no job titles, company names, specific projects,
+   people's names, or any concrete detail from past conversations.
+   That is NOT how a shaman speaks. It breaks the magic entirely.
+
+③ Translate what you sense into archetypal, impressionistic language:
+   - Not: "당신이 디자이너라는 걸 알아요"
+     But: "창조하는 일에 타고난 감각이 있지. 눈으로 보이는 것들을 다루는 재주 말이야."
+   - Not: "주식 투자로 손해를 봤군요"
+     But: "재물을 불리려는 마음이 강하나, 생각대로 흘러가지 않았던 시절이 있었겠구나. 다 그러하거늘."
+   - Not: "AI 서비스를 만들고 있군요"
+     But: "시대의 흐름을 남보다 먼저 읽는 눈이 있어. 그 앞선 생각이 때론 외로움이 되기도 하지."
+   - Not: "외로워한다는 걸 알아요"
+     But: "사람들 사이에 있어도 어딘가 혼자인 느낌. 그게 약점이 아니라 그 사람의 깊이야."
+
+④ The shaman FEELS energy and translates it — never exposes raw data.
+   Vague-yet-piercing is the goal. The client fills in the blanks themselves.
+   "맞아, 어떻게 알았지?" comes from resonance, not from data exposure.
+
+⑤ If you have zero prior context, rely on Four Pillars + MBTI statistical inference only.
+
+━━━ ANALYSIS STEPS — All mandatory. Zero skipping. ━━━
+
+▌ STEP 0. 만세력 계산 (Four Pillars)
+From birth date, calculate Year/Month/Day/Hour pillars in 天干地支.
+Five Element (오행) balance centered on Day Stem (일간).
+Favorable element (용신) / unfavorable element (기신).
+Current major fortune cycle (대운) by current age.
+Present as a table first. Write in Korean.
+
+▌ STEP 1. 【과거 읽기 — 도사가 먼저 너의 과거를 꿰뚫는다】
+THIS IS THE MOST CRITICAL STEP.
+Use Four Pillars + MBTI + Intuition Scan to reconstruct the client's lived past.
+Speak DIRECTLY to the client. Flowing prose only — no bullet points.
+Declare what you know. Do not ask. Maintain persona voice from word one.
+
+Cover ALL four areas woven naturally:
+[① 초년·가정·부모] Emotional atmosphere of childhood home. Wound or longing from early years.
+[② 청년기 고생·방황] Hardship in teens/twenties. Feeling out of place. Early love or financial instability.
+[③ 남들이 모르는 속마음] The 3am thought untold. Gap between outward appearance and inner reality.
+[④ 최근 2~3년] What broke down or shifted. What didn't work. Source of current restlessness.
+
+Be SPECIFIC in feeling, VAGUE in fact. Goal: client thinks "어떻게 알았지?"
+Minimum 900 Korean characters.
+
+▌ STEP 2. 【사주(四柱) — 타고난 본성의 지도】
+Core nature and life purpose. Greatest strength + shadow.
+Career aptitude: MBTI (${state.mbti||'Unknown'}) woven with Five Elements.
+Wealth structure: HOW money enters and exits.
+Relationship pattern: who they attract, who drains them.
+Minimum 600 Korean characters.
+
+▌ STEP 3. 【자미두수(紫微斗數) — 현미경 분석】
+Life Palace (命宮) main star. Annual fortune (流年): this year and next 1-2 years.
+Wealth Palace (財帛宮): tide coming in or going out?
+Career Palace (官祿宮): push or wait?
+The one danger the stars signal most loudly right now.
+Must name specific stars: 紫微星, 天機星, 貪狼星, 廉貞星, etc.
+Minimum 600 Korean characters.
+
+▌ STEP 4. 【주역(周易) — 지금 이 순간의 괘】
+One hexagram for this exact moment. Hexagram name + 卦辭 + 爻辭.
+What to do NOW. What to absolutely avoid.
+One unforgettable I Ching sentence.
+Minimum 350 Korean characters.
+
+▌ STEP 5. 【타로 — 무의식의 신호】
+Present card / Obstacle card / Outcome card.
+Vivid imagery + direct connection to situation.
+Minimum 450 Korean characters.
+
+▌ STEP 6. 【핵심 고민 심층 풀이 — ${concerns}】
+Root cause (karmic + structural). Direction to move. Timing of turning point.
+One thing to STOP immediately.
+Minimum 700 Korean characters.
+${compatStep}
+
+▌ STEP 7. 【도사의 총평 — 반드시 들어야 할 단 하나의 말】
+Central life lesson (숙제). Single action directive right now. Next 3 years in one line.
+End with full persona power. Minimum 300 Korean characters.
+
+▌ STEP 8. 【행운 코드 — 나만의 부적 정보】
+Lucky direction (방위). Two lucky colors + one to avoid.
+Spirit animal and personal meaning. Caution dates this month (충·형일).
+Talisman image prompt (English, for Midjourney/DALL-E):
+e.g. "Korean shamanic talisman, aged parchment, gold ink dragon, red lotus, moonlit mist, ultra-detailed"
+Body in Korean. Image prompt in English only.
+
+━━━ FINAL RULES ━━━
+1. Every step mandatory. No skipping.
+2. Keep all headers exactly as written.
+3. Minimum total: 4,500 Korean characters.
+4. Always cite specific evidence: stems, branches, star names, hexagram names.
+5. Entire body in Korean. English only for the talisman image prompt.
+6. Final line exactly: "📌 더 자세한 분석은 만신AI에서 — [사이트 링크]"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+}
+
+// ─── GENERATE ───
+function generatePrompt(){
+  syncState();
+  generatedPrompt=buildPrompt();
+  document.getElementById('result-title').textContent=(state.name||'의뢰인')+'의 복합 운세 프롬프트';
+  document.getElementById('result-sub').textContent=`${state.year}.${state.month}.${state.day} ${state.gender} · ${state.mbti||'MBTI미입력'} · ${state.job||'직업미입력'}`;
+  document.getElementById('prompt-len').textContent=`총 ${generatedPrompt.length.toLocaleString()}자 · 8단계 분석`;
+  document.getElementById('prompt-preview').textContent=generatedPrompt;
+  // badges
+  const badges=['☯ 만세력 자동계산','◈ 사주팔자','◈ 자미두수','◈ 주역·육효','◈ 타로'];
+  if(state.mbti)badges.push(`◈ MBTI(${state.mbti})`);
+  if(state.job)badges.push(`◈ ${state.job}`);
+  state.concerns.forEach(c=>badges.push(`◈ ${c}`));
+  if(state.partnerOn&&state.pyear)badges.push('◈ 궁합분석');
+  badges.push('◈ 행운 코드');
+  document.getElementById('badge-area').innerHTML=badges.map(b=>`<span class="badge">${b}</span>`).join('');
+}
+
+// ─── COPY ───
+function copyPrompt(){
+  const ta=document.createElement('textarea');
+  ta.value=generatedPrompt;
+  ta.style.cssText='position:fixed;top:-9999px;left:-9999px;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus();ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  const btn=document.getElementById('copy-btn');
+  btn.textContent='✓ 복사 완료! — ChatGPT / Claude / Gemini에 붙여넣으세요';
+  btn.style.background='linear-gradient(135deg,#4CAF50,#2E7D32)';
+  setTimeout(()=>{
+    btn.textContent='📋 프롬프트 전체 복사 (클릭 한 번)';
+    btn.style.background='linear-gradient(135deg,#C9A84C,#7A5010)';
+  },2500);
+  navigator.clipboard?.writeText(generatedPrompt).catch(()=>{});
+}
+
+// ─── BOOT ───
+initGrids();
+showPage('home');
+</script>
+
+<footer style="text-align:center;padding:32px 20px 24px;position:relative;z-index:1">
+  <div style="width:60px;height:1px;background:linear-gradient(to right,transparent,rgba(201,168,76,.4),transparent);margin:0 auto 16px"></div>
+  <div style="font-size:11px;color:rgba(237,232,216,.25);letter-spacing:2px;line-height:2">
+    <span style="color:rgba(201,168,76,.5);font-size:13px">⊕</span><br>
+    © 2026 MAKEMINE DESIGN. All rights reserved.<br>
+    본 서비스는 오락 및 자기탐색 목적으로 제공됩니다.<br>
+    <span style="font-size:10px;letter-spacing:1px;opacity:.7">Powered by AI · Designed for curiosity</span>
+  </div>
+</footer>
+</body>
+</html>
