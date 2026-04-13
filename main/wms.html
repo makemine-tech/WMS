@@ -52,12 +52,13 @@ var fbDb=firebase.database();
 
 function normalizeWH(raw){
   if(!raw||!raw.id)return null;
-  var wh=Object.assign({inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',pendOut:[]},raw);
+  var wh=Object.assign({inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',pendOut:[],txLog:[]},raw);
   if(!Array.isArray(wh.inQ))wh.inQ=[];
   if(!Array.isArray(wh.history))wh.history=[];
   if(!Array.isArray(wh.undoStack))wh.undoStack=[];
   wh.undoStack=[];
   if(!Array.isArray(wh.pendOut))wh.pendOut=[];
+  if(!Array.isArray(wh.txLog))wh.txLog=[];
   if(!wh.pColors||typeof wh.pColors!=='object')wh.pColors={};
   var cells={};
   for(var r=0;r<(wh.rows||0);r++){
@@ -121,6 +122,10 @@ function uid(){return Math.random().toString(36).slice(2,9);}
 function genCode(){var c='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',r='';for(var i=0;i<6;i++)r+=c[Math.floor(Math.random()*c.length)];return r;}
 function dayLabel(){var d=new Date(),W=['일','월','화','수','목','금','토'];return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate())+' ('+W[d.getDay()]+')';}
 function pad(n){return String(n).padStart(2,'0');}
+function todayStr(){var d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function daysAgoStr(n){var d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function dateKr(s){if(!s)return '';var p=s.split('-'),W=['일','월','화','수','목','금','토'];var dt=new Date(+p[0],+p[1]-1,+p[2]);return p[1]+'.'+p[2]+' ('+W[dt.getDay()]+')';}
+function aggregateTxLog(txLog,dateStr,type){var entries=(txLog||[]).filter(function(t){return t.date===dateStr&&t.type===type;});var m={};entries.forEach(function(e){var key=e.name+'__'+(e.exp||'');if(!m[key])m[key]={name:e.name,exp:e.exp||'',pallets:0,qty:0};m[key].pallets+=e.pallets||1;m[key].qty+=e.qty||0;});return Object.values(m);}
 function fmtExp(s){return s&&s.length===6?'20'+s.slice(0,2)+'.'+s.slice(2,4)+'.'+s.slice(4,6):(s||'');}
 function fmtShort(s){return s&&s.length===6?s.slice(2,4)+'/'+s.slice(4,6):'';}
 function deep(o){try{return JSON.parse(JSON.stringify(o));}catch(e){console.warn('deep() 실패',e);return o;}}
@@ -139,7 +144,7 @@ var Footer=h('div',{style:{position:'fixed',bottom:0,left:0,right:0,pointerEvent
 
 function mkSlots(r,c){var s={};for(var i=0;i<r;i++)for(var j=0;j<c;j++)s[i+'-'+j]=null;return s;}
 function mkCell(tp,dr,dc){return{type:tp,divR:dr,divC:dc,slots:mkSlots(dr,dc)};}
-function mkWH(name,rows,cols){var cells={};for(var r=0;r<rows;r++)for(var c=0;c<cols;c++)cells[r+'-'+c]={type:null,divR:1,divC:1,slots:{'0-0':null}};return{id:uid(),name:name,rows:rows,cols:cols,cells:cells,inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',pendOut:[]};}
+function mkWH(name,rows,cols){var cells={};for(var r=0;r<rows;r++)for(var c=0;c<cols;c++)cells[r+'-'+c]={type:null,divR:1,divC:1,slots:{'0-0':null}};return{id:uid(),name:name,rows:rows,cols:cols,cells:cells,inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',pendOut:[],txLog:[]};}
 function calcSt(wh){var tot=0,used=0;Object.values(wh.cells||{}).forEach(function(c){if(!c)return;if(c.type==='rack'||c.type==='shelf'){tot+=((c.divR||1)*(c.divC||1));used+=Object.values(c.slots||{}).filter(Boolean).length;}});return{tot:tot,used:used,free:tot-used};}
 function getPG(wh,cells){var src=cells||wh.cells||{},m={};Object.values(src).forEach(function(c){if(!c)return;Object.values(c.slots||{}).forEach(function(s){if(!s)return;var clr=(wh.pColors&&wh.pColors[s.name])||'#94A3B8';if(!m[s.name])m[s.name]={name:s.name,cnt:0,totalQty:0,clr:clr,exps:{}};m[s.name].cnt++;m[s.name].totalQty+=s.qty||0;var ek=s.exp||'';if(!m[s.name].exps[ek])m[s.name].exps[ek]={exp:ek,cnt:0,totalQty:0};m[s.name].exps[ek].cnt++;m[s.name].exps[ek].totalQty+=s.qty||0;});});return Object.values(m).map(function(p){return Object.assign({},p,{exps:Object.values(p.exps).sort(function(a,b){if(!a.exp)return 1;if(!b.exp)return -1;return a.exp.localeCompare(b.exp);})});});}
 function pickClr(wh,name){if(wh.pColors[name])return wh.pColors[name];var used=new Set(Object.values(wh.pColors));return PAL.find(function(c){return !used.has(c);})||PAL[0];}
@@ -467,6 +472,7 @@ function WHView(p){
   var v14=useState(null),colorPick=v14[0],setColorPick=v14[1];
   var v15=useState(false),saveFlash=v15[0],setSaveFlash=v15[1];
   var v16=useState(null),hlProd=v16[0],setHlProd=v16[1];
+  var v17=useState(null),hlExp=v17[0],setHlExp=v17[1];
   /* ★ 상품 필터 바텀시트 */
   var f1=useState(false),filterOpen=f1[0],setFilterOpen=f1[1];
   var f2=useState(''),filterSearch=f2[0],setFilterSearch=f2[1];
@@ -513,19 +519,20 @@ function WHView(p){
   function chgClr(name,clr){onUpdate(function(w){return Object.assign({},w,{pColors:setClrMap(w.pColors,name,clr)});});setColorPick(null);}
   function toggleSel(key){if(didDrag.current)return;setSel(function(s){var n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});}
   function applySetup(){if(!sel.size)return;withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c);});return w;});setSel(new Set());}
-  function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};});withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr)});});setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');}
+  function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};});var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:inForm.exp.trim(),pallets:n,qty:(+inForm.qty||1)*n};withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');}
   function clickSlot(cKey,sKey){if(locked||didDrag.current)return;if(pendSet.has(cKey+'||'+sKey))return;var cell=wh.cells[cKey];if(!cell||!cell.type||cell.type==='unused')return;if(!cell.slots)return;var slot=cell.slots[sKey]||null;if(outSelMode){if(!slot)return;var meta=outMeta;onUpdate(function(w){var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});});return;}if(immMode){if(!slot)return;setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});return;}if(moveFrom){if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}if(!slot){withUndo(function(w){w.cells[cKey].slots[sKey]=moveFrom.slot;w.cells[moveFrom.cKey].slots[moveFrom.sKey]=null;return w;});}setMoveFrom(null);return;}if(slot&&selSlots.length===0){setMoveFrom({cKey:cKey,sKey:sKey,slot:slot});return;}if(!slot&&(cell.type==='rack'||cell.type==='shelf')){var idx=selSlots.findIndex(function(s){return s.cKey===cKey&&s.sKey===sKey;});if(idx>=0)setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});else setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});}}
   function assignIn(item){if(selSlots.length===0){withUndo(function(w){var en=Object.entries(w.cells);for(var i=0;i<en.length;i++){var ck=en[i][0],cc=en[i][1];if(cc.type!=='rack'&&cc.type!=='shelf')continue;if(!cc.slots)continue;var sks=Object.keys(cc.slots);for(var j=0;j<sks.length;j++){if(!cc.slots[sks[j]]){cc.slots[sks[j]]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;}}}return w;});}else{var t=selSlots[0],cc2=wh.cells[t.cKey];if(!cc2||!cc2.slots||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}withUndo(function(w){w.cells[t.cKey].slots[t.sKey]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;});setSelSlots(function(s){return s.slice(1);});}}
   function dblClick(cKey,sKey){if(locked||didDrag.current||pendSet.has(cKey+'||'+sKey))return;var slot=wh.cells[cKey]&&wh.cells[cKey].slots[sKey];if(slot)setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}
   function saveEdit(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=editInfo.data;return w;});setEditInfo(null);}
-  function confirmPend(qid){onUpdate(function(w){var pend=w.pendOut||[];var item=pend.find(function(x){return x.qid===qid;});if(!item)return w;var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);nc[item.cKey].slots[item.sKey]=null;return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return x.qid!==qid;}),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
-  function confirmPendAll(qids){onUpdate(function(w){var pend=w.pendOut||[];var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);var qidSet=new Set(qids);pend.forEach(function(item){if(qidSet.has(item.qid)&&nc[item.cKey]&&nc[item.cKey].slots)nc[item.cKey].slots[item.sKey]=null;});return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return !qidSet.has(x.qid);}),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
+  function confirmPend(qid){onUpdate(function(w){var pend=w.pendOut||[];var item=pend.find(function(x){return x.qid===qid;});if(!item)return w;var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);nc[item.cKey].slots[item.sKey]=null;var txEntry={id:uid(),type:'out',date:todayStr(),name:item.slot.name,exp:item.slot.exp||'',pallets:1,qty:item.slot.qty||0};return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return x.qid!==qid;}),txLog:(w.txLog||[]).concat([txEntry]),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
+  function confirmPendAll(qids){onUpdate(function(w){var pend=w.pendOut||[];var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);var qidSet=new Set(qids);var newTx=[];pend.forEach(function(item){if(qidSet.has(item.qid)&&nc[item.cKey]&&nc[item.cKey].slots){nc[item.cKey].slots[item.sKey]=null;newTx.push({id:uid(),type:'out',date:todayStr(),name:item.slot.name,exp:item.slot.exp||'',pallets:1,qty:item.slot.qty||0});}});return Object.assign({},w,{cells:nc,pendOut:pend.filter(function(x){return !qidSet.has(x.qid);}),txLog:(w.txLog||[]).concat(newTx),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
   function withdrawPend(qid){onUpdate(function(w){return Object.assign({},w,{pendOut:(w.pendOut||[]).filter(function(x){return x.qid!==qid;})});});}
   function withdrawPendAll(qids){onUpdate(function(w){var qidSet=new Set(qids);return Object.assign({},w,{pendOut:(w.pendOut||[]).filter(function(x){return !qidSet.has(x.qid);})});});}
-  function confirmImm(qid){setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});}
+  function confirmImm(qid){var item=outQ.find(function(x){return x.qid===qid;});if(item){var txEntry={id:uid(),type:'out',date:todayStr(),name:item.slot.name,exp:item.slot.exp||'',pallets:1,qty:item.slot.qty||0};onUpdate(function(w){return Object.assign({},w,{txLog:(w.txLog||[]).concat([txEntry])});});}setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});}
   function cancelImm(qid){var item=outQ.find(function(x){return x.qid===qid;});if(!item)return;withUndo(function(w){w.cells[item.cKey].slots[item.sKey]=item.slot;return w;});setOutQ(function(q){return q.filter(function(x){return x.qid!==qid;});});}
-  function confirmAllImm(){setOutQ([]);setImmMode(false);setShowOutPanel(false);}
+  function confirmAllImm(){var newTx=outQ.map(function(item){return{id:uid(),type:'out',date:todayStr(),name:item.slot.name,exp:item.slot.exp||'',pallets:1,qty:item.slot.qty||0};});if(newTx.length>0){onUpdate(function(w){return Object.assign({},w,{txLog:(w.txLog||[]).concat(newTx)});});}setOutQ([]);setImmMode(false);setShowOutPanel(false);}
   function cancelAllModes(){setSelSlots([]);setMoveFrom(null);setOutSelMode(false);setOutMeta(null);setImmMode(false);}
+  function clearHl(){setHlProd(null);setHlExp(null);}
 
   function renderGrid(ops){
     var cells=[];
@@ -534,7 +541,7 @@ function WHView(p){
       var ct=CT[cell.type],isSel=sel.has(key);
       var dR=(!ops&&isSel)?sDiv.r:cell.divR,dC=(!ops&&isSel)?sDiv.c:cell.divC;
       var isPrev=!ops&&isSel,pCT=CT[isPrev?sType:cell.type];
-      var hasHl=hlProd&&Object.values(cell.slots||{}).some(function(s){return s&&s.name===hlProd;});
+      var hasHl=hlProd&&Object.values(cell.slots||{}).some(function(s){return s&&s.name===hlProd&&(!hlExp||s.exp===hlExp);});
       var isDimmed=hlProd&&!hasHl;
       var subs=[];
       for(var sr=0;sr<dR;sr++){for(var sc=0;sc<dC;sc++){(function(sr,sc){
@@ -545,7 +552,7 @@ function WHView(p){
         var showName=visH>=36&&visW>=24,showFull=visH>=52&&visW>=34;
         var pClr=slot?(wh.pColors[slot.name]||'#94A3B8'):null;
         var esSt=(!isPrev&&slot)?getExpSt(slot.exp):'ok',em=EM[esSt];
-        var isPend=pendSet.has(key+'||'+sKey),isHlSl=!!(hlProd&&slot&&slot.name===hlProd);
+        var isPend=pendSet.has(key+'||'+sKey),isHlSl=!!(hlProd&&slot&&slot.name===hlProd&&(!hlExp||slot.exp===hlExp));
         var sbg,sBdr;
         if(isPend){sbg='rgba(245,158,11,.20)';sBdr='#F59E0B';}
         else if(isPrev){sbg=idx2===0?(pCT&&pCT.bg||'rgba(255,255,255,.08)'):'rgba(255,255,255,.04)';sBdr=BDR;}
@@ -578,7 +585,7 @@ function WHView(p){
     },
       h('div',{
         className:'sheet-anim',
-        style:{background:CARD,borderRadius:'20px 20px 0 0',maxHeight:'78vh',display:'flex',flexDirection:'column',paddingBottom:'env(safe-area-inset-bottom,16px)'},
+        style:{background:CARD,borderRadius:'20px 20px 0 0',maxHeight:'82vh',display:'flex',flexDirection:'column',paddingBottom:'env(safe-area-inset-bottom,16px)'},
         onClick:function(e){e.stopPropagation();}
       },
         /* 헤더 */
@@ -589,9 +596,9 @@ function WHView(p){
               h('span',{style:{fontSize:15,fontWeight:700}},'상품 필터'),
               h('span',{style:{fontSize:11,color:SUB,background:'rgba(255,255,255,.07)',borderRadius:10,padding:'1px 8px',marginLeft:2}},pg.length+'종')),
             h('div',{style:{display:'flex',gap:6}},
-              hlProd&&h('button',{
+              (hlProd||hlExp)&&h('button',{
                 style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 12px',fontSize:11,borderRadius:20}),
-                onClick:function(){setHlProd(null);setFilterOpen(false);}
+                onClick:function(){setHlProd(null);setHlExp(null);setFilterOpen(false);}
               },'전체보기'),
               h('button',{
                 style:S('rgba(255,255,255,.08)',SUB,{padding:'4px 10px',fontSize:11,borderRadius:20}),
@@ -626,7 +633,6 @@ function WHView(p){
             return h(Fragment,null,filtered.map(function(p2){
               var isHl=hlProd===p2.name;
               var clr=wh.pColors[p2.name]||'#94A3B8';
-              /* 유통기한 최악 상태 계산 */
               var worstExp='ok';
               p2.exps.forEach(function(e){
                 var st=getExpSt(e.exp);
@@ -634,48 +640,33 @@ function WHView(p){
                 else if(st==='imminent'&&worstExp==='ok')worstExp='imminent';
               });
               var em7=EM[worstExp];
-              return h('div',{
-                key:p2.name,
-                onClick:function(){setHlProd(isHl?null:p2.name);setFilterOpen(false);},
-                style:{
-                  display:'flex',alignItems:'center',gap:10,
-                  padding:'11px 12px',marginBottom:5,borderRadius:12,cursor:'pointer',
-                  background:isHl?(clr+'1a'):'rgba(255,255,255,.04)',
-                  border:'1.5px solid '+(isHl?clr:'rgba(255,255,255,.08)'),
-                  transition:'all .15s',
-                  WebkitTapHighlightColor:'transparent'
-                }
-              },
-                /* 색상 도트 */
-                h('div',{style:{
-                  width:14,height:14,borderRadius:'50%',background:clr,flexShrink:0,
-                  border:isHl?('2px solid '+clr):'2px solid rgba(255,255,255,.2)',
-                  boxShadow:isHl?('0 0 0 3px '+clr+'44'):'none',
-                  transition:'box-shadow .15s'
-                }}),
-                /* 상품명 + 유통기한 요약 */
-                h('div',{style:{flex:1,minWidth:0}},
-                  h('div',{style:{fontSize:13,fontWeight:700,color:isHl?clr:TX,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},p2.name),
-                  h('div',{style:{fontSize:10,color:SUB,marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
-                    p2.exps.slice(0,3).map(function(e){return(e.exp?fmtExp(e.exp):'기한없음')+' '+e.cnt+'팔';}).join(' · ')+(p2.exps.length>3?' +'+(p2.exps.length-3)+'건':''))),
-                /* 만료/임박 뱃지 */
-                em7&&h('span',{style:{
-                  fontSize:10,color:em7.clr,fontWeight:700,
-                  background:em7.bg,border:'1px solid '+em7.bdr,
-                  borderRadius:6,padding:'2px 6px',flexShrink:0
-                }},em7.icon+' '+em7.label),
-                /* 재고수 */
-                h('div',{style:{textAlign:'right',flexShrink:0,minWidth:44}},
-                  h('div',{style:{fontSize:13,fontWeight:700,color:clr,lineHeight:1.2}},p2.cnt+'팔'),
-                  h('div',{style:{fontSize:10,color:SUB}},p2.totalQty.toLocaleString()+'개')),
-                /* 선택 체크 */
-                h('div',{style:{
-                  width:20,height:20,borderRadius:'50%',flexShrink:0,
-                  display:'flex',alignItems:'center',justifyContent:'center',
-                  background:isHl?clr:'rgba(255,255,255,.06)',
-                  border:'1.5px solid '+(isHl?clr:'rgba(255,255,255,.15)'),
-                  transition:'all .15s'
-                }},isHl&&h('span',{style:{fontSize:11,color:'#fff',fontWeight:900,lineHeight:1}},'✓')));
+              return h('div',{key:p2.name,style:{marginBottom:6}},
+                h('div',{
+                  onClick:function(){
+                    if(isHl){setHlProd(null);setHlExp(null);}
+                    else{setHlProd(p2.name);setHlExp(null);}
+                    setFilterOpen(false);
+                  },
+                  style:{
+                    display:'flex',alignItems:'center',gap:10,
+                    padding:'11px 12px',borderRadius:12,cursor:'pointer',
+                    background:isHl?(clr+'20'):'rgba(255,255,255,.04)',
+                    border:'1.5px solid '+(isHl?clr:'rgba(255,255,255,.08)'),
+                    transition:'all .15s',
+                    WebkitTapHighlightColor:'transparent'
+                  }
+                },
+                  h('div',{style:{width:14,height:14,borderRadius:'50%',background:clr,flexShrink:0,border:isHl?('2px solid '+clr):'2px solid rgba(255,255,255,.2)',boxShadow:isHl?('0 0 0 3px '+clr+'44'):'none',transition:'box-shadow .15s'}}),
+                  h('div',{style:{flex:1,minWidth:0}},
+                    h('div',{style:{fontSize:13,fontWeight:700,color:isHl?clr:TX,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},p2.name),
+                    h('div',{style:{fontSize:10,color:SUB,marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
+                      p2.exps.slice(0,3).map(function(e){return(e.exp?fmtExp(e.exp):'기한없음')+' '+e.cnt+'팔';}).join(' · ')+(p2.exps.length>3?' +'+(p2.exps.length-3)+'건':''))),
+                  em7&&h('span',{style:{fontSize:10,color:em7.clr,fontWeight:700,background:em7.bg,border:'1px solid '+em7.bdr,borderRadius:6,padding:'2px 6px',flexShrink:0}},em7.icon+' '+em7.label),
+                  h('div',{style:{textAlign:'right',flexShrink:0,minWidth:44}},
+                    h('div',{style:{fontSize:13,fontWeight:700,color:clr,lineHeight:1.2}},p2.cnt+'팔'),
+                    h('div',{style:{fontSize:10,color:SUB}},p2.totalQty.toLocaleString()+'개')),
+                  h('div',{style:{width:20,height:20,borderRadius:'50%',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',background:isHl?clr:'rgba(255,255,255,.06)',border:'1.5px solid '+(isHl?clr:'rgba(255,255,255,.15)'),transition:'all .15s'}},
+                    isHl&&h('span',{style:{fontSize:11,color:'#fff',fontWeight:900,lineHeight:1}},'✓'))));
             }));
           })())));
   }
@@ -720,8 +711,10 @@ function WHView(p){
           var clr=wh.pColors[hlProd]||'#94A3B8';
           return h(Fragment,null,
             h('div',{style:{width:8,height:8,borderRadius:'50%',background:clr,flexShrink:0}}),
+            h('div',{style:{display:'flex',flexDirection:'column',flex:1,minWidth:0,overflow:'hidden'}}),
             h('span',{style:{fontSize:11,color:clr,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}},hlProd),
-            h('span',{style:{fontSize:10,color:'rgba(248,113,113,.8)',flexShrink:0,fontWeight:600}}),'✕');
+            hlExp&&h('span',{style:{fontSize:9,color:clr,opacity:.8,fontWeight:600,background:clr+'22',borderRadius:8,padding:'0 5px',flexShrink:0,whiteSpace:'nowrap'}},fmtExp(hlExp)),
+            h('span',{style:{fontSize:10,color:'rgba(248,113,113,.8)',flexShrink:0,fontWeight:600,marginLeft:2}},'✕'));
         })():
         h(Fragment,null,
           h('span',{style:{fontSize:11,color:'#94A3B8',flexShrink:0}},'전체'),
@@ -739,6 +732,61 @@ function WHView(p){
       h('div',{style:{display:'flex',alignItems:'stretch'}},[['ops','📦','작업'],['status','📊','현황'],['history','📋','기록']].map(function(x){return h('button',{key:x[0],onClick:function(){setTab(x[0]);setColorPick(null);},style:tS(tab===x[0])},TabLabel(x[1],x[2]));}),
         h('button',{onClick:function(){setLocked(function(l){if(!l)setHlProd(null);return !l;});},style:{background:locked?'rgba(239,68,68,.10)':'rgba(16,185,129,.10)',color:locked?'#F87171':'#34D399',border:'none',borderRadius:0,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:locked?'2px solid #EF4444':'2px solid #10B981',borderLeft:'1px solid '+BDR}},TabLabel(locked?'🔒':'🔓',locked?'잠금':'해제'))),
       h('button',{onClick:function(){setTab('setup');setColorPick(null);},style:Object.assign({},tS(tab==='setup',true),{borderLeft:'1px solid '+BDR})},TabLabel('⚙️','설정'))),
+
+    /* ★ 유통기한 칩 바 — hlProd 선택되고 유통기한 2가지 이상일 때만 노출 */
+    (function(){
+      if(!hlProd)return null;
+      var prod=pg.find(function(p){return p.name===hlProd;});
+      if(!prod||prod.exps.length<2)return null;
+      var clr=wh.pColors[hlProd]||'#94A3B8';
+      return h('div',{style:{background:'rgba(15,23,42,.97)',borderBottom:'1px solid '+(clr+'44'),padding:'6px 10px',overflowX:'auto',flexShrink:0,WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}},
+        h('div',{style:{display:'flex',gap:6,alignItems:'center',minWidth:'max-content'}},
+          /* 상품명 레이블 */
+          h('div',{style:{display:'flex',alignItems:'center',gap:5,flexShrink:0,paddingRight:4,borderRight:'1px solid rgba(255,255,255,.1)',marginRight:2}},
+            h('div',{style:{width:7,height:7,borderRadius:'50%',background:clr}}),
+            h('span',{style:{fontSize:11,fontWeight:700,color:clr,whiteSpace:'nowrap'}},hlProd)),
+          /* 전체 칩 */
+          h('button',{
+            onClick:function(){setHlExp(null);},
+            style:{
+              display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap',
+              background:!hlExp?(clr+'33'):'rgba(255,255,255,.07)',
+              border:'1px solid '+(!hlExp?clr:'rgba(255,255,255,.15)'),
+              borderRadius:20,padding:'4px 10px',cursor:'pointer',
+              color:!hlExp?clr:'#94A3B8',fontSize:11,fontWeight:!hlExp?700:500,
+              transition:'all .15s',flexShrink:0
+            }
+          },!hlExp&&h('span',{style:{fontSize:10}},'✓ '),'전체 ',h('span',{style:{fontSize:10,opacity:.8}},prod.cnt+'팔')),
+          /* 유통기한별 칩 */
+          prod.exps.map(function(e){
+            var esSt=getExpSt(e.exp),em9=EM[esSt];
+            var isSel=hlExp===e.exp;
+            var expLbl=e.exp?fmtExp(e.exp):'기한없음';
+            return h('button',{
+              key:e.exp||'_',
+              onClick:function(){setHlExp(isSel?null:e.exp);},
+              style:{
+                display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap',
+                background:isSel?(clr+'33'):(em9?em9.bg+'cc':'rgba(255,255,255,.07)'),
+                border:'1px solid '+(isSel?clr:(em9?(em9.bdr+'88'):'rgba(255,255,255,.15)')),
+                borderRadius:20,padding:'4px 10px',cursor:'pointer',
+                color:isSel?clr:(em9?em9.clr:'#94A3B8'),
+                fontSize:11,fontWeight:isSel?700:500,
+                transition:'all .15s',flexShrink:0,
+                boxShadow:isSel?('0 0 0 2px '+clr+'44'):'none'
+              }
+            },
+              isSel&&h('span',{style:{fontSize:10}},'✓ '),
+              em9&&h('span',{style:{fontSize:11}},em9.icon+' '),
+              expLbl,' ',
+              h('span',{style:{fontSize:10,opacity:.8}},e.cnt+'팔'));
+          }),
+          /* X 해제 버튼 */
+          h('button',{
+            onClick:function(){setHlProd(null);setHlExp(null);},
+            style:{display:'flex',alignItems:'center',gap:3,whiteSpace:'nowrap',background:'rgba(239,68,68,.12)',border:'1px solid rgba(239,68,68,.3)',borderRadius:20,padding:'4px 10px',cursor:'pointer',color:'#F87171',fontSize:11,fontWeight:600,transition:'all .15s',flexShrink:0,marginLeft:4}
+          },'✕ 해제')));
+    })(),
 
     tab==='setup'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:0,alignItems:'center',overflowX:'auto',flexShrink:0}},
@@ -776,6 +824,7 @@ function WHView(p){
         h('span',null,'📊 현황판'),
         h('button',{style:S('rgba(16,185,129,.15)','#34D399',{padding:'5px 14px',fontSize:12,border:'1px solid rgba(16,185,129,.3)',borderRadius:7}),onClick:function(){var BOM='\uFEFF';var rows=[['상품명','유통기한','수량']];pg.forEach(function(p2){(p2.exps||[]).forEach(function(e){rows.push([p2.name,e.exp?fmtExp(e.exp):'기한없음',e.totalQty]);});});function qCSV(v){var s=String(v||'');return s.indexOf(',')>=0||s.indexOf('"')>=0?'"'+s.replace(/"/g,'""')+'"':s;}var csv=BOM+rows.map(function(rr){return rr.map(qCSV).join(',');}).join('\r\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='재고현황_'+wh.name+'.csv';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},1000);}},h('span',{style:{display:'flex',alignItems:'center',gap:6}},h('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none'},h('rect',{x:2,y:2,width:20,height:20,rx:3,fill:'#1D6F42'}),h('path',{d:'M7 7l3.5 5L7 17h2.5l2-3 2 3H16l-3.5-5L16 7h-2.5l-2 3-2-3H7z',fill:'#fff'})),'CSV 다운로드'))),
       h('div',{style:{background:CARD,borderRadius:11,padding:14,marginBottom:10}},h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'파렛트 슬롯'),h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}},[['전체',stData.tot,'#94A3B8'],['사용중',stData.used,'#60A5FA'],['여유',stData.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:x[2]+'15',border:'1px solid '+x[2]+'33',borderRadius:9,padding:'10px 15px',textAlign:'center',minWidth:72}},h('div',{style:{fontSize:24,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:11,color:SUB}},x[0]));})),stData.tot>0&&h(Fragment,null,h('div',{style:{height:10,background:'rgba(255,255,255,.06)',borderRadius:5,overflow:'hidden',marginBottom:3}},h('div',{style:{height:'100%',width:(stData.used/stData.tot*100)+'%',background:'linear-gradient(90deg,#3B82F6,#60A5FA)',borderRadius:5}})),h('div',{style:{fontSize:11,color:SUB,textAlign:'right'}},'사용률 '+Math.round(stData.used/stData.tot*100)+'%'))),
+      h(TxDayPanel,{wh:wh}),
       h('div',{style:{display:'flex',gap:8,marginBottom:10,padding:'8px 12px',background:CARD,borderRadius:9,border:'1px solid '+BDR,alignItems:'center'}},h('span',{style:{fontSize:11,color:SUB,marginRight:4}},'유통기한'),h('span',{style:{fontSize:12,color:EM.expired.clr,fontWeight:700}},'만료'),h('span',{style:{fontSize:10,color:SUB}},'|'),h('span',{style:{fontSize:12,color:EM.imminent.clr,fontWeight:700}},'임박(3개월 미만)'),h('span',{style:{fontSize:10,color:SUB,marginLeft:'auto'}},'● 클릭 → 색상 변경')),
       h('div',{style:{background:CARD,borderRadius:11,padding:14}},h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'상품별 재고'),pg.length===0?h('div',{style:{fontSize:12,color:SUB}},'배치된 상품 없음'):pg.map(function(p2){var isPickOpen=colorPick===p2.name;return h('div',{key:p2.name,style:{marginBottom:14,background:'rgba(255,255,255,.03)',borderRadius:9,overflow:'hidden',border:'1px solid '+p2.clr+'33'}},h('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',background:p2.clr+'0f'}},h('div',{onClick:function(e){e.stopPropagation();setColorPick(isPickOpen?null:p2.name);},style:{width:16,height:16,borderRadius:'50%',background:p2.clr,flexShrink:0,cursor:'pointer',border:'2px solid '+p2.clr+'99',boxShadow:isPickOpen?'0 0 0 2px #fff':'none'}}),h('div',{style:{flex:1,fontSize:13,fontWeight:700}},p2.name),h('span',{style:{background:p2.clr+'22',border:'1px solid '+p2.clr+'44',color:p2.clr,borderRadius:6,padding:'2px 8px',fontSize:12,fontWeight:700}},p2.cnt+'팔'),h('span',{style:{background:'rgba(255,255,255,.07)',borderRadius:6,padding:'2px 8px',fontSize:12,fontWeight:700}},p2.totalQty.toLocaleString()+'개')),isPickOpen&&h(ColorPicker,{currentClr:p2.clr,onPick:function(clr){chgClr(p2.name,clr);}}),h('div',{style:{padding:'6px 8px',display:'flex',flexDirection:'column',gap:4}},p2.exps.map(function(e){var esSt=getExpSt(e.exp),em5=EM[esSt];return h('div',{key:e.exp||'_',style:{display:'flex',alignItems:'center',gap:7,background:em5?em5.bg:'rgba(255,255,255,.03)',border:'1px solid '+(em5?(em5.bdr+'77'):'rgba(255,255,255,.06)'),borderRadius:6,padding:'5px 9px'}},em5&&h('span',{style:{fontSize:13,color:em5.clr,fontWeight:900,flexShrink:0}},em5.icon),h('div',{style:{flex:1,fontSize:11,color:em5?em5.clr:SUB}},e.exp?fmtExp(e.exp):'유통기한 미기재'),em5&&h('span',{style:{fontSize:10,color:em5.clr,fontWeight:700,background:em5.bg,borderRadius:4,padding:'1px 5px',flexShrink:0}},em5.label),h('span',{style:{fontSize:11,color:p2.clr,fontWeight:600,minWidth:36,textAlign:'right'}},e.cnt+'팔'),h('span',{style:{fontSize:11,fontWeight:700,minWidth:52,textAlign:'right'}},e.totalQty.toLocaleString()+'개'));})));}))),
 
@@ -824,6 +873,56 @@ function WHView(p){
             h('button',{style:S('#3B82F6','#fff',{flex:1,padding:12,fontSize:14}),onClick:saveEdit},'저장'),
             h('button',{style:S('rgba(239,68,68,.2)','#F87171',{flex:1,padding:12,fontSize:14}),onClick:function(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=null;return w;});setEditInfo(null);}},'삭제')))))
   );
+}
+
+/* TX DAY PANEL */
+function TxDayPanel(p){
+  var wh=p.wh;
+  var txLog=wh.txLog||[];
+  var days=[{key:'d2',label:'D-2',date:daysAgoStr(2)},{key:'d1',label:'D-1',date:daysAgoStr(1)},{key:'d0',label:'Today',date:todayStr()}];
+  var hasAny=txLog.length>0;
+
+  function TxTable(tp){
+    var rows=tp.rows,type=tp.type;
+    var isIn=type==='in';
+    if(!rows||rows.length===0)return h('div',{style:{fontSize:11,color:SUB,padding:'6px 0',textAlign:'center'}},'내역 없음');
+    return h('div',null,
+      h('div',{style:{display:'grid',gridTemplateColumns:'1fr 72px 44px 60px',gap:3,padding:'3px 6px',background:'rgba(255,255,255,.04)',borderRadius:5,marginBottom:3}},
+        ['상품명','유통기한','팔레트','수량'].map(function(hd){return h('div',{key:hd,style:{fontSize:9,color:SUB,fontWeight:600}},hd);})),
+      rows.map(function(r,i){
+        var clr=(wh.pColors&&wh.pColors[r.name])||'#94A3B8';
+        return h('div',{key:i,style:{display:'grid',gridTemplateColumns:'1fr 72px 44px 60px',gap:3,padding:'4px 6px',borderRadius:5,marginBottom:2,background:isIn?'rgba(16,185,129,.07)':'rgba(239,68,68,.07)',border:'1px solid '+(isIn?'rgba(16,185,129,.18)':'rgba(239,68,68,.18)')}},
+          h('div',{style:{display:'flex',alignItems:'center',gap:4,overflow:'hidden',minWidth:0}},h('div',{style:{width:5,height:5,borderRadius:'50%',background:clr,flexShrink:0}}),h('span',{style:{fontSize:11,fontWeight:600,color:TX,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},r.name)),
+          h('div',{style:{fontSize:10,color:SUB,alignSelf:'center'}},r.exp?fmtExp(r.exp):'—'),
+          h('div',{style:{fontSize:11,fontWeight:700,color:isIn?'#34D399':'#F87171',textAlign:'right',alignSelf:'center'}},(isIn?'+':'-')+r.pallets+'팔'),
+          h('div',{style:{fontSize:11,fontWeight:700,color:TX,textAlign:'right',alignSelf:'center'}},r.qty.toLocaleString()+'개'));
+      })
+    );
+  }
+
+  return h('div',{style:{marginBottom:10}},
+    h('div',{style:{fontSize:13,fontWeight:700,marginBottom:8,color:TX,display:'flex',alignItems:'center',gap:6}},
+      h('span',null,'📋 입출고 일지'),
+      h('span',{style:{fontSize:10,color:SUB,fontWeight:400}},'— 등록·확정 기준')),
+    !hasAny?h('div',{style:{background:CARD,borderRadius:11,padding:'16px 14px',textAlign:'center',color:SUB,fontSize:12,marginBottom:0}},'아직 입출고 기록이 없습니다',h('br',null),h('span',{style:{fontSize:11,color:'#475569'}},'작업 탭에서 입고 등록 및 출고 확정 시 자동 기록됩니다')):
+    h('div',{style:{display:'flex',flexDirection:'column',gap:7}},
+      days.map(function(day){
+        var isToday=day.key==='d0';
+        var inRows=aggregateTxLog(txLog,day.date,'in');
+        var outRows=aggregateTxLog(txLog,day.date,'out');
+        var hasData=inRows.length>0||outRows.length>0;
+        return h('div',{key:day.key,style:{background:CARD,borderRadius:11,overflow:'hidden',border:'1px solid '+(isToday?'rgba(99,102,241,.35)':BDR),boxShadow:isToday?'0 0 0 1px rgba(99,102,241,.12)':'none'}},
+          h('div',{style:{padding:'7px 12px',background:isToday?'rgba(99,102,241,.12)':'rgba(255,255,255,.02)',borderBottom:'1px solid '+(isToday?'rgba(99,102,241,.2)':BDR),display:'flex',alignItems:'center',gap:7}},
+            h('span',{style:{fontWeight:800,fontSize:13,color:isToday?'#A5B4FC':'#94A3B8',background:isToday?'rgba(99,102,241,.2)':'rgba(255,255,255,.06)',padding:'2px 9px',borderRadius:20}},day.label),
+            h('span',{style:{fontSize:11,color:SUB}},dateKr(day.date)),
+            hasData&&h('div',{style:{marginLeft:'auto',display:'flex',gap:5}},
+              inRows.length>0&&h('span',{style:{fontSize:10,color:'#34D399',fontWeight:600,background:'rgba(16,185,129,.12)',padding:'1px 6px',borderRadius:20}},'입고 '+inRows.reduce(function(a,r){return a+r.pallets;},0)+'팔'),
+              outRows.length>0&&h('span',{style:{fontSize:10,color:'#F87171',fontWeight:600,background:'rgba(239,68,68,.12)',padding:'1px 6px',borderRadius:20}},'출고 '+outRows.reduce(function(a,r){return a+r.pallets;},0)+'팔'))),
+          !hasData?h('div',{style:{padding:'10px 12px',fontSize:11,color:SUB,textAlign:'center'}},'입출고 내역 없음'):
+          h('div',{style:{padding:'8px 10px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+            h('div',null,h('div',{style:{fontSize:11,fontWeight:700,color:'#34D399',marginBottom:4,display:'flex',alignItems:'center',gap:3}},h('span',null,'📥'),' 입고'),h(TxTable,{rows:inRows,type:'in',pColors:wh.pColors})),
+            h('div',null,h('div',{style:{fontSize:11,fontWeight:700,color:'#F87171',marginBottom:4,display:'flex',alignItems:'center',gap:3}},h('span',null,'📤'),' 출고'),h(TxTable,{rows:outRows,type:'out',pColors:wh.pColors}))));
+      })));
 }
 
 /* HIST MODAL */
