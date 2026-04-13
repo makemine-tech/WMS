@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>블로그 AI 생성기 v4 — Claude API</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{--bg:#f0ece5;--card:#fff;--border:#e0dbd2;--sub:#888;--accent:#1a1a1a;--blue:#1a5cc0;--purple:#7722cc;}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--accent);}
+.app{display:flex;min-height:100vh;}
+
+/* 사이드바 */
+.sidebar{width:64px;background:#111;display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:4px;position:sticky;top:0;height:100vh;z-index:10;}
+.sb-logo{color:#fff;font-weight:900;font-size:12px;margin-bottom:12px;text-align:center;line-height:1.3;}
+.sb-logo span{color:#ff5555;display:block;font-size:20px;}
+.sb-btn{width:42px;height:42px;border-radius:8px;background:transparent;border:none;cursor:pointer;font-size:18px;color:#aaa;transition:all .2s;}
+.sb-btn:hover,.sb-btn.on{background:#333;color:#fff;}
+
+.main{flex:1;display:flex;overflow:hidden;}
+.form-col{width:490px;min-width:380px;background:#fff;border-right:1px solid var(--border);overflow-y:auto;height:100vh;position:sticky;top:0;}
+.prev-col{flex:1;overflow-y:auto;height:100vh;background:var(--bg);padding:28px 24px;}
+
+/* API 키 섹션 */
+.api-section{padding:16px 26px;background:linear-gradient(135deg,#0a0a0a,#1a1a2e);border-bottom:2px solid #333;}
+.api-title{font-size:11px;font-weight:700;color:#ff9999;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+.api-row{display:flex;gap:8px;align-items:center;}
+.api-input{flex:1;background:#222;border:1.5px solid #444;border-radius:7px;padding:9px 12px;color:#fff;font-family:inherit;font-size:12px;outline:none;transition:border .15s;}
+.api-input:focus{border-color:#666;}
+.api-input::placeholder{color:#555;}
+.api-save{background:#333;border:1.5px solid #555;color:#aaa;border-radius:7px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.api-save:hover{background:#444;color:#fff;}
+.api-save.saved{background:#1a4a1a;border-color:#2a7a2a;color:#7f7;}
+.api-hint{font-size:10px;color:#555;margin-top:7px;}
+.api-hint a{color:#7799ff;text-decoration:none;}
+
+/* 폼 헤더 */
+.fh{padding:20px 26px 16px;border-bottom:1px solid var(--border);}
+.fh h1{font-size:17px;font-weight:900;margin-bottom:2px;display:flex;align-items:center;gap:8px;}
+.ver{background:#111;color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;}
+.ai-badge{background:linear-gradient(135deg,#1a5cc0,#7722cc);color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:8px;}
+.fh p{font-size:12px;color:var(--sub);}
+
+/* 섹션 */
+.fs{padding:14px 26px;border-bottom:1px solid var(--border);}
+.fs-t{font-size:10px;font-weight:700;letter-spacing:2px;color:#bbb;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+.fs-t::before{content:'';width:12px;height:2px;background:#ccc;display:inline-block;}
+
+/* 카테고리 */
+.glabel{font-size:10px;font-weight:700;letter-spacing:1px;margin:8px 0 5px;padding:4px 9px;border-radius:5px;display:flex;align-items:center;gap:5px;}
+.glabel.lg{background:#eef3ff;color:#1a5cc0;}
+.glabel.ds{background:#f5eeff;color:#7722cc;}
+.glabel.gn{background:#f2f2f2;color:#555;}
+.cg{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:5px;}
+.cb{background:#f5f2ed;border:2px solid transparent;border-radius:8px;padding:7px 2px;text-align:center;cursor:pointer;transition:all .15s;font-size:10px;font-weight:600;color:#666;}
+.cb:hover{border-color:#ccc;background:#fff;}
+.cb.on{border-color:#111;background:#111;color:#fff;}
+.cb.lg.on{border-color:#1a5cc0;background:#1a5cc0;color:#fff;}
+.cb.ds.on{border-color:#7722cc;background:#7722cc;color:#fff;}
+.cb .ic{font-size:16px;display:block;margin-bottom:2px;}
+
+/* 인풋 */
+label{display:block;font-size:11px;font-weight:700;color:#666;margin-bottom:5px;}
+input[type=text]{width:100%;border:1.5px solid var(--border);border-radius:7px;padding:9px 12px;font-family:inherit;font-size:13px;background:#fafaf8;outline:none;transition:border .15s;}
+input[type=text]:focus{border-color:#111;background:#fff;}
+.ig{margin-bottom:11px;}
+.hint{font-size:10px;color:#bbb;margin-top:3px;}
+
+/* 덤프 텍스트 */
+.dump-box{position:relative;}
+.dump-ta{width:100%;border:1.5px solid var(--border);border-radius:7px;padding:11px;font-family:inherit;font-size:13px;background:#fafaf8;outline:none;resize:none;line-height:1.8;min-height:150px;transition:border .15s;color:#333;}
+.dump-ta:focus{border-color:#111;background:#fff;}
+.dump-ta::placeholder{color:#ccc;}
+.cc{position:absolute;bottom:7px;right:10px;font-size:10px;color:#ccc;}
+
+/* 뉴스 참고 박스 */
+.news-hint-box{background:#fff9ec;border:1.5px solid #ffe08a;border-radius:8px;padding:11px 14px;margin-bottom:10px;}
+.news-hint-box p{font-size:11px;color:#886600;line-height:1.7;}
+.news-hint-box strong{font-weight:700;}
+
+/* 이미지 */
+.dz{border:2px dashed #d0cbc2;border-radius:10px;padding:18px;text-align:center;cursor:pointer;transition:all .2s;background:#fafaf8;position:relative;}
+.dz.drag{border-color:#111;background:#f0ece5;}
+.dz input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+.drop-icon{font-size:22px;margin-bottom:4px;}
+.drop-text{font-size:11px;color:#aaa;line-height:1.6;}
+.thumbs{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px;}
+.thumb{position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;border:2px solid #eee;}
+.thumb img{width:100%;height:100%;object-fit:cover;}
+.thumb .rm{position:absolute;top:2px;right:2px;width:15px;height:15px;background:rgba(0,0,0,.65);color:#fff;border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;}
+.thumb .idx{position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,.65);color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;}
+.order-hint{font-size:10px;color:#bbb;margin-top:5px;text-align:center;display:none;}
+
+/* 톤 */
+.tg{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;}
+.tc{padding:9px 5px;border-radius:8px;border:2px solid var(--border);background:#fafaf8;cursor:pointer;transition:all .15s;text-align:center;}
+.tc:hover{border-color:#aaa;background:#fff;}
+.tc.on{border-color:#111;background:#111;color:#fff;}
+.tc .ti{font-size:15px;margin-bottom:2px;display:block;}
+.tc .tn{font-size:10px;font-weight:700;}
+.tc .td{font-size:9px;opacity:.6;margin-top:1px;line-height:1.3;}
+
+/* 생성 버튼 */
+.gen-btn{width:calc(100% - 52px);margin:16px 26px;background:linear-gradient(135deg,#111,#333);color:#fff;border:none;border-radius:10px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s;}
+.gen-btn:hover{background:linear-gradient(135deg,#333,#555);transform:translateY(-1px);}
+.gen-btn:disabled{background:#ccc;cursor:not-allowed;transform:none;}
+
+/* 미리보기 */
+.pv-wrap{max-width:740px;margin:0 auto;}
+.pv-bar{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+.pv-bar h2{font-size:13px;font-weight:700;color:#888;flex:1;}
+.tbtn{padding:7px 14px;border-radius:7px;border:1.5px solid var(--border);background:#fff;font-size:11px;font-weight:600;cursor:pointer;color:#555;transition:all .15s;display:flex;align-items:center;gap:5px;}
+.tbtn:hover,.tbtn.p{background:#111;color:#fff;border-color:#111;}
+
+/* 빈/로딩 상태 */
+.empty{text-align:center;padding:70px 20px;color:#ccc;}
+.empty .ei{font-size:44px;margin-bottom:12px;}
+.loading{display:none;text-align:center;padding:50px 20px;}
+.loading.on{display:block;}
+.spin{width:40px;height:40px;border:3px solid #eee;border-top-color:#333;border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 16px;}
+@keyframes sp{to{transform:rotate(360deg);}}
+.loading-title{font-size:15px;font-weight:700;color:#333;margin-bottom:8px;}
+.loading p{font-size:13px;color:#aaa;}
+.steps{margin-top:14px;font-size:12px;color:#bbb;line-height:2.2;text-align:left;display:inline-block;}
+.step-item{display:flex;align-items:center;gap:8px;}
+.step-item.done{color:#2a7a2a;}
+.step-item.doing{color:#333;font-weight:700;}
+
+/* 에러 */
+.error-box{background:#fff5f5;border:1.5px solid #ffaaaa;border-radius:10px;padding:20px;color:#cc2222;}
+.error-box h3{font-size:14px;font-weight:700;margin-bottom:8px;}
+.error-box p{font-size:13px;line-height:1.7;}
+
+/* 블로그 출력 */
+.bo{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 24px rgba(0,0,0,.07);}
+.bh{position:relative;height:360px;overflow:hidden;background:#0a0a0a;}
+.bh img{width:100%;height:100%;object-fit:cover;opacity:.45;filter:saturate(.7);}
+.bh-ov{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.15) 60%,transparent 100%);display:flex;flex-direction:column;justify-content:flex-end;padding:28px;}
+.bh-badge{position:absolute;top:14px;left:14px;display:flex;gap:6px;flex-wrap:wrap;}
+.bh-cat{background:rgba(255,255,255,.15);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:10px;font-weight:700;padding:3px 10px;border-radius:16px;}
+.bh-ai{background:linear-gradient(135deg,rgba(26,92,192,.6),rgba(119,34,204,.6));backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:10px;font-weight:700;padding:3px 10px;border-radius:16px;}
+.bh-date{color:#ff7777;font-size:10px;font-weight:700;letter-spacing:3px;margin-bottom:9px;}
+.bh-title{color:#fff;font-size:22px;font-weight:900;line-height:1.45;margin-bottom:7px;}
+.bh-sub{color:rgba(255,255,255,.55);font-size:12px;}
+.bb{padding:32px;}
+.intro-p{font-size:15.5px;color:#333;line-height:2.05;margin-bottom:26px;padding-bottom:22px;border-bottom:2.5px solid #111;}
+.bsec{margin-bottom:28px;}
+.bsec-n{font-size:10px;font-weight:700;color:#bbb;letter-spacing:2px;margin-bottom:6px;}
+.bsec h3{font-size:18px;font-weight:900;margin-bottom:12px;color:#111;line-height:1.4;}
+.bsec p{font-size:14.5px;color:#444;line-height:1.95;margin-bottom:10px;}
+.simg-wrap{position:relative;border-radius:10px;overflow:hidden;margin:14px 0;}
+.simg-wrap img{width:100%;object-fit:cover;display:block;max-height:220px;}
+.simg-cap{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.65));color:rgba(255,255,255,.7);font-size:10px;padding:16px 12px 8px;}
+.abox{border-left:3px solid;padding:14px 18px;margin:14px 0;border-radius:0 8px 8px 0;}
+.abox .at{font-size:10px;font-weight:700;letter-spacing:2px;margin-bottom:7px;}
+.abox p{font-size:14px;line-height:1.85;}
+.auth-box{background:#f7f5f0;border-radius:10px;padding:18px;margin:14px 0;display:flex;gap:12px;}
+.auth-av{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#333,#666);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.auth-nm{font-size:11px;font-weight:700;color:#999;margin-bottom:4px;}
+.auth-tx{font-size:14px;color:#333;line-height:1.8;font-style:italic;}
+.img-gallery{display:grid;gap:8px;margin:14px 0;}
+.img-gallery.g2{grid-template-columns:1fr 1fr;}
+.img-gallery.g3{grid-template-columns:1fr 1fr 1fr;}
+.img-gallery img{width:100%;height:160px;object-fit:cover;border-radius:8px;display:block;}
+.tags{display:flex;flex-wrap:wrap;gap:7px;padding:18px 32px;background:#f7f5f0;}
+.tag{color:#0077cc;font-size:12px;font-weight:500;}
+.srcs{padding:14px 32px;background:#fafaf8;border-top:1px solid #eee;}
+.srcs p{font-size:11px;color:#bbb;}
+.srcs a{color:#0077cc;text-decoration:none;}
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:11px 22px;border-radius:20px;font-size:13px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;}
+.toast.show{opacity:1;}
+@media(max-width:860px){.sidebar{display:none;}.form-col{width:100%;position:relative;height:auto;}.main{flex-direction:column;}.prev-col{height:auto;padding:18px 14px;}}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="sidebar">
+  <div class="sb-logo"><span>✦</span>Blog<br>AI</div>
+  <button class="sb-btn on">✏️</button>
+  <button class="sb-btn" onclick="showApiSetup()">🔑</button>
+  <button class="sb-btn">🗂️</button>
+</div>
+
+<div class="main">
+<div class="form-col">
+
+  <!-- API 키 설정 -->
+  <div class="api-section">
+    <div class="api-title">🔑 CLAUDE API 연동</div>
+    <div class="api-row">
+      <input type="password" class="api-input" id="apiKey" placeholder="sk-ant-api03-..." />
+      <button class="api-save" id="apiSaveBtn" onclick="saveKey()">저장</button>
+    </div>
+    <div class="api-hint">
+      API 키가 없으신가요? → <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>에서 발급
+    </div>
+  </div>
+
+  <!-- 폼 헤더 -->
+  <div class="fh">
+    <h1>✦ 블로그 생성기 <span class="ver">v4</span> <span class="ai-badge">🤖 AI POWERED</span></h1>
+    <p>주제와 메모만 입력하면 Claude가 직접 완성된 글을 작성합니다</p>
+  </div>
+
+  <!-- 카테고리 -->
+  <div class="fs">
+    <div class="fs-t">01 · 카테고리</div>
+    <div class="glabel lg">🚚 물류 · 풀필먼트 · 이커머스</div>
+    <div class="cg">
+      <button class="cb lg" data-v="물류·풀필먼트" onclick="selC(this)"><span class="ic">🏭</span>풀필먼트</button>
+      <button class="cb lg" data-v="3PL·4PL" onclick="selC(this)"><span class="ic">🔄</span>3PL·4PL</button>
+      <button class="cb lg" data-v="이커머스·물류" onclick="selC(this)"><span class="ic">🛒</span>이커머스</button>
+      <button class="cb lg" data-v="SCM·공급망" onclick="selC(this)"><span class="ic">🔗</span>SCM</button>
+      <button class="cb lg" data-v="창고·재고관리" onclick="selC(this)"><span class="ic">📦</span>창고·재고</button>
+      <button class="cb lg" data-v="배송·라스트마일" onclick="selC(this)"><span class="ic">🚐</span>배송</button>
+      <button class="cb lg" data-v="화물·운송" onclick="selC(this)"><span class="ic">🚛</span>화물</button>
+      <button class="cb lg" data-v="물류트렌드" onclick="selC(this)"><span class="ic">📊</span>트렌드</button>
+    </div>
+    <div class="glabel ds">🎨 디자인 · 개발 · 브랜딩</div>
+    <div class="cg">
+      <button class="cb ds" data-v="디자인·브랜딩" onclick="selC(this)"><span class="ic">🎨</span>디자인</button>
+      <button class="cb ds" data-v="웹·앱개발" onclick="selC(this)"><span class="ic">💻</span>웹·앱</button>
+      <button class="cb ds" data-v="패키징·인쇄" onclick="selC(this)"><span class="ic">📐</span>패키징</button>
+      <button class="cb ds" data-v="브랜드·마케팅" onclick="selC(this)"><span class="ic">📣</span>마케팅</button>
+    </div>
+    <div class="glabel gn">🌐 시사 · 문화 · 라이프</div>
+    <div class="cg">
+      <button class="cb" data-v="정치·사회" onclick="selC(this)"><span class="ic">🏛️</span>정치</button>
+      <button class="cb" data-v="국제·외교" onclick="selC(this)"><span class="ic">🌐</span>국제</button>
+      <button class="cb" data-v="경제·금융" onclick="selC(this)"><span class="ic">📈</span>경제</button>
+      <button class="cb" data-v="AI·기술" onclick="selC(this)"><span class="ic">🤖</span>AI·기술</button>
+      <button class="cb" data-v="여행" onclick="selC(this)"><span class="ic">✈️</span>여행</button>
+      <button class="cb" data-v="음식·맛집" onclick="selC(this)"><span class="ic">🍜</span>맛집</button>
+      <button class="cb" data-v="영화·드라마" onclick="selC(this)"><span class="ic">🎬</span>영화</button>
+      <button class="cb" data-v="에세이·칼럼" onclick="selC(this)"><span class="ic">📝</span>에세이</button>
+      <button class="cb" data-v="문화·예술" onclick="selC(this)"><span class="ic">🎭</span>문화</button>
+      <button class="cb" data-v="라이프스타일" onclick="selC(this)"><span class="ic">🌿</span>라이프</button>
+      <button class="cb" data-v="창작·소설" onclick="selC(this)"><span class="ic">✨</span>창작</button>
+      <button class="cb" data-v="스포츠" onclick="selC(this)"><span class="ic">⚽</span>스포츠</button>
+    </div>
+  </div>
+
+  <!-- 제목 -->
+  <div class="fs">
+    <div class="fs-t">02 · 제목</div>
+    <input type="text" id="ttl" placeholder="예: 3PL 풀필먼트 선택 시 꼭 확인해야 할 5가지" />
+  </div>
+
+  <!-- 내용 -->
+  <div class="fs">
+    <div class="fs-t">03 · 내용 메모 — 아는 것, 하고 싶은 말 다 입력</div>
+    <div class="news-hint-box">
+      <p><strong>💡 이렇게 쓰세요</strong><br>
+      · 두서없이 생각나는 대로 메모하듯 입력<br>
+      · 최신 뉴스나 정보가 있으면 그 내용도 붙여넣기<br>
+      · 단어, 키워드, 숫자, 경험담 전부 OK<br>
+      → <strong>Claude가 알아서 완성된 글로 작성해드립니다</strong></p>
+    </div>
+    <div class="dump-box">
+      <textarea class="dump-ta" id="dump" rows="9"
+        placeholder="예시:&#10;3PL 업체 고를 때 반품 처리 능력이 제일 중요함. 요즘 이커머스 반품율 20% 넘는 카테고리 많음. 냉장/일반 혼합 운영하는 곳 찾기 힘듦. 가격보다 시스템이 중요. WMS 연동 안 되면 나중에 진짜 힘들어짐..." oninput="updateCC(this)"></textarea>
+      <div class="cc" id="cc">0자</div>
+    </div>
+    <div class="hint">길수록 더 풍부한 글이 생성됩니다 (최소 50자 권장)</div>
+  </div>
+
+  <!-- 필자 의견 -->
+  <div class="fs">
+    <div class="fs-t">04 · 필자 핵심 의견 · 결론 (선택)</div>
+    <input type="text" id="op" placeholder="예: 3PL 선택의 핵심은 WMS 연동 능력과 반품 프로세스다" />
+  </div>
+
+  <!-- 이미지 -->
+  <div class="fs">
+    <div class="fs-t">05 · 이미지 (선택)</div>
+    <div class="dz" id="dz">
+      <input type="file" id="imgFiles" accept="image/*" multiple onchange="handleImgs(this)" />
+      <div class="drop-icon">🖼️</div>
+      <div class="drop-text">클릭 또는 드래그앤드롭 · 여러 장 동시 업로드</div>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="order-hint" id="orderHint">🔢 순서 = 배치 순서 · × 로 제거</div>
+    <div class="ig" style="margin-top:10px;">
+      <label>또는 이미지 URL (쉼표 구분)</label>
+      <input type="text" id="iurls" placeholder="https://... , https://..." />
+    </div>
+  </div>
+
+  <!-- 톤 -->
+  <div class="fs">
+    <div class="fs-t">06 · 글쓰기 톤</div>
+    <div class="tg">
+      <div class="tc on" data-v="정제된 분석" onclick="selT(this)"><span class="ti">🔬</span><div class="tn">정제된 분석</div><div class="td">논리·체계적</div></div>
+      <div class="tc" data-v="냉정한 직설" onclick="selT(this)"><span class="ti">⚡</span><div class="tn">냉정한 직설</div><div class="td">팩트 중심</div></div>
+      <div class="tc" data-v="따뜻한 친근" onclick="selT(this)"><span class="ti">😊</span><div class="tn">따뜻한 친근</div><div class="td">구어·공감</div></div>
+      <div class="tc" data-v="감성 에세이" onclick="selT(this)"><span class="ti">🌙</span><div class="tn">감성 에세이</div><div class="td">문학·감정</div></div>
+      <div class="tc" data-v="전문 저널" onclick="selT(this)"><span class="ti">📰</span><div class="tn">전문 저널</div><div class="td">뉴스·보도</div></div>
+      <div class="tc" data-v="업계 인사이트" onclick="selT(this)"><span class="ti">💼</span><div class="tn">업계 인사이트</div><div class="td">B2B·실무</div></div>
+    </div>
+  </div>
+
+  <!-- 출처 -->
+  <div class="fs">
+    <div class="fs-t">07 · 참고 출처 (선택)</div>
+    <input type="text" id="src" placeholder="https://..." />
+  </div>
+
+  <button class="gen-btn" id="genBtn" onclick="gen()">🚀 &nbsp; Claude AI로 블로그 생성</button>
+</div>
+
+<!-- 미리보기 -->
+<div class="prev-col">
+  <div class="pv-wrap">
+    <div class="pv-bar">
+      <h2 id="pvlabel">← API 키 입력 후 생성 버튼을 누르세요</h2>
+      <button class="tbtn" id="cbtn" onclick="copyIt()" style="display:none">📋 HTML 복사</button>
+      <button class="tbtn p" id="dbtn" onclick="dlIt()" style="display:none">⬇️ 저장</button>
+    </div>
+    <div class="empty" id="emp">
+      <div class="ei">🤖</div>
+      <p>Claude AI가 직접<br>완성된 글을 써드립니다<br><br><span style="font-size:12px;color:#ddd;">카테고리 · 제목 · 내용 입력 후<br>생성 버튼을 누르세요</span></p>
+    </div>
+    <div class="loading" id="ld">
+      <div class="spin"></div>
+      <div class="loading-title">Claude AI가 글을 쓰는 중...</div>
+      <p>잠시만 기다려주세요</p>
+      <div class="steps" id="ldsteps"></div>
+    </div>
+    <div id="errBox" style="display:none;"></div>
+    <div id="out" style="display:none;"></div>
+  </div>
+</div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ── 상태 ──
+let cat='', tone='정제된 분석', imgs=[], outHTML='';
+const LOGISTICS=['물류·풀필먼트','3PL·4PL','이커머스·물류','SCM·공급망','창고·재고관리','배송·라스트마일','화물·운송','물류트렌드'];
+const DESIGN=['디자인·브랜딩','웹·앱개발','패키징·인쇄','브랜드·마케팅'];
+
+// ── API 키 관리 ──
+window.addEventListener('DOMContentLoaded', ()=>{
+  const saved = localStorage.getItem('claude_api_key');
+  if(saved){
+    document.getElementById('apiKey').value = saved;
+    document.getElementById('apiSaveBtn').textContent = '✓ 저장됨';
+    document.getElementById('apiSaveBtn').classList.add('saved');
+    document.getElementById('pvlabel').textContent = '← 내용 입력 후 생성 버튼을 누르세요';
+  }
+});
+function saveKey(){
+  const key = document.getElementById('apiKey').value.trim();
+  if(!key){showToast('API 키를 입력해주세요');return;}
+  if(!key.startsWith('sk-ant')){showToast('올바른 API 키 형식이 아닙니다 (sk-ant-... 로 시작)');return;}
+  localStorage.setItem('claude_api_key', key);
+  document.getElementById('apiSaveBtn').textContent = '✓ 저장됨';
+  document.getElementById('apiSaveBtn').classList.add('saved');
+  document.getElementById('pvlabel').textContent = '← 내용 입력 후 생성 버튼을 누르세요';
+  showToast('✅ API 키가 저장되었습니다');
+}
+function showApiSetup(){document.getElementById('apiKey').scrollIntoView({behavior:'smooth'});}
+
+// ── 선택 ──
+function selC(b){document.querySelectorAll('.cb').forEach(x=>x.classList.remove('on'));b.classList.add('on');cat=b.dataset.v;}
+function selT(b){document.querySelectorAll('.tc').forEach(x=>x.classList.remove('on'));b.classList.add('on');tone=b.dataset.v;}
+function updateCC(ta){document.getElementById('cc').textContent=ta.value.length+'자';}
+
+// ── 이미지 ──
+function handleImgs(inp){[...inp.files].forEach(f=>{const r=new FileReader();r.onload=e=>{imgs.push({src:e.target.result});renderThumbs();};r.readAsDataURL(f);});}
+function renderThumbs(){
+  document.getElementById('thumbs').innerHTML=imgs.map((m,i)=>
+    `<div class="thumb"><img src="${m.src}"/><button class="rm" onclick="rmImg(${i})">×</button><div class="idx">${i+1}</div></div>`
+  ).join('');
+  document.getElementById('orderHint').style.display=imgs.length?'block':'none';
+}
+function rmImg(i){imgs.splice(i,1);renderThumbs();}
+const dze=document.getElementById('dz');
+dze.addEventListener('dragover',e=>{e.preventDefault();dze.classList.add('drag');});
+dze.addEventListener('dragleave',()=>dze.classList.remove('drag'));
+dze.addEventListener('drop',e=>{
+  e.preventDefault();dze.classList.remove('drag');
+  [...e.dataTransfer.files].filter(f=>f.type.startsWith('image/')).forEach(f=>{
+    const r=new FileReader();r.onload=ev=>{imgs.push({src:ev.target.result});renderThumbs();};r.readAsDataURL(f);
+  });
+});
+
+// ── Claude API 호출 ──
+async function callClaude(apiKey, title, category, tone, rawContent, opinion){
+  const toneGuides = {
+    '정제된 분석': '논리적이고 체계적인 분석 문체. 객관적 시각, 구조적 서술. 전문적이지만 읽기 쉽게.',
+    '냉정한 직설': '감정 없이 팩트 중심. 짧고 명확한 문장. 결론을 먼저 말하는 구조. 불필요한 수식어 제거.',
+    '따뜻한 친근': '독자와 대화하듯 구어체. "~해요" "~이에요" 말투. 공감과 경험 공유. 친구에게 설명하는 느낌.',
+    '감성 에세이': '문학적 표현과 감성적 서술. 개인의 감정과 성찰이 담긴 문체. 은유와 비유 활용.',
+    '전문 저널': '뉴스 기사처럼 육하원칙 중심. 인용과 근거 명시. 공신력 있는 보도 문체.',
+    '업계 인사이트': '현장 실무자의 시각. B2B 독자 대상. 구체적 수치와 사례 중심. "업계에서는" "실무적으로" 같은 표현 활용.'
+  };
+
+  const systemPrompt = `당신은 ${category} 분야의 전문 블로그 작가입니다.
+글쓰기 톤: ${tone} — ${toneGuides[tone]||'전문적이고 읽기 쉬운 문체'}
+
+다음 JSON 형식으로만 응답하세요. JSON 외 다른 텍스트는 절대 포함하지 마세요:
+{
+  "subtitle": "부제목 (1줄, 20자 내외)",
+  "intro": "도입부 단락 (3~4문장, 독자의 관심을 끄는 강렬한 시작)",
+  "sections": [
+    {"title": "섹션 제목", "content": "섹션 본문 (4~6문장, 충분한 내용과 구체적 설명 포함)"},
+    {"title": "섹션 제목", "content": "섹션 본문"},
+    {"title": "섹션 제목", "content": "섹션 본문"},
+    {"title": "섹션 제목", "content": "섹션 본문"}
+  ],
+  "conclusion": "결론 단락 (3~4문장, 핵심 메시지와 독자 행동 촉구)",
+  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5", "태그6", "태그7", "태그8"]
+}`;
+
+  const userPrompt = `카테고리: ${category}
+제목: ${title}
+${opinion ? `필자 핵심 의견/결론: ${opinion}` : ''}
+
+작성자 메모 및 참고 내용:
+${rawContent}
+
+위 내용을 바탕으로 완성도 높은 블로그 포스트를 작성해주세요.
+- 작성자의 생각, 경험, 의견을 자연스럽게 글 속에 녹여주세요
+- 단순히 메모를 정리하는 것이 아니라 풍부한 맥락과 분석을 더해주세요
+- 독자에게 실질적인 가치를 주는 완성된 글로 작성해주세요
+- ${tone} 톤으로 일관되게 작성하세요`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'anthropic-dangerous-allow-browser': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 3000,
+      system: systemPrompt,
+      messages: [{role:'user', content:userPrompt}]
+    })
+  });
+
+  if(!response.ok){
+    const err = await response.json().catch(()=>({}));
+    throw new Error(err.error?.message || `API 오류 ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.content[0].text.trim();
+  // JSON 파싱
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if(!jsonMatch) throw new Error('응답 형식 오류');
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── 유틸 ──
+function getAllImgs(){
+  const urls=(document.getElementById('iurls').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  return [...imgs.map(m=>m.src),...urls];
+}
+function getD(){const d=new Date();return `${d.getFullYear()}. ${String(d.getMonth()+1).padStart(2,'0')}. ${String(d.getDate()).padStart(2,'0')}`;}
+function getCatColor(c){return LOGISTICS.includes(c)?'#1a5cc0':DESIGN.includes(c)?'#7722cc':'#c02020';}
+
+// ── 로딩 스텝 ──
+let stepTimer, stepIdx=0;
+const STEPS=[
+  '🔑 API 연결 중...',
+  '🧠 주제 분석 중...',
+  '✍️ 서론 작성 중...',
+  '📝 본문 섹션 작성 중...',
+  '🎯 결론 및 태그 생성 중...',
+  '🖼️ 이미지 배치 중...',
+  '✅ 포스트 완성 중...'
+];
+function startSteps(){
+  stepIdx=0;
+  const el=document.getElementById('ldsteps');el.innerHTML='';
+  stepTimer=setInterval(()=>{
+    if(stepIdx<STEPS.length){
+      if(stepIdx>0){
+        const prev=el.children[stepIdx-1];
+        if(prev){prev.className='step-item done';prev.querySelector('.si').textContent='✓';}
+      }
+      const div=document.createElement('div');
+      div.className='step-item doing';
+      div.innerHTML=`<span class="si">›</span><span>${STEPS[stepIdx]}</span>`;
+      el.appendChild(div);
+      el.scrollTop=el.scrollHeight;
+      stepIdx++;
+    }
+  },600);
+}
+function stopSteps(){clearInterval(stepTimer);}
+
+// ── 메인 생성 ──
+async function gen(){
+  const apiKey = localStorage.getItem('claude_api_key') || document.getElementById('apiKey').value.trim();
+  const ttl = document.getElementById('ttl').value.trim();
+  const raw = document.getElementById('dump').value.trim();
+  const op = document.getElementById('op').value.trim();
+  const src = document.getElementById('src').value.trim();
+
+  if(!apiKey){showToast('🔑 API 키를 먼저 입력하고 저장해주세요');return;}
+  if(!cat){showToast('카테고리를 선택해주세요 📂');return;}
+  if(!ttl){showToast('제목을 입력해주세요 ✏️');return;}
+  if(!raw||raw.length<10){showToast('내용을 더 입력해주세요 📝');return;}
+
+  // UI 초기화
+  document.getElementById('emp').style.display='none';
+  document.getElementById('out').style.display='none';
+  document.getElementById('errBox').style.display='none';
+  document.getElementById('ld').classList.add('on');
+  document.getElementById('pvlabel').textContent='Claude AI가 작성 중...';
+  document.getElementById('genBtn').disabled=true;
+  startSteps();
+
+  try {
+    const result = await callClaude(apiKey, ttl, cat, tone, raw, op);
+    stopSteps();
+
+    const color = getCatColor(cat);
+    const allImgs = getAllImgs();
+    const heroSrc = allImgs[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&q=80&auto=format&fit=crop';
+
+    // 섹션 생성
+    const sections = (result.sections||[]).map((sec,i)=>{
+      const secImg = allImgs[i+1] || null;
+      const imgBlock = secImg ? `<div class="simg-wrap"><img src="${secImg}" alt="${sec.title}" style="max-height:220px;"/><div class="simg-cap">📷 이미지 ${i+1}</div></div>` : '';
+      return `<div class="bsec">
+        <div class="bsec-n">SECTION ${String(i+1).padStart(2,'0')}</div>
+        <h3>${sec.title}</h3>
+        ${imgBlock}
+        <p>${sec.content}</p>
+      </div>`;
+    }).join('');
+
+    // 남은 이미지 갤러리
+    const leftover = allImgs.slice((result.sections||[]).length+1);
+    const gallery = leftover.length>=2 ?
+      `<div class="bsec"><div class="bsec-n">GALLERY</div><h3>관련 이미지</h3><div class="img-gallery ${leftover.length>=3?'g3':'g2'}">${leftover.slice(0,3).map(s=>`<img src="${s}" alt=""/>`).join('')}</div></div>` : '';
+
+    const tags = (result.tags||[]).map(t=>`<span class="tag">#${t.replace('#','')}</span>`).join('');
+
+    outHTML = `<div class="bo">
+  <div class="bh">
+    <img src="${heroSrc}" alt="${ttl}" onerror="this.style.display='none'"/>
+    <div class="bh-badge">
+      <span class="bh-cat">${cat}</span>
+      <span class="bh-ai">🤖 Claude AI</span>
+    </div>
+    <div class="bh-ov">
+      <div class="bh-date">📅 ${getD()}</div>
+      <div class="bh-title">${ttl}</div>
+      <div class="bh-sub">${result.subtitle||''}</div>
+    </div>
+  </div>
+  <div class="bb">
+    <p class="intro-p">${result.intro||''}</p>
+    ${sections}
+    ${gallery}
+    <div class="abox" style="background:${color}11;border-color:${color};">
+      <div class="at" style="color:${color};">💡 핵심 결론</div>
+      <p>${result.conclusion||''}</p>
+    </div>
+    ${op?`<div class="auth-box"><div class="auth-av">✍️</div><div><div class="auth-nm">필자 · ${getD()} · ${cat}</div><div class="auth-tx">"${op}"</div></div></div>`:''}
+  </div>
+  <div class="tags">${tags}</div>
+  ${src?`<div class="srcs"><p>📎 출처: <a href="${src}" target="_blank">${src}</a></p></div>`:''}
+</div>`;
+
+    document.getElementById('ld').classList.remove('on');
+    document.getElementById('out').innerHTML = outHTML;
+    document.getElementById('out').style.display = 'block';
+    document.getElementById('pvlabel').textContent = `✅ Claude AI 작성 완료 — ${tone} · ${cat}`;
+    document.getElementById('cbtn').style.display = 'flex';
+    document.getElementById('dbtn').style.display = 'flex';
+
+  } catch(e) {
+    stopSteps();
+    document.getElementById('ld').classList.remove('on');
+    let errMsg = e.message;
+    let extraGuide = 'API 키를 확인하거나 잠시 후 다시 시도해주세요.';
+    if(e.message === 'Failed to fetch' || e.message.includes('NetworkError') || e.message.includes('CORS') || e.message.includes('fetch')){
+      errMsg = '브라우저 보안 정책(CORS)으로 API 연결이 차단되었습니다.';
+      extraGuide = `
+        <div style="margin-top:12px;padding:12px;background:#1a1a1a;border-radius:8px;text-align:left;">
+          <b style="color:#f0c040;">🔧 해결방법</b><br><br>
+          파일을 직접 열지 말고, <b>블로그생성기_실행.bat</b> 파일을 더블클릭으로 실행하세요.<br><br>
+          <span style="color:#aaa;font-size:12px;">
+            (BlogGenerator 폴더 안에 있습니다)<br>
+            bat 파일이 로컬 서버를 시작하고 브라우저를 자동으로 열어줍니다.
+          </span>
+        </div>`;
+    } else if(e.message.includes('401') || e.message.includes('authentication') || e.message.includes('invalid x-api-key')){
+      errMsg = 'API 키가 올바르지 않습니다.';
+      extraGuide = 'Anthropic Console에서 발급받은 API 키를 다시 확인하고 입력해주세요.';
+    } else if(e.message.includes('429') || e.message.includes('rate_limit')){
+      errMsg = 'API 요청 한도 초과입니다.';
+      extraGuide = '잠시 후(1분) 다시 시도해주세요.';
+    } else if(e.message.includes('insufficient_quota') || e.message.includes('credit')){
+      errMsg = 'API 크레딧이 부족합니다.';
+      extraGuide = 'Anthropic Console에서 크레딧을 충전해주세요.';
+    }
+    document.getElementById('errBox').innerHTML = `<div class="error-box"><h3>⚠️ 오류가 발생했습니다</h3><p>${errMsg}</p><p style="margin-top:8px;font-size:12px;color:#aaa;">${extraGuide}</p></div>`;
+    document.getElementById('errBox').style.display = 'block';
+    document.getElementById('pvlabel').textContent = '오류 발생';
+  }
+  document.getElementById('genBtn').disabled = false;
+}
+
+// ── 복사/저장 ──
+function copyIt(){
+  navigator.clipboard.writeText(document.getElementById('out').innerHTML)
+    .then(()=>showToast('✅ HTML 복사 완료! 티스토리 HTML 편집기에 붙여넣기 하세요'))
+    .catch(()=>showToast('복사 완료!'));
+}
+function dlIt(){
+  const ttl=document.getElementById('ttl').value.trim()||'blog';
+  const blob=new Blob([`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>${ttl}</title></head><body style="font-family:sans-serif;background:#f0ece5;padding:20px;">${outHTML}</body></html>`],{type:'text/html'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=`blog_${new Date().toISOString().slice(0,10)}_${ttl.slice(0,15).replace(/\s/g,'_')}.html`;
+  a.click();showToast('⬇️ 저장 완료!');
+}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+</script>
+</body>
+</html>
