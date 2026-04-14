@@ -12,7 +12,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
+html{height:100%;}
+body{height:100%;background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
 input,button,textarea{font-family:inherit;}
@@ -26,7 +27,7 @@ input,button,textarea{font-family:inherit;}
 .sheet-anim{animation:sheetUp .22s cubic-bezier(.32,.72,0,1) forwards;}
 </style>
 </head>
-<body><div id="root"></div>
+<body><div id="root" style="height:100%;"></div>
 <script>
 (function(){
 'use strict';
@@ -270,6 +271,27 @@ function App(){
   var whsRef=useRef([]);
   whsRef.current=whs;
 
+  /* ★ 창고 진입 여부에 따라 body 스크롤 제어 — iOS Safari 핵심 */
+  var isInWH=!!(whId&&whs.find(function(w){return w&&w.id===whId;}));
+  useEffect(function(){
+    if(isInWH){
+      /* 창고 내부: body 스크롤 잠금, WHView가 100dvh 점유 */
+      document.body.style.overflow='hidden';
+      document.body.style.height='100%';
+      document.documentElement.style.overflow='hidden';
+    } else {
+      /* 목록 화면: body 자연 스크롤 */
+      document.body.style.overflow='';
+      document.body.style.height='';
+      document.documentElement.style.overflow='';
+    }
+    return function(){
+      document.body.style.overflow='';
+      document.body.style.height='';
+      document.documentElement.style.overflow='';
+    };
+  },[isInWH]);
+
   useEffect(function(){
     var unsub=fbAuth.onAuthStateChanged(function(user){
       if(!user){window.location.replace(INDEX_PATH);return;}
@@ -378,7 +400,7 @@ function MainView(p){
     fbDb.ref('inviteCodes/'+code).set({groupId:'makechango',createdAt:now,usedBy:null,expiresAt:now+86400000}).then(function(){setInviteCode(code);setInviteLoading(false);}).catch(function(e){alert('코드 생성 실패: '+e.message);setInviteLoading(false);});
   }
 
-  return h('div',{style:{minHeight:'100vh',background:BG,paddingBottom:'env(safe-area-inset-bottom,36px)',overflowY:'auto',WebkitOverflowScrolling:'touch'}},
+  return h('div',{style:{minHeight:'100%',background:BG,paddingBottom:'env(safe-area-inset-bottom,80px)'}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 14px',height:54,display:'flex',alignItems:'center',gap:8,position:'sticky',top:0,zIndex:10}},
       isAdmin&&h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:function(){localStorage.removeItem('wms_adminGroupId');localStorage.removeItem('wms_adminWhId');window.location.replace(INDEX_PATH);}},'< 그룹'),
       h('div',{style:{flex:1,overflow:'hidden'}},h('div',{style:{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},'메이크창고 WMS'),h('div',{style:{fontSize:9,color:SUB}},'창고관리 ver 01')),
@@ -620,7 +642,7 @@ function WHView(p){
               style:{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:SUB,fontSize:16,cursor:'pointer',padding:2,lineHeight:1}
             },'✕'))),
         /* 리스트 */
-        h('div',{style:{flex:1,overflowY:'auto',padding:'6px 10px 10px',WebkitOverflowScrolling:'touch'}},
+        h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',padding:'6px 10px 10px',WebkitOverflowScrolling:'touch'}},
           (function(){
             var filtered=pg.filter(function(p2){
               return !filterSearch||p2.name.toLowerCase().indexOf(filterSearch.toLowerCase())>=0;
@@ -807,7 +829,7 @@ function WHView(p){
         h('button',{style:S(outSelMode?'rgba(217,119,6,.7)':'rgba(245,158,11,.15)',outSelMode?'#fff':'#F59E0B',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(245,158,11,.3)'}),onClick:function(){if(outSelMode){setOutSelMode(false);setOutMeta(null);}else{setShowOutForm(true);}}},outSelMode?'선택중':'출고대기'),
         h('button',{style:S(immMode?'#DC2626':'rgba(239,68,68,.12)',immMode?'#fff':'#F87171',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(239,68,68,.25)'}),onClick:function(){if(immMode){setImmMode(false);setShowOutPanel(true);}else{setImmMode(true);setShowOutPanel(true);setOutSelMode(false);}}},immMode?'출고중':'출고')),
       GW(true),
-      h('div',{style:{flexShrink:0,overflowY:'auto',maxHeight:'45dvh',paddingBottom:'env(safe-area-inset-bottom,20px)',WebkitOverflowScrolling:'touch'}},
+      h('div',{style:{flexShrink:0,overflowY:'scroll',maxHeight:'45dvh',paddingBottom:'env(safe-area-inset-bottom,20px)',WebkitOverflowScrolling:'touch'}},
       wh.inQ.length>0&&h('div',{style:{background:'rgba(10,20,38,.98)',borderTop:'2px solid #3B82F6',padding:10,paddingBottom:8}},
         h('div',{style:{fontSize:11,fontWeight:700,marginBottom:7,color:'#60A5FA',display:'flex',alignItems:'center',gap:8}},'입고대기 '+wh.inQ.length+'건',selSlots.length>0?h('span',{style:{color:'#4ADE80',fontWeight:700}},selSlots.length+'개 선택'):h('span',{style:{color:SUB,fontSize:10}},'빈슬롯탭 > 위치지정')),
         h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);}},item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));}))  ),
