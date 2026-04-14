@@ -12,7 +12,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
+html{overscroll-behavior:none;scroll-behavior:smooth;}
+body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+  overscroll-behavior-y:none;
+  -webkit-overflow-scrolling:touch;
+}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
 input,button,textarea{font-family:inherit;}
@@ -624,7 +629,7 @@ function WHView(p){
               style:{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:SUB,fontSize:16,cursor:'pointer',padding:2,lineHeight:1}
             },'✕'))),
         /* 리스트 */
-        h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',padding:'6px 10px 10px',WebkitOverflowScrolling:'touch'}},
+        h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',padding:'6px 10px 10px',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto'}},
           (function(){
             var filtered=pg.filter(function(p2){
               return !filterSearch||p2.name.toLowerCase().indexOf(filterSearch.toLowerCase())>=0;
@@ -811,13 +816,13 @@ function WHView(p){
         h('button',{style:S(outSelMode?'rgba(217,119,6,.7)':'rgba(245,158,11,.15)',outSelMode?'#fff':'#F59E0B',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(245,158,11,.3)'}),onClick:function(){if(outSelMode){setOutSelMode(false);setOutMeta(null);}else{setShowOutForm(true);}}},outSelMode?'선택중':'출고대기'),
         h('button',{style:S(immMode?'#DC2626':'rgba(239,68,68,.12)',immMode?'#fff':'#F87171',{padding:'5px 10px',fontSize:12,border:'1px solid rgba(239,68,68,.25)'}),onClick:function(){if(immMode){setImmMode(false);setShowOutPanel(true);}else{setImmMode(true);setShowOutPanel(true);setOutSelMode(false);}}},immMode?'출고중':'출고')),
       GW(true),
-      h('div',{style:{flexShrink:0,overflowY:'scroll',maxHeight:'45dvh',paddingBottom:'env(safe-area-inset-bottom,20px)',WebkitOverflowScrolling:'touch'}},
+      h('div',{style:{flexShrink:0,overflowY:'scroll',maxHeight:'45dvh',paddingBottom:'env(safe-area-inset-bottom,20px)',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto'}},
       wh.inQ.length>0&&h('div',{style:{background:'rgba(10,20,38,.98)',borderTop:'2px solid #3B82F6',padding:10,paddingBottom:8}},
         h('div',{style:{fontSize:11,fontWeight:700,marginBottom:7,color:'#60A5FA',display:'flex',alignItems:'center',gap:8}},'입고대기 '+wh.inQ.length+'건',selSlots.length>0?h('span',{style:{color:'#4ADE80',fontWeight:700}},selSlots.length+'개 선택'):h('span',{style:{color:SUB,fontSize:10}},'빈슬롯탭 > 위치지정')),
         h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);}},item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));}))  ),
       renderPendPanel(),renderImmPanel())),
 
-    tab==='status'&&h('div',{style:{flex:1,overflow:'auto',padding:'14px 14px 28px'},onClick:function(){if(colorPick)setColorPick(null);}},
+    tab==='status'&&h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto',padding:'14px 14px 28px'},onClick:function(){if(colorPick)setColorPick(null);}},
       h('div',{style:{fontWeight:700,fontSize:15,marginBottom:12,display:'flex',alignItems:'center',justifyContent:'space-between'}},
         h('span',null,'📊 현황판'),
         h('button',{style:S('rgba(16,185,129,.15)','#34D399',{padding:'5px 14px',fontSize:12,border:'1px solid rgba(16,185,129,.3)',borderRadius:7}),onClick:function(){var BOM='\uFEFF';var rows=[['상품명','유통기한','수량']];pg.forEach(function(p2){(p2.exps||[]).forEach(function(e){rows.push([p2.name,e.exp?fmtExp(e.exp):'기한없음',e.totalQty]);});});function qCSV(v){var s=String(v||'');return s.indexOf(',')>=0||s.indexOf('"')>=0?'"'+s.replace(/"/g,'""')+'"':s;}var csv=BOM+rows.map(function(rr){return rr.map(qCSV).join(',');}).join('\r\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='재고현황_'+wh.name+'.csv';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},1000);}},h('span',{style:{display:'flex',alignItems:'center',gap:6}},h('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none'},h('rect',{x:2,y:2,width:20,height:20,rx:3,fill:'#1D6F42'}),h('path',{d:'M7 7l3.5 5L7 17h2.5l2-3 2 3H16l-3.5-5L16 7h-2.5l-2 3-2-3H7z',fill:'#fff'})),'CSV 다운로드'))),
@@ -826,7 +831,7 @@ function WHView(p){
       h('div',{style:{display:'flex',gap:8,marginBottom:10,padding:'8px 12px',background:CARD,borderRadius:9,border:'1px solid '+BDR,alignItems:'center'}},h('span',{style:{fontSize:11,color:SUB,marginRight:4}},'유통기한'),h('span',{style:{fontSize:12,color:EM.expired.clr,fontWeight:700}},'만료'),h('span',{style:{fontSize:10,color:SUB}},'|'),h('span',{style:{fontSize:12,color:EM.imminent.clr,fontWeight:700}},'임박(3개월 미만)'),h('span',{style:{fontSize:10,color:SUB,marginLeft:'auto'}},'● 클릭 → 색상 변경')),
       h('div',{style:{background:CARD,borderRadius:11,padding:14}},h('div',{style:{fontSize:13,fontWeight:600,marginBottom:10}},'상품별 재고'),pg.length===0?h('div',{style:{fontSize:12,color:SUB}},'배치된 상품 없음'):pg.map(function(p2){var isPickOpen=colorPick===p2.name;return h('div',{key:p2.name,style:{marginBottom:14,background:'rgba(255,255,255,.03)',borderRadius:9,overflow:'hidden',border:'1px solid '+p2.clr+'33'}},h('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',background:p2.clr+'0f'}},h('div',{onClick:function(e){e.stopPropagation();setColorPick(isPickOpen?null:p2.name);},style:{width:16,height:16,borderRadius:'50%',background:p2.clr,flexShrink:0,cursor:'pointer',border:'2px solid '+p2.clr+'99',boxShadow:isPickOpen?'0 0 0 2px #fff':'none'}}),h('div',{style:{flex:1,fontSize:13,fontWeight:700}},p2.name),h('span',{style:{background:p2.clr+'22',border:'1px solid '+p2.clr+'44',color:p2.clr,borderRadius:6,padding:'2px 8px',fontSize:12,fontWeight:700}},p2.cnt+'팔'),h('span',{style:{background:'rgba(255,255,255,.07)',borderRadius:6,padding:'2px 8px',fontSize:12,fontWeight:700}},p2.totalQty.toLocaleString()+'개')),isPickOpen&&h(ColorPicker,{currentClr:p2.clr,onPick:function(clr){chgClr(p2.name,clr);}}),h('div',{style:{padding:'6px 8px',display:'flex',flexDirection:'column',gap:4}},p2.exps.map(function(e){var esSt=getExpSt(e.exp),em5=EM[esSt];return h('div',{key:e.exp||'_',style:{display:'flex',alignItems:'center',gap:7,background:em5?em5.bg:'rgba(255,255,255,.03)',border:'1px solid '+(em5?(em5.bdr+'77'):'rgba(255,255,255,.06)'),borderRadius:6,padding:'5px 9px'}},em5&&h('span',{style:{fontSize:13,color:em5.clr,fontWeight:900,flexShrink:0}},em5.icon),h('div',{style:{flex:1,fontSize:11,color:em5?em5.clr:SUB}},e.exp?fmtExp(e.exp):'유통기한 미기재'),em5&&h('span',{style:{fontSize:10,color:em5.clr,fontWeight:700,background:em5.bg,borderRadius:4,padding:'1px 5px',flexShrink:0}},em5.label),h('span',{style:{fontSize:11,color:p2.clr,fontWeight:600,minWidth:36,textAlign:'right'}},e.cnt+'팔'),h('span',{style:{fontSize:11,fontWeight:700,minWidth:52,textAlign:'right'}},e.totalQty.toLocaleString()+'개'));})));}))),
 
-    tab==='history'&&h('div',{style:{flex:1,overflow:'auto',padding:'14px 14px 28px'}},
+    tab==='history'&&h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto',padding:'14px 14px 28px'}},
       h('div',{style:{fontWeight:700,fontSize:15,marginBottom:4}},'📋 히스토리'),
       h('div',{style:{fontSize:12,color:SUB,marginBottom:12}},'저장 버튼으로 스냅샷 저장 / 항목 클릭 → 배치도'),
       wh.history.length===0?h('div',{style:{color:SUB,fontSize:13,marginTop:40,textAlign:'center'}},'저장된 히스토리가 없습니다'):
@@ -947,13 +952,13 @@ function ExportModal(p){
           h('button',{style:tabSt(tab==='export','#60A5FA'),onClick:function(){setTab('export');setParsed(null);setImpMsg('');}},h('span',null,'📤 내보내기')),
           h('button',{style:tabSt(tab==='import','#4ADE80'),onClick:function(){setTab('import');}},h('span',null,'📥 가져오기'))),
         h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 10px',fontSize:12,marginLeft:8,flexShrink:0}),onClick:onClose},'닫기')),
-      tab==='export'&&h('div',{style:{flex:1,overflow:'auto',padding:18}},
+      tab==='export'&&h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',padding:18}},
         h('div',{style:{fontSize:12,color:SUB,marginBottom:10,lineHeight:1.6}},'랙 구조, 분할 설정, 상품 배치를 모두 CSV로 저장합니다.',h('br',null),'가져오기로 동일한 구조를 완전 복원할 수 있습니다.'),
         h('div',{style:{fontSize:12,color:SUB,fontWeight:600,marginBottom:8}},'스냅샷 선택'),
         h('div',{style:{display:'flex',gap:5,flexWrap:'wrap',marginBottom:16}},sheets.map(function(s,i){return h('button',{key:i,onClick:function(){setIdx(i);},style:S(idx===i?'rgba(59,130,246,.2)':'rgba(255,255,255,.06)',idx===i?'#60A5FA':SUB,{padding:'5px 11px',fontSize:11,border:'1px solid '+(idx===i?'rgba(59,130,246,.4)':'transparent')})},s.label.slice(0,22));})),
         h('div',{style:{background:'rgba(0,0,0,.3)',borderRadius:8,padding:'10px 14px',marginBottom:16,fontFamily:'monospace',fontSize:10,color:'#7EE787',lineHeight:1.8}},'#창고명$행수$열수$레이블',h('br',null),'셀행$셀열$타입$분할행$분할열$슬롯행$슬롯열$상품명$유통기한$수량'),
         h('button',{style:S('#2563EB','#fff',{padding:13,fontSize:15,width:'100%',borderRadius:9}),onClick:doExport},'💾 CSV 다운로드  —  '+sheets[idx].label)),
-      tab==='import'&&h('div',{style:{flex:1,overflow:'auto',padding:18}},
+      tab==='import'&&h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',padding:18}},
         h('div',{style:{background:'rgba(245,158,11,.08)',border:'1px solid rgba(245,158,11,.3)',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:12,color:'#FBBF24',lineHeight:1.6}},'⚠️ 가져오기 시 현재 창고의 ',h('strong',null,'셀 구조와 상품 배치 전체가 덮어씌워집니다'),'. 히스토리에 자동 저장 후 복원 가능합니다.'),
         h('label',{style:{display:'block',cursor:'pointer'}},
           h('div',{style:{border:'2px dashed '+(impOk?'#22C55E':'#334155'),borderRadius:10,padding:'20px',textAlign:'center',color:impOk?'#4ADE80':SUB,fontSize:13,marginBottom:12,background:'rgba(255,255,255,.02)',transition:'all .2s'},onDragOver:function(e){e.preventDefault();e.currentTarget.style.borderColor='#3B82F6';},onDragLeave:function(e){e.currentTarget.style.borderColor=impOk?'#22C55E':'#334155';},onDrop:function(e){e.preventDefault();var f=e.dataTransfer.files[0];if(f){var dt=new DataTransfer();dt.items.add(f);fileRef.current.files=dt.files;onFileChange({target:{files:[f]}});}},},impOk?'✅ 파일 로드됨':'📂 창고구조_*.csv 파일 선택 또는 드래그'),
