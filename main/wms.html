@@ -12,8 +12,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-html{height:100%;}
-body{height:100%;background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;background:#0F172A;}
+body{font-family:system-ui,sans-serif;color:#E2E8F0;-webkit-tap-highlight-color:transparent;}
+#root{position:fixed;top:0;left:0;right:0;bottom:0;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
 input,button,textarea{font-family:inherit;}
@@ -271,26 +272,7 @@ function App(){
   var whsRef=useRef([]);
   whsRef.current=whs;
 
-  /* ★ 창고 진입 여부에 따라 body 스크롤 제어 — iOS Safari 핵심 */
   var isInWH=!!(whId&&whs.find(function(w){return w&&w.id===whId;}));
-  useEffect(function(){
-    if(isInWH){
-      /* 창고 내부: body 스크롤 잠금, WHView가 100dvh 점유 */
-      document.body.style.overflow='hidden';
-      document.body.style.height='100%';
-      document.documentElement.style.overflow='hidden';
-    } else {
-      /* 목록 화면: body 자연 스크롤 */
-      document.body.style.overflow='';
-      document.body.style.height='';
-      document.documentElement.style.overflow='';
-    }
-    return function(){
-      document.body.style.overflow='';
-      document.body.style.height='';
-      document.documentElement.style.overflow='';
-    };
-  },[isInWH]);
 
   useEffect(function(){
     var unsub=fbAuth.onAuthStateChanged(function(user){
@@ -358,10 +340,10 @@ function App(){
 
   var cWh=whId?whs.find(function(w){return w&&w.id===whId;})||null:null;
 
-  if(authSt==='loading'){return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'인증 확인 중...'),Footer);}
+  if(authSt==='loading'){return h('div',{style:{position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'인증 확인 중...'),Footer);}
   if(cWh){return h(WHView,{wh:cWh,onUpdate:function(fn){upWh(whId,fn);},onBack:(isAdmin||whs.length>1)?function(){setWhId(null);localStorage.removeItem('wms_adminWhId');}:null,onLogout:doLogout,isAdmin:isAdmin,fbUser:fbUser});}
   if(authSt==='ready'){return h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId,onLogout:doLogout,fbUser:fbUser,isAdmin:isAdmin,groupId:localStorage.getItem('wms_adminGroupId'),noticeGroupId:groupId2});}
-  return h('div',{style:{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'창고 로딩 중...'),Footer);
+  return h('div',{style:{position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'창고 로딩 중...'),Footer);
 }
 
 /* ═══ MAIN VIEW ═══ */
@@ -400,7 +382,8 @@ function MainView(p){
     fbDb.ref('inviteCodes/'+code).set({groupId:'makechango',createdAt:now,usedBy:null,expiresAt:now+86400000}).then(function(){setInviteCode(code);setInviteLoading(false);}).catch(function(e){alert('코드 생성 실패: '+e.message);setInviteLoading(false);});
   }
 
-  return h('div',{style:{minHeight:'100%',background:BG,paddingBottom:'env(safe-area-inset-bottom,80px)'}},
+  return h('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',background:BG}},
+    h('div',{style:{paddingBottom:'env(safe-area-inset-bottom,60px)'}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 14px',height:54,display:'flex',alignItems:'center',gap:8,position:'sticky',top:0,zIndex:10}},
       isAdmin&&h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:function(){localStorage.removeItem('wms_adminGroupId');localStorage.removeItem('wms_adminWhId');window.location.replace(INDEX_PATH);}},'< 그룹'),
       h('div',{style:{flex:1,overflow:'hidden'}},h('div',{style:{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},'메이크창고 WMS'),h('div',{style:{fontSize:9,color:SUB}},'창고관리 ver 01')),
@@ -471,8 +454,8 @@ function MainView(p){
         h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8}},
           h('span',{style:{fontSize:11,color:SUB}},noticeText?noticeText.length+'자 · 모든 기기에 동기화됨':'입력 즉시 모든 기기에 반영됩니다'),
           noticeText&&h('span',{style:{fontSize:11,color:'#FBBF24',fontWeight:600}},'● 표시 중')))),
-    Footer);
-}
+    Footer));  /* inner padding div 닫기 */
+}  /* MainView 닫기 */
 
 /* ═══ WH VIEW ═══ */
 function WHView(p){
@@ -694,7 +677,7 @@ function WHView(p){
   }
 
   var anyMode=outSelMode||immMode||moveFrom||selSlots.length>0;
-  return h('div',{ref:rootRef,style:{height:'100dvh',display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
+  return h('div',{ref:rootRef,style:{position:'fixed',inset:0,display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
     saveFlash&&h('div',{key:String(toastK.current),className:'toast'},'저장 완료'),
     h('div',{style:{position:'sticky',top:0,zIndex:10,flexShrink:0}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 8px',height:48,display:'flex',alignItems:'center',gap:5}},
