@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SnapMemo v5</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=18">
 </head>
 <body>
   <div class="toast" id="toast"></div>
+  <input type="date" id="dateHelper" class="date-helper" aria-hidden="true" tabindex="-1">
 
   <header class="header">
     <div class="logo">Snap<em>Memo</em></div>
@@ -41,55 +42,72 @@
         <input type="file" id="fc" accept="image/*" capture="environment">
       </div>
 
-      <div class="prev-box" id="prevBox">
-        <div class="prev-label">분석할 영역</div>
-        <img id="prevImg" src="" alt="선택한 분석 영역 미리보기">
-        <button class="prev-rm" id="rmBtn" aria-label="미리보기 제거">✕</button>
-      </div>
-
       <div class="status-box" id="statusBox" role="status" aria-live="polite"></div>
-      <button class="analyze-btn" id="analyzeBtn">AI 분석 시작 →</button>
+      <button class="recrop-btn" id="recropBtn">＋ 같은 이미지에서 또 크롭</button>
 
       <div>
         <div class="slabel">현황</div>
         <div class="stats">
           <div class="sc"><div class="sn" id="sT">0</div><div class="sl">전체</div></div>
-          <div class="sc"><div class="sn" id="sD">0</div><div class="sl">완료</div></div>
-          <div class="sc"><div class="sn" id="sP">0</div><div class="sl">진행중</div></div>
-          <div class="sc"><div class="sn" id="sA">0</div><div class="sl">보관</div></div>
+          <button class="sc sc-click" data-jump="active"   title="진행중 탭으로 이동"><div class="sn" id="sP">0</div><div class="sl">진행중</div></button>
+          <button class="sc sc-click" data-jump="done"     title="완료 탭으로 이동"><div class="sn" id="sD">0</div><div class="sl">완료</div></button>
+          <button class="sc sc-click" data-jump="archived" title="보관 탭으로 이동"><div class="sn" id="sA">0</div><div class="sl">보관</div></button>
         </div>
       </div>
     </section>
 
-    <!-- ── 우측 패널: 탭 / 메모 리스트 ─────────────────────── -->
+    <!-- ── 우측 패널: 탭 / 정렬 / 메모 리스트 ─────────────── -->
     <section class="right" aria-label="메모 목록">
       <div class="tabs" role="tablist">
         <button class="tab on" data-tab="active"   role="tab">진행중</button>
         <button class="tab"    data-tab="done"     role="tab">완료</button>
         <button class="tab"    data-tab="archived" role="tab">보관</button>
       </div>
+      <div class="atag-bar" id="atagBar" role="group" aria-label="보관 태그 필터" hidden></div>
+      <div class="sort-bar" role="group" aria-label="정렬 방식">
+        <span class="sort-label">정렬</span>
+        <button class="sort-btn on" data-sort="date">날짜순</button>
+        <button class="sort-btn"    data-sort="due">기한순</button>
+        <button class="sort-btn"    data-sort="group">그룹순</button>
+        <button class="sort-btn"    data-sort="similar">비슷한순</button>
+        <button class="sort-btn"    data-sort="manual" title="드래그로 순서를 바꾸면 자동 전환">수동</button>
+        <span class="sort-hint">↕ 항목을 드래그해 위아래 이동</span>
+      </div>
       <div class="items" id="itemList"></div>
     </section>
   </main>
+
+  <!-- ── 카테고리 선택 바텀시트 ────────────────────────── -->
+  <div class="cat-sheet-backdrop" id="catSheetBackdrop" hidden></div>
+  <div class="cat-sheet" id="catSheet" role="dialog" aria-label="카테고리 선택" aria-modal="true" hidden>
+    <div class="cat-sheet-handle" aria-hidden="true"></div>
+    <div class="cat-sheet-head">
+      <span class="cat-sheet-title">카테고리 선택</span>
+      <button class="cat-sheet-close" id="catSheetClose" aria-label="닫기">✕</button>
+    </div>
+    <div class="cat-sheet-list" id="catSheetList" role="listbox" aria-label="카테고리 목록"></div>
+  </div>
 
   <!-- ── 크롭 모달 (이미지 업로드 시 뷰포트 전체를 덮음) ────── -->
   <div class="crop-section" id="cropSection" role="dialog" aria-label="이미지 크롭" aria-modal="true">
     <div class="crop-inner">
       <div class="crop-hint">
-        위아래로 드래그해 <strong>가로줄 영역</strong>을 선택하세요 (가로는 전체 폭으로 잘립니다) · 또는 전체 이미지 바로 분석
+        가로줄을 드래그해 영역 선택 → <strong>＋ 메모 추가</strong> → 또 드래그 → 원하는 만큼 반복 → 마지막에 <strong>분석 시작</strong> 한 번이면 메모가 일괄 생성됩니다.
       </div>
       <div class="crop-wrap" id="cropWrap">
         <canvas id="cropCanvas"></canvas>
         <div class="sel-rect" id="selRect"></div>
       </div>
+      <div class="crop-queue" id="cropQueue" aria-label="대기 중인 크롭 목록"></div>
       <div class="crop-actions">
-        <button class="crop-btn crop-confirm" id="cropConfirm" disabled>선택 영역 분석</button>
-        <button class="crop-btn crop-full" id="cropFull">전체 이미지 분석</button>
-        <button class="crop-btn crop-reset" id="cropReset">취소</button>
+        <button class="crop-btn crop-confirm" id="cropConfirm" disabled>＋ 이 구간 메모로 추가</button>
+        <button class="crop-btn crop-full" id="cropFull">＋ 전체 이미지 메모로 추가</button>
+        <button class="crop-btn crop-analyze" id="cropAnalyze" disabled>분석 시작</button>
+        <button class="crop-btn crop-reset" id="cropReset">닫기</button>
       </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>
