@@ -286,9 +286,24 @@ function handleFile(f){
 function onUpload(e){handleFile(e.target.files[0]);e.target.value='';}
 function importPals(){
   const m={};
-  data.forEach((r,i)=>{const p=String(r[CI['팔레트']]).trim();if(p){if(!m[p])m[p]=[];m[p].push(i);}});
+  data.forEach((r,i)=>{
+    let p=String(r[CI['팔레트']]).trim();
+    if(!p)return;
+    // Normalize: "1" or "팔레트1" or "팔레트 1" → "팔레트1"
+    const num=p.replace(/[^0-9]/g,'');
+    if(num) p='팔레트'+num;
+    // Update the data row so the palette column is consistent
+    r[CI['팔레트']]=p;
+    if(!m[p])m[p]=[];
+    m[p].push(i);
+  });
   pals={};pCnt=0;
-  Object.keys(m).sort().forEach(n=>{pCnt++;pals['P'+pCnt]={name:n,items:m[n]};});
+  // Sort by palette number
+  const sorted=Object.keys(m).sort((a,b)=>{
+    const na=parseInt(a.replace(/[^0-9]/g,''))||0, nb=parseInt(b.replace(/[^0-9]/g,''))||0;
+    return na-nb;
+  });
+  sorted.forEach(n=>{pCnt++;pals['P'+pCnt]={name:n,items:m[n]};});
 }
 
 /* ======= HELPERS ======= */
