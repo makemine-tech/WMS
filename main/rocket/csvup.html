@@ -6,92 +6,114 @@
 <title>PO 주소 매칭 도구</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
+  :root{
+    --bg:#f0f2f5;--surface:#fff;
+    --ink:#1f2937;--ink2:#374151;--ink3:#6b7280;--ink4:#9ca3af;
+    --border:#e5e7eb;--border2:#d1d5db;
+    --pri:#1a56db;--pri-l:#e1effe;
+    --suc:#057a55;--suc-l:#ecfdf5;
+    --dng:#dc2626;--dng-l:#fef2f2;
+    --wrn:#d97706;--wrn-l:#fffbeb;
+    --tag:#f3f4f6;
+    --hdr-bg:linear-gradient(135deg,#1f2937,#374151);
+    --r:8px;
+    --font:'Segoe UI',-apple-system,'Malgun Gothic','맑은 고딕',sans-serif;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Segoe UI', -apple-system, 'Malgun Gothic', '맑은 고딕', sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; display: flex; flex-direction: column; }
+  body { font-family:var(--font);background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column; }
 
-  .header { background: linear-gradient(135deg, #2d3436, #636e72); color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-  .header-left { display: flex; align-items: center; gap: 12px; }
-  .header h1 { font-size: 20px; font-weight: 600; }
-  .btn-home { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.25); padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
-  .btn-home:hover { background: rgba(255,255,255,0.22); }
+  /* Header */
+  .hdr { background:var(--hdr-bg); color:#fff; padding:16px 24px; display:flex; align-items:center; justify-content:space-between; }
+  .hdr-left { display:flex; align-items:center; gap:12px; }
+  .hdr-icon { width:36px;height:36px;background:rgba(255,255,255,0.12);border-radius:var(--r);display:flex;align-items:center;justify-content:center; }
+  .hdr-icon svg { width:20px;height:20px;fill:none;stroke:#fff;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round; }
+  .hdr-name { font-size:18px;font-weight:700; }
+  .hdr-sub { font-size:11px;color:rgba(255,255,255,0.55);margin-top:2px;letter-spacing:0.5px; }
+  .btn-home { background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.25); padding:7px 16px; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; text-decoration:none; transition:all 0.2s; display:inline-flex; align-items:center; gap:6px; }
+  .btn-home:hover { background:rgba(255,255,255,0.22); }
 
-  .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; flex: 1; width: 100%; }
+  .container { max-width:960px; margin:20px auto; padding:0 20px; flex:1; width:100%; }
 
-  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 16px; }
-  .card-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-  .card-title .icon { width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); box-shadow:none; padding:20px; margin-bottom:16px; }
+  .card-title { font-size:15px; font-weight:600; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .card-title .icon { width:26px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center; font-size:13px; }
 
   /* Upload */
-  .upload-zone { border: 2px dashed #d1d5db; border-radius: 10px; padding: 36px; text-align: center; cursor: pointer; transition: all 0.2s; }
-  .upload-zone:hover, .upload-zone.dragover { border-color: #6c5ce7; background: #f8f7ff; }
-  .upload-zone .icon-big { font-size: 32px; margin-bottom: 10px; }
-  .upload-zone p { color: #6b7280; font-size: 13px; }
-  .upload-zone .filename { color: #6c5ce7; font-weight: 600; font-size: 14px; margin-top: 8px; }
+  .upload-zone { border:2px dashed var(--border2); border-radius:10px; padding:36px; text-align:center; cursor:pointer; transition:all 0.2s; }
+  .upload-zone:hover, .upload-zone.dragover { border-color:var(--pri); background:var(--pri-l); }
+  .upload-zone .icon-big { font-size:32px; margin-bottom:10px; }
+  .upload-zone p { color:var(--ink3); font-size:13px; }
+  .upload-zone .filename { color:var(--pri); font-weight:600; font-size:14px; margin-top:8px; }
 
   /* Status */
-  .status-bar { display: flex; gap: 12px; flex-wrap: wrap; }
-  .status-item { flex: 1; min-width: 120px; padding: 14px; border-radius: 8px; text-align: center; }
-  .status-item .num { font-size: 26px; font-weight: 700; }
-  .status-item .label { font-size: 11px; color: #6b7280; margin-top: 2px; }
-  .s-total { background: #eef2ff; color: #4338ca; }
-  .s-match { background: #ecfdf5; color: #059669; }
-  .s-fail { background: #fef2f2; color: #dc2626; }
+  .status-bar { display:flex; gap:12px; flex-wrap:wrap; }
+  .status-item { flex:1; min-width:120px; padding:14px; border-radius:var(--r); text-align:center; }
+  .status-item .num { font-size:26px; font-weight:700; }
+  .status-item .label { font-size:11px; color:var(--ink3); margin-top:2px; }
+  .s-total { background:var(--pri-l); color:var(--pri); }
+  .s-match { background:var(--suc-l); color:var(--suc); }
+  .s-fail { background:var(--dng-l); color:var(--dng); }
 
   /* Table */
-  .table-wrap { overflow-x: auto; margin-top: 10px; border-radius: 6px; border: 1px solid #e5e7eb; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  thead { background: #f9fafb; position: sticky; top: 0; }
-  th { padding: 8px 10px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
-  td { padding: 7px 10px; border-bottom: 1px solid #f3f4f6; white-space: nowrap; }
-  tr:hover td { background: #f9fafb; }
-  .cell-match { background: #ecfdf5; }
-  .cell-fail { background: #fef2f2; color: #dc2626; font-weight: 600; }
+  .table-wrap { overflow-x:auto; margin-top:10px; border-radius:6px; border:1px solid var(--border); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  thead { background:var(--tag); position:sticky; top:0; }
+  th { padding:8px 10px; text-align:left; font-weight:600; color:var(--ink2); border-bottom:2px solid var(--border); white-space:nowrap; }
+  td { padding:7px 10px; border-bottom:1px solid var(--tag); white-space:nowrap; }
+  tr:hover td { background:var(--tag); }
+  .cell-match { background:var(--suc-l); }
+  .cell-fail { background:var(--dng-l); color:var(--dng); font-weight:600; }
 
   /* Save */
-  .save-section { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
-  .form-group { display: flex; flex-direction: column; gap: 4px; }
-  .form-group label { font-size: 12px; font-weight: 500; color: #4b5563; }
-  .form-group input { padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 7px; font-size: 13px; outline: none; transition: border 0.2s; }
-  .form-group input:focus { border-color: #6c5ce7; box-shadow: 0 0 0 3px rgba(108,92,231,0.1); }
-  .save-hint { font-size: 11px; color: #9ca3af; margin-top: 8px; }
+  .save-section { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+  .form-group { display:flex; flex-direction:column; gap:4px; }
+  .form-group label { font-size:12px; font-weight:500; color:var(--ink2); }
+  .form-group input { padding:9px 12px; border:1px solid var(--border2); border-radius:7px; font-size:13px; outline:none; transition:border 0.2s; }
+  .form-group input:focus { border-color:var(--pri); box-shadow:0 0 0 3px rgba(26,86,219,0.1); }
+  .save-hint { font-size:11px; color:var(--ink4); margin-top:8px; }
 
-  .btn { padding: 9px 20px; border: none; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-primary { background: #6c5ce7; color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: #5b4cdb; transform: translateY(-1px); }
-  .btn-secondary { background: #e5e7eb; color: #374151; }
-  .btn-secondary:hover:not(:disabled) { background: #d1d5db; }
+  .btn { padding:9px 20px; border:none; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer; transition:all 0.2s; display:inline-flex; align-items:center; gap:5px; }
+  .btn:disabled { opacity:0.4; cursor:not-allowed; }
+  .btn-primary { background:var(--pri); color:#fff; }
+  .btn-primary:hover:not(:disabled) { background:#1e40af; transform:translateY(-1px); }
+  .btn-secondary { background:var(--surface); color:var(--ink3); border:1px solid var(--border2); }
+  .btn-secondary:hover:not(:disabled) { background:var(--tag); }
 
   /* Address toggle */
-  .addr-toggle { cursor: pointer; color: #6c5ce7; font-size: 12px; font-weight: 500; user-select: none; }
-  .addr-toggle:hover { text-decoration: underline; }
-  .addr-table { max-height: 280px; overflow-y: auto; }
-  .addr-table table { font-size: 11px; }
-  .hidden { display: none; }
+  .addr-toggle { cursor:pointer; color:var(--pri); font-size:12px; font-weight:500; user-select:none; }
+  .addr-toggle:hover { text-decoration:underline; }
+  .addr-table { max-height:280px; overflow-y:auto; }
+  .addr-table table { font-size:11px; }
+  .hidden { display:none; }
 
-  .addr-actions { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-  .addr-actions .btn { padding: 5px 12px; font-size: 11px; }
-  .addr-table input { border: 1px solid transparent; background: transparent; padding: 2px 4px; font-size: 11px; width: 100%; }
-  .addr-table input:focus { border-color: #6c5ce7; background: #fff; outline: none; }
-  .delete-row { cursor: pointer; color: #dc2626; font-size: 15px; }
-  .delete-row:hover { color: #b91c1c; }
+  .addr-actions { display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; }
+  .addr-actions .btn { padding:5px 12px; font-size:11px; }
+  .addr-table input { border:1px solid transparent; background:transparent; padding:2px 4px; font-size:11px; width:100%; }
+  .addr-table input:focus { border-color:var(--pri); background:#fff; outline:none; }
+  .delete-row { cursor:pointer; color:var(--dng); font-size:15px; }
+  .delete-row:hover { color:#b91c1c; }
 
   /* Toast */
-  .toast { position: fixed; bottom: 20px; right: 20px; background: #1a1a2e; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 13px; transform: translateY(80px); opacity: 0; transition: all 0.3s; z-index: 999; }
-  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast { position:fixed; bottom:20px; right:20px; background:var(--ink); color:#fff; padding:12px 20px; border-radius:var(--r); font-size:13px; transform:translateY(80px); opacity:0; transition:all 0.3s; z-index:999; }
+  .toast.show { transform:translateY(0); opacity:1; }
 
   /* Footer */
-  .footer { text-align: center; padding: 16px; color: #9ca3af; font-size: 11px; border-top: 1px solid #e5e7eb; background: #fff; }
-  .footer strong { color: #6b7280; }
+  .ftr { text-align:center; padding:16px; color:var(--ink4); font-size:11px; border-top:1px solid var(--border); background:var(--surface); }
+  .ftr a { color:var(--ink3); text-decoration:none; }
+  .ftr a:hover { text-decoration:underline; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="header-left">
-    <h1>PO 주소 매칭</h1>
+<div class="hdr">
+  <div class="hdr-left">
+    <div class="hdr-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg></div>
+    <div>
+      <div class="hdr-name">PO 주소 매칭</div>
+      <div class="hdr-sub">PO ADDRESS MATCHING · LOCAL ONLY</div>
+    </div>
   </div>
-  <a href="index.html" class="btn-home">&#9664; 홈으로</a>
+  <a class="btn-home" href="index.html">&#9664; 홈으로</a>
 </div>
 
 <div class="container">
@@ -164,9 +186,7 @@
   </div>
 </div>
 
-<div class="footer">
-  <strong>&copy; Rocket WMS</strong> &mdash; 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
-</div>
+<div class="ftr">&copy; 2026 <a href="https://makewon.com">Makemine Design</a>. All rights reserved. &middot; Rocket WMS &mdash; 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.</div>
 
 <div class="toast" id="toast"></div>
 
