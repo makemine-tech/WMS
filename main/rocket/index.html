@@ -38,7 +38,7 @@ input[type=file]{display:none;}
 .left{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--g200);}
 .right{width:370px;min-width:370px;display:flex;flex-direction:column;background:#fff;}
 
-/* SELECTION INFO BAR - big centered */
+/* SELECTION INFO BAR */
 .sel-bar{display:none;padding:14px 20px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;text-align:center;flex-shrink:0;border-bottom:1px solid var(--g200);}
 .sel-bar.active{display:block;}
 .sel-bar .sel-main{font-size:22px;font-weight:800;letter-spacing:.5px;}
@@ -129,7 +129,13 @@ td.cc{font-weight:700;color:var(--pri);}
 .pick-item .pi-code{font-weight:700;color:var(--pri);min-width:60px;}
 .pick-item .pi-name{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pick-item .pi-qty{font-size:12px;color:var(--g500);min-width:50px;text-align:right;}
-.pick-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.pick-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px;}
+
+/* PATTERN FILTER */
+.pick-filter{display:flex;align-items:center;gap:4px;width:100%;margin-top:6px;}
+.pick-filter input{flex:1;padding:5px 8px;border:1px solid var(--g300);border-radius:5px;font-size:12px;outline:none;}
+.pick-filter input:focus{border-color:var(--pri);box-shadow:0 0 0 2px rgba(26,86,219,.12);}
+.pick-filter button{white-space:nowrap;}
 
 /* TOAST */
 .toast{position:fixed;top:16px;right:16px;z-index:9999;padding:10px 18px;border-radius:var(--r);font-size:13px;font-weight:600;transform:translateX(120%);transition:transform .3s;}
@@ -160,7 +166,7 @@ td.cc{font-weight:700;color:var(--pri);}
   </div>
   <div style="display:flex;align-items:center;gap:10px;">
     <span id="badge" class="badge badge-off">데이터 없음</span>
-    <a href="makewon.com" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:6px 14px;font-size:12px;font-weight:500;transition:all .15s;" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,.4)'" onmouseout="this.style.color='rgba(255,255,255,.6)';this.style.borderColor='rgba(255,255,255,.2)'">&#9664; 홈으로</a>
+    <a href="https://www.makewon.com" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:6px 14px;font-size:12px;font-weight:500;transition:all .15s;" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,.4)'" onmouseout="this.style.color='rgba(255,255,255,.6)';this.style.borderColor='rgba(255,255,255,.2)'">&#9664; 홈으로</a>
   </div>
 </div>
 
@@ -399,7 +405,6 @@ function renderPalCards(){
   });
   $('pList').innerHTML=h;
 
-  // Summary
   let totalItems=0,assignedItems=0,totalBoxes=0;
   data.forEach((_,i)=>{totalItems++;if(rowPal(i))assignedItems++;});
   keys.forEach(k=>totalBoxes+=pals[k].items.length);
@@ -492,13 +497,44 @@ function openPrintWindow(htmlContent){
   };
 }
 
+/* ======= PICKER PATTERN FILTER (공용) ======= */
+function pickerPatternSelect(listId){
+  const input=document.getElementById(listId+'_filter');
+  if(!input)return;
+  const q=input.value.trim().toLowerCase();
+  if(!q){toast('검색어를 입력하세요','w');return;}
+  const list=document.getElementById(listId);
+  const items=list.querySelectorAll('.pick-item');
+  let cnt=0;
+  items.forEach(item=>{
+    const txt=item.textContent.toLowerCase();
+    const cb=item.querySelector('input[type=checkbox]');
+    if(txt.includes(q)){cb.checked=true;cnt++;}
+  });
+  toast(cnt+'개 선택됨','s');
+}
+function pickerPatternDeselect(listId){
+  const input=document.getElementById(listId+'_filter');
+  if(!input)return;
+  const q=input.value.trim().toLowerCase();
+  if(!q){toast('검색어를 입력하세요','w');return;}
+  const list=document.getElementById(listId);
+  const items=list.querySelectorAll('.pick-item');
+  let cnt=0;
+  items.forEach(item=>{
+    const txt=item.textContent.toLowerCase();
+    const cb=item.querySelector('input[type=checkbox]');
+    if(txt.includes(q)){cb.checked=false;cnt++;}
+  });
+  toast(cnt+'개 해제됨','s');
+}
+
 /* ======= BOX BARCODE LABEL 100x150mm - PICKER POPUP ======= */
 function printBoxLabels(){
   const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
   if(!keys.length){toast('출력할 데이터 없음','w');return;}
   keys.sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
 
-  // Build box list grouped by palette
   const boxList=[];
   keys.forEach(pk=>{
     pals[pk].items.forEach(ri=>{
@@ -514,7 +550,8 @@ function printBoxLabels(){
     });
   });
 
-  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 박스를 선택하세요</span><div style="display:flex;gap:4px"><button class="bo bsm" onclick="boxPickToggleAll()">전체 선택/해제</button><button class="bo bsm" onclick="boxPickInvert()">반전</button></div></div>';
+  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 박스를 선택하세요</span><div style="display:flex;gap:4px"><button class="bo bsm" onclick="boxPickToggleAll()">전체 선택/해제</button><button class="bo bsm" onclick="boxPickInvert()">반전</button></div>';
+  listHtml+='<div class="pick-filter"><input type="text" id="boxPickList_filter" placeholder="패턴 검색 (예: *2, 품목명...)"><button class="bp bsm" onclick="pickerPatternSelect(\'boxPickList\')">선택</button><button class="bo bsm" onclick="pickerPatternDeselect(\'boxPickList\')">해제</button></div></div>';
   listHtml+='<div class="pick-list" id="boxPickList">';
   boxList.forEach((b,idx)=>{
     listHtml+=`<label class="pick-item"><input type="checkbox" checked value="${idx}"><span class="pi-code" style="min-width:40px;color:var(--suc);">P${b.palNum}</span><span class="pi-code">${esc(b.code)}</span><span class="pi-name">${esc(b.name)}</span><span class="pi-qty">${b.qty}개</span></label>`;
@@ -605,7 +642,8 @@ function openItemLabelPicker(){
     });
   });
 
-  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 상품을 선택하세요 (내품수량만큼 반복 인쇄)</span><button class="bo bsm" onclick="pickToggleAll()">전체 선택/해제</button></div>';
+  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 상품을 선택하세요 (내품수량만큼 반복 인쇄)</span><div style="display:flex;gap:4px"><button class="bo bsm" onclick="pickToggleAll()">전체 선택/해제</button><button class="bo bsm" onclick="pickInvert()">반전</button></div>';
+  listHtml+='<div class="pick-filter"><input type="text" id="pickList_filter" placeholder="패턴 검색 (예: *2, 품목명...)"><button class="bp bsm" onclick="pickerPatternSelect(\'pickList\')">선택</button><button class="bo bsm" onclick="pickerPatternDeselect(\'pickList\')">해제</button></div></div>';
   listHtml+='<div class="pick-list" id="pickList">';
   Object.keys(itemMap).forEach(key=>{
     const it=itemMap[key];
@@ -629,6 +667,10 @@ function pickToggleAll(){
   const cbs=$('pickList').querySelectorAll('input[type=checkbox]');
   const allChecked=[...cbs].every(c=>c.checked);
   cbs.forEach(c=>c.checked=!allChecked);
+}
+function pickInvert(){
+  const cbs=$('pickList').querySelectorAll('input[type=checkbox]');
+  cbs.forEach(c=>c.checked=!c.checked);
 }
 
 function printItemLabels(){
@@ -710,13 +752,11 @@ function onCoupangTemplate(e){
 }
 
 function processCoupangTemplate(wb){
-  // 1. Read original product rows from template
   const wsProduct=wb.Sheets['상품목록 구성하기'];
   const rows=XLSX.utils.sheet_to_json(wsProduct,{header:1,defval:''});
   if(rows.length<2){toast('상품목록이 비어있습니다','e');return;}
   const header=rows[0];
 
-  // 2. Build palette data
   const assignMap={};
   const palKeys=Object.keys(pals).filter(k=>pals[k].items.length>0).sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
 
@@ -733,14 +773,12 @@ function processCoupangTemplate(wb){
     });
   });
 
-  // 3. Palette name mapping
   const palNameMap={};
   palKeys.forEach(pk=>{
     const num=pals[pk].name.replace(/[^0-9]/g,'');
     palNameMap[pk]='PALLET_'+num;
   });
 
-  // 4. Generate new product rows (split by palette)
   const newRows=[header];
   for(let i=1;i<rows.length;i++){
     const origRow=rows[i];
@@ -765,7 +803,7 @@ function processCoupangTemplate(wb){
     }
   }
 
-  // 5. Update 팔레트정보입력 sheet — direct cell writes
+  // Update 팔레트정보입력 sheet — direct cell writes
   const wsPal=wb.Sheets['팔레트정보입력'];
   const palCount=palKeys.length;
   wsPal['A2']={t:'n',v:palCount};
@@ -780,12 +818,10 @@ function processCoupangTemplate(wb){
   if(range.e.c<1)range.e.c=1;
   wsPal['!ref']=XLSX.utils.encode_range(range);
 
-  // 6. Write back product sheet
   const newWsProduct=XLSX.utils.aoa_to_sheet(newRows);
   newWsProduct['!cols']=[{wch:12},{wch:8},{wch:12},{wch:12},{wch:16},{wch:40},{wch:10},{wch:10},{wch:14},{wch:12},{wch:5},{wch:40}];
   wb.Sheets['상품목록 구성하기']=newWsProduct;
 
-  // Update HiddenSheet
   const wsHidden=wb.Sheets['HiddenSheet'];
   if(wsHidden){
     wsHidden['B1']={t:'n',v:palCount};
@@ -799,11 +835,9 @@ function processCoupangTemplate(wb){
     wsHidden['!ref']=XLSX.utils.encode_range(hr);
   }
 
-  // 7. Download
   const fname='TruckShipment_PALLET_완성_'+dateStr()+'.xlsx';
   XLSX.writeFile(wb,fname);
 
-  // 8. Show summary
   const totalSplitRows=newRows.length-1;
   const origRows=rows.length-1;
   toast(`완료! ${origRows}행 → ${totalSplitRows}행 (팔레트 ${palCount}개)`,'s');
