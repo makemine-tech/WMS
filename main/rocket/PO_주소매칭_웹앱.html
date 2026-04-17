@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PO 주소 매칭 도구</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', -apple-system, sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+
+  .header { background: linear-gradient(135deg, #2d3436, #636e72); color: #fff; padding: 20px 32px; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 22px; font-weight: 600; }
+  .header .badge { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; font-size: 12px; }
+
+  .container { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
+
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 24px; margin-bottom: 20px; }
+  .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+  /* Upload Zone */
+  .upload-zone { border: 2px dashed #d1d5db; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .upload-zone:hover, .upload-zone.dragover { border-color: #6c5ce7; background: #f8f7ff; }
+  .upload-zone .icon-big { font-size: 36px; margin-bottom: 12px; }
+  .upload-zone p { color: #6b7280; font-size: 14px; }
+  .upload-zone .filename { color: #6c5ce7; font-weight: 600; font-size: 15px; margin-top: 8px; }
+
+  /* Status */
+  .status-bar { display: flex; gap: 16px; flex-wrap: wrap; }
+  .status-item { flex: 1; min-width: 140px; padding: 16px; border-radius: 10px; text-align: center; }
+  .status-item .num { font-size: 28px; font-weight: 700; }
+  .status-item .label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  .s-total { background: #eef2ff; color: #4338ca; }
+  .s-match { background: #ecfdf5; color: #059669; }
+  .s-fail { background: #fef2f2; color: #dc2626; }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; margin-top: 12px; border-radius: 8px; border: 1px solid #e5e7eb; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { background: #f9fafb; position: sticky; top: 0; }
+  th { padding: 10px 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid #f3f4f6; white-space: nowrap; }
+  tr:hover td { background: #f9fafb; }
+  .cell-match { background: #ecfdf5; }
+  .cell-fail { background: #fef2f2; color: #dc2626; font-weight: 600; }
+
+  /* Save Section */
+  .save-section { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group label { font-size: 13px; font-weight: 500; color: #4b5563; }
+  .form-group input { padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; transition: border 0.2s; }
+  .form-group input:focus { border-color: #6c5ce7; box-shadow: 0 0 0 3px rgba(108,92,231,0.1); }
+
+  .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: #6c5ce7; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #5b4cdb; transform: translateY(-1px); }
+  .btn-secondary { background: #e5e7eb; color: #374151; }
+  .btn-secondary:hover:not(:disabled) { background: #d1d5db; }
+
+  /* Address Book Toggle */
+  .addr-toggle { cursor: pointer; color: #6c5ce7; font-size: 13px; font-weight: 500; user-select: none; }
+  .addr-toggle:hover { text-decoration: underline; }
+  .addr-table { max-height: 300px; overflow-y: auto; }
+  .addr-table table { font-size: 12px; }
+  .hidden { display: none; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: #fff; padding: 14px 24px; border-radius: 10px; font-size: 14px; transform: translateY(80px); opacity: 0; transition: all 0.3s; z-index: 999; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+
+  .footer { text-align: center; padding: 20px; color: #9ca3af; font-size: 12px; }
+
+  /* Address edit */
+  .addr-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+  .addr-actions .btn { padding: 6px 14px; font-size: 12px; }
+  .addr-table input { border: 1px solid transparent; background: transparent; padding: 2px 4px; font-size: 12px; width: 100%; }
+  .addr-table input:focus { border-color: #6c5ce7; background: #fff; outline: none; }
+  .delete-row { cursor: pointer; color: #dc2626; font-size: 16px; }
+  .delete-row:hover { color: #b91c1c; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>PO 주소 매칭 도구</h1>
+    <span class="badge">앳댓모먼트</span>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Upload -->
+  <div class="card">
+    <div class="card-title"><div class="icon" style="background:#eef2ff;color:#4338ca;">📄</div> PO CSV 파일 업로드</div>
+    <div class="upload-zone" id="uploadZone">
+      <div class="icon-big">📁</div>
+      <p>CSV 파일을 드래그하거나 클릭하여 업로드</p>
+      <div class="filename" id="fileLabel"></div>
+    </div>
+    <input type="file" id="fileInput" accept=".csv" style="display:none">
+  </div>
+
+  <!-- Status -->
+  <div class="card hidden" id="statusCard">
+    <div class="card-title"><div class="icon" style="background:#ecfdf5;color:#059669;">✓</div> 매칭 결과</div>
+    <div class="status-bar">
+      <div class="status-item s-total"><div class="num" id="totalCount">0</div><div class="label">전체 행</div></div>
+      <div class="status-item s-match"><div class="num" id="matchCount">0</div><div class="label">매칭 성공</div></div>
+      <div class="status-item s-fail"><div class="num" id="failCount">0</div><div class="label">매칭 실패</div></div>
+    </div>
+  </div>
+
+  <!-- Preview Table -->
+  <div class="card hidden" id="previewCard">
+    <div class="card-title"><div class="icon" style="background:#fff7ed;color:#ea580c;">📋</div> 미리보기</div>
+    <div class="table-wrap" id="previewTable" style="max-height:400px; overflow-y:auto;"></div>
+  </div>
+
+  <!-- Save -->
+  <div class="card hidden" id="saveCard">
+    <div class="card-title"><div class="icon" style="background:#f0fdf4;color:#16a34a;">💾</div> 저장</div>
+    <div class="save-section">
+      <div class="form-group" style="flex:1; min-width:240px;">
+        <label>파일 이름 (.xls)</label>
+        <input type="text" id="fileName" placeholder="예: 0421_앳댓모먼트">
+      </div>
+      <button class="btn btn-primary" id="saveBtn" onclick="saveFile()">💾 XLS 저장</button>
+    </div>
+  </div>
+
+  <!-- Address Book -->
+  <div class="card">
+    <div class="card-title" style="justify-content: space-between;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="icon" style="background:#fef3c7;color:#d97706;">📒</div> 주소록 관리
+      </div>
+      <span class="addr-toggle" onclick="toggleAddr()">▼ 펼치기/접기</span>
+    </div>
+    <div id="addrSection" class="hidden">
+      <div class="addr-actions">
+        <button class="btn btn-secondary" onclick="addAddrRow()">+ 센터 추가</button>
+        <button class="btn btn-secondary" onclick="saveAddrToStorage()">💾 주소록 저장</button>
+        <button class="btn btn-secondary" onclick="exportAddr()">📥 주소록 내보내기(xlsx)</button>
+        <button class="btn btn-secondary" onclick="importAddrFile()">📤 주소록 가져오기</button>
+        <input type="file" id="addrImport" accept=".xlsx,.xls,.csv" style="display:none" onchange="importAddr(event)">
+      </div>
+      <div class="addr-table" id="addrTableWrap"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">PO 주소 매칭 도구 — 주소록은 브라우저에 자동 저장됩니다</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ============ ADDRESS BOOK DATA ============
+const DEFAULT_ADDRESSES = [
+  ["경기광주1","경기도 광주시 도척면 진우리 1006번지 쿠팡 KKW1센터","070-4276-0888"],
+  ["경기광주3","경기도 광주시 오포로 297번길 54","070-4276-0888"],
+  ["고양1","경기도 고양시 덕양구 권율대로 570 , 쿠팡 고양1 물류센터 3번 Gate","070-7730-9778"],
+  ["광주","경기도 광주시 도척면 진우리 1006번지 쿠팡 KKW1센터","070-4276-0888"],
+  ["광주4","광주광역시 광산구 연산동 1250","070-4735-8079"],
+  ["김해2","경상남도 김해시 상동면 대감리 5-8번지(2F), 김해2 물류센터","070-4112-4660"],
+  ["대구","경상북도 칠곡군 지천면 연화리 700번지 영남복합물류 10동 쿠팡 제3물류센터","070-4915-9267"],
+  ["대구2","경상북도 칠곡군 지천면 연화리 700번지 영남복함물류 9동 쿠팡 제6물류센터","070-4915-9269"],
+  ["대구3","대구광역시 달성군 구지면 국가산단대로46길 113","070-5161-9378"],
+  ["대구6","경상북도 칠곡군 지천면 금호로 272 영남복합물류공사 8동","070-5158-6437"],
+  ["대구8","대구광역시 달성군 구지면 국가산단대로46길 113, 1A-04도크","070-4756-9603"],
+  ["덕평1","경기도 이천시 마장면 덕평리 615쿠팡 DEO1 센터 (지상1~3층)","031-694-7881"],
+  ["덕평5","경기도 이천시 마장면 덕평리 615쿠팡 DEO5 센터 (지하 2층)","070-4948-9948"],
+  ["동탄1","경기도 화성시 신동 703 쿠팡동탄물류센터 3F","070-7771-6869"],
+  ["동탄2","경기도 화성시 동탄 물류 1로13 쿠팡동탄물류센터 B1F","070-7771-6861"],
+  ["마장1","경기도 이천시 마장면 청강가창로 309, 켄달스퀘어 A동 2층","070-4449-3617"],
+  ["목천1","충청남도 천안시 동남구 수신면 5산단로 185","070-4236-1438"],
+  ["부천1","경기도 부천시 신흥로 511번길 80 켄달스퀘어 3F B동","070-8898-8564"],
+  ["부천1센터","경기도 부천시 신흥로 511번길 80 켄달스퀘어 3F B동","070-8898-8560"],
+  ["서울","서울특별시 송파구 송파대로 55 E동 쿠팡서울물류센터 1층 10번 Dock","070-5038-6954"],
+  ["시흥2","경기도 시흥시 정왕동 2123-3 번지 (3~7F)","070-4179-3271"],
+  ["안산2","경기도 안산시 단원구 성곡동 796 1층","070-7730-9776"],
+  ["안산3","경기도 안산시 단원구 시화호수로 835, 3~4F","07047548771"],
+  ["안성4","경기도 안성시 죽산면 장능리 35-4 (녹배길 35)","070-4941-7302"],
+  ["안성5","경기도 안성시 원곡면 원곡물류단지 1로 61","070-7732-9074"],
+  ["안성8","경기도 안성시 일죽면 능국리 23-10, 836-4 우회전","070-5158-8104"],
+  ["양산1","경상남도 양산시 물금읍 제방로 27 KIFT A동","070-4452-8234"],
+  ["양지5","경기도 용인시 처인구 양지면 제일리 789 쿠팡양지5물류센터 6F,8F,10F","070-4449-3619"],
+  ["용인1","경기도 용인시 처인구 백암면 백봉리 487-1","070-4204-5121"],
+  ["이천2","경기도 이천시 마장면 이장로 329-38","070-5158-8142"],
+  ["이천3","경기도 이천시 대월면 대장로 190 3층","070-5158-8147"],
+  ["이천4","경기도 이천시 부발읍 송온리 442 2층","070-5154-1563"],
+  ["인천1","인천 서구 오류동 1544-4 쿠팡 인천1물류센터","070-7836-1435"],
+  ["인천10","인천광역시 서구 오류동 1549-4 (4층)","111-1111"],
+  ["인천14","인천광역시 중구 축항대로 165번길 20, 쿠팡14센터 7층","070-7824-4180"],
+  ["인천16","인천광역시 중구 항동7가 104-1","07047540751"],
+  ["인천18","인천광역시 중구 영종순환로 900번길 30 1층","070-4788-2590"],
+  ["인천28","인천광역시 서구 북항로 120번길 55, A동 7~9F","070-4741-9123"],
+  ["인천30","인천광역시 서구 거북로13, 5층","070-5159-0578"],
+  ["인천32","인천광역시 서구 봉수대로 370 B동 2F~7F","070-4747-2982"],
+  ["인천36","인천광역시 서구 북항로 120번길 55, A동 6층","070-4779-6150"],
+  ["인천4","인천 서구 오류동 1545-2 쿠팡 인천4물류센터","070-8852-7709"],
+  ["인천5","인천 서구 오류동 1544-2 쿠팡 인천5물류센터","070-4481-8840"],
+  ["인천8","인천광역시 서구 오류동 1549-2 8센터","070-4907-5808"],
+  ["창원1","경상남도 창원시 진해구 두동로 33 A동 5층","070-4420-4468"],
+  ["창원3","경상남도 창원시 진해구 두동로 34 302번 도크","070-5154-9950"],
+  ["창원4","경상남도 창원시 진해구 두동남로 52","070-5167-2371"],
+  ["천안","충청남도 천안시 서북구 입장면 용정리 113-3번지 2층 쿠팡 천안 물류센터","070-8855-1738"],
+  ["천안2","충남 천안시 서북구 새터길 5, 4F 4-18&19번 Dock","070-7682-4424"],
+  ["평택1","경기도 평택시 포승읍 만호리 666 BLK평택 물류센터 4층 408도크","070-4106-8409"],
+  ["호법","경기도 이천시 호법면 매곡리 977-4","070-4234-7009"],
+  ["XC06","경기도 이천시 마장면 덕평로 831-59 3F","010-9311-2936"],
+  ["전라광주2","광주광역시 광산구 평동산단9번로 43 6F ~ 8F","070-5150-0951"],
+  ["전라광주4","광주광역시 광산구 연산동 1250","070-4735-8079"]
+];
+
+let addressBook = [];
+let matchedData = [];
+const OUTPUT_HEADERS = ['발주번호','발주유형','발주현황','SKU ID','SKU 이름','SKU Barcode','물류센터','입고예정일','발주일','발주수량','확정수량','센터명','센터주소','전화번호'];
+
+// ============ INIT ============
+function init() {
+  loadAddrFromStorage();
+  renderAddrTable();
+  setupUpload();
+}
+
+function loadAddrFromStorage() {
+  try {
+    const saved = localStorage.getItem('po_address_book');
+    if (saved) {
+      addressBook = JSON.parse(saved);
+    } else {
+      addressBook = DEFAULT_ADDRESSES.map(a => ({name: a[0], addr: a[1], tel: a[2]}));
+      saveAddrToStorage();
+    }
+  } catch(e) {
+    addressBook = DEFAULT_ADDRESSES.map(a => ({name: a[0], addr: a[1], tel: a[2]}));
+  }
+}
+
+function saveAddrToStorage() {
+  try {
+    // Read current values from inputs
+    syncAddrFromInputs();
+    localStorage.setItem('po_address_book', JSON.stringify(addressBook));
+    showToast('주소록이 저장되었습니다');
+  } catch(e) {
+    showToast('주소록 저장 실패');
+  }
+}
+
+function syncAddrFromInputs() {
+  const rows = document.querySelectorAll('#addrTableBody tr');
+  rows.forEach((row, i) => {
+    if (addressBook[i]) {
+      const inputs = row.querySelectorAll('input');
+      addressBook[i].name = inputs[0].value.trim();
+      addressBook[i].addr = inputs[1].value.trim();
+      addressBook[i].tel = inputs[2].value.trim();
+    }
+  });
+}
+
+// ============ ADDRESS TABLE ============
+function renderAddrTable() {
+  const wrap = document.getElementById('addrTableWrap');
+  let html = '<table><thead><tr><th style="width:40px">#</th><th>센터명</th><th>센터주소</th><th>전화번호</th><th style="width:40px"></th></tr></thead><tbody id="addrTableBody">';
+  addressBook.forEach((a, i) => {
+    html += `<tr>
+      <td style="color:#9ca3af">${i+1}</td>
+      <td><input value="${esc(a.name)}" /></td>
+      <td><input value="${esc(a.addr)}" /></td>
+      <td><input value="${esc(a.tel)}" /></td>
+      <td><span class="delete-row" onclick="deleteAddrRow(${i})">×</span></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function addAddrRow() {
+  syncAddrFromInputs();
+  addressBook.push({name:'', addr:'', tel:''});
+  renderAddrTable();
+}
+
+function deleteAddrRow(i) {
+  syncAddrFromInputs();
+  addressBook.splice(i, 1);
+  renderAddrTable();
+}
+
+function toggleAddr() {
+  document.getElementById('addrSection').classList.toggle('hidden');
+}
+
+function exportAddr() {
+  syncAddrFromInputs();
+  const ws = XLSX.utils.aoa_to_sheet([['센터명','센터주소','전화번호'], ...addressBook.map(a => [a.name, a.addr, a.tel])]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '주소록');
+  XLSX.writeFile(wb, '주소록.xlsx');
+}
+
+function importAddrFile() { document.getElementById('addrImport').click(); }
+
+function importAddr(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    const wb = XLSX.read(ev.target.result, {type:'binary'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, {header:1});
+    const startRow = (data[0] && typeof data[0][0] === 'string' && data[0][0].includes('센터')) ? 1 : 0;
+    addressBook = [];
+    for (let i = startRow; i < data.length; i++) {
+      if (data[i][0]) addressBook.push({name: String(data[i][0]).trim(), addr: String(data[i][1]||'').trim(), tel: String(data[i][2]||'').trim()});
+    }
+    saveAddrToStorage();
+    renderAddrTable();
+    showToast(`주소록 ${addressBook.length}개 센터 가져오기 완료`);
+  };
+  reader.readAsBinaryString(file);
+  e.target.value = '';
+}
+
+// ============ FILE UPLOAD & MATCHING ============
+function setupUpload() {
+  const zone = document.getElementById('uploadZone');
+  const input = document.getElementById('fileInput');
+
+  zone.onclick = () => input.click();
+  zone.ondragover = (e) => { e.preventDefault(); zone.classList.add('dragover'); };
+  zone.ondragleave = () => zone.classList.remove('dragover');
+  zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); };
+  input.onchange = (e) => { if(e.target.files[0]) handleFile(e.target.files[0]); };
+}
+
+function handleFile(file) {
+  if (!file) return;
+  document.getElementById('fileLabel').textContent = file.name;
+
+  // Suggest filename from date in CSV name or today
+  const dateMatch = file.name.match(/(\d{8})/);
+  let suggestedName = '';
+  if (dateMatch) {
+    const d = dateMatch[1];
+    suggestedName = d.substring(4,6) + d.substring(6,8) + '_앳댓모먼트';
+  } else {
+    const now = new Date();
+    suggestedName = String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + '_앳댓모먼트';
+  }
+  document.getElementById('fileName').value = suggestedName;
+
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    parseAndMatch(ev.target.result);
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function parseAndMatch(csvText) {
+  // Parse CSV
+  const lines = csvText.trim().split('\n');
+  const headers = parseCSVLine(lines[0]);
+
+  // Find column indices
+  const colMap = {};
+  const neededCols = ['발주번호','발주유형','발주현황','SKU ID','SKU 이름','SKU Barcode','물류센터','입고예정일','발주일','발주수량','확정수량'];
+  headers.forEach((h, i) => { colMap[h.trim()] = i; });
+
+  // Build address lookup
+  syncAddrFromInputs();
+  const addrMap = {};
+  addressBook.forEach(a => { addrMap[a.name.trim()] = a; });
+
+  matchedData = [];
+  let matchOk = 0, matchFail = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const cols = parseCSVLine(lines[i]);
+
+    const center = (cols[colMap['물류센터']] || '').trim();
+    const found = addrMap[center];
+
+    const row = {
+      '발주번호': cols[colMap['발주번호']] || '',
+      '발주유형': cols[colMap['발주유형']] || '',
+      '발주현황': cols[colMap['발주현황']] || '',
+      'SKU ID': cols[colMap['SKU ID']] || '',
+      'SKU 이름': cols[colMap['SKU 이름']] || '',
+      'SKU Barcode': cols[colMap['SKU Barcode']] || '',
+      '물류센터': center,
+      '입고예정일': cols[colMap['입고예정일']] || '',
+      '발주일': cols[colMap['발주일']] || '',
+      '발주수량': cols[colMap['발주수량']] || '',
+      '확정수량': cols[colMap['확정수량']] || '',
+      '센터명': found ? found.name : '❌ 미매칭',
+      '센터주소': found ? found.addr : '',
+      '전화번호': found ? found.tel : '',
+      '_matched': !!found
+    };
+    matchedData.push(row);
+    found ? matchOk++ : matchFail++;
+  }
+
+  // Update UI
+  document.getElementById('statusCard').classList.remove('hidden');
+  document.getElementById('previewCard').classList.remove('hidden');
+  document.getElementById('saveCard').classList.remove('hidden');
+  document.getElementById('totalCount').textContent = matchedData.length;
+  document.getElementById('matchCount').textContent = matchOk;
+  document.getElementById('failCount').textContent = matchFail;
+
+  renderPreview();
+}
+
+function renderPreview() {
+  let html = '<table><thead><tr>';
+  OUTPUT_HEADERS.forEach(h => { html += `<th>${h}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  matchedData.forEach(row => {
+    html += '<tr>';
+    OUTPUT_HEADERS.forEach(h => {
+      let cls = '';
+      if (h === '센터명' || h === '센터주소' || h === '전화번호') {
+        cls = row._matched ? 'cell-match' : 'cell-fail';
+      }
+      html += `<td class="${cls}">${esc(String(row[h]))}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('previewTable').innerHTML = html;
+}
+
+// ============ SAVE ============
+function saveFile() {
+  if (!matchedData.length) { showToast('매칭된 데이터가 없습니다'); return; }
+
+  let fname = document.getElementById('fileName').value.trim();
+  if (!fname) fname = '출력파일';
+  if (!fname.endsWith('.xls')) fname += '.xls';
+
+  const aoa = [OUTPUT_HEADERS];
+  matchedData.forEach(row => {
+    aoa.push(OUTPUT_HEADERS.map(h => {
+      const v = row[h];
+      // Keep 발주번호 and SKU ID as numbers if possible
+      if ((h === '발주번호' || h === 'SKU ID' || h === '발주수량' || h === '확정수량') && !isNaN(v) && v !== '') return Number(v);
+      return v;
+    }));
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Set column widths
+  ws['!cols'] = [
+    {wch:14},{wch:6},{wch:8},{wch:12},{wch:40},{wch:18},{wch:8},{wch:12},{wch:20},{wch:8},{wch:8},{wch:8},{wch:50},{wch:16}
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  XLSX.writeFile(wb, fname, {bookType:'xls'});
+  showToast(`${fname} 저장 완료!`);
+}
+
+// ============ UTILS ============
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i+1] === '"') { current += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else current += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { result.push(current); current = ''; }
+      else current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+init();
+</script>
+</body>
+</html>
