@@ -3,176 +3,893 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rocket WMS · 도구 모음</title>
+<title>크로스닥 팔레트 관리 시스템</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --pri:#1a56db;--pri-l:#e1effe;
+  --pri:#1a56db;--pri-l:#e1effe;--dng:#e02424;--dng-l:#fde8e8;
+  --suc:#057a55;--suc-l:#def7ec;--wrn:#d97706;--wrn-l:#fef3c7;
   --g50:#f9fafb;--g100:#f3f4f6;--g200:#e5e7eb;--g300:#d1d5db;
   --g400:#9ca3af;--g500:#6b7280;--g600:#4b5563;--g700:#374151;--g800:#1f2937;--g900:#111827;
+  --r:8px;
 }
-body{font-family:'Segoe UI',-apple-system,'Malgun Gothic','맑은 고딕',sans-serif;background:var(--g50);color:var(--g800);font-size:14px;line-height:1.5;min-height:100vh;display:flex;flex-direction:column;}
+body{font-family:'Segoe UI',-apple-system,'Malgun Gothic','맑은 고딕',sans-serif;background:var(--g50);color:var(--g800);font-size:14px;line-height:1.5;overflow:hidden;height:100vh;}
+button{cursor:pointer;font-family:inherit;font-size:13px;border:none;border-radius:6px;padding:8px 16px;font-weight:600;transition:all .15s;}
+button:disabled{opacity:.4;cursor:not-allowed;}
+.bp{background:var(--pri);color:#fff;}.bp:hover:not(:disabled){background:#1e40af;}
+.bo{background:#fff;color:var(--g700);border:1px solid var(--g300);}.bo:hover:not(:disabled){background:var(--g50);}
+.bd{background:var(--dng);color:#fff;}.bd:hover:not(:disabled){background:#c81e1e;}
+.bs{background:var(--suc);color:#fff;}.bs:hover:not(:disabled){background:#046c4e;}
+.bw{background:var(--wrn);color:#fff;}.bw:hover:not(:disabled){background:#b45309;}
+.bsm{padding:5px 10px;font-size:12px;}
+input[type=file]{display:none;}
 
 /* HEADER */
-.hdr{background:var(--g900);color:#fff;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;}
-.hdr-left{display:flex;align-items:center;gap:12px;}
-.hdr h1{font-size:20px;font-weight:800;letter-spacing:-.5px;}
-.hdr h1 span{color:#60a5fa;}
-.hdr-sub{font-size:11px;color:var(--g400);margin-top:1px;}
-.hdr-right{display:flex;align-items:center;gap:8px;}
-.hdr-link{color:var(--g400);text-decoration:none;font-size:12px;padding:6px 14px;border-radius:6px;border:1px solid var(--g700);transition:all .15s;display:inline-flex;align-items:center;gap:5px;}
-.hdr-link:hover{color:#fff;border-color:var(--g500);background:rgba(255,255,255,.06);}
+.badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;}
+.badge-on{background:var(--suc-l);color:var(--suc);}.badge-off{background:var(--g100);color:var(--g500);}
 
-/* MAIN */
-.main{flex:1;max-width:1100px;width:100%;margin:0 auto;padding:28px 24px;}
+/* CTRL */
+.ctrl{background:#fff;border-bottom:1px solid var(--g200);padding:10px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 
-/* SECTION */
-.section{margin-bottom:28px;}
-.section-title{font-size:12px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;padding-left:4px;display:flex;align-items:center;gap:8px;}
-.section-title::after{content:'';flex:1;height:1px;background:var(--g200);}
+/* LAYOUT */
+.wrap{display:flex;height:calc(100vh - 96px);}
+.left{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--g200);}
+.right{width:370px;min-width:370px;display:flex;flex-direction:column;background:#fff;}
 
-/* GRID */
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+/* SELECTION INFO BAR - big centered */
+.sel-bar{display:none;padding:14px 20px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;text-align:center;flex-shrink:0;border-bottom:1px solid var(--g200);}
+.sel-bar.active{display:block;}
+.sel-bar .sel-main{font-size:22px;font-weight:800;letter-spacing:.5px;}
+.sel-bar .sel-detail{font-size:14px;opacity:.9;margin-top:2px;}
 
-/* CARD */
-.card{background:#fff;border:1px solid var(--g200);border-radius:10px;padding:18px;text-decoration:none;color:inherit;transition:all .2s;display:flex;flex-direction:column;}
-.card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.07);border-color:var(--g300);}
-.card-icon{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:12px;flex-shrink:0;}
-.card-title{font-size:14px;font-weight:700;margin-bottom:4px;}
-.card-desc{font-size:11px;color:var(--g500);line-height:1.5;flex:1;}
-.card-tag{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;margin-top:8px;align-self:flex-start;}
+/* SECTION HEADERS */
+.sec-hdr{padding:8px 16px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.sec-hdr-un{background:#fff4e5;color:#b45309;border-bottom:1px solid var(--g200);}
+.sec-hdr-done{background:#ecfdf5;color:#047857;border-top:2px solid var(--g200);border-bottom:1px solid var(--g200);}
 
-/* Colors */
-.c-blue .card-icon{background:#dbeafe;color:#1e40af;}.c-blue .card-tag{background:#dbeafe;color:#1e40af;}
-.c-green .card-icon{background:#dcfce7;color:#166534;}.c-green .card-tag{background:#dcfce7;color:#166534;}
-.c-orange .card-icon{background:#fff7ed;color:#c2410c;}.c-orange .card-tag{background:#ffedd5;color:#c2410c;}
-.c-purple .card-icon{background:#ede9fe;color:#5b21b6;}.c-purple .card-tag{background:#ede9fe;color:#5b21b6;}
-.c-pink .card-icon{background:#fce7f3;color:#9d174d;}.c-pink .card-tag{background:#fce7f3;color:#9d174d;}
-.c-cyan .card-icon{background:#cffafe;color:#155e75;}.c-cyan .card-tag{background:#cffafe;color:#155e75;}
-.c-yellow .card-icon{background:#fef3c7;color:#92400e;}.c-yellow .card-tag{background:#fef3c7;color:#92400e;}
-.c-red .card-icon{background:#fee2e2;color:#991b1b;}.c-red .card-tag{background:#fee2e2;color:#991b1b;}
-.c-slate .card-icon{background:#e2e8f0;color:#334155;}.c-slate .card-tag{background:#e2e8f0;color:#334155;}
-.c-indigo .card-icon{background:#e0e7ff;color:#3730a3;}.c-indigo .card-tag{background:#e0e7ff;color:#3730a3;}
+/* TOOLBAR */
+.tbar{padding:8px 14px;background:#fff;border-bottom:1px solid var(--g200);display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;}
+.tbar input[type=text]{flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--g300);border-radius:6px;font-size:13px;outline:none;}
+.tbar input[type=text]:focus{border-color:var(--pri);box-shadow:0 0 0 3px rgba(26,86,219,.12);}
+
+/* TABLE */
+.tbl-wrap{overflow:auto;background:#fff;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead{position:sticky;top:0;z-index:10;}
+thead th{background:var(--g800);color:#fff;padding:8px 10px;text-align:left;font-weight:600;white-space:nowrap;cursor:pointer;user-select:none;font-size:12px;}
+thead th:hover{background:var(--g700);}
+thead th .si{margin-left:3px;opacity:.5;font-size:10px;}
+thead th.sorted .si{opacity:1;}
+tbody tr{border-bottom:1px solid var(--g100);transition:background .1s;cursor:pointer;}
+tbody tr:hover{background:#eff6ff;}
+tbody tr.sel{background:var(--pri-l);}
+tbody td{padding:7px 10px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;}
+td.cc{font-weight:700;color:var(--pri);}
+
+/* ASSIGNED TABLE */
+.done-tbl-wrap{overflow:auto;background:#fff;}
+.done-tbl-wrap table tbody tr{cursor:default;}
+.done-tbl-wrap table tbody tr:hover{background:#f0fdf4;}
+
+/* PALETTE TAG */
+.pt{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;}
+.pc1{background:#dbeafe;color:#1e40af;}.pc2{background:#dcfce7;color:#166534;}
+.pc3{background:#fef9c3;color:#854d0e;}.pc4{background:#fce7f3;color:#9d174d;}
+.pc5{background:#e0e7ff;color:#3730a3;}.pc6{background:#fed7aa;color:#9a3412;}
+.pc7{background:#d1fae5;color:#065f46;}.pc8{background:#ede9fe;color:#5b21b6;}
+.pc9{background:#fecaca;color:#991b1b;}.pc10{background:#cffafe;color:#155e75;}
 
 /* FOOTER */
-.footer{text-align:center;padding:14px 20px;background:var(--g900);color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.04em;}
-.footer a{color:rgba(255,255,255,.5);text-decoration:none;}
-.footer a:hover{color:rgba(255,255,255,.8);}
+.ftr{padding:8px 14px;background:#fff;border-top:1px solid var(--g200);display:flex;justify-content:space-between;font-size:12px;color:var(--g500);flex-shrink:0;}
 
-@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr);}}
-@media(max-width:560px){.grid{grid-template-columns:1fr;}}
+/* RIGHT PANEL */
+.rp-hdr{padding:12px 14px;border-bottom:1px solid var(--g200);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:space-between;}
+.rp-assign{padding:8px 14px;border-bottom:1px solid var(--g200);display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.rp-assign select{padding:6px 8px;border:1px solid var(--g300);border-radius:6px;font-size:13px;min-width:120px;}
+.rp-list{flex:1;overflow-y:auto;padding:10px 14px;}
+
+/* PALETTE CARD */
+.pcard{border:1px solid var(--g200);border-radius:var(--r);margin-bottom:8px;overflow:hidden;transition:all .2s;}
+.pcard-empty{background:var(--g50);border-style:dashed;opacity:.7;}
+.pcard-filled{background:#fff;border-left:4px solid var(--suc);box-shadow:0 1px 4px rgba(0,0,0,.06);}
+.pcard-filled .pcard-h{background:var(--suc-l);}
+.pcard-h{padding:8px 12px;display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:13px;cursor:pointer;}
+.pcard-h:hover{background:var(--g100);}
+.pcard-b{padding:0 12px 8px;font-size:11px;}
+.pcard-b .ir{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--g100);}
+.pcard-b .ir:last-child{border:0;}
+.rbtn{background:none;color:var(--dng);font-size:15px;padding:2px 6px;border-radius:4px;}
+.rbtn:hover{background:var(--dng-l);}
+.pcard-check{color:var(--suc);font-size:14px;margin-right:6px;}
+.rp-sum{padding:10px 14px;border-top:1px solid var(--g200);background:var(--g50);font-size:13px;}
+.rp-sum .st{display:flex;justify-content:space-between;padding:2px 0;}
+.rp-sum .sv{font-weight:700;}
+.rp-act{padding:10px 14px;border-top:1px solid var(--g200);display:flex;flex-direction:column;gap:6px;}
+
+/* EMPTY */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--g400);gap:10px;padding:30px;text-align:center;font-size:13px;}
+.empty .ei{font-size:40px;}
+
+/* OVERLAY / DIALOG */
+.ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;}
+.ov.show{display:flex;}
+.dlg{background:#fff;border-radius:12px;padding:22px;max-width:500px;width:92%;max-height:80vh;overflow-y:auto;}
+.dlg h3{font-size:15px;margin-bottom:6px;}
+.dlg p{font-size:13px;color:var(--g600);margin-bottom:14px;white-space:pre-line;}
+.dlg-a{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;}
+
+/* Item picker dialog */
+.pick-list{max-height:50vh;overflow-y:auto;border:1px solid var(--g200);border-radius:6px;}
+.pick-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--g100);cursor:pointer;transition:background .1s;}
+.pick-item:hover{background:var(--g50);}
+.pick-item:last-child{border:0;}
+.pick-item input{width:16px;height:16px;accent-color:var(--pri);}
+.pick-item .pi-code{font-weight:700;color:var(--pri);min-width:60px;}
+.pick-item .pi-name{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pick-item .pi-qty{font-size:12px;color:var(--g500);min-width:50px;text-align:right;}
+.pick-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+
+/* TOAST */
+.toast{position:fixed;top:16px;right:16px;z-index:9999;padding:10px 18px;border-radius:var(--r);font-size:13px;font-weight:600;transform:translateX(120%);transition:transform .3s;}
+.toast.show{transform:translateX(0);}
+.t-s{background:var(--suc);color:#fff;}.t-e{background:var(--dng);color:#fff;}.t-w{background:var(--wrn);color:#fff;}
+
+/* RESIZE HANDLE */
+.resizer{height:4px;background:var(--g200);cursor:row-resize;flex-shrink:0;transition:background .15s;}
+.resizer:hover,.resizer.active{background:var(--pri);height:5px;}
+
+/* DRAG & DROP */
+.drop-zone{transition:all .2s;}
+.drop-zone.drag-over{background:#dbeafe !important;outline:3px dashed var(--pri);outline-offset:-6px;}
+.drop-zone.drag-over *{pointer-events:none;}
+
 </style>
 </head>
 <body>
 
-<div class="hdr">
-  <div class="hdr-left">
+<!-- HEADER -->
+<div class="hdr" style="background:linear-gradient(135deg,#1f2937,#374151);color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div style="width:32px;height:32px;background:rgba(255,255,255,.12);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;">📦</div>
     <div>
-      <h1><span>R</span>ocket WMS</h1>
-      <div class="hdr-sub">물류 관리 도구 모음</div>
+      <div style="font-size:16px;font-weight:700;">크로스닥 팔레트 관리</div>
+      <div style="font-size:10px;color:rgba(255,255,255,.45);letter-spacing:.06em;">CROSSDOCK PALETTE MANAGER</div>
     </div>
   </div>
-  <div class="hdr-right">
-    <a href="../index.html" class="hdr-link">&#9664; 메인 홈</a>
-    <a href="https://www.makewon.com" class="hdr-link" target="_blank">makewon.com</a>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span id="badge" class="badge badge-off">데이터 없음</span>
+    <a href="index.html" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:6px 14px;font-size:12px;font-weight:500;transition:all .15s;" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,.4)'" onmouseout="this.style.color='rgba(255,255,255,.6)';this.style.borderColor='rgba(255,255,255,.2)'">&#9664; 홈으로</a>
   </div>
 </div>
 
-<div class="main">
-
-  <!-- 물류 도구 -->
-  <div class="section">
-    <div class="section-title">물류 도구</div>
-    <div class="grid">
-
-      <a href="crossdock-manager.html" class="card c-blue">
-        <div class="card-icon">&#128230;</div>
-        <div class="card-title">크로스닥 팔레트 관리</div>
-        <div class="card-desc">팔레트 구성, 박스 할당, 바코드 라벨 출력, 쿠팡 업로드 엑셀 생성</div>
-        <span class="card-tag">물류</span>
-      </a>
-
-      <a href="csvup.html" class="card c-green">
-        <div class="card-icon">&#128203;</div>
-        <div class="card-title">PO 주소 매칭</div>
-        <div class="card-desc">PO CSV 업로드 후 물류센터 주소록 자동 매칭, XLS 저장</div>
-        <span class="card-tag">물류</span>
-      </a>
-
-      <a href="../picking_ebut.html" class="card c-orange">
-        <div class="card-icon">&#128666;</div>
-        <div class="card-title">이벗 피킹 시스템</div>
-        <div class="card-desc">이벗 피킹 작업 관리</div>
-        <span class="card-tag">피킹</span>
-      </a>
-
-      <a href="../picking_ez.html" class="card c-yellow">
-        <div class="card-icon">&#128666;</div>
-        <div class="card-title">이지어드민 피킹 시스템</div>
-        <div class="card-desc">이지어드민 피킹 작업 관리</div>
-        <span class="card-tag">피킹</span>
-      </a>
-
-    </div>
-  </div>
-
-  <!-- 문서 도구 -->
-  <div class="section">
-    <div class="section-title">문서 도구</div>
-    <div class="grid">
-
-      <a href="../excel_merge.html" class="card c-indigo">
-        <div class="card-icon">&#128202;</div>
-        <div class="card-title">엑셀 합치기</div>
-        <div class="card-desc">여러 엑셀 파일을 하나로 병합</div>
-        <span class="card-tag">문서</span>
-      </a>
-
-      <a href="../pdf_smart_merge.html" class="card c-red">
-        <div class="card-icon">&#128196;</div>
-        <div class="card-title">PDF 스마트 병합</div>
-        <div class="card-desc">여러 PDF 파일을 하나로 스마트 병합</div>
-        <span class="card-tag">문서</span>
-      </a>
-
-      <a href="../pdf_pdf.html" class="card c-pink">
-        <div class="card-icon">&#128269;</div>
-        <div class="card-title">PDF 텍스트 진단</div>
-        <div class="card-desc">PDF 파일 텍스트 분석 및 진단</div>
-        <span class="card-tag">문서</span>
-      </a>
-
-    </div>
-  </div>
-
-  <!-- 기타 서비스 -->
-  <div class="section">
-    <div class="section-title">기타 서비스</div>
-    <div class="grid">
-
-      <a href="../stock/index.html" class="card c-cyan">
-        <div class="card-icon">&#128200;</div>
-        <div class="card-title">주식 분석</div>
-        <div class="card-desc">Stock-Sync Advisor 주식 분석 도구</div>
-        <span class="card-tag">투자</span>
-      </a>
-
-      <a href="../saju/index.html" class="card c-purple">
-        <div class="card-icon">&#128302;</div>
-        <div class="card-title">만신 AI</div>
-        <div class="card-desc">복합 운세 프롬프트 생성기, 사주 분석</div>
-        <span class="card-tag">운세</span>
-      </a>
-
-    </div>
-  </div>
-
+<!-- CTRL -->
+<div class="ctrl">
+  <button class="bp" onclick="$('fi').click()">📂 파일 업로드</button>
+  <input type="file" id="fi" accept=".xls,.xlsx" onchange="onUpload(event)">
+  <button class="bo" onclick="dlTemplate()">📋 양식 다운로드</button>
+  <button class="bd" onclick="confirmReset()" id="btnRst" disabled>🔄 초기화</button>
+  <div style="flex:1"></div>
+  <button class="bo bsm" onclick="restoreLocal()" id="btnRes" style="display:none">💾 이전 작업 불러오기</button>
 </div>
 
-<div class="footer">
-  &copy; 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo &middot; <a href="https://www.makewon.com" target="_blank">makewon.com</a><br>
-  본 서비스의 무단 복제, 배포, 수정 및 상업적 이용을 금지합니다.
+<!-- MAIN -->
+<div class="wrap">
+  <div class="left" id="leftPanel">
+
+    <!-- SELECTION INFO BAR -->
+    <div class="sel-bar" id="selBar">
+      <div class="sel-main" id="selMain"></div>
+      <div class="sel-detail" id="selDetail"></div>
+    </div>
+
+    <!-- UNASSIGNED SECTION -->
+    <div class="sec-hdr sec-hdr-un" id="secUn" style="display:none">
+      <span>📋 미할당 목록 (<span id="unCnt">0</span>)</span>
+    </div>
+    <div class="tbar" id="tbar" style="display:none">
+      <input type="text" placeholder="🔍 품목명/코드 검색..." oninput="doFilter(this.value)" id="searchIn">
+      <button class="bo bsm" onclick="selAllVisible()">전체 선택</button>
+      <button class="bo bsm" onclick="selNone()">선택 해제</button>
+    </div>
+    <div class="tbl-wrap" id="unTblWrap" style="flex:1;min-height:100px;">
+      <div class="empty" id="emptyMsg">
+        <div class="ei">📄</div>
+        <p><strong>엑셀 파일을 업로드하세요</strong><br>크로스닥 양식(.xls, .xlsx)을 선택하거나<br>드래그하여 업로드할 수 있습니다.</p>
+      </div>
+      <table id="unTbl" style="display:none">
+        <thead id="unHead"></thead>
+        <tbody id="unBody"></tbody>
+      </table>
+    </div>
+
+    <div class="resizer" id="resizer" style="display:none"></div>
+
+    <!-- ASSIGNED SECTION -->
+    <div class="sec-hdr sec-hdr-done" id="secDone" style="display:none">
+      <span>✅ 할당 완료 (<span id="doneCnt">0</span>)</span>
+      <button class="bo bsm" onclick="toggleDone()" id="btnToggleDone" style="font-size:11px">접기 ▼</button>
+    </div>
+    <div class="done-tbl-wrap" id="doneTblWrap" style="flex:0 0 200px;min-height:0;display:none;overflow:auto;">
+      <table id="doneTbl"><thead id="doneHead"></thead><tbody id="doneBody"></tbody></table>
+    </div>
+
+    <div class="ftr" id="ftr" style="display:none"><span id="ftrL"></span><span id="ftrR"></span></div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="right">
+    <div class="rp-hdr">
+      <span>🎨 팔레트 구성</span>
+      <button class="bo bsm" onclick="addPalette()" id="btnAdd" disabled>+ 새 팔레트</button>
+    </div>
+    <div class="rp-assign" id="assignBar" style="display:none">
+      <select id="pSel"></select>
+      <button class="bp bsm" onclick="doAssignUI()" id="btnAsgn" disabled>할당</button>
+      <button class="bo bsm" onclick="doUnassignUI()" id="btnUnasgn" disabled>해제</button>
+    </div>
+    <div class="rp-list" id="pList">
+      <div class="empty" id="pEmpty"><div class="ei">📋</div><p>데이터 로드 후<br>팔레트를 구성하세요.</p></div>
+    </div>
+    <div class="rp-sum" id="pSum" style="display:none">
+      <div class="st"><span>총 팔레트</span><span class="sv" id="sP">0</span></div>
+      <div class="st"><span>할당</span><span class="sv" id="sA">0/0</span></div>
+      <div class="st"><span>총 박스</span><span class="sv" id="sB">0</span></div>
+    </div>
+    <div class="rp-act" id="pAct" style="display:none">
+      <button class="bs" onclick="printBoxLabels()">🏷️ 박스 바코드 라벨 (100x150)</button>
+      <button class="bp" onclick="openItemLabelPicker()">🏷️ 상품 바코드 라벨 (50x30)</button>
+      <button class="bw" onclick="openCoupangExport()">📥 쿠팡 업로드 엑셀 생성</button>
+      <input type="file" id="fiCoupang" style="display:none" accept=".xlsx" onchange="onCoupangTemplate(event)">
+    </div>
+  </div>
 </div>
 
+<!-- DIALOG -->
+<div class="ov" id="ov">
+  <div class="dlg" id="dlgBox"><h3 id="dT"></h3><p id="dM"></p><div id="dlgContent"></div><div class="dlg-a"><button class="bo" onclick="closeDlg()">취소</button><button class="bp" id="dC">확인</button></div></div>
+</div>
+<div class="toast" id="toast"></div>
+<div style="text-align:center;padding:10px 20px;background:#1f2937;color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.04em;">
+  © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=v=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const COLS=['센터명','받는분전화번호','받는분주소(전체, 분할)','팔레트','내품수량','품목명','품목코드','1차 바코드','2차 바코드','크로스닥상품명','발주번호'];
+const CI={};COLS.forEach((c,i)=>CI[c]=i);
+const DCOLS=['품목코드','품목명','내품수량','1차 바코드','2차 바코드','발주번호'];
+
+let data=[],sel=new Set(),pals={},pCnt=0,sortC=-1,sortA=true,filterQ='',doneOpen=true;
+
+/* ======= UPLOAD ======= */
+function handleFile(f){
+  if(!f)return;
+  const rd=new FileReader();
+  rd.onload=function(ev){
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const js=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(js.length<2)throw new Error('데이터 없음');
+      const hdr=js[0].map(c=>String(c).trim());
+      const miss=COLS.filter(c=>!hdr.includes(c));
+      if(miss.length){toast('컬럼 불일치: '+miss.join(', '),'e');return;}
+      const cm=COLS.map(c=>hdr.indexOf(c));
+      data=[];pals={};pCnt=0;
+      for(let i=1;i<js.length;i++){
+        const r=cm.map(ci=>js[i][ci]!==undefined?js[i][ci]:'');
+        if(typeof r[CI['1차 바코드']]==='number')r[CI['1차 바코드']]=String(Math.round(r[CI['1차 바코드']]));
+        else r[CI['1차 바코드']]=String(r[CI['1차 바코드']]).replace(/\.0$/,'');
+        if(typeof r[CI['발주번호']]==='number')r[CI['발주번호']]=String(Math.round(r[CI['발주번호']]));
+        r[CI['내품수량']]=Number(r[CI['내품수량']])||0;
+        data.push(r);
+      }
+      importPals();sel.clear();render();setUI(true);save();
+      toast(data.length+'개 행 로드 완료','s');
+    }catch(er){toast('파일 오류: '+er.message,'e');}
+  };
+  rd.readAsArrayBuffer(f);
+}
+function onUpload(e){handleFile(e.target.files[0]);e.target.value='';}
+function importPals(){
+  const m={};
+  data.forEach((r,i)=>{
+    let p=String(r[CI['팔레트']]).trim();
+    if(!p)return;
+    const num=p.replace(/[^0-9]/g,'');
+    if(num) p='팔레트'+num;
+    r[CI['팔레트']]=p;
+    if(!m[p])m[p]=[];
+    m[p].push(i);
+  });
+  pals={};pCnt=0;
+  const sorted=Object.keys(m).sort((a,b)=>{
+    const na=parseInt(a.replace(/[^0-9]/g,''))||0, nb=parseInt(b.replace(/[^0-9]/g,''))||0;
+    return na-nb;
+  });
+  sorted.forEach(n=>{pCnt++;pals['P'+pCnt]={name:n,items:m[n]};});
+}
+
+/* ======= HELPERS ======= */
+function rowPal(ri){for(const k in pals){if(pals[k].items.includes(ri))return k;}return null;}
+function palColor(k){return 'pc'+((parseInt(k.replace('P',''))-1)%10+1);}
+
+/* ======= RENDER ======= */
+function render(){renderUnassigned();renderAssigned();renderPalCards();updateFooter();updateSelBar();}
+
+function makeHead(thId){
+  let h='<tr>';
+  DCOLS.forEach(c=>{const ri=CI[c],s=sortC===ri,ar=s?(sortA?'▲':'▼'):'⇅';
+    h+=`<th class="${s?'sorted':''}" onclick="doSort(${ri})">${c} <span class="si">${ar}</span></th>`;});
+  h+='<th style="width:80px">팔레트</th></tr>';$(thId).innerHTML=h;
+}
+function getUnassigned(){
+  let list=[];
+  data.forEach((_,i)=>{if(!rowPal(i))list.push(i);});
+  if(filterQ)list=list.filter(i=>{
+    const nm=String(data[i][CI['품목명']]).toLowerCase(),cd=String(data[i][CI['품목코드']]).toLowerCase();
+    return nm.includes(filterQ)||cd.includes(filterQ);});
+  if(sortC>=0)list.sort((a,b)=>{let va=data[a][sortC],vb=data[b][sortC];
+    if(typeof va==='number'&&typeof vb==='number')return sortA?va-vb:vb-va;
+    return sortA?String(va).localeCompare(String(vb),'ko'):String(vb).localeCompare(String(va),'ko');});
+  return list;
+}
+function renderUnassigned(){
+  if(!data.length)return;
+  makeHead('unHead');
+  const list=getUnassigned();
+  $('unCnt').textContent=list.length;
+  let h='';
+  list.forEach(i=>{
+    const r=data[i],s=sel.has(i);
+    h+=`<tr class="${s?'sel':''}" onclick="toggleRow(${i})">`;
+    DCOLS.forEach(c=>{h+=`<td${c==='품목코드'?' class="cc"':''}>${esc(r[CI[c]])}</td>`;});
+    h+='<td>-</td></tr>';
+  });
+  $('unBody').innerHTML=h;
+}
+function getAssigned(){
+  let list=[];
+  for(const k in pals)pals[k].items.forEach(i=>list.push({ri:i,pk:k}));
+  if(sortC>=0)list.sort((a,b)=>{let va=data[a.ri][sortC],vb=data[b.ri][sortC];
+    if(typeof va==='number'&&typeof vb==='number')return sortA?va-vb:vb-va;
+    return sortA?String(va).localeCompare(String(vb),'ko'):String(vb).localeCompare(String(va),'ko');});
+  return list;
+}
+function renderAssigned(){
+  if(!data.length)return;
+  makeHead('doneHead');
+  const list=getAssigned();
+  $('doneCnt').textContent=list.length;
+  let h='';
+  list.forEach(({ri,pk})=>{
+    const r=data[ri],c=palColor(pk),nm=pals[pk].name;
+    h+=`<tr>`;
+    DCOLS.forEach(col=>{h+=`<td${col==='품목코드'?' class="cc"':''}>${esc(r[CI[col]])}</td>`;});
+    h+=`<td><span class="pt ${c}">${esc(nm)}</span></td></tr>`;
+  });
+  $('doneBody').innerHTML=h;
+}
+function renderPalCards(){
+  const keys=Object.keys(pals);
+  if(!keys.length){
+    $('pList').innerHTML='<div class="empty"><div class="ei">📋</div><p>데이터 로드 후<br>팔레트를 구성하세요.</p></div>';
+    $('pSum').style.display='none';$('pAct').style.display='none';
+    return;
+  }
+  keys.sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
+  let h='';
+  keys.forEach(k=>{
+    const p=pals[k],cnt=p.items.length,filled=cnt>0;
+    const cls=filled?'pcard pcard-filled':'pcard pcard-empty';
+    const chk=filled?'<span class="pcard-check">✓</span>':'';
+    h+=`<div class="${cls}"><div class="pcard-h" onclick="togglePCard('${k}')">${chk}<span>${esc(p.name)} (${cnt})</span><button class="rbtn" onclick="event.stopPropagation();removePal('${k}')" title="삭제">✕</button></div>`;
+    if(cnt){
+      h+='<div class="pcard-b" id="pb_'+k+'">';
+      p.items.forEach(ri=>{
+        const r=data[ri];
+        h+=`<div class="ir"><span>${esc(r[CI['품목코드']])} ${esc(r[CI['품목명']])}</span><span>${r[CI['내품수량']]}개</span></div>`;
+      });
+      h+='</div>';
+    }
+    h+='</div>';
+  });
+  $('pList').innerHTML=h;
+
+  // Summary
+  let totalItems=0,assignedItems=0,totalBoxes=0;
+  data.forEach((_,i)=>{totalItems++;if(rowPal(i))assignedItems++;});
+  keys.forEach(k=>totalBoxes+=pals[k].items.length);
+  $('sP').textContent=keys.length;
+  $('sA').textContent=assignedItems+'/'+totalItems;
+  $('sB').textContent=totalBoxes;
+  $('pSum').style.display='block';
+  $('pAct').style.display=keys.some(k=>pals[k].items.length>0)?'flex':'none';
+  updatePSel();
+}
+function togglePCard(k){
+  const el=document.getElementById('pb_'+k);
+  if(el)el.style.display=el.style.display==='none'?'':'none';
+}
+function updateFooter(){
+  if(!data.length)return;
+  const un=getUnassigned().length,done=getAssigned().length;
+  $('ftrL').textContent=`미할당: ${un} / 할당: ${done} / 전체: ${data.length}`;
+  const pct=data.length?Math.round(done/data.length*100):0;
+  $('ftrR').textContent=`진행률: ${pct}%`;
+}
+
+/* ======= SELECTION ======= */
+function toggleRow(i){sel.has(i)?sel.delete(i):sel.add(i);renderUnassigned();updateSelBar();}
+function selAllVisible(){getUnassigned().forEach(i=>sel.add(i));renderUnassigned();updateSelBar();}
+function selNone(){sel.clear();renderUnassigned();updateSelBar();}
+function updateSelBar(){
+  const n=sel.size;
+  if(!n){$('selBar').classList.remove('active');$('btnAsgn').disabled=true;$('btnUnasgn').disabled=true;return;}
+  $('selBar').classList.add('active');$('btnAsgn').disabled=false;$('btnUnasgn').disabled=false;
+  let totalQty=0,codes=new Set();
+  sel.forEach(i=>{totalQty+=data[i][CI['내품수량']]||0;codes.add(data[i][CI['품목코드']]);});
+  $('selMain').textContent=n+'박스 선택됨';
+  $('selDetail').textContent=codes.size+'종 - 내품합계 '+totalQty+'개';
+}
+
+/* ======= SORT / FILTER ======= */
+function doSort(ci){if(sortC===ci)sortA=!sortA;else{sortC=ci;sortA=true;}render();}
+function doFilter(q){filterQ=q.toLowerCase().trim();renderUnassigned();}
+
+/* ======= PALETTE MANAGEMENT ======= */
+function addPalette(){pCnt++;pals['P'+pCnt]={name:'팔레트'+pCnt,items:[]};renderPalCards();updatePSel();save();}
+function updatePSel(){
+  const s=$('pSel');s.innerHTML='';
+  Object.keys(pals).sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1))).forEach(k=>{
+    s.innerHTML+=`<option value="${k}">${esc(pals[k].name)}</option>`;
+  });
+}
+function doAssignUI(){
+  const pk=$('pSel').value;if(!pk||!sel.size)return;
+  sel.forEach(i=>{
+    const cur=rowPal(i);
+    if(cur)pals[cur].items=pals[cur].items.filter(x=>x!==i);
+    pals[pk].items.push(i);
+    data[i][CI['팔레트']]=pals[pk].name;
+  });
+  sel.clear();render();save();toast('할당 완료','s');
+}
+function doUnassignUI(){
+  sel.forEach(i=>{
+    const cur=rowPal(i);
+    if(cur){pals[cur].items=pals[cur].items.filter(x=>x!==i);data[i][CI['팔레트']]='';}
+  });
+  sel.clear();render();save();toast('해제 완료','s');
+}
+function removePal(k){
+  if(!pals[k])return;
+  showDlg('팔레트 삭제',pals[k].name+'을 삭제합니다.\n할당된 항목은 미할당으로 돌아갑니다.',null,()=>{
+    pals[k].items.forEach(i=>data[i][CI['팔레트']]='');
+    delete pals[k];render();save();toast('삭제 완료','s');
+  });
+}
+function toggleDone(){
+  doneOpen=!doneOpen;
+  $('doneTblWrap').style.display=doneOpen?'block':'none';
+  $('btnToggleDone').textContent=doneOpen?'접기 ▼':'펼치기 ▲';
+}
+
+/* ======= PRINT WINDOW ======= */
+function openPrintWindow(htmlContent){
+  const w=window.open('','_blank','width=800,height=600');
+  w.document.write(htmlContent);
+  w.document.close();
+  w.onload=function(){
+    const svgs=w.document.querySelectorAll('.bc');
+    svgs.forEach(el=>{
+      try{w.JsBarcode(el,el.dataset.value,JSON.parse(el.dataset.opts));}catch(e){}
+    });
+    setTimeout(()=>w.print(),300);
+  };
+}
+
+/* ======= BOX BARCODE LABEL 100x150mm - PICKER POPUP ======= */
+function printBoxLabels(){
+  const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
+  if(!keys.length){toast('출력할 데이터 없음','w');return;}
+  keys.sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
+
+  // Build box list grouped by palette
+  const boxList=[];
+  keys.forEach(pk=>{
+    pals[pk].items.forEach(ri=>{
+      const r=data[ri];
+      const palNum=pals[pk].name.replace(/[^0-9]/g,'');
+      boxList.push({
+        ri, pk, palNum,
+        code:String(r[CI['품목코드']]),
+        name:String(r[CI['품목명']]),
+        qty:r[CI['내품수량']],
+        bc2:String(r[CI['2차 바코드']])
+      });
+    });
+  });
+
+  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 박스를 선택하세요</span><div style="display:flex;gap:4px"><button class="bo bsm" onclick="boxPickToggleAll()">전체 선택/해제</button><button class="bo bsm" onclick="boxPickInvert()">반전</button></div></div>';
+  listHtml+='<div class="pick-list" id="boxPickList">';
+  boxList.forEach((b,idx)=>{
+    listHtml+=`<label class="pick-item"><input type="checkbox" checked value="${idx}"><span class="pi-code" style="min-width:40px;color:var(--suc);">P${b.palNum}</span><span class="pi-code">${esc(b.code)}</span><span class="pi-name">${esc(b.name)}</span><span class="pi-qty">${b.qty}개</span></label>`;
+  });
+  listHtml+='</div>';
+
+  $('dT').textContent='🏷️ 박스 바코드 라벨 출력';
+  $('dM').textContent='';
+  $('dlgContent').innerHTML=listHtml;
+  $('ov').classList.add('show');
+
+  window._boxPickList=boxList;
+
+  const btn=$('dC'),nb=btn.cloneNode(true);btn.parentNode.replaceChild(nb,btn);nb.id='dC';
+  nb.style.display='';nb.textContent='인쇄';
+  nb.onclick=()=>{closeDlg();doPrintBoxLabels();};
+}
+
+function boxPickToggleAll(){
+  const cbs=$('boxPickList').querySelectorAll('input[type=checkbox]');
+  const allChecked=[...cbs].every(c=>c.checked);
+  cbs.forEach(c=>c.checked=!allChecked);
+}
+function boxPickInvert(){
+  const cbs=$('boxPickList').querySelectorAll('input[type=checkbox]');
+  cbs.forEach(c=>c.checked=!c.checked);
+}
+
+function doPrintBoxLabels(){
+  const cbs=$('boxPickList').querySelectorAll('input[type=checkbox]:checked');
+  if(!cbs.length){toast('선택된 항목 없음','w');return;}
+  const list=window._boxPickList;
+  const selected=[...cbs].map(c=>list[parseInt(c.value)]);
+
+  let labels='';
+  selected.forEach(b=>{
+    labels+=`
+    <div class="label">
+      <div class="lbl-header">
+        <span class="lbl-pal">${b.palNum}</span>
+        <span class="lbl-code">${esc(b.code)}</span>
+      </div>
+      <div class="lbl-qty">${b.qty}</div>
+      <div class="lbl-name">${esc(b.name)}</div>
+      <div class="lbl-bc">
+        <svg class="bc" data-value="${esc(b.bc2)}" data-opts='{"format":"CODE128","width":2.2,"height":100,"displayValue":true,"fontSize":14,"margin":2,"font":"Malgun Gothic"}'></svg>
+      </div>
+    </div>`;
+  });
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
+  <style>
+    @page{size:100mm 150mm;margin:0;}
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .label{width:100mm;height:150mm;padding:4mm;page-break-after:always;border:1px solid #ccc;display:flex;flex-direction:column;}
+    .label:last-child{page-break-after:auto;}
+    .lbl-header{border:1px solid #000;padding:4mm;border-radius:2mm;display:flex;justify-content:space-between;align-items:center;}
+    .lbl-pal{font-size:28pt;font-weight:900;color:#000;}
+    .lbl-code{font-size:14pt;font-weight:700;color:#333;}
+    .lbl-qty{text-align:center;font-size:60pt;font-weight:900;margin:3mm 0 1mm;line-height:1;}
+    .lbl-name{text-align:center;font-size:11pt;padding:0 4mm 1mm;word-break:keep-all;color:#333;}
+    .lbl-bc{text-align:center;margin-top:2mm;flex:1;display:flex;align-items:center;justify-content:center;}
+    .lbl-bc svg{width:80mm;height:40mm;}
+  </style></head><body>${labels}</body></html>`;
+  openPrintWindow(html);
+}
+
+/* ======= ITEM BARCODE LABEL 50x30mm - PICKER POPUP ======= */
+function openItemLabelPicker(){
+  const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
+  if(!keys.length){toast('출력할 데이터 없음','w');return;}
+
+  const itemMap={};
+  keys.sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
+  keys.forEach(pk=>{
+    pals[pk].items.forEach(ri=>{
+      const r=data[ri];
+      const bc1=String(r[CI['1차 바코드']]);
+      const code=String(r[CI['품목코드']]);
+      const key=bc1+'_'+code;
+      if(!itemMap[key]){
+        itemMap[key]={bc1,code,name:String(r[CI['품목명']]),totalQty:0,rows:[]};
+      }
+      itemMap[key].totalQty+=r[CI['내품수량']]||0;
+      itemMap[key].rows.push(ri);
+    });
+  });
+
+  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 상품을 선택하세요 (내품수량만큼 반복 인쇄)</span><button class="bo bsm" onclick="pickToggleAll()">전체 선택/해제</button></div>';
+  listHtml+='<div class="pick-list" id="pickList">';
+  Object.keys(itemMap).forEach(key=>{
+    const it=itemMap[key];
+    listHtml+=`<label class="pick-item"><input type="checkbox" checked value="${esc(key)}"><span class="pi-code">${esc(it.code)}</span><span class="pi-name">${esc(it.name)}</span><span class="pi-qty">x${it.totalQty}장</span></label>`;
+  });
+  listHtml+='</div>';
+
+  $('dT').textContent='🏷️ 상품 바코드 라벨 출력';
+  $('dM').textContent='';
+  $('dlgContent').innerHTML=listHtml;
+  $('ov').classList.add('show');
+
+  window._pickItemMap=itemMap;
+
+  const b=$('dC'),nb=b.cloneNode(true);b.parentNode.replaceChild(nb,b);nb.id='dC';
+  nb.textContent='인쇄';
+  nb.onclick=()=>{closeDlg();printItemLabels();};
+}
+
+function pickToggleAll(){
+  const cbs=$('pickList').querySelectorAll('input[type=checkbox]');
+  const allChecked=[...cbs].every(c=>c.checked);
+  cbs.forEach(c=>c.checked=!allChecked);
+}
+
+function printItemLabels(){
+  const cbs=$('pickList').querySelectorAll('input[type=checkbox]:checked');
+  if(!cbs.length){toast('선택된 항목 없음','w');return;}
+  const map=window._pickItemMap;
+  const selectedKeys=[...cbs].map(c=>c.value);
+
+  let labels='';
+  selectedKeys.forEach(key=>{
+    const it=map[key];
+    if(!it)return;
+    const lbl=esc(it.name)+' - '+esc(it.code);
+    const qty=Math.max(1,Math.round(it.totalQty));
+    for(let q=0;q<qty;q++){
+      const bcVal=it.bc1.replace(/[^0-9]/g,'');
+      const isEAN=(bcVal.length===12||bcVal.length===13);
+      const fmt=isEAN?'EAN13':'CODE128';
+      const dispVal=isEAN?bcVal:it.bc1;
+      labels+=`
+      <div class="label">
+        <div class="item-bc">
+          <svg class="bc" data-value="${esc(dispVal)}" data-opts='{"format":"${fmt}","width":${isEAN?1.6:1.2},"height":50,"displayValue":true,"fontSize":9,"margin":1,"textMargin":1,"font":"Malgun Gothic"}'></svg>
+        </div>
+        <div class="item-name">${lbl}</div>
+      </div>`;
+    }
+  });
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
+  <style>
+    @page{size:50mm 30mm;margin:0;}
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .label{width:50mm;height:30mm;padding:1mm 2mm;page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #ccc;}
+    .label:last-child{page-break-after:auto;}
+    .item-bc{text-align:center;width:40mm;height:20mm;display:flex;align-items:center;justify-content:center;}
+    .item-bc svg{width:40mm;height:20mm;}
+    .item-name{font-size:6pt;font-weight:600;text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46mm;margin-top:0.5mm;}
+  </style></head><body>${labels}</body></html>`;
+  openPrintWindow(html);
+}
+
+/* ======= COUPANG EXCEL EXPORT (템플릿 기반) ======= */
+function openCoupangExport(){
+  if(!data.length){toast('데이터 없음','w');return;}
+  const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
+  if(!keys.length){toast('할당된 팔레트가 없습니다','w');return;}
+  $('dT').textContent='📥 쿠팡 업로드 엑셀 생성';
+  $('dM').textContent='';
+  $('dlgContent').innerHTML=`
+    <div style="text-align:center;padding:16px 0">
+      <p style="font-size:13px;color:var(--g600);margin-bottom:14px">쿠팡에서 받은 <b>TruckShipment PALLET Form</b> 엑셀 파일을 업로드하세요.<br>우리 팔레트 구성에 맞춰 자동으로 채워집니다.</p>
+      <button class="bp" onclick="closeDlg();$('fiCoupang').click();" style="font-size:14px;padding:12px 28px">📂 쿠팡 양식 파일 선택 (.xlsx)</button>
+      <div style="margin-top:16px;padding:12px;background:var(--wrn-l);border-radius:8px;font-size:11px;color:#92400e;text-align:left">
+        <b>매핑 기준:</b> 발주번호 + 상품바코드(1차바코드)로 매칭<br>
+        <b>행 분할:</b> 한 상품이 여러 팔레트에 나뉘면 자동 분할<br>
+        <b>팔레트 명명:</b> 팔레트N → PALLET_N 자동 변환
+      </div>
+    </div>`;
+  $('ov').classList.add('show');
+  const b=$('dC');b.style.display='none';
+}
+
+function onCoupangTemplate(e){
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=function(ev){
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      if(!wb.SheetNames.includes('상품목록 구성하기')||!wb.SheetNames.includes('팔레트정보입력')){
+        toast('쿠팡 양식이 아닙니다 (시트 없음)','e');return;
+      }
+      processCoupangTemplate(wb);
+    }catch(er){toast('파일 오류: '+er.message,'e');}
+  };
+  rd.readAsArrayBuffer(f);e.target.value='';
+}
+
+function processCoupangTemplate(wb){
+  // 1. Read original product rows from template
+  const wsProduct=wb.Sheets['상품목록 구성하기'];
+  const rows=XLSX.utils.sheet_to_json(wsProduct,{header:1,defval:''});
+  if(rows.length<2){toast('상품목록이 비어있습니다','e');return;}
+  const header=rows[0];
+
+  // 2. Build palette data
+  const assignMap={};
+  const palKeys=Object.keys(pals).filter(k=>pals[k].items.length>0).sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
+
+  palKeys.forEach(pk=>{
+    pals[pk].items.forEach(ri=>{
+      const r=data[ri];
+      const po=String(r[CI['발주번호']]).trim();
+      const bc=String(r[CI['1차 바코드']]).trim();
+      const qty=Number(r[CI['내품수량']])||0;
+      const mapKey=po+'|||'+bc;
+      if(!assignMap[mapKey])assignMap[mapKey]={};
+      if(!assignMap[mapKey][pk])assignMap[mapKey][pk]=0;
+      assignMap[mapKey][pk]+=qty;
+    });
+  });
+
+  // 3. Palette name mapping
+  const palNameMap={};
+  palKeys.forEach(pk=>{
+    const num=pals[pk].name.replace(/[^0-9]/g,'');
+    palNameMap[pk]='PALLET_'+num;
+  });
+
+  // 4. Generate new product rows (split by palette)
+  const newRows=[header];
+  for(let i=1;i<rows.length;i++){
+    const origRow=rows[i];
+    const po=String(origRow[0]).trim();
+    const bc=String(origRow[4]).trim();
+    const mapKey=po+'|||'+bc;
+
+    if(assignMap[mapKey]){
+      const palAssignments=assignMap[mapKey];
+      for(const pk in palAssignments){
+        const qtyForPal=palAssignments[pk];
+        const newRow=[...origRow];
+        newRow[7]=qtyForPal;
+        newRow[8]=palNameMap[pk]||'';
+        newRow[9]=qtyForPal;
+        newRows.push(newRow);
+      }
+      delete assignMap[mapKey];
+    }else{
+      const newRow=[...origRow];
+      newRows.push(newRow);
+    }
+  }
+
+  // 5. Update 팔레트정보입력 sheet — direct cell writes
+  const wsPal=wb.Sheets['팔레트정보입력'];
+  const palCount=palKeys.length;
+  wsPal['A2']={t:'n',v:palCount};
+  for(let i=0;i<palCount;i++){
+    const rn=5+i;
+    const pName='PALLET_'+(i+1);
+    wsPal['A'+rn]={t:'s',v:pName};
+    wsPal['B'+rn]={t:'n',v:1};
+  }
+  const range=XLSX.utils.decode_range(wsPal['!ref']||'A1:B4');
+  if(range.e.r<4+palCount-1)range.e.r=4+palCount-1;
+  if(range.e.c<1)range.e.c=1;
+  wsPal['!ref']=XLSX.utils.encode_range(range);
+
+  // 6. Write back product sheet
+  const newWsProduct=XLSX.utils.aoa_to_sheet(newRows);
+  newWsProduct['!cols']=[{wch:12},{wch:8},{wch:12},{wch:12},{wch:16},{wch:40},{wch:10},{wch:10},{wch:14},{wch:12},{wch:5},{wch:40}];
+  wb.Sheets['상품목록 구성하기']=newWsProduct;
+
+  // Update HiddenSheet
+  const wsHidden=wb.Sheets['HiddenSheet'];
+  if(wsHidden){
+    wsHidden['B1']={t:'n',v:palCount};
+    for(let i=0;i<palCount;i++){
+      const rn=2+i;
+      wsHidden['C'+rn]={t:'s',v:'PALLET_'+(i+1)};
+    }
+    const hr=XLSX.utils.decode_range(wsHidden['!ref']||'A1:C1');
+    if(hr.e.r<1+palCount)hr.e.r=1+palCount;
+    if(hr.e.c<2)hr.e.c=2;
+    wsHidden['!ref']=XLSX.utils.encode_range(hr);
+  }
+
+  // 7. Download
+  const fname='TruckShipment_PALLET_완성_'+dateStr()+'.xlsx';
+  XLSX.writeFile(wb,fname);
+
+  // 8. Show summary
+  const totalSplitRows=newRows.length-1;
+  const origRows=rows.length-1;
+  toast(`완료! ${origRows}행 → ${totalSplitRows}행 (팔레트 ${palCount}개)`,'s');
+
+  let summary=`<b>팔레트 ${palCount}개</b>: ${palKeys.map(pk=>palNameMap[pk]).join(', ')}<br><br>`;
+  summary+=`<b>원본 행:</b> ${origRows}개<br>`;
+  summary+=`<b>생성 행:</b> ${totalSplitRows}개 (팔레트별 분할 포함)<br><br>`;
+
+  const unmatched=Object.keys(assignMap);
+  if(unmatched.length){
+    summary+=`<div style="background:var(--dng-l);padding:8px;border-radius:6px;margin-top:8px"><b>⚠️ 매칭 안 된 항목 (${unmatched.length}건):</b><br>`;
+    unmatched.forEach(k=>{const[po,bc]=k.split('|||');summary+=`발주:${po} / 바코드:${bc}<br>`;});
+    summary+=`</div>`;
+  }
+
+  showDlg('✅ 쿠팡 엑셀 생성 완료',null,`<div style="font-size:12px;line-height:1.6">${summary}</div><p style="margin-top:12px;font-size:13px;color:var(--suc);font-weight:700">${fname} 다운로드됨</p>`,null);
+}
+function dlTemplate(){
+  const ws=XLSX.utils.aoa_to_sheet([COLS]);
+  ws['!cols']=[{wch:10},{wch:16},{wch:40},{wch:10},{wch:8},{wch:25},{wch:12},{wch:16},{wch:22},{wch:40},{wch:14}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sheet1');
+  XLSX.writeFile(wb,'크로스닥_양식.xlsx');
+}
+
+/* ======= LOCAL STORAGE ======= */
+function save(){try{localStorage.setItem('cxd',JSON.stringify({data,pals,pCnt}));}catch(e){}}
+function restoreLocal(){try{const s=JSON.parse(localStorage.getItem('cxd'));data=s.data||[];pals=s.pals||{};pCnt=s.pCnt||0;sel.clear();render();setUI(true);toast('복원 완료','s');}catch(e){toast('복원 실패','e');}}
+function checkLocal(){try{const s=localStorage.getItem('cxd');if(s&&JSON.parse(s).data?.length)$('btnRes').style.display='inline-flex';}catch(e){}}
+
+/* ======= UI ======= */
+function setUI(on){
+  const b=$('badge');
+  if(on&&data.length){
+    b.textContent=data.length+'행';b.className='badge badge-on';
+    $('btnRst').disabled=false;$('btnAdd').disabled=false;
+    ['tbar','secUn','secDone','ftr','assignBar'].forEach(id=>$(id).style.display='flex');
+    $('doneTblWrap').style.display=doneOpen?'block':'none';
+    $('resizer').style.display='block';$('emptyMsg').style.display='none';$('unTbl').style.display='table';
+  }else{
+    b.textContent='데이터 없음';b.className='badge badge-off';
+    $('btnRst').disabled=true;$('btnAdd').disabled=true;
+    ['tbar','secUn','secDone','ftr','assignBar'].forEach(id=>$(id).style.display='none');
+    $('doneTblWrap').style.display='none';$('resizer').style.display='none';
+    $('emptyMsg').style.display='flex';$('unTbl').style.display='none';
+  }
+}
+function confirmReset(){showDlg('🔄 초기화','모든 데이터와 팔레트를 초기화합니다.\n되돌릴 수 없습니다.',null,()=>{
+  data=[];pals={};pCnt=0;sel.clear();sortC=-1;filterQ='';$('searchIn').value='';
+  $('unHead').innerHTML='';$('unBody').innerHTML='';$('doneHead').innerHTML='';$('doneBody').innerHTML='';
+  renderPalCards();setUI(false);localStorage.removeItem('cxd');toast('초기화 완료','s');});}
+
+/* ======= DIALOG / TOAST ======= */
+function showDlg(t,m,content,fn){
+  $('dT').textContent=t;$('dM').textContent=m||'';$('dlgContent').innerHTML=content||'';
+  $('ov').classList.add('show');
+  const b=$('dC'),nb=b.cloneNode(true);b.parentNode.replaceChild(nb,b);nb.id='dC';nb.textContent='확인';
+  nb.onclick=()=>{closeDlg();if(fn)fn();};
+}
+function closeDlg(){$('ov').classList.remove('show');}
+let tt;function toast(m,t){const e=$('toast');e.textContent=m;e.className='toast t-'+(t||'s')+' show';clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('show'),2500);}
+function dateStr(){const d=new Date();return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');}
+
+/* ======= RESIZER ======= */
+(function(){const rs=$('resizer');let sY,sH;
+  rs.addEventListener('mousedown',e=>{e.preventDefault();rs.classList.add('active');sY=e.clientY;sH=$('doneTblWrap').offsetHeight;
+    const mv=ev=>{const nh=Math.max(60,Math.min(sH+(sY-ev.clientY),window.innerHeight*.6));$('doneTblWrap').style.flex='0 0 '+nh+'px';};
+    const up=()=>{rs.classList.remove('active');document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+    document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
+})();
+
+/* ======= DRAG & DROP ======= */
+(function(){
+  const body=document.body;
+  let dragCnt=0;
+  body.addEventListener('dragenter',e=>{e.preventDefault();dragCnt++;body.classList.add('drop-zone','drag-over');});
+  body.addEventListener('dragleave',e=>{e.preventDefault();dragCnt--;if(dragCnt<=0){dragCnt=0;body.classList.remove('drag-over');}});
+  body.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});
+  body.addEventListener('drop',e=>{
+    e.preventDefault();dragCnt=0;body.classList.remove('drop-zone','drag-over');
+    const f=e.dataTransfer.files[0];
+    if(f&&/\.(xls|xlsx)$/i.test(f.name)){handleFile(f);}
+    else if(f){toast('xls 또는 xlsx 파일만 업로드 가능합니다','e');}
+  });
+})();
+
+checkLocal();
+</script>
 </body>
 </html>
