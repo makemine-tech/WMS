@@ -643,12 +643,11 @@ function openItemLabelPicker(){
   });
 
   let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 상품을 선택하세요 (내품수량만큼 반복 인쇄)</span><div style="display:flex;gap:4px"><button class="bo bsm" onclick="pickToggleAll()">전체 선택/해제</button><button class="bo bsm" onclick="pickInvert()">반전</button></div>';
-  listHtml+='<div class="pick-filter"><input type="text" id="pickList_filter" placeholder="패턴 검색 (예: *2, 품목명...)"><button class="bp bsm" onclick="pickerPatternSelect(\'pickList\')">선택</button><button class="bo bsm" onclick="pickerPatternDeselect(\'pickList\')">해제</button></div>';
-  listHtml+='<div style="display:flex;align-items:center;gap:6px;margin-top:6px;"><label style="font-size:12px;color:var(--g600);white-space:nowrap;">소비기한:</label><input type="text" id="itemExpDate" placeholder="예: 2026.12.31 (공란시 미인쇄)" style="flex:1;padding:5px 8px;border:1px solid var(--g300);border-radius:5px;font-size:12px;outline:none;"></div></div>';
+  listHtml+='<div class="pick-filter"><input type="text" id="pickList_filter" placeholder="패턴 검색 (예: *2, 품목명...)"><button class="bp bsm" onclick="pickerPatternSelect(\'pickList\')">선택</button><button class="bo bsm" onclick="pickerPatternDeselect(\'pickList\')">해제</button></div></div>';
   listHtml+='<div class="pick-list" id="pickList">';
   Object.keys(itemMap).forEach(key=>{
     const it=itemMap[key];
-    listHtml+=`<label class="pick-item"><input type="checkbox" checked value="${esc(key)}"><span class="pi-code">${esc(it.code)}</span><span class="pi-name">${esc(it.name)}</span><span class="pi-qty">x${it.totalQty}장</span></label>`;
+    listHtml+=`<div class="pick-item" style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap;"><input type="checkbox" checked value="${esc(key)}"><span class="pi-code">${esc(it.code)}</span><span class="pi-name" style="flex:1;min-width:0;">${esc(it.name)}</span><input type="text" class="exp-input" data-key="${esc(key)}" placeholder="소비기한" style="width:90px;padding:3px 5px;border:1px solid var(--g300);border-radius:4px;font-size:11px;text-align:center;outline:none;"><span class="pi-qty" style="white-space:nowrap;">x${it.totalQty}장</span></div>`;
   });
   listHtml+='</div>';
 
@@ -679,13 +678,19 @@ function printItemLabels(){
   if(!cbs.length){toast('선택된 항목 없음','w');return;}
   const map=window._pickItemMap;
   const selectedKeys=[...cbs].map(c=>c.value);
-  const expInput=$('itemExpDate');
-  const expDate=expInput?expInput.value.trim():'';
+  /* 품목별 소비기한 수집 */
+  const expMap={};
+  document.querySelectorAll('#pickList .exp-input').forEach(inp=>{
+    const v=inp.value.trim();
+    if(v) expMap[inp.dataset.key]=v;
+  });
+  const hasAnyExp=Object.keys(expMap).length>0;
 
   let labels='';
   selectedKeys.forEach(key=>{
     const it=map[key];
     if(!it)return;
+    const expDate=expMap[key]||'';
     const qty=Math.max(1,Math.round(it.totalQty));
     for(let q=0;q<qty;q++){
       const bcVal=it.bc1.replace(/[^0-9]/g,'');
@@ -693,8 +698,9 @@ function printItemLabels(){
       const fmt=isEAN?'EAN13':'CODE128';
       const dispVal=isEAN?bcVal:it.bc1;
       const expLine=expDate?`<div class="item-exp">소비기한 : ${esc(expDate)}</div>`:'';
+      const lblCls=expDate?'label has-exp':'label no-exp';
       labels+=`
-      <div class="label">
+      <div class="${lblCls}">
         <div class="item-bc">
           <svg class="bc" data-value="${esc(dispVal)}" data-opts='{"format":"${fmt}","width":${isEAN?1.6:1.2},"height":${expDate?40:50},"displayValue":true,"fontSize":8,"margin":1,"textMargin":1,"font":"Malgun Gothic"}'></svg>
         </div>
@@ -712,10 +718,12 @@ function printItemLabels(){
     body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .label{width:50mm;height:30mm;padding:1mm 1.5mm;page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #ccc;}
     .label:last-child{page-break-after:auto;}
-    .item-bc{text-align:center;width:40mm;height:${expDate?'16mm':'20mm'};display:flex;align-items:center;justify-content:center;}
-    .item-bc svg{width:40mm;height:${expDate?'16mm':'20mm'};}
+    .item-bc{text-align:center;width:40mm;display:flex;align-items:center;justify-content:center;}
+    .item-bc svg{width:40mm;}
     .item-name{font-size:6pt;font-weight:700;text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46mm;margin-top:0.5mm;}
-    .item-exp{font-size:7pt;font-weight:700;text-align:center;margin-top:0.5mm;color:#000;}
+    .item-exp{font-size:7pt;font-weight:700;text-align:center;margin-top:0.3mm;color:#000;}
+    .has-exp .item-bc{height:16mm;} .has-exp .item-bc svg{height:16mm;}
+    .no-exp .item-bc{height:20mm;} .no-exp .item-bc svg{height:20mm;}
   </style></head><body>${labels}</body></html>`;
   openPrintWindow(html);
 }
