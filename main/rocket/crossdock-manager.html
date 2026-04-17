@@ -492,34 +492,73 @@ function openPrintWindow(htmlContent){
   };
 }
 
-/* ======= BOX BARCODE LABEL 100x150mm ======= */
+/* ======= BOX BARCODE LABEL 100x150mm - PICKER POPUP ======= */
 function printBoxLabels(){
   const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
   if(!keys.length){toast('출력할 데이터 없음','w');return;}
   keys.sort((a,b)=>parseInt(a.slice(1))-parseInt(b.slice(1)));
 
-  let labels='';
+  // Build box list grouped by palette
+  const boxList=[];
   keys.forEach(pk=>{
     pals[pk].items.forEach(ri=>{
       const r=data[ri];
-      const bc2=String(r[CI['2차 바코드']]);
-      const qty=r[CI['내품수량']];
-      const name=esc(String(r[CI['품목명']]));
-      const code=esc(String(r[CI['품목코드']]));
       const palNum=pals[pk].name.replace(/[^0-9]/g,'');
-      labels+=`
-      <div class="label">
-        <div class="lbl-header">
-          <span class="lbl-pal">${palNum}</span>
-          <span class="lbl-code">${code}</span>
-        </div>
-        <div class="lbl-qty">${qty}</div>
-        <div class="lbl-name">${name}</div>
-        <div class="lbl-bc">
-          <svg class="bc" data-value="${esc(bc2)}" data-opts='{"format":"CODE128","width":2.2,"height":100,"displayValue":true,"fontSize":14,"margin":2,"font":"Malgun Gothic"}'></svg>
-        </div>
-      </div>`;
+      boxList.push({
+        ri, pk, palNum,
+        code:String(r[CI['품목코드']]),
+        name:String(r[CI['품목명']]),
+        qty:r[CI['내품수량']],
+        bc2:String(r[CI['2차 바코드']])
+      });
     });
+  });
+
+  let listHtml='<div class="pick-top"><span style="font-size:13px;color:var(--g600)">출력할 박스를 선택하세요</span><button class="bo bsm" onclick="boxPickToggleAll()">전체 선택/해제</button></div>';
+  listHtml+='<div class="pick-list" id="boxPickList">';
+  boxList.forEach((b,idx)=>{
+    listHtml+=`<label class="pick-item"><input type="checkbox" checked value="${idx}"><span class="pi-code" style="min-width:40px;color:var(--suc);">P${b.palNum}</span><span class="pi-code">${esc(b.code)}</span><span class="pi-name">${esc(b.name)}</span><span class="pi-qty">${b.qty}개</span></label>`;
+  });
+  listHtml+='</div>';
+
+  $('dT').textContent='🏷️ 박스 바코드 라벨 출력';
+  $('dM').textContent='';
+  $('dlgContent').innerHTML=listHtml;
+  $('ov').classList.add('show');
+
+  window._boxPickList=boxList;
+
+  const btn=$('dC'),nb=btn.cloneNode(true);btn.parentNode.replaceChild(nb,btn);nb.id='dC';
+  nb.style.display='';nb.textContent='인쇄';
+  nb.onclick=()=>{closeDlg();doPrintBoxLabels();};
+}
+
+function boxPickToggleAll(){
+  const cbs=$('boxPickList').querySelectorAll('input[type=checkbox]');
+  const allChecked=[...cbs].every(c=>c.checked);
+  cbs.forEach(c=>c.checked=!allChecked);
+}
+
+function doPrintBoxLabels(){
+  const cbs=$('boxPickList').querySelectorAll('input[type=checkbox]:checked');
+  if(!cbs.length){toast('선택된 항목 없음','w');return;}
+  const list=window._boxPickList;
+  const selected=[...cbs].map(c=>list[parseInt(c.value)]);
+
+  let labels='';
+  selected.forEach(b=>{
+    labels+=`
+    <div class="label">
+      <div class="lbl-header">
+        <span class="lbl-pal">${b.palNum}</span>
+        <span class="lbl-code">${esc(b.code)}</span>
+      </div>
+      <div class="lbl-qty">${b.qty}</div>
+      <div class="lbl-name">${esc(b.name)}</div>
+      <div class="lbl-bc">
+        <svg class="bc" data-value="${esc(b.bc2)}" data-opts='{"format":"CODE128","width":2.2,"height":100,"displayValue":true,"fontSize":14,"margin":2,"font":"Malgun Gothic"}'></svg>
+      </div>
+    </div>`;
   });
 
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
