@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>눈치게임: 부부싸움</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game-container {
+    position: relative;
+    width: 100%;
+    max-width: 480px;
+    aspect-ratio: 3/4;
+    max-height: 100vh;
+    background: linear-gradient(180deg, #ffd6e0 0%, #fff3cd 70%, #d4a373 100%);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,0,0,0.78);
+    color: white;
+    text-align: center;
+    padding: 24px;
+    z-index: 10;
+  }
+  .hidden { display: none !important; }
+  h1 { font-size: 26px; margin-bottom: 14px; }
+  h2 { font-size: 24px; margin-bottom: 10px; }
+  p { font-size: 14px; margin-bottom: 18px; line-height: 1.6; color: #ddd; max-width: 320px; }
+  .btn {
+    padding: 13px 22px;
+    margin: 5px;
+    font-size: 17px;
+    border: none;
+    border-radius: 10px;
+    background: #ff6b9d;
+    color: white;
+    cursor: pointer;
+    font-weight: 700;
+    transition: transform 0.08s;
+    min-width: 110px;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.94); }
+  .btn.dad { background: #4a90e2; }
+  .btn.mom { background: #e91e63; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #hud {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 12px;
+    color: #222;
+    font-weight: 700;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .status {
+    background: rgba(255,255,255,0.82);
+    padding: 5px 9px;
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+  }
+  .danger { color: #c2185b; animation: pulse 0.5s infinite; }
+  @keyframes pulse { 50% { opacity: 0.45; } }
+  .controls-hint {
+    position: absolute;
+    bottom: 6px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 10px;
+    color: #555;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .tip {
+    font-size: 12px;
+    color: #bbb;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="canvas"></canvas>
+
+  <div id="hud" class="hidden">
+    <div class="status" id="size-status">내 50% | 상대 50%</div>
+    <div class="status" id="time-status">⏱ 60</div>
+  </div>
+  <div class="controls-hint hidden" id="hint">← → 키 또는 화면 좌/우 터치</div>
+
+  <div id="start-screen" class="overlay">
+    <h1>🥊 부부싸움: 눈치게임</h1>
+    <p>내 구역에 떨어지는 살림살이를 피하면 나는 커지고 상대는 작아진다.<br><br>
+    너무 작아지면 <b>밀려나고</b>, 너무 커지면 <b>이혼</b>한다.<br>
+    자식은 큰 쪽으로 간다. 그쪽이 나여야 안전.</p>
+    <div class="btn-row">
+      <button class="btn dad" onclick="startGame('dad')">👨 아빠로 플레이</button>
+      <button class="btn mom" onclick="startGame('mom')">👩 엄마로 플레이</button>
+    </div>
+    <p class="tip">60초 생존 · 적정 크기 유지가 관건</p>
+  </div>
+
+  <div id="end-screen" class="overlay hidden">
+    <h2 id="end-title">게임 오버</h2>
+    <p id="end-desc"></p>
+    <p id="end-stat" style="font-size:12px;color:#999;margin-top:-8px;"></p>
+    <button class="btn" onclick="location.reload()">다시 하기</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  W = rect.width;
+  H = rect.height;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+
+// roundRect polyfill
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    if (typeof r === 'number') r = [r,r,r,r];
+    this.beginPath();
+    this.moveTo(x + r[0], y);
+    this.lineTo(x + w - r[1], y);
+    this.quadraticCurveTo(x + w, y, x + w, y + r[1]);
+    this.lineTo(x + w, y + h - r[2]);
+    this.quadraticCurveTo(x + w, y + h, x + w - r[2], y + h);
+    this.lineTo(x + r[3], y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - r[3]);
+    this.lineTo(x, y + r[0]);
+    this.quadraticCurveTo(x, y, x + r[0], y);
+    this.closePath();
+    return this;
+  };
+}
+
+let game = null;
+
+function startGame(selectedRole) {
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('hud').classList.remove('hidden');
+  document.getElementById('hint').classList.remove('hidden');
+  resize();
+  game = new Game(selectedRole);
+  game.start();
+}
+
+class Character {
+  constructor(role, x, y) {
+    this.role = role;
+    this.x = x;
+    this.y = y;
+    this.size = 50;  // 0-100
+    this.baseW = 54;
+    this.baseH = 70;
+    this.targetX = x;
+    this.shakeUntil = 0;
+    this.flashUntil = 0;
+    this.emoteUntil = 0;
+    this.emoteText = '';
+  }
+  get scale() { return 0.35 + this.size / 70; }  // 0.35 ~ ~1.78
+  get width() { return this.baseW * this.scale; }
+  get height() { return this.baseH * this.scale; }
+
+  update(dt) {
+    this.x += (this.targetX - this.x) * Math.min(1, dt * 8);
+  }
+
+  draw(ctx) {
+    const now = performance.now();
+    const shake = now < this.shakeUntil ? (Math.random() - 0.5) * 7 : 0;
+    const w = this.width, h = this.height;
+    const x = this.x + shake, y = this.y;
+    const flashing = now < this.flashUntil;
+
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, w * 0.55, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // body
+    ctx.fillStyle = flashing ? '#fff' : (this.role === 'dad' ? '#4a90e2' : '#e91e63');
+    ctx.beginPath();
+    ctx.roundRect(x - w/2, y - h, w, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // head
+    const headR = w * 0.32;
+    const headY = y - h - headR * 0.8;
+    ctx.fillStyle = '#ffdbac';
+    ctx.beginPath();
+    ctx.arc(x, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // hair
+    ctx.fillStyle = this.role === 'dad' ? '#2d2d2d' : '#5d3a1a';
+    ctx.beginPath();
+    if (this.role === 'dad') {
+      // short hair
+      ctx.arc(x, headY - headR * 0.15, headR * 0.98, Math.PI * 1.05, Math.PI * 1.95);
+    } else {
+      // long hair
+      ctx.arc(x, headY, headR * 1.05, Math.PI * 1.08, Math.PI * 1.92);
+      ctx.lineTo(x + headR * 0.95, headY + headR * 0.6);
+      ctx.lineTo(x - headR * 0.95, headY + headR * 0.6);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // eyes
+    const mad = this.size < 45;
+    const eyeOffX = headR * 0.32;
+    const eyeY = headY + headR * 0.05;
+    ctx.fillStyle = '#000';
+    if (mad) {
+      // angry slanted
+      ctx.save();
+      ctx.translate(x - eyeOffX, eyeY);
+      ctx.rotate(-0.3);
+      ctx.fillRect(-4, -1, 8, 2.2);
+      ctx.restore();
+      ctx.save();
+      ctx.translate(x + eyeOffX, eyeY);
+      ctx.rotate(0.3);
+      ctx.fillRect(-4, -1, 8, 2.2);
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x - eyeOffX, eyeY, 2.3, 0, Math.PI * 2);
+      ctx.arc(x + eyeOffX, eyeY, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // mouth
+    ctx.strokeStyle = '#c0392b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (mad) {
+      ctx.moveTo(x - headR * 0.3, headY + headR * 0.45);
+      ctx.lineTo(x + headR * 0.3, headY + headR * 0.4);
+    } else {
+      ctx.arc(x, headY + headR * 0.3, headR * 0.22, 0, Math.PI);
+    }
+    ctx.stroke();
+
+    // emote
+    if (now < this.emoteUntil) {
+      this.drawEmote(ctx, x, headY - headR * 1.2);
+    }
+  }
+
+  drawEmote(ctx, x, y) {
+    ctx.font = 'bold 12px -apple-system, "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const text = this.emoteText;
+    const w = Math.max(40, ctx.measureText(text).width + 14);
+    const h = 22;
+    ctx.fillStyle = 'rgba(255,255,255,0.96)';
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x - w/2, y - h, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+    // tail
+    ctx.beginPath();
+    ctx.moveTo(x - 4, y - 1);
+    ctx.lineTo(x, y + 5);
+    ctx.lineTo(x + 4, y - 1);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,0.96)';
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillText(text, x, y - h/2);
+  }
+
+  hit() {
+    this.shakeUntil = performance.now() + 320;
+    this.flashUntil = performance.now() + 120;
+  }
+  say(text, dur = 1800) {
+    this.emoteText = text;
+    this.emoteUntil = performance.now() + dur;
+  }
+}
+
+class Child {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.targetX = x;
+    this.allegiance = null;
+    this.confusion = 0;
+  }
+  update(dt, dad, mom) {
+    const diff = dad.size - mom.size;
+    if (Math.abs(diff) > 8) {
+      this.allegiance = diff > 0 ? 'dad' : 'mom';
+      this.targetX = this.allegiance === 'dad'
+        ? dad.x + dad.width * 0.65
+        : mom.x - mom.width * 0.65;
+      this.confusion = 0;
+    } else {
+      this.confusion = Math.min(1, this.confusion + dt * 0.5);
+    }
+    this.x += (this.targetX - this.x) * Math.min(1, dt * 1.8);
+  }
+  draw(ctx) {
+    const x = this.x, y = this.y;
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, 18, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body
+    ctx.fillStyle = '#ffeb3b';
+    ctx.beginPath();
+    ctx.roundRect(x - 14, y - 32, 28, 32, 6);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    // head
+    ctx.fillStyle = '#ffdbac';
+    ctx.beginPath();
+    ctx.arc(x, y - 42, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // hair (bowl cut)
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(x, y - 42, 12.5, Math.PI * 1.02, Math.PI * 1.98);
+    ctx.closePath();
+    ctx.fill();
+    // eyes (worried)
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(x - 4, y - 42, 1.6, 0, Math.PI * 2);
+    ctx.arc(x + 4, y - 42, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+    // mouth (small o)
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y - 36, 1.8, 0, Math.PI * 2);
+    ctx.stroke();
+    // confusion symbol
+    if (this.confusion > 0.6) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('?', x, y - 58);
+    }
+  }
+}
+
+const ITEMS = [
+  { emoji: '🍳', name: '프라이팬' },
+  { emoji: '🥢', name: '젓가락' },
+  { emoji: '📺', name: 'TV리모컨' },
+  { emoji: '🧴', name: '세제' },
+  { emoji: '👠', name: '하이힐' },
+  { emoji: '🥫', name: '김치통' },
+  { emoji: '📱', name: '휴대폰' },
+  { emoji: '🍲', name: '냄비' },
+  { emoji: '🪑', name: '의자' },
+  { emoji: '⏰', name: '자명종' },
+  { emoji: '💄', name: '립스틱' },
+  { emoji: '🥄', name: '숟가락' },
+  { emoji: '☕', name: '머그컵' },
+];
+
+class FallingItem {
+  constructor(x) {
+    this.x = x;
+    this.y = -30;
+    this.type = ITEMS[Math.floor(Math.random() * ITEMS.length)];
+    this.vy = 150 + Math.random() * 90;
+    this.rot = 0;
+    this.vrot = (Math.random() - 0.5) * 6;
+    this.size = 26 + Math.random() * 8;
+    this.dead = false;
+    this.counted = false;
+  }
+  update(dt) {
+    this.y += this.vy * dt;
+    this.rot += this.vrot * dt;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.font = `${this.size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.type.emoji, 0, 0);
+    ctx.restore();
+  }
+}
+
+const NAG_LINES = {
+  dad: ['술 먹고 또야!', '말 좀 해봐!', '애는 누가 봐!', '돈은 언제 벌어?', '한숨만 나와', '어디서 큰소리!', '진짜 어이없네'],
+  mom: ['또 시작이야?', '됐어 됐어', '내가 뭘 어쨌는데', '그래 나만 나빠', '말을 말자', '알아서 해', '허 참...']
+};
+
+class Game {
+  constructor(role) {
+    this.role = role;
+    this.dad = new Character('dad', W * 0.25, H - 18);
+    this.mom = new Character('mom', W * 0.75, H - 18);
+    this.child = new Child(W * 0.5, H - 18);
+    this.items = [];
+    this.lastItem = 0;
+    this.lastNag = 1.2;
+    this.timeLeft = 60;
+    this.elapsed = 0;
+    this.running = false;
+    this.moveDir = 0;
+    this.keys = {};
+    this.setupInput();
+  }
+
+  get player() { return this.role === 'dad' ? this.dad : this.mom; }
+  get opponent() { return this.role === 'dad' ? this.mom : this.dad; }
+
+  setupInput() {
+    const update = () => {
+      this.moveDir = (this.keys['ArrowLeft'] || this.keys['a'] || this.keys['A']) ? -1
+        : (this.keys['ArrowRight'] || this.keys['d'] || this.keys['D']) ? 1
+        : 0;
+    };
+    window.addEventListener('keydown', e => {
+      this.keys[e.key] = true;
+      update();
+      if (['ArrowLeft','ArrowRight','a','A','d','D'].includes(e.key)) e.preventDefault();
+    });
+    window.addEventListener('keyup', e => {
+      this.keys[e.key] = false;
+      update();
+    });
+
+    const touchHandler = (e) => {
+      e.preventDefault();
+      if (e.touches.length === 0) { this.moveDir = 0; return; }
+      const rect = canvas.getBoundingClientRect();
+      const tx = e.touches[0].clientX - rect.left;
+      this.moveDir = tx < rect.width/2 ? -1 : 1;
+    };
+    canvas.addEventListener('touchstart', touchHandler, {passive: false});
+    canvas.addEventListener('touchmove', touchHandler, {passive: false});
+    canvas.addEventListener('touchend', (e) => { e.preventDefault(); this.moveDir = 0; }, {passive: false});
+  }
+
+  start() {
+    this.lastT = performance.now();
+    this.running = true;
+    requestAnimationFrame(this.loop.bind(this));
+  }
+
+  loop(t) {
+    if (!this.running) return;
+    const dt = Math.min(0.05, (t - this.lastT) / 1000);
+    this.lastT = t;
+    this.update(dt);
+    this.draw();
+    requestAnimationFrame(this.loop.bind(this));
+  }
+
+  update(dt) {
+    this.elapsed += dt;
+    this.timeLeft -= dt;
+
+    const playerZone = this.role === 'dad' ? [22, W*0.5 - 22] : [W*0.5 + 22, W - 22];
+    const oppZone = this.role === 'dad' ? [W*0.5 + 22, W - 22] : [22, W*0.5 - 22];
+
+    // Player movement
+    this.player.targetX += this.moveDir * 230 * dt;
+    this.player.targetX = Math.max(playerZone[0], Math.min(playerZone[1], this.player.targetX));
+
+    // Opponent random walk
+    if (Math.random() < 0.015) {
+      this.opponent.targetX = oppZone[0] + Math.random() * (oppZone[1] - oppZone[0]);
+    }
+
+    this.dad.update(dt);
+    this.mom.update(dt);
+    this.child.update(dt, this.dad, this.mom);
+
+    // Spawn items - difficulty ramps up
+    this.lastItem += dt;
+    const difficulty = 1 + this.elapsed / 30;  // 1x -> 2x over 30s
+    const spawnInterval = 0.55 / difficulty;
+    if (this.lastItem > spawnInterval) {
+      this.lastItem = 0;
+      // Always in player's zone (main dodge)
+      this.items.push(new FallingItem(playerZone[0] + Math.random() * (playerZone[1] - playerZone[0])));
+      // Sometimes in opponent zone (visual chaos)
+      if (Math.random() < 0.55) {
+        this.items.push(new FallingItem(oppZone[0] + Math.random() * (oppZone[1] - oppZone[0])));
+      }
+    }
+
+    // Opponent nagging
+    this.lastNag += dt;
+    if (this.lastNag > 2.4) {
+      this.lastNag = 0;
+      const lines = NAG_LINES[this.opponent.role];
+      this.opponent.say(lines[Math.floor(Math.random()*lines.length)]);
+    }
+
+    // Items update + collisions
+    for (const it of this.items) {
+      it.update(dt);
+      if (it.y > H + 40) { it.dead = true; continue; }
+
+      // Only items in player's side affect player
+      const inPlayerZone = (this.role === 'dad' && it.x < W/2) || (this.role === 'mom' && it.x >= W/2);
+      if (inPlayerZone) {
+        const p = this.player;
+        // Collision check - item landing on player height
+        if (it.y > p.y - p.height * 0.95 && it.y < p.y - p.height * 0.15 &&
+            Math.abs(it.x - p.x) < p.width * 0.5 + 10) {
+          it.dead = true;
+          this.player.hit();
+          this.player.size = Math.max(0, this.player.size - 3);
+          this.opponent.size = Math.min(100, this.opponent.size + 2);
+        }
+        // Reward for dodging (item passed player)
+        else if (!it.counted && it.y > p.y + 5) {
+          it.counted = true;
+          this.player.size = Math.min(100, this.player.size + 2);
+          this.opponent.size = Math.max(0, this.opponent.size - 1.5);
+        }
+      }
+    }
+    this.items = this.items.filter(i => !i.dead);
+
+    // HUD
+    const pSize = this.player.size.toFixed(0);
+    const oSize = this.opponent.size.toFixed(0);
+    document.getElementById('size-status').textContent = `내 ${pSize}% | 상대 ${oSize}%`;
+    document.getElementById('time-status').textContent = `⏱ ${Math.max(0, this.timeLeft).toFixed(0)}`;
+
+    const sizeEl = document.getElementById('size-status');
+    if (this.player.size > 78 || this.player.size < 22) {
+      sizeEl.classList.add('danger');
+    } else {
+      sizeEl.classList.remove('danger');
+    }
+
+    // End conditions
+    if (this.player.size >= 88) {
+      this.end('💔 이혼', '너무 커져서 상대를 완전히 짓눌렀다.\n힘의 불균형은 결국 관계의 종말.');
+    } else if (this.player.size <= 12) {
+      this.end('😵 가정 붕괴', '쪼그라들 대로 쪼그라들어 자리를 빼앗겼다.');
+    } else if (this.child.allegiance && this.child.allegiance !== this.role) {
+      const dist = Math.abs(this.child.x - this.opponent.x);
+      if (dist < this.opponent.width * 0.6 && this.opponent.size > this.player.size + 12) {
+        const other = this.opponent.role === 'dad' ? '아빠' : '엄마';
+        this.end('😶 눈치없는 아이', `아이가 ${other} 쪽으로 가버렸다.\n편이 갈라진 순간, 집은 이미 끝.`);
+      }
+    }
+    if (this.timeLeft <= 0 && this.running) {
+      const diff = Math.abs(this.player.size - 50);
+      if (diff < 25) {
+        this.end('🕊️ 화해 (WIN)', '60초를 적당한 균형으로 버텨냈다.\n싸움은 결국 어느 정도 져주는 쪽이 이긴다.');
+      } else {
+        this.end('🤷 애매한 휴전', '시간은 버텼지만 집안 공기는 싸늘하다.');
+      }
+    }
+  }
+
+  draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Zone divider (very subtle)
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W/2, 0);
+    ctx.lineTo(W/2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Zone tints - player zone very slightly highlighted
+    const playerLeft = this.role === 'dad';
+    ctx.fillStyle = 'rgba(255, 235, 59, 0.06)';
+    ctx.fillRect(playerLeft ? 0 : W/2, 0, W/2, H);
+
+    // Floor
+    ctx.fillStyle = '#b8895e';
+    ctx.fillRect(0, H - 14, W, 14);
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(0, H - 14, W, 2);
+
+    // Falling items (behind characters)
+    for (const it of this.items) it.draw(ctx);
+
+    // Characters (draw in z order by y)
+    const drawables = [this.dad, this.mom, this.child].sort((a,b) => a.y - b.y);
+    drawables.forEach(d => d.draw(ctx));
+
+    // Player glow/crown
+    const p = this.player;
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    const cy = p.y - p.height * 0.55;
+    ctx.ellipse(p.x, cy, Math.max(p.width, p.height) * 0.75, Math.max(p.width, p.height) * 0.65, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Zone labels (fade after 3s)
+    if (this.elapsed < 3) {
+      const alpha = Math.max(0, 1 - this.elapsed / 3);
+      ctx.fillStyle = `rgba(50,50,50,${alpha * 0.45})`;
+      ctx.font = 'bold 13px -apple-system, "Noto Sans KR", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('아빠 구역', W * 0.25, 30);
+      ctx.fillText('엄마 구역', W * 0.75, 30);
+    }
+  }
+
+  end(title, desc) {
+    if (!this.running) return;
+    this.running = false;
+    document.getElementById('end-title').textContent = title;
+    document.getElementById('end-desc').textContent = desc;
+    const stat = `최종 크기 나 ${this.player.size.toFixed(0)}% · 상대 ${this.opponent.size.toFixed(0)}%`;
+    document.getElementById('end-stat').textContent = stat;
+    document.getElementById('end-screen').classList.remove('hidden');
+  }
+}
+
+resize();
+</script>
+</body>
+</html>
