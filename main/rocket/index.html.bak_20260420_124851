@@ -244,7 +244,6 @@ td.cc{font-weight:700;color:var(--pri);}
       <div class="st"><span>총 박스</span><span class="sv" id="sB">0</span></div>
     </div>
     <div class="rp-act" id="pAct" style="display:none">
-      <button onclick="openPickingChecklist()" style="background:#4b5563;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;">📋 피킹 체크 리스트 출력 (A4)</button>
       <button class="bs" onclick="printBoxLabels()">🏷️ 박스 바코드 라벨 (100x150)</button>
       <button class="bp" onclick="openItemLabelPicker()">🏷️ 상품 바코드 라벨 (50x30)</button>
       <button class="bw" onclick="openCoupangExport()">📥 쿠팡 업로드 엑셀 생성</button>
@@ -530,179 +529,6 @@ function pickerPatternDeselect(listId){
   toast(cnt+'개 해제됨','s');
 }
 
-/* ======= PICKING CHECKLIST A4 ======= */
-function openPickingChecklist(){
-  if(!data.length){toast('데이터 없음','w');return;}
-  const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
-  if(!keys.length){toast('할당된 팔레트가 없습니다','w');return;}
-
-  const itemMap={};
-  for(const pk in pals){
-    pals[pk].items.forEach(ri=>{
-      const r=data[ri];
-      const code=String(r[CI['품목코드']]);
-      if(!itemMap[code]){
-        itemMap[code]={code,name:String(r[CI['품목명']]),boxCount:0,totalQty:0,pallets:new Set()};
-      }
-      itemMap[code].boxCount++;
-      itemMap[code].totalQty+=Number(r[CI['내품수량']])||0;
-      itemMap[code].pallets.add(pals[pk].name);
-    });
-  }
-  const items=Object.values(itemMap).map(it=>({
-    code:it.code,
-    name:it.name,
-    boxCount:it.boxCount,
-    totalQty:it.totalQty,
-    pallets:[...it.pallets].sort((a,b)=>{
-      const na=parseInt(a.replace(/[^0-9]/g,''))||0;
-      const nb=parseInt(b.replace(/[^0-9]/g,''))||0;
-      return na-nb;
-    }).join(', ')
-  }));
-
-  window._pickingItems=items;
-  window._pickingSort={col:'code',asc:true};
-  renderPickingDialog();
-}
-
-function renderPickingDialog(){
-  const items=window._pickingItems;
-  const sort=window._pickingSort;
-  const sorted=[...items].sort((a,b)=>{
-    let va=a[sort.col],vb=b[sort.col];
-    if(typeof va==='number'&&typeof vb==='number')return sort.asc?va-vb:vb-va;
-    return sort.asc?String(va).localeCompare(String(vb),'ko'):String(vb).localeCompare(String(va),'ko');
-  });
-  const headers=[
-    {key:'code',label:'품번명'},
-    {key:'name',label:'상품명'},
-    {key:'boxCount',label:'박스수'},
-    {key:'totalQty',label:'수량'},
-    {key:'pallets',label:'팔렛트배정'}
-  ];
-  let totalBoxes=0,totalQty=0;
-  sorted.forEach(it=>{totalBoxes+=it.boxCount;totalQty+=it.totalQty;});
-
-  let html='<div style="font-size:12px;color:var(--g600);margin-bottom:8px">컬럼명을 클릭하면 오름/내림차순으로 정렬됩니다.</div>';
-  html+='<div style="max-height:50vh;overflow:auto;border:1px solid var(--g200);border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:12px">';
-  html+='<thead><tr>';
-  headers.forEach(h=>{
-    const arrow=sort.col===h.key?(sort.asc?'▲':'▼'):'⇅';
-    html+='<th onclick="sortPicking(\''+h.key+'\')" style="background:var(--g800);color:#fff;padding:7px 8px;text-align:left;cursor:pointer;position:sticky;top:0;font-size:11px;user-select:none;white-space:nowrap;">'+h.label+' <span style="opacity:.6;font-size:10px">'+arrow+'</span></th>';
-  });
-  html+='</tr></thead><tbody>';
-  sorted.forEach(it=>{
-    html+='<tr style="border-bottom:1px solid var(--g100)">'+
-      '<td style="padding:6px 8px;font-weight:700;color:var(--pri);white-space:nowrap">'+esc(it.code)+'</td>'+
-      '<td style="padding:6px 8px">'+esc(it.name)+'</td>'+
-      '<td style="padding:6px 8px;text-align:center;font-weight:700">'+it.boxCount+'</td>'+
-      '<td style="padding:6px 8px;text-align:center;font-weight:700">'+it.totalQty+'</td>'+
-      '<td style="padding:6px 8px;font-size:11px">'+esc(it.pallets)+'</td>'+
-    '</tr>';
-  });
-  html+='</tbody></table></div>';
-  html+='<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+
-    '<div style="padding:4px 10px;background:var(--g100);border-radius:4px;font-size:12px">품목수 <b>'+sorted.length+'</b></div>'+
-    '<div style="padding:4px 10px;background:var(--g100);border-radius:4px;font-size:12px">총 박스수 <b>'+totalBoxes+'</b></div>'+
-    '<div style="padding:4px 10px;background:var(--g100);border-radius:4px;font-size:12px">총 수량 <b>'+totalQty+'</b></div>'+
-  '</div>';
-
-  $('dT').textContent='📋 피킹 체크 리스트';
-  $('dM').textContent='';
-  $('dlgContent').innerHTML=html;
-  $('ov').classList.add('show');
-
-  const b=$('dC'),nb=b.cloneNode(true);b.parentNode.replaceChild(nb,b);nb.id='dC';
-  nb.style.display='';nb.textContent='A4 인쇄';
-  nb.onclick=()=>{closeDlg();printPickingChecklist(sorted);};
-}
-
-function sortPicking(col){
-  const sort=window._pickingSort;
-  if(sort.col===col)sort.asc=!sort.asc;
-  else{sort.col=col;sort.asc=true;}
-  renderPickingDialog();
-}
-
-function printPickingChecklist(items){
-  let rows='';
-  items.forEach((it,idx)=>{
-    rows+='<tr>'+
-      '<td class="num">'+(idx+1)+'</td>'+
-      '<td class="code">'+esc(it.code)+'</td>'+
-      '<td class="name">'+esc(it.name)+'</td>'+
-      '<td class="qty">'+it.boxCount+'</td>'+
-      '<td class="qty">'+it.totalQty+'</td>'+
-      '<td class="pal">'+esc(it.pallets)+'</td>'+
-      '<td class="check"></td>'+
-    '</tr>';
-  });
-  const totalBoxes=items.reduce((s,it)=>s+it.boxCount,0);
-  const totalQty=items.reduce((s,it)=>s+it.totalQty,0);
-  const now=new Date();
-  const dateLabel=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0')+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-
-  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>피킹 체크 리스트</title>'+
-  '<style>'+
-    '@page{size:A4 portrait;margin:10mm;}'+
-    '*{box-sizing:border-box;margin:0;padding:0;}'+
-    'body{font-family:\'Malgun Gothic\',\'맑은 고딕\',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;color:#000;}'+
-    '.header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4mm;margin-bottom:4mm;}'+
-    '.header h1{font-size:18pt;font-weight:900;letter-spacing:1px;}'+
-    '.header .meta{font-size:9pt;text-align:right;line-height:1.6;}'+
-    '.summary{display:flex;gap:3mm;margin-bottom:4mm;font-size:10pt;}'+
-    '.summary .item{padding:2mm 5mm;background:#f3f4f6;border:1px solid #ddd;border-radius:3px;}'+
-    '.summary .item b{font-size:12pt;margin-left:3mm;color:#1a56db;}'+
-    'table{width:100%;border-collapse:collapse;font-size:10pt;}'+
-    'thead th{background:#1f2937;color:#fff;padding:3mm 2mm;text-align:center;font-weight:700;border:1px solid #1f2937;font-size:10pt;}'+
-    'tbody td{padding:2.5mm 2mm;border:1px solid #666;text-align:center;word-break:keep-all;}'+
-    'tbody tr:nth-child(even){background:#f9fafb;}'+
-    'td.num{width:6%;font-weight:700;color:#555;}'+
-    'td.code{width:13%;font-weight:700;color:#1a56db;}'+
-    'td.name{width:30%;text-align:left;padding-left:3mm;}'+
-    'td.qty{width:8%;font-weight:700;font-size:11pt;}'+
-    'td.pal{width:18%;font-size:9pt;}'+
-    'td.check{width:17%;height:10mm;}'+
-    '.footer{margin-top:8mm;display:flex;justify-content:space-between;font-size:9pt;border-top:1px solid #aaa;padding-top:3mm;}'+
-    '.footer .sign{display:flex;gap:6mm;}'+
-    '.footer .sign span{border-bottom:1px solid #000;padding:0 10mm 1mm;min-width:30mm;display:inline-block;}'+
-    '@media print{thead{display:table-header-group;}tr{page-break-inside:avoid;}.footer{page-break-inside:avoid;}}'+
-  '</style></head><body>'+
-    '<div class="header">'+
-      '<h1>📋 피킹 체크 리스트</h1>'+
-      '<div class="meta">출력일시 : '+dateLabel+'<br>담당자 : ________________</div>'+
-    '</div>'+
-    '<div class="summary">'+
-      '<div class="item">총 품목 수 <b>'+items.length+'</b>종</div>'+
-      '<div class="item">총 박스 수 <b>'+totalBoxes+'</b>박스</div>'+
-      '<div class="item">총 수량 <b>'+totalQty+'</b>개</div>'+
-    '</div>'+
-    '<table>'+
-      '<thead><tr>'+
-        '<th>NO</th>'+
-        '<th>품번명</th>'+
-        '<th>상품명</th>'+
-        '<th>박스수</th>'+
-        '<th>수량</th>'+
-        '<th>팔렛트배정</th>'+
-        '<th>체크사항</th>'+
-      '</tr></thead>'+
-      '<tbody>'+rows+'</tbody>'+
-    '</table>'+
-    '<div class="footer">'+
-      '<div>※ 박스 수량 및 품목을 확인 후 체크사항 란에 표시해주세요.</div>'+
-      '<div class="sign">작성자 <span></span> / 확인자 <span></span></div>'+
-    '</div>'+
-    '<script>setTimeout(function(){window.print();},250);<\/script>'+
-  '</body></html>';
-
-  const w=window.open('','_blank','width=900,height=700');
-  if(!w){toast('팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.','e');return;}
-  w.document.write(html);
-  w.document.close();
-}
-
 /* ======= BOX BARCODE LABEL 100x150mm - PICKER POPUP ======= */
 function printBoxLabels(){
   const keys=Object.keys(pals).filter(k=>pals[k].items.length>0);
@@ -875,9 +701,8 @@ function printItemLabels(){
       const lblCls=expDate?'label has-exp':'label no-exp';
       labels+=`
       <div class="${lblCls}">
-        <div class="item-code">${esc(it.code)}</div>
         <div class="item-bc">
-          <svg class="bc" data-value="${esc(dispVal)}" data-opts='{"format":"${fmt}","width":${isEAN?1.6:1.2},"height":${expDate?38:48},"displayValue":true,"fontSize":8,"margin":1,"textMargin":1,"font":"Malgun Gothic"}'></svg>
+          <svg class="bc" data-value="${esc(dispVal)}" data-opts='{"format":"${fmt}","width":${isEAN?1.6:1.2},"height":${expDate?40:50},"displayValue":true,"fontSize":8,"margin":1,"textMargin":1,"font":"Malgun Gothic"}'></svg>
         </div>
         <div class="item-name">${esc(it.name)}</div>
         ${expLine}
@@ -891,15 +716,14 @@ function printItemLabels(){
     @page{size:50mm 30mm;margin:0;}
     *{box-sizing:border-box;margin:0;padding:0;}
     body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-    .label{position:relative;width:50mm;height:30mm;padding:2.5mm 1.5mm 1mm;page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #ccc;}
+    .label{width:50mm;height:30mm;padding:1mm 1.5mm;page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #ccc;}
     .label:last-child{page-break-after:auto;}
-    .item-code{position:absolute;top:0.8mm;right:1.5mm;font-size:6.5pt;font-weight:800;color:#000;letter-spacing:0.2px;max-width:26mm;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .item-bc{text-align:center;width:40mm;display:flex;align-items:center;justify-content:center;}
     .item-bc svg{width:40mm;}
     .item-name{font-size:6pt;font-weight:700;text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46mm;margin-top:0.5mm;}
     .item-exp{font-size:7pt;font-weight:700;text-align:center;margin-top:0.3mm;color:#000;}
-    .has-exp .item-bc{height:15mm;} .has-exp .item-bc svg{height:15mm;}
-    .no-exp .item-bc{height:19mm;} .no-exp .item-bc svg{height:19mm;}
+    .has-exp .item-bc{height:16mm;} .has-exp .item-bc svg{height:16mm;}
+    .no-exp .item-bc{height:20mm;} .no-exp .item-bc svg{height:20mm;}
   </style></head><body>${labels}</body></html>`;
   openPrintWindow(html);
 }
