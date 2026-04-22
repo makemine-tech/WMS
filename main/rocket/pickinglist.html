@@ -256,6 +256,15 @@
     .preview-stage { margin: 0; gap: 0; }
     .preview-empty { display: none !important; }
     .pl-page { box-shadow: none; margin: 0; }
+
+    /* 라벨 프린터가 페이지 하단부터 급지할 때,
+       HTML을 180° 미리 회전시켜 출력 결과가 정방향으로 보이게 한다.
+       - 프린터가 용지를 역방향으로 먹음 + HTML도 역방향 = 최종 정방향
+       - 연결송장에서 1→2→3 이음매가 자연스럽게 이어짐 */
+    body.mode-invoice.rotate-invoice .pl-page {
+      transform: rotate(180deg);
+      transform-origin: center center;
+    }
   }
 
   /* ===== 웹 푸터 (main/index.html 통일) ===== */
@@ -311,6 +320,7 @@
     <div class="opt-row">
       <label class="opt-item"><input type="checkbox" id="optHideZero" checked /> 발송대기 0인 품목 제외</label>
       <label class="opt-item"><input type="checkbox" id="optSortWait" /> 발송대기 많은 순으로 정렬</label>
+      <label class="opt-item" title="라벨 프린터가 페이지 하단부터 인쇄해 연결이 어긋날 때 체크. HTML을 180°로 미리 뒤집어 보정합니다."><input type="checkbox" id="optRotate" checked /> 라벨 프린터 방향 맞춤 (페이지 180°)</label>
     </div>
     <div class="status-bar" id="statusBar">엑셀 파일을 선택하면 자동으로 분석됩니다.</div>
   </section>
@@ -450,7 +460,7 @@ function buildHeaderRow() {
       <div class="c-stk">가용재고</div>
     </div>`;
 }
-function buildPageHtml({ items, vendor, totalCount, totalWait, issued, pageNo, totalPages, showFooter = true, showHeader = true }) {
+function buildPageHtml({ items, vendor, totalCount, totalWait, issued, pageNo, totalPages, showFooter = true, showHeader = true, showTableHead = true }) {
   const fullHeader = `
     <header class="pl-header">
       <h1>피킹리스트 (Picking List)</h1>
@@ -472,7 +482,7 @@ function buildPageHtml({ items, vendor, totalCount, totalWait, issued, pageNo, t
     <section class="pl-page">
       ${showHeader ? fullHeader : miniHeader}
       <div class="pl-list">
-        ${buildHeaderRow()}
+        ${showTableHead ? buildHeaderRow() : ""}
         ${buildItemRowsHtml(items)}
       </div>
       ${showFooter ? `<footer class="pl-footer">
@@ -576,7 +586,7 @@ function applyPageSize(cssSize) {
 }
 
 function restorePreview() {
-  document.body.classList.remove("mode-invoice");
+  document.body.classList.remove("mode-invoice", "rotate-invoice");
   const s = document.getElementById("print-size-override");
   if (s) s.remove();
   if (SNAPSHOT_HTML !== null) {
@@ -621,8 +631,9 @@ function printInvoice() {
       issued,
       pageNo,
       totalPages: total,
-      showHeader: isFirst,  // 1페이지에만 제목/메타
-      showFooter: isLast,   // 마지막 페이지에만 서명란
+      showHeader: isFirst,     // 1페이지에만 제목/메타
+      showTableHead: isFirst,  // 1페이지에만 표 헤더(발송대기/상품명/옵션명/가용재고)
+      showFooter: isLast,      // 마지막 페이지에만 서명란
     });
   }).join("");
 
@@ -631,6 +642,9 @@ function printInvoice() {
   stage.innerHTML = html;
 
   document.body.classList.add("mode-invoice");
+  if (document.getElementById("optRotate").checked) {
+    document.body.classList.add("rotate-invoice");
+  }
   applyPageSize("107mm 168mm");
   setTimeout(() => window.print(), 60);
 }
