@@ -217,6 +217,18 @@
     display: flex; justify-content: space-between; align-items: center;
   }
 
+  /* 2페이지 이후에 표시되는 슬림 상단바 (제목 없음, 최소 정보만) */
+  .pl-mini-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 2mm; margin-bottom: 3mm;
+    border-bottom: 1px solid #cbd5e1;
+    font-size: 8pt; color: #64748b;
+  }
+  .pl-mini-head b { color: #0f172a; font-weight: 700; }
+  body.mode-invoice .pl-mini-head {
+    font-size: 6.5pt; padding-bottom: 1.2mm; margin-bottom: 2mm;
+  }
+
   /* ===== 송장 롤지(107×168mm) 모드 ===== */
   body.mode-invoice .pl-page {
     width: 107mm; min-height: 168mm;
@@ -438,20 +450,27 @@ function buildHeaderRow() {
       <div class="c-stk">가용재고</div>
     </div>`;
 }
-function buildPageHtml({ items, vendor, totalCount, totalWait, issued, pageNo, totalPages, showFooter = true }) {
+function buildPageHtml({ items, vendor, totalCount, totalWait, issued, pageNo, totalPages, showFooter = true, showHeader = true }) {
+  const fullHeader = `
+    <header class="pl-header">
+      <h1>피킹리스트 (Picking List)</h1>
+      <div class="meta">
+        <span>고객사 <b>${escapeHtml(vendor)}</b></span>
+        <span>총 품목 <b>${fmt(totalCount)}</b></span>
+        <span>발송대기 합계 <b>${fmt(totalWait)}</b></span>
+        <span>발행 <b>${escapeHtml(issued)}</b></span>
+        ${totalPages > 1 ? `<span>페이지 <b>${pageNo}/${totalPages}</b></span>` : ""}
+        ${META.fileName ? `<span style="margin-left:auto; color:#94a3b8;">${escapeHtml(META.fileName)}</span>` : ""}
+      </div>
+    </header>`;
+  const miniHeader = `
+    <div class="pl-mini-head">
+      <span>고객사 <b>${escapeHtml(vendor)}</b></span>
+      <span>페이지 <b>${pageNo}/${totalPages}</b></span>
+    </div>`;
   return `
     <section class="pl-page">
-      <header class="pl-header">
-        <h1>피킹리스트 (Picking List)</h1>
-        <div class="meta">
-          <span>고객사 <b>${escapeHtml(vendor)}</b></span>
-          <span>총 품목 <b>${fmt(totalCount)}</b></span>
-          <span>발송대기 합계 <b>${fmt(totalWait)}</b></span>
-          <span>발행 <b>${escapeHtml(issued)}</b></span>
-          ${totalPages > 1 ? `<span>페이지 <b>${pageNo}/${totalPages}</b></span>` : ""}
-          ${META.fileName ? `<span style="margin-left:auto; color:#94a3b8;">${escapeHtml(META.fileName)}</span>` : ""}
-        </div>
-      </header>
+      ${showHeader ? fullHeader : miniHeader}
       <div class="pl-list">
         ${buildHeaderRow()}
         ${buildItemRowsHtml(items)}
@@ -592,6 +611,7 @@ function printInvoice() {
      서명란(피킹 담당자/확인)은 마지막 페이지(N)에만 표시 */
   const html = chunks.map((chunk, pageIdx) => {
     const pageNo = pageIdx + 1;
+    const isFirst = pageIdx === 0;
     const isLast = pageIdx === chunks.length - 1;
     return buildPageHtml({
       items: chunk,
@@ -601,7 +621,8 @@ function printInvoice() {
       issued,
       pageNo,
       totalPages: total,
-      showFooter: isLast,
+      showHeader: isFirst,  // 1페이지에만 제목/메타
+      showFooter: isLast,   // 마지막 페이지에만 서명란
     });
   }).join("");
 
