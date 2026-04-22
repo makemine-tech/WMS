@@ -239,14 +239,6 @@
     .preview-empty { display: none !important; }
     .pl-page { box-shadow: none; margin: 0; }
 
-    /* 라벨 프린터가 페이지 하단부터 급지할 때,
-       HTML을 180° 미리 회전시켜 출력 결과가 정방향으로 보이게 한다.
-       - 프린터가 용지를 역방향으로 먹음 + HTML도 역방향 = 최종 정방향
-       - 연결송장에서 1→2→3 이음매가 자연스럽게 이어짐 */
-    body.mode-invoice.rotate-invoice .pl-page {
-      transform: rotate(180deg);
-      transform-origin: center center;
-    }
   }
 
   /* ===== 웹 푸터 (main/index.html 통일) ===== */
@@ -302,7 +294,6 @@
     <div class="opt-row">
       <label class="opt-item"><input type="checkbox" id="optHideZero" checked /> 발송대기 0인 품목 제외</label>
       <label class="opt-item"><input type="checkbox" id="optSortWait" /> 발송대기 많은 순으로 정렬</label>
-      <label class="opt-item" title="라벨 프린터로 실제 인쇄할 때만 체크하세요. PDF 저장이나 일반 프린터에서는 체크를 해제해야 정방향으로 저장됩니다."><input type="checkbox" id="optRotate" /> 라벨 프린터 인쇄용 180° 회전 (PDF 저장 시 반드시 해제)</label>
     </div>
     <div class="status-bar" id="statusBar">엑셀 파일을 선택하면 자동으로 분석됩니다.</div>
   </section>
@@ -541,11 +532,26 @@ document.getElementById("vendorName").addEventListener("input", renderPreview);
 /* =========================================================
    인쇄 모드 전환
    - A4: 기본 단일 페이지(1단) 인쇄
-   - 송장(107×168): 1페이지는 제목/메타/표헤더가 있어 공간이 좁으므로
-     첫 페이지와 이후 페이지의 행 수를 다르게 분할한다.
+   - 송장(107×168): 라벨 프린터 특성(각 페이지 하단부터 인쇄 + 아래로 배출)을
+     이용해 180° 회전 없이 정방향 연결 결과를 얻는다.
+     · 페이지 분할: 전체를 "뒤에서부터" 18개씩 묶음 (첫 페이지만 남은 수)
+     · DOM 배치: 역순 (원래 N페이지가 먼저 출력, 1페이지가 마지막 출력)
+     · 결과: 용지에 위→아래로 [제목 → 품목 1 → 품목 2 → … → 품목 N] 자연 연결
 ========================================================= */
-const INVOICE_ROWS_FIRST_PAGE = 15;  // 1페이지: 제목+메타+표헤더 차지 후 남는 공간
-const INVOICE_ROWS_OTHER_PAGE = 23;  // 2페이지 이후: 품목만 (서명란 제거로 공간 확보)
+const INVOICE_ROWS_PER_PAGE = 18;  // 마지막 페이지 기준 18행 (뒤에서부터 묶음)
+
+/* 뒤에서부터 size 만큼씩 묶어 정방향 배열(P1…PN)로 반환.
+   마지막 페이지부터 꽉 차게 채워지고, 첫 페이지만 남는 수가 됨. */
+function chunkFromEnd(list, size) {
+  const chunks = [];
+  let remain = list.slice();
+  while (remain.length > size) {
+    chunks.unshift(remain.slice(-size));
+    remain = remain.slice(0, -size);
+  }
+  chunks.unshift(remain);  // 나머지가 첫 페이지
+  return chunks;
+}
 
 let SNAPSHOT_HTML = null;
 
@@ -559,7 +565,7 @@ function applyPageSize(cssSize) {
 }
 
 function restorePreview() {
-  document.body.classList.remove("mode-invoice", "rotate-invoice");
+  document.body.classList.remove("mode-invoice");
   const s = document.getElementById("print-size-override");
   if (s) s.remove();
   if (SNAPSHOT_HTML !== null) {
@@ -579,43 +585,36 @@ function printInvoice() {
   const list = getFilteredList();
   if (!list.length) { alert("출력할 품목이 없습니다."); return; }
 
-  // 품목을 페이지 단위로 분할: 1페이지는 헤더 공간 때문에 행 수 적게
-  const chunks = [];
-  chunks.push(list.slice(0, INVOICE_ROWS_FIRST_PAGE));
-  let idx = INVOICE_ROWS_FIRST_PAGE;
-  while (idx < list.length) {
-    chunks.push(list.slice(idx, idx + INVOICE_ROWS_OTHER_PAGE));
-    idx += INVOICE_ROWS_OTHER_PAGE;
-  }
-  const total = chunks.length;
+  /* 1) 뒤에서부터 18개씩 묶어 원본 페이지 순서(P1..PN) 배열 생성
+     2) 1페이지(원본 기준)에만 제목/메타/표헤더 포함
+     3) DOM에는 역순(PN..P1)으로 배치 → 프린터는 원본 N페이지를 먼저, 1페이지를 마지막에 처리 */
+  const chunksForward = chunkFromEnd(list, INVOICE_ROWS_PER_PAGE);
   const totalWait = list.reduce((s,r)=>s+r.wait,0);
   const issued = new Date().toLocaleString("ko-KR", { hour12: false });
   const vendor = getVendorLabel();
 
-  /* 연결송장(연속 용지) 기준 정방향 배치:
-     물리 출력 순서 = 1, 2, 3, ..., N (피킹리스트 제목이 맨 먼저 나옴)
-     서명란(피킹 담당자/확인)은 마지막 페이지(N)에만 표시 */
-  const html = chunks.map((chunk, pageIdx) => {
-    const isFirst = pageIdx === 0;
+  // 각 원본 페이지의 HTML (index 0 = 원본 P1 = 헤더 있음)
+  const pagesHtml = chunksForward.map((chunk, pageIdx) => {
+    const isFirstOriginal = pageIdx === 0;
     return buildPageHtml({
       items: chunk,
       vendor,
       totalCount: list.length,
       totalWait,
       issued,
-      showHeader: isFirst,     // 1페이지에만 제목/메타
-      showTableHead: isFirst,  // 1페이지에만 표 헤더
+      showHeader: isFirstOriginal,     // 원본 1페이지에만 제목/메타
+      showTableHead: isFirstOriginal,  // 원본 1페이지에만 표 헤더
     });
-  }).join("");
+  });
+
+  // DOM 배치는 역순: [PN, PN-1, ..., P2, P1]
+  const html = pagesHtml.slice().reverse().join("");
 
   const stage = document.getElementById("previewStage");
   SNAPSHOT_HTML = stage.innerHTML;
   stage.innerHTML = html;
 
   document.body.classList.add("mode-invoice");
-  if (document.getElementById("optRotate").checked) {
-    document.body.classList.add("rotate-invoice");
-  }
   applyPageSize("107mm 168mm");
   setTimeout(() => window.print(), 60);
 }
