@@ -566,7 +566,7 @@ function WHView(p){
   },[wh.id]);
   function withUndo(fn){onUpdate(function(w){try{var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nw=fn(Object.assign({},w,{cells:deep(w.cells)}));return Object.assign({},nw,{undoStack:(w.undoStack||[]).slice(-4).concat([snap])});}catch(e){console.warn('withUndo 실패',e);return w;}});}
   function doUndo(){onUpdate(function(w){if(!w.undoStack||!w.undoStack.length)return w;var stack=w.undoStack.slice(),prev=stack.pop();return Object.assign({},w,prev,{undoStack:stack});});}
-  function doSave(){onUpdate(function(w){return Object.assign({},w,{history:w.history.concat([{id:uid(),label:dayLabel(),cells:deep(w.cells),stats:calcSt(w),prods:getPG(w,w.cells)}])});});toastK.current++;setSaveFlash(true);setTimeout(function(){setSaveFlash(false);},2200);}
+  function doSave(){var MAX_HIST=15;onUpdate(function(w){var nh=w.history.concat([{id:uid(),label:dayLabel(),cells:deep(w.cells),stats:calcSt(w),prods:getPG(w,w.cells)}]);if(nh.length>MAX_HIST)nh=nh.slice(nh.length-MAX_HIST);return Object.assign({},w,{history:nh});});toastK.current++;setSaveFlash(true);setTimeout(function(){setSaveFlash(false);},2200);}
   function chgClr(name,clr){onUpdate(function(w){return Object.assign({},w,{pColors:setClrMap(w.pColors,name,clr)});});setColorPick(null);}
   function toggleSel(key){if(didDrag.current)return;setSel(function(s){var n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});}
   function applySetup(){if(!sel.size)return;withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c);});return w;});setSel(new Set());}
