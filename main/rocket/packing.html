@@ -126,12 +126,27 @@
     padding: 4px 6px 4px 10px; font-size: 12px;
     background: #f1f5f9; border: 1px solid var(--border);
     border-radius: 999px;
+    cursor: pointer;
+    user-select: none;
+    transition: background .12s, border-color .12s, transform .08s;
   }
+  .vendor-chip:hover {
+    background: #e0e7ff; border-color: #a5b4fc;
+  }
+  .vendor-chip:active { transform: translateY(1px); }
+  .vendor-chip.is-active {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .vendor-chip.is-active strong,
+  .vendor-chip.is-active span { color: #fff !important; }
   .vendor-chip button {
     background: none; border: none; cursor: pointer;
     color: var(--text-sub); font-size: 14px; padding: 0 4px;
+    border-radius: 50%;
   }
-  .vendor-chip button:hover { color: var(--danger); }
+  .vendor-chip button:hover { color: var(--danger); background: rgba(220,38,38,.08); }
+  .vendor-chip.is-active button { color: rgba(255,255,255,.75); }
+  .vendor-chip.is-active button:hover { color: #fff; background: rgba(255,255,255,.15); }
 
   .status-bar {
     padding: 10px 14px; background: #f8fafc;
@@ -614,10 +629,11 @@ function renderVendors() {
   if (cur && list.some(v => v.name === cur)) sel.value = cur;
 
   const chips = document.getElementById("vendorChips");
+  const curName = document.getElementById("vendorName").value.trim();
   chips.innerHTML = list.length === 0
     ? '<span style="font-size:11px;color:var(--text-sub);">등록된 업체가 없습니다.</span>'
     : list.map(v => `
-      <span class="vendor-chip" data-name="${escapeHtml(v.name)}">
+      <span class="vendor-chip${v.name === curName ? " is-active" : ""}" data-name="${escapeHtml(v.name)}" title="클릭하여 이 업체 선택">
         <strong>${escapeHtml(v.name)}</strong>
         <span style="color:var(--text-sub);">${escapeHtml(v.code)}</span>
         <button title="삭제" data-del="${escapeHtml(v.name)}">×</button>
@@ -650,16 +666,33 @@ document.getElementById("vendorSelect").addEventListener("change", e => {
     document.getElementById("vendorName").value = v.name;
     document.getElementById("vendorCode").value = v.code;
   }
+  renderVendors();
   renderIfReady();
 });
 
 document.getElementById("vendorChips").addEventListener("click", e => {
+  // ① 삭제 버튼 우선 처리
   const del = e.target.getAttribute("data-del");
-  if (!del) return;
-  if (!confirm(`'${del}' 업체를 삭제하시겠습니까?`)) return;
-  removeVendor(del);
-  renderVendors();
-  renderIfReady();
+  if (del) {
+    if (!confirm(`'${del}' 업체를 삭제하시겠습니까?`)) return;
+    removeVendor(del);
+    renderVendors();
+    renderIfReady();
+    return;
+  }
+  // ② 칩 자체 클릭 → 해당 업체 선택 (입력란 + select 동기화)
+  const chip = e.target.closest(".vendor-chip");
+  if (!chip) return;
+  const name = chip.getAttribute("data-name");
+  if (!name) return;
+  const v = vendorStore.load().find(v => v.name === name);
+  if (!v) return;
+  document.getElementById("vendorName").value = v.name;
+  document.getElementById("vendorCode").value = v.code;
+  document.getElementById("vendorSelect").value = v.name;
+  setStatus(`업체 '${v.name}' 선택 완료.`, "ok");
+  renderVendors();       // is-active 하이라이트 갱신
+  renderIfReady();        // 미리보기 즉시 갱신
 });
 
 /* =========================================================
@@ -1009,7 +1042,7 @@ document.getElementById("btnReset").addEventListener("click", () => {
   renderPreview([]);
 });
 
-document.getElementById("vendorName").addEventListener("input", renderIfReady);
+document.getElementById("vendorName").addEventListener("input", () => { renderVendors(); renderIfReady(); });
 document.getElementById("vendorCode").addEventListener("input", renderIfReady);
 document.getElementById("defaultYear").addEventListener("input", renderIfReady);
 
