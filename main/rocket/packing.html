@@ -396,7 +396,12 @@
   <section class="panel">
     <div class="panel-head">
       <div class="panel-title"><span class="step">1</span>업체 정보</div>
-      <span style="font-size:11px; color:var(--text-sub);">목록에서 선택하거나 신규 등록하세요</span>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <span style="font-size:11px; color:var(--text-sub); margin-right:6px;" id="vendorSourceHint">목록에서 선택하거나 신규 등록</span>
+        <button class="btn btn-sm" id="btnImportVendors" title="vendors.json 파일에서 업체 목록 불러오기">📥 불러오기</button>
+        <button class="btn btn-sm" id="btnExportVendors" title="현재 업체 목록을 vendors.json 파일로 저장">📤 내보내기</button>
+        <input type="file" id="vendorFileInput" accept=".json" style="display:none;" />
+      </div>
     </div>
     <div class="row">
       <div class="field" style="flex: 2 1 260px;">
@@ -481,14 +486,57 @@ console.log(
 );
 
 /* =========================================================
-   1. 업체 주소록 (localStorage)
+   1. 업체 주소록 (vendors.json + localStorage 하이브리드)
+   - vendors.json: 공식 업체 목록 (GitHub에서 공유)
+   - localStorage: 로컬 작업본 (임시 추가/수정 사항)
+   - 페이지 로드 시 vendors.json을 fetch 하여 localStorage와 merge
 ========================================================= */
 const VENDOR_KEY = "rocket_vendors_v1";
+const VENDOR_JSON_URL = "vendors.json";
 
 const vendorStore = {
   load() { try { return JSON.parse(localStorage.getItem(VENDOR_KEY)) || []; } catch { return []; } },
   save(v) { localStorage.setItem(VENDOR_KEY, JSON.stringify(v)); },
 };
+
+/* 두 배열 merge: base(우선) + extras(추가만) — 업체명이 key */
+function mergeVendors(base, extras) {
+  const map = new Map();
+  (Array.isArray(base) ? base : []).forEach(v => {
+    if (v && v.name) map.set(v.name, { name: String(v.name), code: String(v.code || "") });
+  });
+  (Array.isArray(extras) ? extras : []).forEach(v => {
+    if (v && v.name && !map.has(v.name)) map.set(v.name, { name: String(v.name), code: String(v.code || "") });
+  });
+  return [...map.values()];
+}
+
+/* vendors.json 자동 로드 시도 (실패해도 무시) */
+async function fetchRemoteVendors() {
+  try {
+    const res = await fetch(VENDOR_JSON_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch (_) {
+    return null; // file:// 또는 CORS 실패 시 조용히 skip
+  }
+}
+
+async function initVendors() {
+  const local = vendorStore.load();
+  const remote = await fetchRemoteVendors();
+  let merged = local;
+  const hint = document.getElementById("vendorSourceHint");
+  if (remote) {
+    merged = mergeVendors(remote, local); // remote 우선 + local 신규 추가
+    vendorStore.save(merged);
+    if (hint) hint.textContent = `vendors.json 연동됨 · 공식 ${remote.length}건 / 로컬 ${merged.length - remote.length}건`;
+  } else {
+    if (hint) hint.textContent = "vendors.json 미연결 · 로컬 저장만 사용";
+  }
+  renderVendors();
+}
 
 function upsertVendor(name, code) {
   const list = vendorStore.load();
@@ -499,6 +547,48 @@ function upsertVendor(name, code) {
 }
 function removeVendor(name) {
   vendorStore.save(vendorStore.load().filter(v => v.name !== name));
+}
+
+/* ---------- 내보내기 (JSON 다운로드) ---------- */
+function exportVendorsJson() {
+  const list = vendorStore.load();
+  if (!list.length) {
+    alert("내보낼 업체가 없습니다. 먼저 업체를 등록하세요.");
+    return;
+  }
+  const blob = new Blob([JSON.stringify(list, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "vendors.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setStatus(`vendors.json (${list.length}건) 다운로드 완료. GitHub rocket 폴더에 덮어쓰면 전체 PC 동기화됩니다.`, "ok");
+}
+
+/* ---------- 불러오기 (JSON 업로드) ---------- */
+function importVendorsJsonFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) throw new Error("JSON 배열 형식이어야 합니다.");
+      const clean = data
+        .filter(v => v && v.name && v.code)
+        .map(v => ({ name: String(v.name), code: String(v.code) }));
+      if (!clean.length) throw new Error("유효한 업체 레코드가 없습니다. { name, code } 형식을 확인하세요.");
+      const merged = mergeVendors(clean, vendorStore.load());
+      vendorStore.save(merged);
+      renderVendors();
+      setStatus(`불러오기 완료 — 공식 ${clean.length}건, 병합 후 총 ${merged.length}건.`, "ok");
+    } catch (err) {
+      setStatus("JSON 읽기 실패: " + err.message, "err");
+    }
+  };
+  reader.onerror = () => setStatus("파일 읽기 실패", "err");
+  reader.readAsText(file, "utf-8");
 }
 
 function renderVendors() {
@@ -962,8 +1052,19 @@ document.getElementById("btnPrint2").addEventListener("click", () => {
 // 인쇄 대화상자 닫히면(저장/취소 무관) 원상 복구
 window.addEventListener("afterprint", exitDuplexMode);
 
-/* 초기화 */
-renderVendors();
+/* Import / Export 바인딩 */
+document.getElementById("btnExportVendors").addEventListener("click", exportVendorsJson);
+document.getElementById("btnImportVendors").addEventListener("click", () => {
+  document.getElementById("vendorFileInput").click();
+});
+document.getElementById("vendorFileInput").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (f) importVendorsJsonFile(f);
+  e.target.value = "";
+});
+
+/* 초기화: vendors.json 자동 로드 후 목록 렌더 */
+initVendors();
 </script>
 
 </body>
