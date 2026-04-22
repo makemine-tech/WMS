@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>피킹리스트 생성기</title>
+<meta name="author" content="Makemine Design · PKW" />
+<meta name="copyright" content="© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<!-- SheetJS (xls/xlsx 모두 지원) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e5e7eb;
+    --border-strong: #cbd5e1;
+    --text: #0f172a;
+    --text-sub: #64748b;
+    --accent: #0f172a;
+    --accent-hover: #1e293b;
+    --danger: #dc2626;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+    --shadow: 0 4px 12px rgba(15,23,42,.08);
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    background: var(--bg); color: var(--text);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 화면 UI ===== */
+  .app-shell { max-width: 1200px; margin: 0 auto; padding: 32px 24px 80px; }
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px; gap: 16px;
+  }
+  .app-title { font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
+  .app-title small { display: block; font-size: 12px; color: var(--text-sub); font-weight: 500; margin-top: 2px; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 20px; margin-bottom: 16px;
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .panel-title {
+    font-size: 13px; font-weight: 700; color: var(--text);
+    letter-spacing: 0.3px; text-transform: uppercase;
+  }
+  .panel-title .step {
+    display: inline-block; width: 22px; height: 22px;
+    line-height: 22px; text-align: center;
+    background: var(--accent); color: #fff; font-size: 11px;
+    border-radius: 50%; margin-right: 8px;
+  }
+
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .field { flex: 1 1 180px; min-width: 140px; }
+  .field label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 4px; font-weight: 600; }
+  input[type="text"] {
+    width: 100%; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: #fff; color: var(--text); font-family: inherit;
+  }
+  input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15,23,42,.08); }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+    border-radius: var(--radius-sm); cursor: pointer; transition: all .15s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: #f8fafc; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  .status-bar {
+    padding: 10px 14px; background: #f8fafc;
+    border-radius: var(--radius-sm); font-size: 12px;
+    color: var(--text-sub); margin-top: 10px;
+  }
+  .status-bar.ok  { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .status-bar.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
+  /* 드래그존 */
+  .dropzone {
+    position: relative; border: 2px dashed var(--border-strong);
+    border-radius: var(--radius); background: #fafbfc;
+    padding: 24px 20px; text-align: center; cursor: pointer;
+    transition: all .15s; margin-top: 4px;
+  }
+  .dropzone:hover { border-color: var(--accent); background: #f1f5f9; }
+  .dropzone.is-drag {
+    border-color: var(--accent); background: #eef2ff;
+    box-shadow: 0 0 0 4px rgba(15,23,42,.06);
+  }
+  .dropzone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    width: 100%; height: 100%; padding: 0; border: 0;
+  }
+  .dropzone .dz-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .dropzone .dz-sub { font-size: 12px; color: var(--text-sub); }
+  .dropzone .dz-file { margin-top: 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .dropzone .dz-icon { font-size: 22px; margin-bottom: 4px; color: var(--text-sub); }
+
+  /* 옵션 체크박스 */
+  .opt-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+  .opt-item {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text); cursor: pointer;
+    padding: 6px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: #fff;
+  }
+  .opt-item input { cursor: pointer; }
+
+  /* 액션 바 */
+  .action-bar {
+    position: sticky; bottom: 16px; z-index: 10;
+    display: flex; gap: 10px; justify-content: flex-end; align-items: center;
+    padding: 14px; background: rgba(255,255,255,.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); margin-top: 16px; flex-wrap: wrap;
+  }
+  .action-bar .summary {
+    flex: 1; min-width: 200px; font-size: 13px; color: var(--text-sub);
+    display: flex; align-items: center;
+  }
+  .action-bar .summary b { color: var(--text); margin: 0 4px; }
+
+  /* ===== 미리보기 (기본: A4 세로 · 1단) ===== */
+  .preview-stage {
+    margin-top: 24px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+  }
+  .preview-empty {
+    padding: 80px 20px; text-align: center; color: var(--text-sub);
+    background: var(--surface); border: 2px dashed var(--border-strong);
+    border-radius: var(--radius); width: 100%;
+  }
+
+  /* 피킹리스트 페이지 (A4 기본) */
+  .pl-page {
+    width: 210mm; min-height: 297mm;
+    background: #fff; color: #111;
+    padding: 12mm 10mm 10mm;
+    box-shadow: 0 6px 28px rgba(15,23,42,.10);
+    display: flex; flex-direction: column;
+  }
+  .pl-header {
+    border-bottom: 2px solid #0f172a;
+    padding-bottom: 6mm; margin-bottom: 5mm;
+  }
+  .pl-header h1 {
+    font-size: 18pt; font-weight: 800; letter-spacing: -0.3px;
+    margin-bottom: 2mm;
+  }
+  .pl-header .meta {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    font-size: 9pt; color: #475569;
+  }
+  .pl-header .meta b { color: #0f172a; font-weight: 700; }
+
+  /* 데이터: 테이블이 아닌 grid-row 기반 (2단 분할 호환) */
+  .pl-list {
+    column-count: 1;
+    column-gap: 6mm;
+  }
+  .pl-head, .pl-item {
+    display: grid;
+    grid-template-columns: 14mm 1fr 22mm 20mm;
+    align-items: center;
+    column-gap: 2mm;
+    padding: 4px 4px;
+    font-size: 9pt;
+    line-height: 1.3;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .pl-head {
+    font-weight: 800; font-size: 9pt; color: #fff;
+    background: #0f172a; letter-spacing: 0.3px;
+    border-radius: 3px;
+    margin-bottom: 2mm;
+  }
+  .pl-item {
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .pl-item .c-wait { font-weight: 800; font-size: 12pt; color: #0f172a; text-align: center; }
+  .pl-item .c-name { font-weight: 500; color: #0f172a; padding-right: 2mm; word-break: break-word; }
+  .pl-item .c-opt  { font-size: 8pt; color: #64748b; text-align: center; }
+  .pl-item .c-stk  { font-size: 8.5pt; color: #0f172a; text-align: right; padding-right: 2mm; }
+  .pl-head .c-wait, .pl-head .c-opt { text-align: center; }
+  .pl-head .c-stk { text-align: right; padding-right: 2mm; }
+
+  .pl-footer {
+    margin-top: auto; padding-top: 4mm;
+    border-top: 1px solid #e2e8f0;
+    font-size: 8pt; color: #64748b;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  /* ===== A4 2단 모드 ===== */
+  body.mode-a4-2col .pl-list {
+    column-count: 2;
+    column-gap: 6mm;
+  }
+
+  /* ===== 송장 롤지(107×168mm) 모드 ===== */
+  body.mode-invoice .pl-page {
+    width: 107mm; min-height: 168mm;
+    padding: 6mm 5mm 5mm;
+  }
+  body.mode-invoice .pl-header h1 { font-size: 12pt; margin-bottom: 1mm; }
+  body.mode-invoice .pl-header .meta { font-size: 7pt; gap: 6px; }
+  body.mode-invoice .pl-header { padding-bottom: 3mm; margin-bottom: 3mm; }
+  body.mode-invoice .pl-list { column-count: 1 !important; }
+  body.mode-invoice .pl-head, body.mode-invoice .pl-item {
+    grid-template-columns: 10mm 1fr 16mm 14mm;
+    font-size: 7.5pt;
+    padding: 2px 2px;
+  }
+  body.mode-invoice .pl-item .c-wait { font-size: 9.5pt; }
+  body.mode-invoice .pl-item .c-opt  { font-size: 6.5pt; }
+  body.mode-invoice .pl-item .c-stk  { font-size: 7pt; }
+  body.mode-invoice .pl-footer { font-size: 6.5pt; padding-top: 2mm; }
+
+  /* ===== 인쇄 공통 ===== */
+  @page { size: A4 portrait; margin: 0; }
+  @media print {
+    body { background: #fff; }
+    .app-shell > :not(.preview-stage) { display: none !important; }
+    .preview-stage { margin: 0; gap: 0; }
+    .preview-empty { display: none !important; }
+    .pl-page { box-shadow: none; margin: 0; }
+  }
+
+  /* ===== 웹 푸터 (main/index.html 통일) ===== */
+  .site-footer{
+    display:flex; align-items:center; justify-content:center;
+    flex-wrap:wrap; gap:.6rem;
+    font-family:'Share Tech Mono', monospace;
+    font-size:.72rem; letter-spacing:.1em;
+    padding: 32px 16px 24px; margin-top: 40px;
+    border-top: 1px solid rgba(15,23,42,.08);
+    color: var(--text-sub);
+  }
+  .footer-brand { color: rgba(15,23,42,.55); font-weight:700; letter-spacing:.12em; }
+  .footer-sep   { opacity:.35; }
+  .footer-copy  { opacity:.75; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <header class="app-header">
+    <div class="app-title">
+      피킹리스트 자동 생성기
+      <small>엑셀(.xls/.xlsx) 업로드 → A4 2단 또는 송장 107×168mm 인쇄</small>
+    </div>
+    <div style="font-size:11px; color:var(--text-sub);">v1.0 · WMS / Picking</div>
+  </header>
+
+  <!-- 업로드 패널 -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><span class="step">1</span>엑셀 업로드</div>
+      <span style="font-size:11px; color:var(--text-sub);">주문내역/재고 엑셀 원본 그대로</span>
+    </div>
+    <div class="row">
+      <div class="field" style="flex: 3 1 380px;">
+        <label>주문내역 엑셀 파일 (.xls / .xlsx)</label>
+        <div class="dropzone" id="dropzone">
+          <div class="dz-icon">⬆</div>
+          <div class="dz-title">클릭하여 선택하거나, 파일을 여기로 끌어다 놓으세요</div>
+          <div class="dz-sub">지원 형식: .xls, .xlsx</div>
+          <div class="dz-file" id="dzFile"></div>
+          <input type="file" id="fileInput" accept=".xls,.xlsx" />
+        </div>
+      </div>
+      <div class="field" style="flex: 1 1 200px;">
+        <label>고객사 (비우면 엑셀 C열 자동 사용)</label>
+        <input type="text" id="vendorName" placeholder="자동" />
+      </div>
+      <button class="btn" id="btnReset">초기화</button>
+    </div>
+    <div class="opt-row">
+      <label class="opt-item"><input type="checkbox" id="optHideZero" checked /> 발송대기 0인 품목 제외</label>
+      <label class="opt-item"><input type="checkbox" id="optSortWait" /> 발송대기 많은 순으로 정렬</label>
+    </div>
+    <div class="status-bar" id="statusBar">엑셀 파일을 선택하면 자동으로 분석됩니다.</div>
+  </section>
+
+  <!-- 액션 바 -->
+  <div class="action-bar">
+    <div class="summary" id="summary">파일을 업로드하면 미리보기가 표시됩니다.</div>
+    <button class="btn" id="btnPrintInvoice" disabled title="107×168mm 연속 용지 모드">송장(107×168) 연속 인쇄</button>
+    <button class="btn btn-primary" id="btnPrintA4" disabled title="A4 세로 한 장에 좌우 2단으로 꽉 채워 인쇄">A4 좌우 2단 인쇄</button>
+  </div>
+
+  <!-- 미리보기 -->
+  <div class="preview-stage" id="previewStage">
+    <div class="preview-empty">업로드된 피킹리스트가 여기에 A4 페이지로 표시됩니다.</div>
+  </div>
+
+  <!-- ── FOOTER (main/index.html 과 통일) ── -->
+  <div class="site-footer">
+    <span class="footer-brand">Makemine Design · PKW</span>
+    <span class="footer-sep">·</span>
+    <span class="footer-copy">© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo</span>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================
+   © 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo
+========================================================= */
+console.log("%c© 2026 Makemine Design. All rights reserved.", "color:#0f172a;font-weight:bold;");
+
+/* ---------- 상태 ---------- */
+let ROWS = [];
+let META = { vendor: "", total: 0, totalWait: 0, fileName: "" };
+
+const H = {
+  vendor:  ["고객사","거래처","업체명"],
+  name:    ["상품명"],
+  option:  ["옵션명","옵션"],
+  stock:   ["가용재고","재고"],
+  wait:    ["발송대기"],
+};
+
+/* ---------- 유틸 ---------- */
+function findCol(headers, aliases) {
+  for (const a of aliases) {
+    const i = headers.findIndex(h => (h || "").toString().trim() === a);
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[c]));
+}
+function fmt(n){ return Number(n||0).toLocaleString("ko-KR"); }
+function setStatus(msg, type=""){
+  const el = document.getElementById("statusBar");
+  el.className = "status-bar" + (type ? " "+type : "");
+  el.textContent = msg;
+}
+
+/* ---------- 엑셀 파싱 ---------- */
+function parseExcel(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        if (aoa.length < 2) throw new Error("데이터가 비어 있습니다.");
+        const headers = aoa[0].map(h => (h || "").toString().trim());
+
+        const idx = {
+          vendor: findCol(headers, H.vendor),
+          name:   findCol(headers, H.name),
+          option: findCol(headers, H.option),
+          stock:  findCol(headers, H.stock),
+          wait:   findCol(headers, H.wait),
+        };
+        const required = ["name","wait","stock"];
+        const miss = required.filter(k => idx[k] === -1);
+        if (miss.length) throw new Error("엑셀에 필수 열이 없습니다: " + miss.join(", "));
+
+        const rows = aoa.slice(1)
+          .filter(r => r && r.some(c => c !== "" && c !== null))
+          .map(r => ({
+            vendor: idx.vendor !== -1 ? String(r[idx.vendor] ?? "").trim() : "",
+            name:   String(r[idx.name] ?? "").trim(),
+            option: idx.option !== -1 ? String(r[idx.option] ?? "").trim() : "",
+            stock:  Number(r[idx.stock] || 0),
+            wait:   Number(r[idx.wait]  || 0),
+          }))
+          .filter(r => r.name);
+
+        const vendors = [...new Set(rows.map(r => r.vendor).filter(Boolean))];
+        resolve({ rows, vendor: vendors.length === 1 ? vendors[0] : vendors.join(", ") });
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(new Error("파일 읽기 실패"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/* ---------- 렌더 ---------- */
+function renderPreview() {
+  const stage = document.getElementById("previewStage");
+  if (!ROWS.length) {
+    stage.innerHTML = '<div class="preview-empty">업로드된 피킹리스트가 여기에 표시됩니다.</div>';
+    document.getElementById("btnPrintA4").disabled = true;
+    document.getElementById("btnPrintInvoice").disabled = true;
+    document.getElementById("summary").textContent = "파일을 업로드하면 미리보기가 표시됩니다.";
+    return;
+  }
+
+  const hideZero = document.getElementById("optHideZero").checked;
+  const sortWait = document.getElementById("optSortWait").checked;
+  const vendorOverride = document.getElementById("vendorName").value.trim();
+  const vendor = vendorOverride || META.vendor || "-";
+
+  let list = ROWS.slice();
+  if (hideZero) list = list.filter(r => r.wait > 0);
+  if (sortWait) list.sort((a,b) => b.wait - a.wait);
+
+  const totalWait = list.reduce((s,r) => s + r.wait, 0);
+  const issued = new Date().toLocaleString("ko-KR", { hour12: false });
+
+  const items = list.map(r => `
+    <div class="pl-item">
+      <div class="c-wait">${fmt(r.wait)}</div>
+      <div class="c-name">${escapeHtml(r.name)}</div>
+      <div class="c-opt">${escapeHtml(r.option || "-")}</div>
+      <div class="c-stk">${fmt(r.stock)}</div>
+    </div>`).join("");
+
+  stage.innerHTML = `
+    <section class="pl-page">
+      <header class="pl-header">
+        <h1>피킹리스트 (Picking List)</h1>
+        <div class="meta">
+          <span>고객사 <b>${escapeHtml(vendor)}</b></span>
+          <span>총 품목 <b>${fmt(list.length)}</b></span>
+          <span>발송대기 합계 <b>${fmt(totalWait)}</b></span>
+          <span>발행 <b>${escapeHtml(issued)}</b></span>
+          ${META.fileName ? `<span style="margin-left:auto; color:#94a3b8;">${escapeHtml(META.fileName)}</span>` : ""}
+        </div>
+      </header>
+
+      <div class="pl-list">
+        <div class="pl-head">
+          <div class="c-wait">발송대기</div>
+          <div class="c-name" style="text-align:left;padding-left:2mm;">상품명</div>
+          <div class="c-opt">옵션명</div>
+          <div class="c-stk">가용재고</div>
+        </div>
+        ${items}
+      </div>
+
+      <footer class="pl-footer">
+        <span>피킹 담당자: ____________________</span>
+        <span>확인: ____________________</span>
+      </footer>
+    </section>
+  `;
+
+  document.getElementById("btnPrintA4").disabled = false;
+  document.getElementById("btnPrintInvoice").disabled = false;
+  document.getElementById("summary").innerHTML =
+    `고객사 <b>${escapeHtml(vendor)}</b> · 품목 <b>${fmt(list.length)}</b>개 · 발송대기 합계 <b>${fmt(totalWait)}</b>`;
+}
+
+/* ---------- 파일 처리 ---------- */
+async function handleFile(f) {
+  if (!f) return;
+  const n = f.name.toLowerCase();
+  if (!/\.(xlsx|xls)$/.test(n)) {
+    setStatus("지원하지 않는 형식입니다. .xls 또는 .xlsx 파일을 올려주세요.", "err"); return;
+  }
+  document.getElementById("dzFile").textContent = "📄 " + f.name;
+  setStatus(`'${f.name}' 분석 중...`);
+  try {
+    const res = await parseExcel(f);
+    ROWS = res.rows;
+    META = { vendor: res.vendor, total: res.rows.length, totalWait: res.rows.reduce((s,r)=>s+r.wait,0), fileName: f.name };
+    setStatus(`분석 완료 — 총 ${ROWS.length}개 품목, 발송대기 합계 ${fmt(META.totalWait)}.`, "ok");
+    renderPreview();
+  } catch (err) {
+    ROWS = []; META = { vendor:"", total:0, totalWait:0, fileName:"" };
+    setStatus("오류: " + err.message, "err");
+    renderPreview();
+  }
+}
+
+document.getElementById("fileInput").addEventListener("change", e => handleFile(e.target.files[0]));
+
+/* 드래그앤드롭 */
+const dz = document.getElementById("dropzone");
+["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add("is-drag"); }));
+["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove("is-drag"); }));
+dz.addEventListener("drop", e => {
+  const f = e.dataTransfer?.files?.[0];
+  if (f) {
+    try { const dt = new DataTransfer(); dt.items.add(f); document.getElementById("fileInput").files = dt.files; } catch (_) {}
+    handleFile(f);
+  }
+});
+["dragover","drop"].forEach(ev => window.addEventListener(ev, e => e.preventDefault(), false));
+
+document.getElementById("btnReset").addEventListener("click", () => {
+  document.getElementById("fileInput").value = "";
+  document.getElementById("dzFile").textContent = "";
+  ROWS = []; META = { vendor:"", total:0, totalWait:0, fileName:"" };
+  setStatus("초기화됨.");
+  renderPreview();
+});
+
+document.getElementById("optHideZero").addEventListener("change", renderPreview);
+document.getElementById("optSortWait").addEventListener("change", renderPreview);
+document.getElementById("vendorName").addEventListener("input", renderPreview);
+
+/* ---------- 인쇄 모드 전환 ---------- */
+function applyPageSize(cssSize) {
+  const old = document.getElementById("print-size-override");
+  if (old) old.remove();
+  const s = document.createElement("style");
+  s.id = "print-size-override";
+  s.textContent = `@page { size: ${cssSize}; margin: 0; }`;
+  document.head.appendChild(s);
+}
+
+function printA4_2col() {
+  document.body.classList.add("mode-a4-2col");
+  document.body.classList.remove("mode-invoice");
+  applyPageSize("A4 portrait");
+  setTimeout(() => window.print(), 50);
+}
+
+function printInvoice() {
+  document.body.classList.add("mode-invoice");
+  document.body.classList.remove("mode-a4-2col");
+  applyPageSize("107mm 168mm");
+  setTimeout(() => window.print(), 50);
+}
+
+window.addEventListener("afterprint", () => {
+  document.body.classList.remove("mode-a4-2col", "mode-invoice");
+  const s = document.getElementById("print-size-override");
+  if (s) s.remove();
+});
+
+document.getElementById("btnPrintA4").addEventListener("click", printA4_2col);
+document.getElementById("btnPrintInvoice").addEventListener("click", printInvoice);
+</script>
+
+</body>
+</html>
