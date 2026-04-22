@@ -217,12 +217,6 @@
     display: flex; justify-content: space-between; align-items: center;
   }
 
-  /* ===== A4 2단 모드 ===== */
-  body.mode-a4-2col .pl-list {
-    column-count: 2;
-    column-gap: 6mm;
-  }
-
   /* ===== 송장 롤지(107×168mm) 모드 ===== */
   body.mode-invoice .pl-page {
     width: 107mm; min-height: 168mm;
@@ -312,8 +306,8 @@
   <!-- 액션 바 -->
   <div class="action-bar">
     <div class="summary" id="summary">파일을 업로드하면 미리보기가 표시됩니다.</div>
-    <button class="btn" id="btnPrintInvoice" disabled title="107×168mm 연속 용지 모드">송장(107×168) 연속 인쇄</button>
-    <button class="btn btn-primary" id="btnPrintA4" disabled title="A4 세로 한 장에 좌우 2단으로 꽉 채워 인쇄">A4 좌우 2단 인쇄</button>
+    <button class="btn" id="btnPrintInvoice" disabled title="107×168mm 연속 용지에 마지막 페이지부터 역순 출력">송장(107×168) 역순 인쇄</button>
+    <button class="btn btn-primary" id="btnPrintA4" disabled title="A4 세로에 한 단으로 출력 (기본)">A4 인쇄 (기본)</button>
   </div>
 
   <!-- 미리보기 -->
@@ -411,7 +405,65 @@ function parseExcel(file) {
   });
 }
 
-/* ---------- 렌더 ---------- */
+/* ---------- 필터 (공통 사용) ---------- */
+function getFilteredList() {
+  const hideZero = document.getElementById("optHideZero").checked;
+  const sortWait = document.getElementById("optSortWait").checked;
+  let list = ROWS.slice();
+  if (hideZero) list = list.filter(r => r.wait > 0);
+  if (sortWait) list.sort((a,b) => b.wait - a.wait);
+  return list;
+}
+function getVendorLabel() {
+  const override = document.getElementById("vendorName").value.trim();
+  return override || META.vendor || "-";
+}
+
+/* ---------- 렌더 조각 ---------- */
+function buildItemRowsHtml(items) {
+  return items.map(r => `
+    <div class="pl-item">
+      <div class="c-wait">${fmt(r.wait)}</div>
+      <div class="c-name">${escapeHtml(r.name)}</div>
+      <div class="c-opt">${escapeHtml(r.option || "-")}</div>
+      <div class="c-stk">${fmt(r.stock)}</div>
+    </div>`).join("");
+}
+function buildHeaderRow() {
+  return `
+    <div class="pl-head">
+      <div class="c-wait">발송대기</div>
+      <div class="c-name" style="text-align:left;padding-left:2mm;">상품명</div>
+      <div class="c-opt">옵션명</div>
+      <div class="c-stk">가용재고</div>
+    </div>`;
+}
+function buildPageHtml({ items, vendor, totalCount, totalWait, issued, pageNo, totalPages, showFooter = true }) {
+  return `
+    <section class="pl-page">
+      <header class="pl-header">
+        <h1>피킹리스트 (Picking List)</h1>
+        <div class="meta">
+          <span>고객사 <b>${escapeHtml(vendor)}</b></span>
+          <span>총 품목 <b>${fmt(totalCount)}</b></span>
+          <span>발송대기 합계 <b>${fmt(totalWait)}</b></span>
+          <span>발행 <b>${escapeHtml(issued)}</b></span>
+          ${totalPages > 1 ? `<span>페이지 <b>${pageNo}/${totalPages}</b></span>` : ""}
+          ${META.fileName ? `<span style="margin-left:auto; color:#94a3b8;">${escapeHtml(META.fileName)}</span>` : ""}
+        </div>
+      </header>
+      <div class="pl-list">
+        ${buildHeaderRow()}
+        ${buildItemRowsHtml(items)}
+      </div>
+      ${showFooter ? `<footer class="pl-footer">
+        <span>피킹 담당자: ____________________</span>
+        <span>확인: ____________________</span>
+      </footer>` : ""}
+    </section>`;
+}
+
+/* ---------- 기본 미리보기 (A4 기본 1단, 전체 품목 한 페이지) ---------- */
 function renderPreview() {
   const stage = document.getElementById("previewStage");
   if (!ROWS.length) {
@@ -422,55 +474,14 @@ function renderPreview() {
     return;
   }
 
-  const hideZero = document.getElementById("optHideZero").checked;
-  const sortWait = document.getElementById("optSortWait").checked;
-  const vendorOverride = document.getElementById("vendorName").value.trim();
-  const vendor = vendorOverride || META.vendor || "-";
-
-  let list = ROWS.slice();
-  if (hideZero) list = list.filter(r => r.wait > 0);
-  if (sortWait) list.sort((a,b) => b.wait - a.wait);
-
+  const list = getFilteredList();
   const totalWait = list.reduce((s,r) => s + r.wait, 0);
   const issued = new Date().toLocaleString("ko-KR", { hour12: false });
+  const vendor = getVendorLabel();
 
-  const items = list.map(r => `
-    <div class="pl-item">
-      <div class="c-wait">${fmt(r.wait)}</div>
-      <div class="c-name">${escapeHtml(r.name)}</div>
-      <div class="c-opt">${escapeHtml(r.option || "-")}</div>
-      <div class="c-stk">${fmt(r.stock)}</div>
-    </div>`).join("");
-
-  stage.innerHTML = `
-    <section class="pl-page">
-      <header class="pl-header">
-        <h1>피킹리스트 (Picking List)</h1>
-        <div class="meta">
-          <span>고객사 <b>${escapeHtml(vendor)}</b></span>
-          <span>총 품목 <b>${fmt(list.length)}</b></span>
-          <span>발송대기 합계 <b>${fmt(totalWait)}</b></span>
-          <span>발행 <b>${escapeHtml(issued)}</b></span>
-          ${META.fileName ? `<span style="margin-left:auto; color:#94a3b8;">${escapeHtml(META.fileName)}</span>` : ""}
-        </div>
-      </header>
-
-      <div class="pl-list">
-        <div class="pl-head">
-          <div class="c-wait">발송대기</div>
-          <div class="c-name" style="text-align:left;padding-left:2mm;">상품명</div>
-          <div class="c-opt">옵션명</div>
-          <div class="c-stk">가용재고</div>
-        </div>
-        ${items}
-      </div>
-
-      <footer class="pl-footer">
-        <span>피킹 담당자: ____________________</span>
-        <span>확인: ____________________</span>
-      </footer>
-    </section>
-  `;
+  stage.innerHTML = buildPageHtml({
+    items: list, vendor, totalCount: list.length, totalWait, issued, pageNo: 1, totalPages: 1
+  });
 
   document.getElementById("btnPrintA4").disabled = false;
   document.getElementById("btnPrintInvoice").disabled = false;
@@ -527,7 +538,15 @@ document.getElementById("optHideZero").addEventListener("change", renderPreview)
 document.getElementById("optSortWait").addEventListener("change", renderPreview);
 document.getElementById("vendorName").addEventListener("input", renderPreview);
 
-/* ---------- 인쇄 모드 전환 ---------- */
+/* =========================================================
+   인쇄 모드 전환
+   - A4: 기본 단일 페이지(1단) 인쇄
+   - 송장(107×168): 페이지당 행 수로 수동 분할 + 역순 DOM 배치
+========================================================= */
+const INVOICE_ROWS_PER_PAGE = 22; // 107×168mm 기준 보수적 행 수
+
+let SNAPSHOT_HTML = null;
+
 function applyPageSize(cssSize) {
   const old = document.getElementById("print-size-override");
   if (old) old.remove();
@@ -537,28 +556,68 @@ function applyPageSize(cssSize) {
   document.head.appendChild(s);
 }
 
-function printA4_2col() {
-  document.body.classList.add("mode-a4-2col");
+function restorePreview() {
   document.body.classList.remove("mode-invoice");
-  applyPageSize("A4 portrait");
-  setTimeout(() => window.print(), 50);
-}
-
-function printInvoice() {
-  document.body.classList.add("mode-invoice");
-  document.body.classList.remove("mode-a4-2col");
-  applyPageSize("107mm 168mm");
-  setTimeout(() => window.print(), 50);
-}
-
-window.addEventListener("afterprint", () => {
-  document.body.classList.remove("mode-a4-2col", "mode-invoice");
   const s = document.getElementById("print-size-override");
   if (s) s.remove();
-});
+  if (SNAPSHOT_HTML !== null) {
+    document.getElementById("previewStage").innerHTML = SNAPSHOT_HTML;
+    SNAPSHOT_HTML = null;
+  }
+}
 
-document.getElementById("btnPrintA4").addEventListener("click", printA4_2col);
-document.getElementById("btnPrintInvoice").addEventListener("click", printInvoice);
+function printA4() {
+  // 기본 모드 그대로, 용지만 명시
+  restorePreview();
+  applyPageSize("A4 portrait");
+  setTimeout(() => window.print(), 30);
+}
+
+function printInvoiceReverse() {
+  const list = getFilteredList();
+  if (!list.length) { alert("출력할 품목이 없습니다."); return; }
+
+  // 품목을 페이지 단위로 분할
+  const chunks = [];
+  for (let i = 0; i < list.length; i += INVOICE_ROWS_PER_PAGE) {
+    chunks.push(list.slice(i, i + INVOICE_ROWS_PER_PAGE));
+  }
+  const total = chunks.length;
+  const totalWait = list.reduce((s,r)=>s+r.wait,0);
+  const issued = new Date().toLocaleString("ko-KR", { hour12: false });
+  const vendor = getVendorLabel();
+
+  // 역순 DOM: 페이지 N, N-1, ..., 2, 1 순서로 배치
+  // 원래 페이지 번호는 유지해서 표시 (물리적 출력 순서만 역순)
+  const reversedPages = chunks.slice().reverse();
+  const html = reversedPages.map((chunk, physIdx) => {
+    const originalPageNo = total - physIdx; // N, N-1, ..., 1
+    const isLastPhysical = physIdx === reversedPages.length - 1; // 물리적 마지막 = 원본 페이지 1번
+    return buildPageHtml({
+      items: chunk,
+      vendor,
+      totalCount: list.length,
+      totalWait,
+      issued,
+      pageNo: originalPageNo,
+      totalPages: total,
+      showFooter: isLastPhysical, // 원본 1페이지(가장 먼저 보게 되는 페이지)에만 푸터
+    });
+  }).join("");
+
+  const stage = document.getElementById("previewStage");
+  SNAPSHOT_HTML = stage.innerHTML;
+  stage.innerHTML = html;
+
+  document.body.classList.add("mode-invoice");
+  applyPageSize("107mm 168mm");
+  setTimeout(() => window.print(), 60);
+}
+
+window.addEventListener("afterprint", restorePreview);
+
+document.getElementById("btnPrintA4").addEventListener("click", printA4);
+document.getElementById("btnPrintInvoice").addEventListener("click", printInvoiceReverse);
 </script>
 
 </body>
