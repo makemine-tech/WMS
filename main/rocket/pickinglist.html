@@ -306,7 +306,7 @@
   <!-- 액션 바 -->
   <div class="action-bar">
     <div class="summary" id="summary">파일을 업로드하면 미리보기가 표시됩니다.</div>
-    <button class="btn" id="btnPrintInvoice" disabled title="107×168mm 연속 용지에 마지막 페이지부터 역순 출력">송장(107×168) 역순 인쇄</button>
+    <button class="btn" id="btnPrintInvoice" disabled title="107×168mm 연결송장에 1페이지부터 차례대로 연속 출력">송장(107×168) 연속 인쇄</button>
     <button class="btn btn-primary" id="btnPrintA4" disabled title="A4 세로에 한 단으로 출력 (기본)">A4 인쇄 (기본)</button>
   </div>
 
@@ -573,7 +573,7 @@ function printA4() {
   setTimeout(() => window.print(), 30);
 }
 
-function printInvoiceReverse() {
+function printInvoice() {
   const list = getFilteredList();
   if (!list.length) { alert("출력할 품목이 없습니다."); return; }
 
@@ -587,21 +587,21 @@ function printInvoiceReverse() {
   const issued = new Date().toLocaleString("ko-KR", { hour12: false });
   const vendor = getVendorLabel();
 
-  // 역순 DOM: 페이지 N, N-1, ..., 2, 1 순서로 배치
-  // 원래 페이지 번호는 유지해서 표시 (물리적 출력 순서만 역순)
-  const reversedPages = chunks.slice().reverse();
-  const html = reversedPages.map((chunk, physIdx) => {
-    const originalPageNo = total - physIdx; // N, N-1, ..., 1
-    const isLastPhysical = physIdx === reversedPages.length - 1; // 물리적 마지막 = 원본 페이지 1번
+  /* 연결송장(연속 용지) 기준 정방향 배치:
+     물리 출력 순서 = 1, 2, 3, ..., N (피킹리스트 제목이 맨 먼저 나옴)
+     서명란(피킹 담당자/확인)은 마지막 페이지(N)에만 표시 */
+  const html = chunks.map((chunk, pageIdx) => {
+    const pageNo = pageIdx + 1;
+    const isLast = pageIdx === chunks.length - 1;
     return buildPageHtml({
       items: chunk,
       vendor,
       totalCount: list.length,
       totalWait,
       issued,
-      pageNo: originalPageNo,
+      pageNo,
       totalPages: total,
-      showFooter: isLastPhysical, // 원본 1페이지(가장 먼저 보게 되는 페이지)에만 푸터
+      showFooter: isLast,
     });
   }).join("");
 
@@ -617,7 +617,7 @@ function printInvoiceReverse() {
 window.addEventListener("afterprint", restorePreview);
 
 document.getElementById("btnPrintA4").addEventListener("click", printA4);
-document.getElementById("btnPrintInvoice").addEventListener("click", printInvoiceReverse);
+document.getElementById("btnPrintInvoice").addEventListener("click", printInvoice);
 </script>
 
 </body>
