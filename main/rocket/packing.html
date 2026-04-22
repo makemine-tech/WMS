@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>쿠팡 팔레트 적재리스트 자동 생성기</title>
+<meta name="author" content="Makemine Design · PKW" />
+<meta name="copyright" content="© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo" />
+
+<!-- 폰트: main/index.html 과 통일 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<!-- SheetJS (엑셀 파싱용) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  /* ======================================================
+     디자인 토큰
+  ====================================================== */
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e5e7eb;
+    --border-strong: #cbd5e1;
+    --text: #0f172a;
+    --text-sub: #64748b;
+    --accent: #0f172a;
+    --accent-hover: #1e293b;
+    --danger: #dc2626;
+    --success: #16a34a;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+    --shadow: 0 4px 12px rgba(15,23,42,.08);
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ======================================================
+     화면 (조작 UI)
+  ====================================================== */
+  .app-shell { max-width: 1200px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px; gap: 16px;
+  }
+  .app-title {
+    font-size: 20px; font-weight: 700; letter-spacing: -0.2px;
+  }
+  .app-title small {
+    display: block; font-size: 12px; color: var(--text-sub);
+    font-weight: 500; margin-top: 2px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .panel-title {
+    font-size: 13px; font-weight: 700; color: var(--text);
+    letter-spacing: 0.3px; text-transform: uppercase;
+  }
+  .panel-title .step {
+    display: inline-block; width: 22px; height: 22px;
+    line-height: 22px; text-align: center;
+    background: var(--accent); color: #fff; font-size: 11px;
+    border-radius: 50%; margin-right: 8px;
+  }
+
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .field { flex: 1 1 180px; min-width: 140px; }
+  .field label {
+    display: block; font-size: 12px; color: var(--text-sub);
+    margin-bottom: 4px; font-weight: 600;
+  }
+  input[type="text"], select, input[type="file"] {
+    width: 100%; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: #fff; color: var(--text); font-family: inherit;
+    transition: border .15s, box-shadow .15s;
+  }
+  input[type="text"]:focus, select:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(15,23,42,.08);
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+    border-radius: var(--radius-sm); cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+  }
+  .btn:hover { background: #f8fafc; }
+  .btn-primary {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-danger { color: var(--danger); border-color: #fecaca; }
+  .btn-danger:hover { background: #fef2f2; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .vendor-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .vendor-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 6px 4px 10px; font-size: 12px;
+    background: #f1f5f9; border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+  .vendor-chip button {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-sub); font-size: 14px; padding: 0 4px;
+  }
+  .vendor-chip button:hover { color: var(--danger); }
+
+  .status-bar {
+    padding: 10px 14px; background: #f8fafc;
+    border-radius: var(--radius-sm); font-size: 12px;
+    color: var(--text-sub); margin-top: 10px;
+  }
+  .status-bar.ok   { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .status-bar.err  { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
+  /* ===== 드래그 앤 드롭 존 ===== */
+  .dropzone {
+    position: relative;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
+    background: #fafbfc;
+    padding: 24px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .15s;
+    margin-top: 4px;
+  }
+  .dropzone:hover { border-color: var(--accent); background: #f1f5f9; }
+  .dropzone.is-drag {
+    border-color: var(--accent); background: #eef2ff;
+    box-shadow: 0 0 0 4px rgba(15,23,42,.06);
+  }
+  .dropzone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    width: 100%; height: 100%; padding: 0; border: 0;
+  }
+  .dropzone .dz-title {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    margin-bottom: 4px;
+  }
+  .dropzone .dz-sub {
+    font-size: 12px; color: var(--text-sub);
+  }
+  .dropzone .dz-file {
+    margin-top: 8px; font-size: 12px; color: var(--accent);
+    font-weight: 600;
+  }
+  .dropzone .dz-icon {
+    font-size: 22px; margin-bottom: 4px; color: var(--text-sub);
+  }
+
+  .action-bar {
+    position: sticky; bottom: 16px; z-index: 10;
+    display: flex; gap: 10px; justify-content: flex-end;
+    padding: 14px; background: rgba(255,255,255,.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); margin-top: 16px;
+  }
+  .action-bar .summary {
+    flex: 1; font-size: 13px; color: var(--text-sub);
+    display: flex; align-items: center;
+  }
+  .action-bar .summary b { color: var(--text); margin: 0 4px; }
+
+  /* ======================================================
+     미리보기 영역 (프린트 페이지)
+  ====================================================== */
+  .preview-stage {
+    margin-top: 24px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+  }
+  .preview-empty {
+    padding: 80px 20px; text-align: center; color: var(--text-sub);
+    background: var(--surface); border: 2px dashed var(--border-strong);
+    border-radius: var(--radius); width: 100%;
+  }
+
+  /* ---------- 실제 A4 페이지 ---------- */
+  .page {
+    width: 210mm; min-height: 297mm;
+    background: #fff; color: #111;
+    padding: 16mm 14mm 14mm;
+    box-shadow: 0 6px 28px rgba(15,23,42,.10);
+    position: relative;
+    page-break-after: always;
+    font-size: 10pt;
+    display: flex; flex-direction: column;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .page > * { position: relative; z-index: 1; }
+
+  .doc-header { text-align: center; margin-bottom: 8mm; }
+  .doc-header h1 {
+    font-size: 18pt; font-weight: 800; letter-spacing: -0.3px;
+    margin-bottom: 2mm;
+  }
+  .doc-header .subnote {
+    font-size: 9pt; color: #555; font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .doc-header .rule-note {
+    display: inline-flex; gap: 14px; align-items: center; justify-content: center;
+    margin-top: 3mm; padding: 8px 20px;
+    background: #f1f5f9; border-radius: 12px;
+    font-size: 18pt; color: #0f172a; font-weight: 800;
+    letter-spacing: -0.3px;
+  }
+  .doc-header .rule-note .rn-sep {
+    color: #cbd5e1; font-weight: 400;
+  }
+  .doc-header .rule-note .rn-label {
+    font-size: 10pt; color: #64748b; font-weight: 600; margin-right: 2px;
+    letter-spacing: 0;
+  }
+
+  .section-title {
+    font-size: 10.5pt; font-weight: 700; margin: 5mm 0 2mm;
+    padding-left: 6px; border-left: 3px solid #0f172a;
+  }
+
+  /* 정보 테이블 */
+  .info-table {
+    width: 100%; border-collapse: collapse;
+    border: 1px solid #334155; font-size: 10pt;
+  }
+  .info-table th, .info-table td {
+    border: 1px solid #cbd5e1; padding: 6px 10px;
+  }
+  .info-table th {
+    width: 32%; background: #f8fafc; font-weight: 700;
+    color: #334155; text-align: left;
+  }
+  .info-table td { color: #0f172a; font-weight: 500; }
+  .info-table td.val-accent { color: #2563eb; font-weight: 700; font-size: 20pt; line-height: 1.2; }
+
+  /* 상품 테이블 — 기본 폰트 원복, 특정 컬럼만 강조 */
+  .sku-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 9.5pt; margin-top: 2mm;
+    border: 1px solid #334155;
+    table-layout: fixed;
+  }
+  .sku-table th, .sku-table td {
+    border: 1px solid #cbd5e1; padding: 5px 6px;
+    text-align: center; vertical-align: middle;
+    word-break: break-word; line-height: 1.35;
+  }
+  .sku-table th {
+    background: #0f172a; color: #fff; font-weight: 700;
+    font-size: 9pt; letter-spacing: 0.3px;
+  }
+  /* 박스수 / 수량 값 셀: 2배 + 볼드 */
+  .sku-table td.num-emph {
+    font-size: 19pt;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  /* 비고 값 셀: 박스수/수량보다 2단계 아래 */
+  .sku-table td.remark-emph {
+    font-size: 15pt;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  /* 소비기한: 기본보다 1pt 크게 + 볼드 */
+  .sku-table td.exp-emph {
+    font-size: 10.5pt;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .sku-table td.name {
+    text-align: left; color: #1e293b; font-weight: 500;
+  }
+  .sku-table tr:nth-child(even) td { background: #fafbfc; }
+  .sku-table .muted { color: #94a3b8; }
+
+  /* 하단 (발행정보만, 카피라이트 없음) */
+  .foot {
+    margin-top: auto; padding-top: 6mm;
+    display: flex; justify-content: flex-end; align-items: flex-end;
+    font-size: 8pt; color: #64748b;
+  }
+  .foot .issued { text-align: right; line-height: 1.4; }
+
+  /* ======================================================
+     웹페이지 하단 푸터 (main/index.html과 통일)
+     - Share Tech Mono / 본 페이지는 라이트 테마라 색상만 반전
+  ====================================================== */
+  .site-footer{
+    display:flex; align-items:center; justify-content:center;
+    flex-wrap:wrap; gap:.6rem;
+    font-family:'Share Tech Mono', monospace;
+    font-size:.72rem; letter-spacing:.1em;
+    padding: 32px 16px 24px;
+    margin-top: 40px;
+    border-top: 1px solid rgba(15,23,42,.08);
+    color: var(--text-sub);
+  }
+  .footer-brand { color: rgba(15,23,42,.55); font-weight:700; letter-spacing:.12em; }
+  .footer-sep   { opacity:.35; }
+  .footer-copy  { opacity:.75; }
+
+  /* ======================================================
+     인쇄 모드 (기본: A4 세로 · 1부)
+  ====================================================== */
+  @page { size: A4 portrait; margin: 0; }
+  @media print {
+    body { background: #fff; }
+    .app-shell > :not(.preview-stage) { display: none !important; }
+    .preview-stage { margin: 0; gap: 0; }
+    .preview-empty { display: none !important; }
+    .page {
+      box-shadow: none; margin: 0;
+      width: 210mm; min-height: 297mm;
+    }
+  }
+
+  /* ======================================================
+     2부 인쇄 모드 (A4 가로 · 좌우 동일본)
+     - A4 가로 한 장(297×210mm)을 148.5×210mm씩 반으로 나눠
+       동일한 팔레트 페이지를 두 번 배치 (절단선용 점선 구분)
+     - .page 원본 크기(210×297mm)를 scale(0.707)로 축소
+  ====================================================== */
+  .duplex-sheet {
+    width: 297mm; height: 210mm;
+    display: flex; background: #fff;
+    box-shadow: 0 6px 28px rgba(15,23,42,.10);
+    page-break-after: always;
+  }
+  .duplex-sheet:last-child { page-break-after: auto; }
+  .duplex-half {
+    width: 148.5mm; height: 210mm;
+    overflow: hidden; position: relative;
+  }
+  .duplex-half + .duplex-half {
+    border-left: 1px dashed rgba(0,0,0,.35);
+  }
+  .duplex-half > .page {
+    width: 210mm; min-height: 297mm;
+    transform: scale(0.707); transform-origin: top left;
+    box-shadow: none; margin: 0;
+    page-break-after: auto;
+  }
+
+  @media print {
+    body.print-2up .duplex-sheet { box-shadow: none; }
+    body.print-2up .duplex-half + .duplex-half { border-left: 1px dashed rgba(0,0,0,.4); }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ===================== 헤더 ===================== -->
+  <header class="app-header">
+    <div class="app-title">
+      쿠팡 팔레트 적재리스트 자동 생성기
+      <small>엑셀 업로드 → 양식 자동 생성 → PDF 저장 / 인쇄</small>
+    </div>
+    <div style="font-size:11px; color:var(--text-sub);">
+      v1.0 · WMS / Rocket
+    </div>
+  </header>
+
+  <!-- ===================== 1) 업체 정보 ===================== -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><span class="step">1</span>업체 정보</div>
+      <span style="font-size:11px; color:var(--text-sub);">목록에서 선택하거나 신규 등록하세요</span>
+    </div>
+    <div class="row">
+      <div class="field" style="flex: 2 1 260px;">
+        <label>등록된 업체</label>
+        <select id="vendorSelect">
+          <option value="">— 업체를 선택하세요 —</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>업체명</label>
+        <input type="text" id="vendorName" placeholder="예: test_for_goldfish" />
+      </div>
+      <div class="field">
+        <label>업체코드</label>
+        <input type="text" id="vendorCode" placeholder="예: A00871098" />
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button class="btn btn-primary" id="btnSaveVendor">등록/갱신</button>
+        <button class="btn btn-danger" id="btnDeleteVendor" title="선택 업체 삭제">삭제</button>
+      </div>
+    </div>
+    <div class="vendor-chips" id="vendorChips"></div>
+  </section>
+
+  <!-- ===================== 2) 엑셀 업로드 ===================== -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><span class="step">2</span>엑셀 업로드</div>
+      <span style="font-size:11px; color:var(--text-sub);">쿠팡 발주 엑셀(.xlsx) 그대로 사용</span>
+    </div>
+    <div class="row">
+      <div class="field" style="flex: 3 1 380px;">
+        <label>발주 엑셀 파일</label>
+        <div class="dropzone" id="dropzone">
+          <div class="dz-icon">⬆</div>
+          <div class="dz-title">클릭하여 선택하거나, 파일을 여기로 끌어다 놓으세요</div>
+          <div class="dz-sub">지원 형식: .xlsx, .xls</div>
+          <div class="dz-file" id="dzFile"></div>
+          <input type="file" id="fileInput" accept=".xlsx,.xls" />
+        </div>
+      </div>
+      <div class="field">
+        <label>도착예정일 기준 연도 (선택)</label>
+        <input type="text" id="defaultYear" placeholder="자동 (올해)" />
+      </div>
+      <button class="btn" id="btnReset">초기화</button>
+    </div>
+    <div class="status-bar" id="statusBar">엑셀 파일을 선택하면 자동으로 분석됩니다.</div>
+  </section>
+
+  <!-- ===================== 액션 바 ===================== -->
+  <div class="action-bar">
+    <div class="summary" id="summary">업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.</div>
+    <button class="btn" id="btnPrint2" disabled title="A4 가로 한 장에 같은 페이지를 좌·우로 2번 인쇄">2부 인쇄 (가로 · 좌우 동일)</button>
+    <button class="btn btn-primary" id="btnPrint" disabled>PDF 저장 / 인쇄 (1부)</button>
+  </div>
+
+  <!-- ===================== 3) 미리보기 ===================== -->
+  <div class="preview-stage" id="previewStage">
+    <div class="preview-empty">업로드된 적재리스트가 여기에 A4 페이지로 표시됩니다.</div>
+  </div>
+
+  <!-- ── FOOTER (main/index.html 과 통일) ── -->
+  <div class="site-footer">
+    <span class="footer-brand">Makemine Design · PKW</span>
+    <span class="footer-sep">·</span>
+    <span class="footer-copy">© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo</span>
+  </div>
+
+</div>
+
+<!-- ====================================================
+     © 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo
+==================================================== -->
+<script>
+/* =========================================================
+   0. 카피라이트
+========================================================= */
+console.log(
+  "%c© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo",
+  "color:#0f172a;font-weight:bold;font-size:12px;"
+);
+
+/* =========================================================
+   1. 업체 주소록 (localStorage)
+========================================================= */
+const VENDOR_KEY = "rocket_vendors_v1";
+
+const vendorStore = {
+  load() { try { return JSON.parse(localStorage.getItem(VENDOR_KEY)) || []; } catch { return []; } },
+  save(v) { localStorage.setItem(VENDOR_KEY, JSON.stringify(v)); },
+};
+
+function upsertVendor(name, code) {
+  const list = vendorStore.load();
+  const idx = list.findIndex(v => v.name === name);
+  if (idx >= 0) list[idx] = { name, code };
+  else list.push({ name, code });
+  vendorStore.save(list);
+}
+function removeVendor(name) {
+  vendorStore.save(vendorStore.load().filter(v => v.name !== name));
+}
+
+function renderVendors() {
+  const list = vendorStore.load();
+  const sel = document.getElementById("vendorSelect");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— 업체를 선택하세요 —</option>' +
+    list.map(v => `<option value="${escapeHtml(v.name)}">${escapeHtml(v.name)} (${escapeHtml(v.code)})</option>`).join("");
+  if (cur && list.some(v => v.name === cur)) sel.value = cur;
+
+  const chips = document.getElementById("vendorChips");
+  chips.innerHTML = list.length === 0
+    ? '<span style="font-size:11px;color:var(--text-sub);">등록된 업체가 없습니다.</span>'
+    : list.map(v => `
+      <span class="vendor-chip" data-name="${escapeHtml(v.name)}">
+        <strong>${escapeHtml(v.name)}</strong>
+        <span style="color:var(--text-sub);">${escapeHtml(v.code)}</span>
+        <button title="삭제" data-del="${escapeHtml(v.name)}">×</button>
+      </span>`).join("");
+}
+
+document.getElementById("btnSaveVendor").addEventListener("click", () => {
+  const name = document.getElementById("vendorName").value.trim();
+  const code = document.getElementById("vendorCode").value.trim();
+  if (!name || !code) { alert("업체명과 업체코드를 모두 입력하세요."); return; }
+  upsertVendor(name, code);
+  renderVendors();
+  document.getElementById("vendorSelect").value = name;
+  setStatus(`업체 '${name}' 등록 완료.`, "ok");
+  renderIfReady();
+});
+
+document.getElementById("btnDeleteVendor").addEventListener("click", () => {
+  const sel = document.getElementById("vendorSelect").value;
+  if (!sel) { alert("삭제할 업체를 목록에서 선택하세요."); return; }
+  if (!confirm(`'${sel}' 업체를 삭제하시겠습니까?`)) return;
+  removeVendor(sel);
+  renderVendors();
+  renderIfReady();
+});
+
+document.getElementById("vendorSelect").addEventListener("change", e => {
+  const v = vendorStore.load().find(v => v.name === e.target.value);
+  if (v) {
+    document.getElementById("vendorName").value = v.name;
+    document.getElementById("vendorCode").value = v.code;
+  }
+  renderIfReady();
+});
+
+document.getElementById("vendorChips").addEventListener("click", e => {
+  const del = e.target.getAttribute("data-del");
+  if (!del) return;
+  if (!confirm(`'${del}' 업체를 삭제하시겠습니까?`)) return;
+  removeVendor(del);
+  renderVendors();
+  renderIfReady();
+});
+
+/* =========================================================
+   2. 엑셀 파싱 & 그룹핑
+========================================================= */
+const H = {
+  po:           ["발주번호"],
+  status:       ["발주현황"],
+  skuId:        ["SKU ID", "SKU"],
+  skuName:      ["SKU 이름", "SKU명", "상품명"],
+  barcode:      ["SKU Barcode", "바코드"],
+  center:       ["물류센터"],
+  eta:          ["입고예정일"],
+  qtyConfirmed: ["확정수량"],
+  boxCount:     ["박스수"],
+  palletTotal:  ["파렛트수", "팔레트수"],
+  palletNo:     ["파렛트번호", "팔레트번호"],
+  expiry:       ["유통(소비)기한", "유통기한", "소비기한"],
+};
+
+let RAW_ROWS = [];
+let GROUPS = [];
+
+function findCol(headers, aliases) {
+  for (const a of aliases) {
+    const i = headers.findIndex(h => (h || "").toString().trim() === a);
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+
+function parseExcel(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        if (aoa.length < 2) throw new Error("데이터가 비어 있습니다.");
+        const headers = aoa[0].map(h => (h || "").toString().trim());
+
+        const idx = {
+          po:       findCol(headers, H.po),
+          status:   findCol(headers, H.status),
+          skuId:    findCol(headers, H.skuId),
+          skuName:  findCol(headers, H.skuName),
+          barcode:  findCol(headers, H.barcode),
+          center:   findCol(headers, H.center),
+          eta:      findCol(headers, H.eta),
+          qty:      findCol(headers, H.qtyConfirmed),
+          box:      findCol(headers, H.boxCount),
+          palletT:  findCol(headers, H.palletTotal),
+          palletN:  findCol(headers, H.palletNo),
+          expiry:   findCol(headers, H.expiry),
+        };
+        // 발주현황은 있으면 사용, 없으면 빈값 처리 (필수 아님)
+        const required = ["po","skuId","skuName","center","eta","qty","box","palletT","palletN","expiry"];
+        const missing = required.filter(k => idx[k] === -1);
+        if (missing.length) {
+          throw new Error("엑셀에서 다음 열을 찾을 수 없습니다: " + missing.join(", "));
+        }
+
+        const rows = aoa.slice(1)
+          .filter(r => r && r.some(c => c !== "" && c !== null))
+          .map(r => ({
+            po:      String(r[idx.po] ?? "").trim(),
+            status:  idx.status !== -1 ? String(r[idx.status] ?? "").trim() : "",
+            skuId:   String(r[idx.skuId] ?? "").trim(),
+            skuName: String(r[idx.skuName] ?? "").trim(),
+            barcode: String(r[idx.barcode] ?? "").trim(),
+            center:  String(r[idx.center] ?? "").trim(),
+            eta:     r[idx.eta],
+            qty:     Number(r[idx.qty] || 0),
+            box:     Number(r[idx.box] || 0),
+            palletT: Number(r[idx.palletT] || 0),
+            palletN: Number(r[idx.palletN] || 0),
+            expiry:  String(r[idx.expiry] ?? "").trim(),
+          }))
+          .filter(r => r.center && r.palletT && r.palletN);
+
+        resolve(rows);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(new Error("파일 읽기 실패"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/* (물류센터 + 파렛트수 + 파렛트번호) 그룹핑 = 1페이지 */
+function groupRows(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    const key = `${r.center}::${r.palletT}::${r.palletN}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  const groups = [...map.entries()].map(([key, items]) => {
+    const first = items[0];
+    return {
+      key,
+      center: first.center,
+      palletTotal: first.palletT,
+      palletNo: first.palletN,
+      eta: first.eta,
+      pos: [...new Set(items.map(i => i.po).filter(Boolean))],
+      boxSum: items.reduce((s, i) => s + (i.box || 0), 0),
+      items,
+    };
+  });
+
+  /* 정렬 우선순위:
+     1) 도착예정일 (오름차순)
+     2) 물류센터 (한국어 가나다)
+     3) 같은 센터 내 팔레트 묶음(총 팔레트 수) — 동일 입고 단위끼리 연속
+     4) 팔레트 번호 (1,2,3…) */
+  const toEtaKey = (e) => {
+    const s = formatEta(e, new Date().getFullYear());
+    return s || "9999-99-99";
+  };
+  groups.sort((a, b) => {
+    const ea = toEtaKey(a.eta), eb = toEtaKey(b.eta);
+    if (ea !== eb) return ea < eb ? -1 : 1;
+    const c = a.center.localeCompare(b.center, "ko");
+    if (c !== 0) return c;
+    if (a.palletTotal !== b.palletTotal) return a.palletTotal - b.palletTotal;
+    return a.palletNo - b.palletNo;
+  });
+  return groups;
+}
+
+/* =========================================================
+   3. 포맷 유틸
+========================================================= */
+function formatEta(raw, fallbackYear) {
+  if (!raw && raw !== 0) return "";
+  if (typeof raw === "number") {
+    const d = XLSX.SSF.parse_date_code(raw);
+    if (d) return `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+  }
+  const s = String(raw).trim();
+  const m = s.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (m) {
+    const year = fallbackYear || new Date().getFullYear();
+    return `${year}-${pad(m[1])}-${pad(m[2])}`;
+  }
+  const iso = s.match(/(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})/);
+  if (iso) return `${iso[1]}-${pad(iso[2])}-${pad(iso[3])}`;
+  return s;
+}
+function formatExpiry(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "-";
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return s;
+}
+function pad(n){ n = String(n); return n.length < 2 ? "0"+n : n; }
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[c]));
+}
+function fmt(n){ return Number(n||0).toLocaleString("ko-KR"); }
+
+/* =========================================================
+   4. 렌더링
+========================================================= */
+function renderPreview(groups) {
+  const stage = document.getElementById("previewStage");
+  stage.innerHTML = "";
+  if (!groups.length) {
+    stage.innerHTML = '<div class="preview-empty">업로드된 적재리스트가 여기에 A4 페이지로 표시됩니다.</div>';
+    document.getElementById("btnPrint").disabled = true;
+    document.getElementById("btnPrint2").disabled = true;
+    document.getElementById("summary").textContent = "업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.";
+    return;
+  }
+
+  const vendor = getCurrentVendor();
+  if (!vendor.name || !vendor.code) {
+    stage.innerHTML = '<div class="preview-empty" style="color:#dc2626;">① 업체 정보를 먼저 등록/선택하세요.</div>';
+    document.getElementById("btnPrint").disabled = true;
+    document.getElementById("btnPrint2").disabled = true;
+    return;
+  }
+
+  const issued = new Date().toLocaleString("ko-KR", { hour12: false });
+  const fallbackYear = document.getElementById("defaultYear").value.trim() || new Date().getFullYear();
+
+  const html = groups.map((g, i) => {
+    const eta = formatEta(g.eta, fallbackYear);
+    const skuRows = g.items.map((it, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtml(it.skuId)}</td>
+        <td class="name">${escapeHtml(it.skuName)}</td>
+        <td class="num-emph">${fmt(it.box)}</td>
+        <td class="num-emph">${fmt(it.qty)}</td>
+        <td class="exp-emph">${formatExpiry(it.expiry) === "-" ? '<span class="muted" style="font-weight:400;">-</span>' : formatExpiry(it.expiry)}</td>
+        <td class="remark-emph">${escapeHtml(it.status) || '<span class="muted" style="font-size:9.5pt;font-weight:400;">-</span>'}</td>
+      </tr>`).join("");
+
+    return `
+      <section class="page">
+        <div class="doc-header">
+          <h1>쿠팡 팔레트 적재리스트</h1>
+          <div class="subnote">각 팔레트 부착 필수 · 팔레트 높이 1,700mm 초과 금지</div>
+          <div class="rule-note">
+            <span>${escapeHtml(g.center)}</span>
+            <span class="rn-sep">·</span>
+            <span><span class="rn-label">팔레트</span>${g.palletTotal}-${g.palletNo}</span>
+            <span class="rn-sep">·</span>
+            <span><span class="rn-label">수량</span>${fmt(g.boxSum)}</span>
+          </div>
+        </div>
+
+        <div class="section-title">1) 업체 정보</div>
+        <table class="info-table">
+          <tr><th>업체명</th><td>${escapeHtml(vendor.name)}</td></tr>
+          <tr><th>업체코드</th><td>${escapeHtml(vendor.code)}</td></tr>
+        </table>
+
+        <div class="section-title">2) 입고 예약 정보</div>
+        <table class="info-table">
+          <tr><th>요청 ID (발주번호)</th><td>${escapeHtml(g.pos.join(", "))}</td></tr>
+          <tr><th>물류센터</th><td class="val-accent">${escapeHtml(g.center)}</td></tr>
+          <tr><th>물류센터 도착예정일</th><td class="val-accent">${escapeHtml(eta)}</td></tr>
+          <tr><th>팔레트 번호</th><td class="val-accent">${g.palletTotal}-${g.palletNo}</td></tr>
+          <tr><th>총 박스</th><td class="val-accent">${fmt(g.boxSum)}</td></tr>
+        </table>
+
+        <div class="section-title">3) 상품 정보</div>
+        <table class="sku-table">
+          <thead>
+            <tr>
+              <th style="width:5%;">No.</th>
+              <th style="width:13%;">SKU ID</th>
+              <th>물류입고용 상품명 / 옵션명</th>
+              <th style="width:11%;">박스수</th>
+              <th style="width:10%;">수량</th>
+              <th style="width:14%;">소비기한</th>
+              <th style="width:14%;">비고</th>
+            </tr>
+          </thead>
+          <tbody>${skuRows}</tbody>
+        </table>
+
+        <div class="foot">
+          <div class="issued">
+            발행: ${escapeHtml(issued)}<br/>
+            페이지: ${i+1} / ${groups.length}
+          </div>
+        </div>
+      </section>`;
+  }).join("");
+
+  stage.innerHTML = html;
+  document.getElementById("btnPrint").disabled = false;
+  document.getElementById("btnPrint2").disabled = false;
+  document.getElementById("summary").innerHTML =
+    `업체 <b>${escapeHtml(vendor.name)}</b> · 총 <b>${groups.length}</b>개 팔레트 · ` +
+    `물류센터 <b>${[...new Set(groups.map(g=>g.center))].length}</b>곳 · ` +
+    `SKU행 <b>${groups.reduce((s,g)=>s+g.items.length,0)}</b>건`;
+}
+
+/* =========================================================
+   5. 상태/이벤트
+========================================================= */
+function setStatus(msg, type = "") {
+  const el = document.getElementById("statusBar");
+  el.className = "status-bar" + (type ? " " + type : "");
+  el.textContent = msg;
+}
+function getCurrentVendor(){
+  return {
+    name: document.getElementById("vendorName").value.trim(),
+    code: document.getElementById("vendorCode").value.trim(),
+  };
+}
+function renderIfReady() {
+  if (GROUPS.length) renderPreview(GROUPS);
+}
+
+async function handleFile(f) {
+  if (!f) return;
+  const name = f.name.toLowerCase();
+  if (!/\.(xlsx|xls)$/.test(name)) {
+    setStatus("지원하지 않는 형식입니다. .xlsx 또는 .xls 파일을 올려주세요.", "err");
+    return;
+  }
+  document.getElementById("dzFile").textContent = "📄 " + f.name;
+  setStatus(`'${f.name}' 분석 중...`);
+  try {
+    RAW_ROWS = await parseExcel(f);
+    GROUPS = groupRows(RAW_ROWS);
+    setStatus(`분석 완료 — 행 ${RAW_ROWS.length}개, 팔레트 ${GROUPS.length}개 감지.`, "ok");
+    renderIfReady();
+  } catch (err) {
+    GROUPS = []; RAW_ROWS = [];
+    setStatus("오류: " + err.message, "err");
+    renderPreview([]);
+  }
+}
+
+/* 파일 선택 */
+document.getElementById("fileInput").addEventListener("change", (e) => {
+  handleFile(e.target.files[0]);
+});
+
+/* 드래그 앤 드롭 */
+const dz = document.getElementById("dropzone");
+["dragenter","dragover"].forEach(ev => {
+  dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dz.classList.add("is-drag");
+  });
+});
+["dragleave","drop"].forEach(ev => {
+  dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dz.classList.remove("is-drag");
+  });
+});
+dz.addEventListener("drop", e => {
+  const f = e.dataTransfer?.files?.[0];
+  if (f) {
+    // 드래그로 들어온 파일을 input에도 반영 (초기화 호환)
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      document.getElementById("fileInput").files = dt.files;
+    } catch (_) {}
+    handleFile(f);
+  }
+});
+/* 윈도우 바깥 드롭 방지 (브라우저가 파일을 열어버리는 것 차단) */
+["dragover","drop"].forEach(ev => {
+  window.addEventListener(ev, e => { e.preventDefault(); }, false);
+});
+
+document.getElementById("btnReset").addEventListener("click", () => {
+  document.getElementById("fileInput").value = "";
+  document.getElementById("dzFile").textContent = "";
+  GROUPS = []; RAW_ROWS = [];
+  setStatus("초기화됨. 엑셀을 다시 업로드하세요.");
+  renderPreview([]);
+});
+
+document.getElementById("vendorName").addEventListener("input", renderIfReady);
+document.getElementById("vendorCode").addEventListener("input", renderIfReady);
+document.getElementById("defaultYear").addEventListener("input", renderIfReady);
+
+/* =========================================================
+   인쇄 — 1부(기본) / 2부(A4 가로 좌우 동일)
+========================================================= */
+let SNAPSHOT_HTML = null;   // 2부 모드 진입 전 미리보기 HTML 백업
+
+function enterDuplexMode() {
+  const stage = document.getElementById("previewStage");
+  SNAPSHOT_HTML = stage.innerHTML;
+
+  // 각 팔레트 페이지를 duplex-sheet(좌·우 동일본)로 래핑
+  const pages = [...stage.querySelectorAll(".page")];
+  if (!pages.length) return false;
+
+  stage.innerHTML = pages.map(p => {
+    const inner = p.outerHTML;
+    return `<div class="duplex-sheet"><div class="duplex-half">${inner}</div><div class="duplex-half">${inner}</div></div>`;
+  }).join("");
+
+  // 기본 @page(세로)를 가로로 오버라이드
+  const s = document.createElement("style");
+  s.id = "print2up-override";
+  s.textContent = "@page { size: A4 landscape; margin: 0; }";
+  document.head.appendChild(s);
+
+  document.body.classList.add("print-2up");
+  return true;
+}
+
+function exitDuplexMode() {
+  if (SNAPSHOT_HTML !== null) {
+    document.getElementById("previewStage").innerHTML = SNAPSHOT_HTML;
+    SNAPSHOT_HTML = null;
+  }
+  const s = document.getElementById("print2up-override");
+  if (s) s.remove();
+  document.body.classList.remove("print-2up");
+}
+
+document.getElementById("btnPrint").addEventListener("click", () => {
+  // 안전: 혹시 이전 2부 모드 잔재가 있으면 정리
+  exitDuplexMode();
+  window.print();
+});
+
+document.getElementById("btnPrint2").addEventListener("click", () => {
+  if (!enterDuplexMode()) return;
+  // 렌더 커밋 후 인쇄
+  setTimeout(() => window.print(), 60);
+});
+
+// 인쇄 대화상자 닫히면(저장/취소 무관) 원상 복구
+window.addEventListener("afterprint", exitDuplexMode);
+
+/* 초기화 */
+renderVendors();
+</script>
+
+</body>
+</html>
