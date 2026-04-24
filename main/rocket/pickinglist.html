@@ -231,14 +231,16 @@
   body.mode-invoice .pl-footer { font-size: 6.5pt; padding-top: 2mm; }
 
   /* ===== 인쇄 공통 ===== */
-  @page { size: A4 portrait; margin: 0; }
+  /* A4 기본: 상·하 1cm 프린터 안전지대 확보 (가장자리 잘림 방지) */
+  @page { size: A4 portrait; margin: 10mm 0; }
   @media print {
     body { background: #fff; }
     .app-shell > :not(.preview-stage) { display: none !important; }
     .preview-stage { margin: 0; gap: 0; }
     .preview-empty { display: none !important; }
     .pl-page { box-shadow: none; margin: 0; }
-
+    /* A4 모드: 상·하 @page 여백(20mm)만큼 .pl-page 높이 축소 → 빈 페이지 방지 */
+    body:not(.mode-invoice) .pl-page { min-height: 277mm; }
   }
 
   /* ===== 웹 푸터 (main/index.html 통일) ===== */
@@ -555,12 +557,12 @@ function chunkFromEnd(list, size) {
 
 let SNAPSHOT_HTML = null;
 
-function applyPageSize(cssSize) {
+function applyPageSize(cssSize, pageMargin) {
   const old = document.getElementById("print-size-override");
   if (old) old.remove();
   const s = document.createElement("style");
   s.id = "print-size-override";
-  s.textContent = `@page { size: ${cssSize}; margin: 0; }`;
+  s.textContent = `@page { size: ${cssSize}; margin: ${pageMargin || '0'}; }`;
   document.head.appendChild(s);
 }
 
@@ -575,9 +577,9 @@ function restorePreview() {
 }
 
 function printA4() {
-  // 기본 모드 그대로, 용지만 명시
+  // 기본 모드 그대로, 용지 + 상·하 1cm 프린터 안전지대 지정
   restorePreview();
-  applyPageSize("A4 portrait");
+  applyPageSize("A4 portrait", "10mm 0");
   setTimeout(() => window.print(), 30);
 }
 
