@@ -472,6 +472,16 @@
     page-break-inside: avoid;
     break-inside: avoid;
   }
+  /* 2부 모드에서 PDF 라벨 페이지도 동일하게 zoom 축소 */
+  .duplex-half > .pdf-page {
+    width: 210mm;
+    height: 297mm;
+    zoom: 0.707;
+    margin: 0;
+    page-break-after: auto !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
 
   @media print {
     /* 2부 모드 인쇄 시 @page는 JS에서 landscape로 오버라이드 됨 */
@@ -1550,14 +1560,29 @@ function isRcCenter(center) {
          pdfStore.truck.some(it => it.pages.some(p => p.centerNorm === normCenter(center)));
 }
 
+/* 페이지 텍스트에서 특정 센터명을 substring으로 안전 검색
+   (PDF.js 한글 추출이 깨지거나 공백이 끼어도 매칭되도록) */
+function pageMatchesCenter(page, cn) {
+  if (page.centerNorm && page.centerNorm === cn) return true;
+  // fallback: 텍스트 전체 normalize 후 substring
+  const cleanText = String(page.text || '').replace(/\s+/g, '').toLowerCase();
+  return cn && cleanText.includes(cn);
+}
+
+/* PDF 1개에서 센터별 후보 페이지 인덱스 (출력 정책 적용 후) */
+function matchPagesInPdf(item, cn) {
+  const allowed = pickPagesForCategory(item);
+  return allowed.filter(i => pageMatchesCenter(item.pages[i-1], cn));
+}
+
 /* 한 센터에 대한 라벨 페이지(이미지URL 배열) 생성, 인덱스는 팔레트 번호 1..N */
 async function getLabelPagesForCenter(center) {
   const cn = normCenter(center);
   // truck 우선
   for (const it of pdfStore.truck) {
-    const odd = pickPagesForCategory(it); // 홀수페이지
-    const matched = odd.filter(i => it.pages[i-1].centerNorm === cn);
+    const matched = matchPagesInPdf(it, cn);
     if (matched.length) {
+      console.log('[label match] center=%s → truck %s, pages=%o', center, it.name, matched);
       const urls = [];
       for (const i of matched) urls.push(await renderPdfPageToImg(it.doc, i));
       return urls;
@@ -1565,15 +1590,16 @@ async function getLabelPagesForCenter(center) {
   }
   // download 다음
   for (const it of pdfStore.download) {
-    // 앞 절반에서 매칭
-    const half = pickPagesForCategory(it);
-    const matched = half.filter(i => it.pages[i-1].centerNorm === cn);
+    const matched = matchPagesInPdf(it, cn);
     if (matched.length) {
+      console.log('[label match] center=%s → download %s, pages=%o', center, it.name, matched);
       const urls = [];
       for (const i of matched) urls.push(await renderPdfPageToImg(it.doc, i));
       return urls;
     }
   }
+  console.warn('[label match] center=%s → 매칭 실패. download 텍스트 sample:', center,
+    pdfStore.download.map(it => ({name: it.name, p1text: (it.pages[0]?.text||'').slice(0,150)})));
   return [];
 }
 
@@ -1624,12 +1650,28 @@ async function buildIntegratedStage() {
 ========================================================= */
 let SNAPSHOT_HTML = null;   // 2부 모드 진입 전 미리보기 HTML 백업
 
-function enterDuplexMode() {
+async function enterDuplexMode() {
   const stage = document.getElementById("previewStage");
   SNAPSHOT_HTML = stage.innerHTML;
 
-  // 각 팔레트 페이지를 duplex-sheet(좌·우 동일본)로 래핑
-  const pages = [...stage.querySelectorAll(".page")];
+  // PDF가 업로드되어 있으면 통합 시퀀스(적재→라벨→적재→라벨)를 좌우로 복제
+  // 그렇지 않으면 기존처럼 적재리스트 .page만 좌우로 복제
+  const hasLabels = pdfStore.download.length || pdfStore.truck.length;
+
+  let pages;
+  if (hasLabels && GROUPS.length) {
+    // 통합 시퀀스 임시 생성 → 그 안의 모든 페이지 노드를 가져와서 좌우 복제
+    const built = await buildIntegratedStage();
+    if (built) {
+      pages = [...document.querySelectorAll('#integratedStage > *')];
+      // 임시 사용 끝, 비워둠 (실제 통합 인쇄는 다른 버튼이 처리)
+      document.getElementById('integratedStage').innerHTML = '';
+    } else {
+      pages = [...stage.querySelectorAll(".page")];
+    }
+  } else {
+    pages = [...stage.querySelectorAll(".page")];
+  }
   if (!pages.length) return false;
 
   stage.innerHTML = pages.map(p => {
@@ -1655,6 +1697,9 @@ function exitDuplexMode() {
   const s = document.getElementById("print2up-override");
   if (s) s.remove();
   document.body.classList.remove("print-2up");
+  // 인쇄 다이얼로그 닫혔을 때 버튼 다시 활성
+  const b2 = document.getElementById("btnPrint2");
+  if (b2) b2.disabled = !GROUPS.length;
 }
 
 document.getElementById("btnPrint").addEventListener("click", async () => {
@@ -1687,12 +1732,21 @@ document.getElementById("btnPrint").addEventListener("click", async () => {
   window.print();
 });
 
-document.getElementById("btnPrint2").addEventListener("click", () => {
+document.getElementById("btnPrint2").addEventListener("click", async () => {
   exitInvoiceMode();
   exitIntegratedMode();
-  if (!enterDuplexMode()) return;
-  // 렌더 커밋 후 인쇄
-  setTimeout(() => window.print(), 60);
+  const btn = document.getElementById("btnPrint2");
+  btn.disabled = true;
+  try {
+    const ok = await enterDuplexMode();
+    if (!ok) { btn.disabled = false; return; }
+    // 렌더 커밋 후 인쇄
+    setTimeout(() => window.print(), 100);
+  } catch (e) {
+    console.error(e);
+    setPdfStatus('2부 인쇄 준비 실패: ' + e.message, 'err');
+    btn.disabled = false;
+  }
 });
 
 document.getElementById("btnPrintInvoice").addEventListener("click", () => {
