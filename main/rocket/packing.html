@@ -15,6 +15,15 @@
 <!-- SheetJS (엑셀 파싱용) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+<!-- PDF.js (PDF 텍스트 추출 + 캔버스 렌더링용) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
+
 <style>
   /* ======================================================
      디자인 토큰
@@ -349,9 +358,35 @@
   .footer-copy  { opacity:.75; }
 
   /* ======================================================
+     PDF 인쇄 전용 페이지 (PDF.js 캔버스 이미지)
+  ====================================================== */
+  .print-stage { display: none; }
+  .pdf-page {
+    width: 210mm;
+    height: 297mm;
+    background: #fff;
+    overflow: hidden;
+    page-break-after: always;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+  }
+  .pdf-page:last-child { page-break-after: auto; }
+  .pdf-page img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  /* ======================================================
      인쇄 모드 (기본: A4 세로 · 1부)
      - 핵심: .page를 정확히 297mm로 고정 + overflow:hidden
      - 핵심: .preview-stage flex 해제(인쇄 시 page-break 오작동 방지)
+     - 모드 분기: body.print-invoice / body.print-integrated 로 스테이지 전환
   ====================================================== */
   @page { size: A4 portrait; margin: 0; }
   @media print {
@@ -364,7 +399,7 @@
       max-width: none;
       margin: 0; padding: 0;
     }
-    .app-shell > :not(.preview-stage) { display: none !important; }
+    .app-shell > :not(.preview-stage):not(.print-stage) { display: none !important; }
     /* flex 컨테이너에서 page-break-after가 무시되는 브라우저 버그 회피 */
     .preview-stage {
       margin: 0; padding: 0; gap: 0;
@@ -386,6 +421,13 @@
     .page:last-child {
       page-break-after: auto;
     }
+
+    /* 모드별 표시 전환: 기본은 preview-stage, 다른 모드일 땐 숨기고 해당 stage만 표시 */
+    body:not(.print-invoice):not(.print-integrated) .print-stage { display: none !important; }
+    body.print-invoice .preview-stage { display: none !important; }
+    body.print-invoice #invoiceStage { display: block !important; }
+    body.print-integrated .preview-stage { display: none !important; }
+    body.print-integrated #integratedStage { display: block !important; }
   }
 
   /* ======================================================
@@ -558,17 +600,45 @@
     <div class="status-bar" id="statusBar">엑셀 파일을 선택하면 자동으로 분석됩니다.</div>
   </section>
 
+  <!-- ===================== 3) PDF 업로드 (선택) ===================== -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><span class="step">3</span>PDF 업로드 (거래명세서 · 라벨 · 선택)</div>
+      <span style="font-size:11px; color:var(--text-sub);">파일명으로 자동 분류 (booking_maniFest_*, supplier.coupang.com_*, download*, Truck_Shipment_*)</span>
+    </div>
+    <div class="row">
+      <div class="field" style="flex: 3 1 380px;">
+        <label>PDF 파일 (여러 개 한꺼번에)</label>
+        <div class="dropzone" id="pdfDropzone">
+          <div class="dz-icon">📑</div>
+          <div class="dz-title">PDF 여러 개를 한번에 끌어다 놓으세요</div>
+          <div class="dz-sub">booking_manifest · supplier.coupang.com · download · Truck_Shipment 자동 인식</div>
+          <input type="file" id="pdfFileInput" accept=".pdf" multiple />
+        </div>
+      </div>
+      <button class="btn" id="btnPdfReset">PDF 초기화</button>
+    </div>
+    <div class="status-bar" id="pdfStatus">PDF가 업로드되면 거래명세서·라벨이 자동 분류되어 인쇄에 포함됩니다.</div>
+    <div class="vendor-chips" id="pdfList" style="margin-top:10px;"></div>
+  </section>
+
   <!-- ===================== 액션 바 ===================== -->
   <div class="action-bar">
     <div class="summary" id="summary">업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.</div>
+    <button class="btn" id="btnPrintInvoice" disabled title="booking_manifest 전체페이지 + supplier 홀수페이지 합본 (센터별 정렬)">📋 거래명세서인쇄</button>
     <button class="btn" id="btnPrint2" disabled title="A4 가로 한 장에 같은 페이지를 좌·우로 2번 인쇄">2부 인쇄 (가로 · 좌우 동일)</button>
-    <button class="btn btn-primary" id="btnPrint" disabled>PDF 저장 / 인쇄 (1부)</button>
+    <button class="btn btn-primary" id="btnPrint" disabled title="PDF 업로드 시 적재리스트+매칭 라벨 자동 통합">PDF 저장 / 인쇄 (1부)</button>
   </div>
 
-  <!-- ===================== 3) 미리보기 ===================== -->
+  <!-- ===================== 4) 미리보기 ===================== -->
   <div class="preview-stage" id="previewStage">
     <div class="preview-empty">업로드된 적재리스트가 여기에 A4 페이지로 표시됩니다.</div>
   </div>
+
+  <!-- 거래명세서 인쇄 전용 스테이지 (화면에서는 숨김, 인쇄 시점에만 표시) -->
+  <div class="print-stage" id="invoiceStage" aria-hidden="true"></div>
+  <!-- 통합(적재리스트 + 라벨) 인쇄 전용 스테이지 -->
+  <div class="print-stage" id="integratedStage" aria-hidden="true"></div>
 
   <!-- ── FOOTER (main/index.html 과 통일) ── -->
   <div class="site-footer">
@@ -1200,7 +1270,357 @@ document.getElementById("vendorCode").addEventListener("input", renderIfReady);
 document.getElementById("defaultYear").addEventListener("input", renderIfReady);
 
 /* =========================================================
-   인쇄 — 1부(기본) / 2부(A4 가로 좌우 동일)
+   PDF 업로드 · 분류 · 텍스트 추출 · 매칭 · 인쇄
+   ----------------------------------------------------------
+   카테고리 자동 분류 규칙 (파일명 패턴):
+     booking   : /^booking_manifest|booking_manifest/i
+     supplier  : /^supplier\.coupang\.com/i
+     download  : /^download\d*\.pdf$/i
+     truck     : /^truck_shipment/i
+   각 카테고리 출력 정책:
+     booking  → 전체 페이지
+     supplier → 홀수 페이지만
+     download → 앞 절반만 (각 팔레트가 2부씩 들어있어 dedupe)
+     truck    → 홀수 페이지만 (홀수=센터정보, 짝수=팔레트상세, 홀수만 부착용)
+========================================================= */
+const PDF_CAT = {
+  booking:  { name: 'booking',  label: '거래명세서(booking)', regex: /booking_?manifest/i },
+  supplier: { name: 'supplier', label: '거래명세서(supplier)', regex: /supplier\.coupang/i },
+  download: { name: 'download', label: '밀크런 라벨(download)', regex: /^download\d*\.pdf$/i },
+  truck:    { name: 'truck',    label: '트럭쉽먼트 라벨',     regex: /truck_?shipment/i },
+};
+const pdfStore = { booking: [], supplier: [], download: [], truck: [] };
+
+function classifyPdf(filename) {
+  for (const k of ['booking','supplier','download','truck']) {
+    if (PDF_CAT[k].regex.test(filename)) return k;
+  }
+  return null;
+}
+
+/* 센터명 정규화: "천안8(RC)" "천안8(RC)(CHA8)" "안성8(10)" → "천안8" "안성8" */
+function normCenter(s) {
+  return String(s||'')
+    .replace(/\(.*?\)/g, '')   // 괄호 내용 제거
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+/* PDF 1개 분석 → { file, doc, category, pages: [{idx, center, text, useFor}], allText } */
+async function analyzePdf(file, category) {
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pages = [];
+  let allText = '';
+  for (let i = 1; i <= doc.numPages; i++) {
+    const p = await doc.getPage(i);
+    const tc = await p.getTextContent();
+    const text = tc.items.map(it => it.str).join(' ');
+    allText += '\n' + text;
+    // 페이지별 센터명 추출 (카테고리별 패턴)
+    let center = '';
+    let m;
+    if (category === 'booking') {
+      // "납품 센터 천안8(RC)(CHA8)"
+      m = text.match(/납품\s*센터\s+(\S+?)\s*\(/);
+      if (m) center = m[1];
+    } else if (category === 'supplier') {
+      // "FC Name 안성8 Delivery..."
+      m = text.match(/FC\s*Name\s+(\S+)/);
+      if (m) center = m[1];
+    } else if (category === 'download') {
+      // "받는 사람 : 안성8(10)"
+      m = text.match(/받는\s*사람\s*[:：]\s*(\S+?)\s*\(/);
+      if (m) center = m[1];
+    } else if (category === 'truck') {
+      // 홀수페이지에 "CHA8 천안8(RC)_TRUCK_001" 또는 "INC41 인천41(RC)_TRUCK_001"
+      m = text.match(/[A-Z]{2,4}\d*\s+(\S+?\(?\S*?\)?)_TRUCK/);
+      if (m) center = m[1];
+    }
+    pages.push({ idx: i, text, center, centerNorm: normCenter(center) });
+  }
+  return { file, name: file.name, doc, category, pages, allText, numPages: doc.numPages };
+}
+
+/* 카테고리별 출력에 사용할 페이지 인덱스 결정 */
+function pickPagesForCategory(item) {
+  const n = item.numPages;
+  switch (item.category) {
+    case 'booking':  return Array.from({length:n}, (_,i)=>i+1);              // 전체
+    case 'supplier': return Array.from({length:n}, (_,i)=>i+1).filter(i=>i%2===1); // 홀수
+    case 'download': return Array.from({length:Math.ceil(n/2)}, (_,i)=>i+1); // 앞 절반
+    case 'truck':    return Array.from({length:n}, (_,i)=>i+1).filter(i=>i%2===1); // 홀수
+  }
+  return [];
+}
+
+/* PDF 페이지 → canvas 렌더링 (인쇄 품질) */
+async function renderPdfPageToImg(doc, pageNum, scale = 2) {
+  const page = await doc.getPage(pageNum);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width  = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+/* 인쇄용 .pdf-page 엘리먼트 생성 */
+function pdfImgPage(dataUrl) {
+  const div = document.createElement('div');
+  div.className = 'pdf-page';
+  const img = document.createElement('img');
+  img.src = dataUrl;
+  div.appendChild(img);
+  return div;
+}
+
+/* ==========================
+   PDF 업로드 핸들러
+========================== */
+async function handlePdfFiles(files) {
+  if (!files || !files.length) return;
+  if (!window.pdfjsLib) {
+    setPdfStatus('PDF.js 라이브러리 로드 실패 — 인터넷 연결 확인 필요', 'err');
+    return;
+  }
+  setPdfStatus(`PDF ${files.length}개 분석 중...`);
+  let added = 0, skipped = 0;
+  for (const f of files) {
+    const cat = classifyPdf(f.name);
+    if (!cat) { skipped++; continue; }
+    try {
+      // 동일 파일명이 이미 있으면 교체
+      pdfStore[cat] = pdfStore[cat].filter(x => x.name !== f.name);
+      const item = await analyzePdf(f, cat);
+      pdfStore[cat].push(item);
+      added++;
+    } catch (e) {
+      console.error('PDF 분석 실패:', f.name, e);
+    }
+  }
+  renderPdfList();
+  updatePrintButtonsState();
+  const total = pdfStore.booking.length + pdfStore.supplier.length +
+                pdfStore.download.length + pdfStore.truck.length;
+  const msg = `등록 ${added}개 · 미인식 ${skipped}개 · 보유 총 ${total}개`;
+  setPdfStatus(msg, skipped ? 'err' : 'ok');
+}
+
+function renderPdfList() {
+  const el = document.getElementById('pdfList');
+  const cats = [
+    { k: 'booking',  emoji: '📋' },
+    { k: 'supplier', emoji: '🚚' },
+    { k: 'download', emoji: '🏷️' },
+    { k: 'truck',    emoji: '📦' },
+  ];
+  let html = '';
+  for (const c of cats) {
+    const list = pdfStore[c.k];
+    if (!list.length) continue;
+    for (const it of list) {
+      const pickN = pickPagesForCategory(it).length;
+      const centers = [...new Set(it.pages.map(p=>p.center).filter(Boolean))].join(', ');
+      html += `<span class="vendor-chip" title="${escapeHtml(it.name)}">
+        <strong>${c.emoji} ${escapeHtml(PDF_CAT[c.k].label)}</strong>
+        <span style="color:var(--text-sub);">${escapeHtml(centers||'-')} · ${it.numPages}p→${pickN}p</span>
+        <button data-pdfdel="${escapeHtml(c.k)}::${escapeHtml(it.name)}" title="삭제">×</button>
+      </span>`;
+    }
+  }
+  el.innerHTML = html || '<span style="font-size:11px;color:var(--text-sub);">업로드된 PDF가 없습니다.</span>';
+}
+
+function setPdfStatus(msg, type='') {
+  const el = document.getElementById('pdfStatus');
+  el.className = 'status-bar' + (type ? ' ' + type : '');
+  el.textContent = msg;
+}
+
+document.getElementById('pdfFileInput').addEventListener('change', e => {
+  handlePdfFiles(e.target.files);
+});
+document.getElementById('btnPdfReset').addEventListener('click', () => {
+  pdfStore.booking = []; pdfStore.supplier = []; pdfStore.download = []; pdfStore.truck = [];
+  document.getElementById('pdfFileInput').value = '';
+  renderPdfList(); updatePrintButtonsState();
+  setPdfStatus('PDF 초기화됨.');
+});
+document.getElementById('pdfList').addEventListener('click', e => {
+  const del = e.target.getAttribute('data-pdfdel');
+  if (!del) return;
+  const [cat, name] = del.split('::');
+  pdfStore[cat] = pdfStore[cat].filter(x => x.name !== name);
+  renderPdfList(); updatePrintButtonsState();
+});
+
+/* PDF Dropzone */
+(function bindPdfDropzone(){
+  const dz = document.getElementById('pdfDropzone');
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.add('is-drag');
+  }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove('is-drag');
+  }));
+  dz.addEventListener('drop', e => {
+    const fs = e.dataTransfer?.files;
+    if (fs && fs.length) handlePdfFiles(fs);
+  });
+})();
+
+function updatePrintButtonsState() {
+  const hasInvoice = pdfStore.booking.length || pdfStore.supplier.length;
+  const btnInvoice = document.getElementById('btnPrintInvoice');
+  btnInvoice.disabled = !hasInvoice;
+}
+
+/* =========================================================
+   거래명세서인쇄 — booking 전체 + supplier 홀수, 센터별 정렬
+========================================================= */
+async function buildInvoiceStage() {
+  const stage = document.getElementById('invoiceStage');
+  stage.innerHTML = '';
+  // (item, pageIdx, center) 페어 수집
+  const tasks = [];
+  for (const it of pdfStore.booking) {
+    for (const i of pickPagesForCategory(it)) {
+      const pg = it.pages[i-1];
+      tasks.push({ item: it, pageIdx: i, center: pg.center, centerNorm: pg.centerNorm, kind: 'booking' });
+    }
+  }
+  for (const it of pdfStore.supplier) {
+    for (const i of pickPagesForCategory(it)) {
+      const pg = it.pages[i-1];
+      tasks.push({ item: it, pageIdx: i, center: pg.center, centerNorm: pg.centerNorm, kind: 'supplier' });
+    }
+  }
+  // 센터별 정렬 (한국어 가나다, 빈 센터는 뒤로)
+  tasks.sort((a, b) => {
+    if (!a.centerNorm && b.centerNorm) return 1;
+    if (a.centerNorm && !b.centerNorm) return -1;
+    if (a.centerNorm !== b.centerNorm)
+      return a.centerNorm.localeCompare(b.centerNorm, 'ko');
+    // 같은 센터면 booking 먼저
+    if (a.kind !== b.kind) return a.kind === 'booking' ? -1 : 1;
+    return a.pageIdx - b.pageIdx;
+  });
+  // 순서대로 렌더링
+  for (const t of tasks) {
+    const url = await renderPdfPageToImg(t.item.doc, t.pageIdx);
+    stage.appendChild(pdfImgPage(url));
+  }
+  return tasks.length;
+}
+
+async function printInvoice() {
+  const btn = document.getElementById('btnPrintInvoice');
+  btn.disabled = true;
+  setPdfStatus('거래명세서 인쇄용 페이지 생성 중...');
+  try {
+    const n = await buildInvoiceStage();
+    if (!n) { setPdfStatus('인쇄할 거래명세서 페이지가 없습니다.', 'err'); btn.disabled = false; return; }
+    document.body.classList.add('print-invoice');
+    setPdfStatus(`거래명세서 ${n}페이지 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
+    setTimeout(() => window.print(), 100);
+  } catch (e) {
+    console.error(e);
+    setPdfStatus('거래명세서 생성 실패: ' + e.message, 'err');
+    btn.disabled = false;
+  }
+}
+function exitInvoiceMode() {
+  document.body.classList.remove('print-invoice');
+  document.getElementById('invoiceStage').innerHTML = '';
+  updatePrintButtonsState();
+}
+
+/* =========================================================
+   PDF 저장 인쇄(1부) — PDF 업로드 시 적재리스트 + 매칭 라벨 통합
+   ----------------------------------------------------------
+   각 팔레트(센터,팔번호)에 대해:
+     1) 적재리스트 .page 1장
+     2) RC센터(천안*/인천*/...) → truck_shipment 홀수페이지 중 매칭(N번째 팔레트)
+        밀크런(나머지)         → download 앞절반 중 매칭
+========================================================= */
+function isRcCenter(center) {
+  // 패턴 단순 휴리스틱: 센터명에 "(RC)"가 있거나 truck 파일에 있는 센터로 매칭
+  return /\(RC\)/.test(center) ||
+         pdfStore.truck.some(it => it.pages.some(p => p.centerNorm === normCenter(center)));
+}
+
+/* 한 센터에 대한 라벨 페이지(이미지URL 배열) 생성, 인덱스는 팔레트 번호 1..N */
+async function getLabelPagesForCenter(center) {
+  const cn = normCenter(center);
+  // truck 우선
+  for (const it of pdfStore.truck) {
+    const odd = pickPagesForCategory(it); // 홀수페이지
+    const matched = odd.filter(i => it.pages[i-1].centerNorm === cn);
+    if (matched.length) {
+      const urls = [];
+      for (const i of matched) urls.push(await renderPdfPageToImg(it.doc, i));
+      return urls;
+    }
+  }
+  // download 다음
+  for (const it of pdfStore.download) {
+    // 앞 절반에서 매칭
+    const half = pickPagesForCategory(it);
+    const matched = half.filter(i => it.pages[i-1].centerNorm === cn);
+    if (matched.length) {
+      const urls = [];
+      for (const i of matched) urls.push(await renderPdfPageToImg(it.doc, i));
+      return urls;
+    }
+  }
+  return [];
+}
+
+async function buildIntegratedStage() {
+  const stage = document.getElementById('integratedStage');
+  stage.innerHTML = '';
+  if (!GROUPS.length) return 0;
+
+  // 센터별 라벨 페이지 캐시 (한 센터당 1번만 렌더링)
+  const labelCache = {};
+  for (const g of GROUPS) {
+    const cn = normCenter(g.center);
+    if (!(cn in labelCache)) {
+      labelCache[cn] = await getLabelPagesForCenter(g.center);
+    }
+  }
+
+  // 적재리스트 페이지를 그대로 복제하기 위해 미리보기에서 가져옴
+  const palletPages = [...document.querySelectorAll('#previewStage > .page')];
+
+  // 센터별 팔레트 번호 카운터
+  const centerCounters = {};
+  let totalAdded = 0;
+  for (let i = 0; i < GROUPS.length; i++) {
+    const g = GROUPS[i];
+    const cn = normCenter(g.center);
+    centerCounters[cn] = (centerCounters[cn] || 0) + 1;
+    const palletIdx = centerCounters[cn]; // 1, 2, 3...
+
+    // 1) 적재리스트 페이지 복제
+    if (palletPages[i]) {
+      stage.appendChild(palletPages[i].cloneNode(true));
+      totalAdded++;
+    }
+    // 2) 매칭 라벨 페이지
+    const urls = labelCache[cn] || [];
+    const labelUrl = urls[palletIdx - 1]; // N번째 팔레트
+    if (labelUrl) {
+      stage.appendChild(pdfImgPage(labelUrl));
+      totalAdded++;
+    }
+  }
+  return totalAdded;
+}
+
+/* =========================================================
+   인쇄 — 1부(기본) / 2부(A4 가로 좌우 동일) / 거래명세서 / 통합
 ========================================================= */
 let SNAPSHOT_HTML = null;   // 2부 모드 진입 전 미리보기 HTML 백업
 
@@ -1237,20 +1657,62 @@ function exitDuplexMode() {
   document.body.classList.remove("print-2up");
 }
 
-document.getElementById("btnPrint").addEventListener("click", () => {
-  // 안전: 혹시 이전 2부 모드 잔재가 있으면 정리
+document.getElementById("btnPrint").addEventListener("click", async () => {
+  // 안전: 다른 인쇄 모드 잔재 정리
   exitDuplexMode();
+  exitInvoiceMode();
+  exitIntegratedMode();
+
+  // PDF가 업로드되어 있으면 적재리스트 + 라벨 통합 모드
+  const hasLabels = pdfStore.download.length || pdfStore.truck.length;
+  if (hasLabels && GROUPS.length) {
+    const btn = document.getElementById('btnPrint');
+    btn.disabled = true;
+    setPdfStatus('적재리스트 + 라벨 통합 페이지 생성 중...');
+    try {
+      const n = await buildIntegratedStage();
+      if (!n) { setPdfStatus('통합할 페이지가 없습니다.', 'err'); btn.disabled = false; return; }
+      document.body.classList.add('print-integrated');
+      setPdfStatus(`통합 ${n}페이지 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
+      setTimeout(() => window.print(), 100);
+    } catch (e) {
+      console.error(e);
+      setPdfStatus('통합 인쇄 생성 실패: ' + e.message, 'err');
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  // 평소 1부 인쇄 (적재리스트만)
   window.print();
 });
 
 document.getElementById("btnPrint2").addEventListener("click", () => {
+  exitInvoiceMode();
+  exitIntegratedMode();
   if (!enterDuplexMode()) return;
   // 렌더 커밋 후 인쇄
   setTimeout(() => window.print(), 60);
 });
 
+document.getElementById("btnPrintInvoice").addEventListener("click", () => {
+  exitDuplexMode();
+  exitIntegratedMode();
+  printInvoice();
+});
+
+function exitIntegratedMode() {
+  document.body.classList.remove('print-integrated');
+  document.getElementById('integratedStage').innerHTML = '';
+  document.getElementById('btnPrint').disabled = !GROUPS.length || !document.querySelector('#previewStage > .page');
+}
+
 // 인쇄 대화상자 닫히면(저장/취소 무관) 원상 복구
-window.addEventListener("afterprint", exitDuplexMode);
+window.addEventListener("afterprint", () => {
+  exitDuplexMode();
+  exitInvoiceMode();
+  exitIntegratedMode();
+});
 
 /* Import / Export 바인딩 */
 document.getElementById("btnExportVendors").addEventListener("click", exportVendorsJson);
