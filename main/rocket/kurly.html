@@ -563,10 +563,38 @@ async function handleFiles(files){
   }
   setTimeout(()=>{ $('#progressWrap').classList.add('hidden'); $('#progressBar').style.width='0'; }, 400);
 
+  // PDF 처리 후 DB 강제 동기화 (구독이 늦거나 실패한 경우 대비)
+  if(window.kurlyDb && window.kurlyDb.ready && window.kurlyDb.getOnce){
+    try {
+      const data = await window.kurlyDb.getOnce();
+      const normalized = {};
+      Object.entries(data || {}).forEach(function(pair){
+        const bc = pair[0], val = pair[1];
+        if(typeof val === 'string') normalized[bc] = { name: val };
+        else if(typeof val === 'object' && val !== null) normalized[bc] = val;
+      });
+      state.barcodeDb = normalized;
+      state.dbLoaded = true;
+      console.log('[KURLY handleFiles] DB 강제 동기화:', Object.keys(normalized).length, '건');
+    } catch(e) {
+      console.error('[KURLY handleFiles] DB 강제 동기화 실패:', e);
+      toast('☁ DB 읽기 실패: ' + e.message, 'err');
+    }
+  }
+
   rebuildRows();
   renderAll();
 
-  // 결과 토스트 (성공/실패 명시)
+  // lookup 통계 토스트 (디버그)
+  const dbCount = Object.keys(state.barcodeDb).length;
+  const matched = state.rows.filter(function(r){ return !r.meta.missingName; }).length;
+  const totalRows = state.rows.length;
+  console.log('[KURLY lookup]', 'DB=' + dbCount, 'matched=' + matched + '/' + totalRows);
+  if(totalRows > 0){
+    if(matched === totalRows) toast('✓ 매칭 ' + matched + '/' + totalRows + ' (DB ' + dbCount + '건)', 'suc');
+    else toast('⚠ 매칭 ' + matched + '/' + totalRows + ' (DB ' + dbCount + '건) — 빨간 셀 직접 입력', 'err');
+  }
+
   const ok = state.files.filter(f=>f.ok && f.rawRows.length>0).length;
   const empty = state.files.filter(f=>f.ok && f.rawRows.length===0).length;
   const failed = state.files.filter(f=>!f.ok).length;
@@ -1095,7 +1123,8 @@ function initFirebaseSync(){
     state.barcodeDb = normalized;
     state.dbLoaded = true;
     const n = Object.keys(state.barcodeDb).length;
-    console.log('[KURLY] Firebase 동기화:', n, '건');
+    const sample = Object.entries(state.barcodeDb)[0];
+    console.log('[KURLY] Firebase 동기화:', n, '건', sample ? '샘플=' + sample[0] + ':' + JSON.stringify(sample[1]) : '');
     updateStats();
     if(state.files.length > 0){ rebuildRows(); renderAll(); }
     if(!state.firstSyncDone){
@@ -1107,8 +1136,8 @@ function initFirebaseSync(){
 
 updateStats();
 initFirebaseSync();
-console.log('[KURLY v3.4] 로드 완료');
-setTimeout(()=>toast('Kurly Parser v3.4 로드 완료',''), 300);
+console.log('[KURLY v3.5] 로드 완료. handleFiles에서 DB 강제 동기화');
+setTimeout(()=>toast('Kurly Parser v3.5 로드 완료',''), 300);
 </script>
 </body>
 </html>
