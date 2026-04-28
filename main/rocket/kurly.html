@@ -6,6 +6,7 @@
 <title>Kurly 거래명세서 → WMS 엑셀 변환</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 
 <!-- Firebase Realtime Database (makemine-wms) -->
 <script type="module">
@@ -221,10 +222,12 @@
   .sp-row-marker { position:absolute; left:14px; right:14px; height:34px; background:rgba(95,0,128,0.22); border:2px solid var(--kurly); border-radius:4px; box-shadow:0 0 12px rgba(95,0,128,0.4); pointer-events:none; transition:top 0.25s; z-index:5; }
   .sp-body canvas { display:block; margin:0 auto 12px; box-shadow:0 2px 12px rgba(0,0,0,0.08); max-width:none; background:#fff; }
 
-  /* 표 그룹 헤더 + 색상 띠 */
-  .grp-header td { background:linear-gradient(90deg, var(--grp-color, var(--kurly-l)) 0%, #fff 280px) !important; padding:8px 12px !important; font-weight:700; font-size:12px; color:var(--ink); border-top:2px solid var(--grp-color, var(--kurly)); }
-  .grp-header .grp-bar { display:inline-block; width:4px; height:16px; background:var(--grp-color, var(--kurly)); border-radius:2px; vertical-align:middle; margin-right:8px; }
-  .grp-header .grp-meta { color:var(--ink3); font-weight:500; font-size:11px; margin-left:10px; }
+  /* 표 그룹 헤더 + 색상 띠 + sticky */
+  .grp-header td { background:#fff; padding:0 !important; border-top:2px solid var(--grp-color, var(--kurly)); position:sticky; top:33px; left:0; z-index:7; }
+  .grp-header .grp-content { position:sticky; left:0; display:flex; align-items:center; gap:8px; padding:9px 14px; font-weight:700; font-size:12.5px; color:var(--ink); background:linear-gradient(90deg, var(--grp-color-l, var(--kurly-l)) 0%, #fff 100%); border-left:4px solid var(--grp-color, var(--kurly)); width:max-content; max-width:560px; box-shadow:1px 0 6px rgba(0,0,0,0.04); }
+  .grp-header .grp-bar { display:inline-block; width:4px; height:16px; background:var(--grp-color, var(--kurly)); border-radius:2px; }
+  .grp-header .grp-meta { color:var(--ink3); font-weight:500; font-size:11px; margin-left:6px; white-space:nowrap; }
+  .grp-header .btn-mini { margin-left:auto; flex-shrink:0; }
   tr.data-row td.idx { border-left:4px solid var(--grp-color, transparent); }
 
   .o-actions { margin-top:8px; display:flex; gap:6px; }
@@ -833,13 +836,14 @@ function renderPreview(){
       const h = fileEntry && fileEntry.header || {};
       const grpRows = state.rows.filter(rr => rr.meta.file === r.meta.file).length;
       const fileIdx = state.files.indexOf(fileEntry);
-      html += `<tr class="grp-header" style="--grp-color:${color};">`;
-      html += `<td colspan="${HEADERS.length+2}">`;
-      html += `<span class="grp-bar"></span>`;
+      // grp-color-l: 같은 색상의 연한 버전 (배경용)
+      const colorLight = color + '20';  // 12.5% 투명도
+      html += `<tr class="grp-header" style="--grp-color:${color}; --grp-color-l:${colorLight};">`;
+      html += `<td colspan="${HEADERS.length+2}"><div class="grp-content">`;
       html += `📦 <b>${escapeHtml(h.center || '(센터미상)')}</b>`;
       html += `<span class="grp-meta">${escapeHtml(h.orderCode || '')} · 입고 ${escapeHtml(formatMD(h.arriveDate) || '-')} · ${grpRows}건</span>`;
-      html += ` <button class="btn-mini" data-act="view" data-i="${fileIdx}" style="float:right;">🖼 원본</button>`;
-      html += `</td></tr>`;
+      html += ` <button class="btn-mini" data-act="view" data-i="${fileIdx}">🖼 원본</button>`;
+      html += `</div></td></tr>`;
     }
     const color = grpColors[grpIdx % grpColors.length];
     html += `<tr class="data-row" style="--grp-color:${color};"><td class="idx">${ri+1}</td>`;
@@ -1305,15 +1309,35 @@ function openPdfModal(fileIdx){
 }
 
 async function printPdfFile(fileIdx){
-  // 모달 열고 렌더링이 끝나면 print() 호출 (@media print으로 모달만 인쇄)
-  _currentPdfFileIdx = fileIdx;
+  // 원본 PDF의 명세서 페이지만 추출해서 새 창에서 인쇄 (해상도 손실 없음)
   const f = state.files[fileIdx];
-  if(!f) return;
-  $('#pdfModalSub').textContent = (f.name || '') + (f.header && f.header.orderCode ? ' · ' + f.header.orderCode : '');
-  $('#modalPdf').classList.add('show');
-  await renderPdfInContainer(fileIdx, $('#pdfCanvasWrap'));
-  // 렌더링 완료 후 약간 대기 후 인쇄 다이얼로그
-  setTimeout(function(){ window.print(); }, 300);
+  if(!f || !f.pdfData) return;
+  if(typeof PDFLib === 'undefined'){ toast('pdf-lib 로드 실패 — 새로고침 필요','err'); return; }
+  try {
+    const dataCopy = new Uint8Array(f.pdfData);
+    const pdfjs = await pdfjsLib.getDocument({data: dataCopy}).promise;
+    const textPages = [];
+    for(let i=0; i<pdfjs.numPages; i++){
+      const p = await pdfjs.getPage(i+1);
+      const tc = await p.getTextContent();
+      const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
+      if(txt.length >= 30) textPages.push(i);
+    }
+    if(!textPages.length){ toast('인쇄할 페이지가 없습니다','err'); return; }
+    const dataCopy2 = new Uint8Array(f.pdfData);
+    const src = await PDFLib.PDFDocument.load(dataCopy2);
+    const out = await PDFLib.PDFDocument.create();
+    const copied = await out.copyPages(src, textPages);
+    copied.forEach(p => out.addPage(p));
+    const bytes = await out.save();
+    const blob = new Blob([bytes], {type:'application/pdf'});
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    if(!w){ toast('팝업 차단됨 — 허용 후 재시도','err'); return; }
+    setTimeout(function(){ try { w.focus(); w.print(); } catch(e){} }, 1200);
+    setTimeout(()=> URL.revokeObjectURL(url), 60000);
+    toast('✓ 새 탭에서 인쇄','suc');
+  } catch(e){ console.error('단일 인쇄 실패:', e); toast('인쇄 실패: '+e.message,'err'); }
 }
 
 $('#btnPdfClose').onclick = function(){ $('#modalPdf').classList.remove('show'); $('#pdfCanvasWrap').innerHTML = ''; };
@@ -1461,37 +1485,46 @@ $('#sidePdfWrap').addEventListener('wheel', function(e){
 $('#btnPrintAll').onclick = async function(){
   const okFiles = state.files.filter(f=>f.ok && f.pdfData);
   if(!okFiles.length){ toast('인쇄할 PDF가 없습니다','err'); return; }
-  // 모달 영역에 모든 PDF의 명세서 페이지를 다 그린 후 print()
-  $('#pdfModalSub').textContent = okFiles.length + '개 거래명세서 일괄 인쇄';
-  $('#modalPdf').classList.add('show');
-  const wrap = $('#pdfCanvasWrap');
-  wrap.innerHTML = '<div class="pdf-loading">전체 PDF 렌더링 중... (' + okFiles.length + '건)</div>';
-  // 모두 렌더링
-  const allCanvases = [];
-  for(let fi=0; fi<okFiles.length; fi++){
-    const f = okFiles[fi];
-    try {
-      const dataCopy = new Uint8Array(f.pdfData);
-      const pdf = await pdfjsLib.getDocument({data: dataCopy}).promise;
-      for(let i=1; i<=pdf.numPages; i++){
-        const page = await pdf.getPage(i);
-        const tc = await page.getTextContent();
-        const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
-        if(txt.length < 30) continue;
-        const viewport = page.getViewport({scale: 1.5});
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        allCanvases.push({canvas, page, viewport});
-      }
-    } catch(e){ console.error('일괄 렌더 실패:', f.name, e); }
+  if(typeof PDFLib === 'undefined'){ toast('pdf-lib 로드 실패 — 새로고침 필요','err'); return; }
+  toast('📦 ' + okFiles.length + '개 PDF 합치는 중...', '');
+  try {
+    // pdf-lib으로 모든 PDF의 명세서 페이지(텍스트가 있는 페이지)만 추출해 새 PDF로 합치기
+    const merged = await PDFLib.PDFDocument.create();
+    for(const f of okFiles){
+      try {
+        // 어느 페이지가 명세서인지 PDF.js로 텍스트 양 확인 (이미지 페이지 제외)
+        const dataCopy = new Uint8Array(f.pdfData);
+        const pdfjs = await pdfjsLib.getDocument({data: dataCopy}).promise;
+        const textPages = [];
+        for(let i=0; i<pdfjs.numPages; i++){
+          const p = await pdfjs.getPage(i+1);
+          const tc = await p.getTextContent();
+          const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
+          if(txt.length >= 30) textPages.push(i);  // pdf-lib는 0-base
+        }
+        if(!textPages.length) continue;
+        const dataCopy2 = new Uint8Array(f.pdfData);
+        const src = await PDFLib.PDFDocument.load(dataCopy2);
+        const copied = await merged.copyPages(src, textPages);
+        copied.forEach(p => merged.addPage(p));
+      } catch(e){ console.error('PDF 추출 실패:', f.name, e); }
+    }
+    if(merged.getPageCount() === 0){ toast('인쇄할 페이지가 없습니다','err'); return; }
+    const bytes = await merged.save();
+    const blob = new Blob([bytes], {type:'application/pdf'});
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    if(!w){ toast('팝업이 차단되었습니다 — 브라우저 설정에서 허용 후 재시도','err'); return; }
+    // 새 창이 PDF 로드 후 print()
+    setTimeout(function(){
+      try { w.focus(); w.print(); } catch(e){ console.warn('자동 인쇄 실패, 수동 인쇄 필요:', e); }
+    }, 1500);
+    toast('✓ ' + merged.getPageCount() + '페이지 PDF 생성 — 새 탭에서 인쇄','suc');
+    setTimeout(()=> URL.revokeObjectURL(url), 60000);
+  } catch(e){
+    console.error('일괄 인쇄 실패:', e);
+    toast('인쇄 실패: ' + e.message, 'err');
   }
-  wrap.innerHTML = '';
-  for(const item of allCanvases){
-    wrap.appendChild(item.canvas);
-    await item.page.render({canvasContext: item.canvas.getContext('2d'), viewport: item.viewport}).promise;
-  }
-  setTimeout(()=> window.print(), 500);
 };
 
 
@@ -1528,8 +1561,8 @@ function initFirebaseSync(){
 
 updateStats();
 initFirebaseSync();
-console.log('[KURLY v3.7] 로드 완료 — PDF 줌 + 행 그룹화 — PDF 보기/인쇄 추가');
-setTimeout(()=>toast('Kurly Parser v3.7 로드 완료',''), 300);
+console.log('[KURLY v3.8] 로드 완료 — sticky 그룹 + 원본 PDF 인쇄 — PDF 보기/인쇄 추가');
+setTimeout(()=>toast('Kurly Parser v3.8 로드 완료',''), 300);
 </script>
 </body>
 </html>
