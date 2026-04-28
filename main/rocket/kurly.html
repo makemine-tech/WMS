@@ -62,6 +62,7 @@
   td { padding:0; border-bottom:1px solid var(--tag); white-space:nowrap; max-width:280px; vertical-align:middle; }
   tr:hover td:not(.idx) { background:#fafafa; }
   td.miss .cell-edit { color:var(--dng); background:var(--dng-l); }
+  td.miss .cell-edit::placeholder { color:var(--dng); opacity:0.7; }
   td.calc .cell-edit { color:var(--suc); font-weight:600; background:var(--suc-l); }
   td.fixed .cell-edit { color:var(--kurly); font-weight:600; background:var(--kurly-l); }
   .cell-edit { display:block; width:100%; padding:7px 10px; background:transparent; border:1px solid transparent; outline:none; font:inherit; color:inherit; font-size:12px; min-width:60px; max-width:280px; text-overflow:ellipsis; overflow:hidden; }
@@ -84,6 +85,8 @@
   .btn-ghost:hover:not(:disabled) { background:var(--tag); color:var(--ink); }
   .btn-suc { background:var(--suc); color:#fff; }
   .btn-suc:hover:not(:disabled) { background:#046c4e; transform:translateY(-1px); }
+  .btn-wrn { background:var(--wrn); color:#fff; }
+  .btn-wrn:hover:not(:disabled) { background:#b45309; }
 
   .config-row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px; }
   .config-row .form-group { flex:1; min-width:160px; }
@@ -122,6 +125,8 @@
   .hint-box.suc b { color:var(--suc); }
   .hint-box.wrn { background:var(--wrn-l); border-left-color:var(--wrn); }
   .hint-box.wrn b { color:var(--wrn); }
+  .hint-box.dng { background:var(--dng-l); border-left-color:var(--dng); }
+  .hint-box.dng b { color:var(--dng); }
 
   .legend { display:flex; gap:14px; font-size:11px; color:var(--ink3); margin-top:10px; flex-wrap:wrap; }
   .legend span { display:inline-flex; align-items:center; gap:5px; }
@@ -134,6 +139,10 @@
 
   .dirty-badge { display:inline-block; background:var(--wrn); color:#fff; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600; margin-left:8px; }
 
+  /* Action bar (above table) */
+  .action-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 14px; background:var(--wrn-l); border:1px solid var(--wrn); border-radius:7px; margin-bottom:12px; }
+  .action-bar .ab-text { font-size:12.5px; color:var(--wrn); font-weight:600; flex:1; }
+
   /* Modal */
   .modal-mask { position:fixed; inset:0; background:rgba(15,23,42,0.45); display:none; align-items:center; justify-content:center; z-index:200; padding:20px; }
   .modal-mask.show { display:flex; }
@@ -144,12 +153,6 @@
   .modal-hdr .sub { font-size:12px; color:var(--ink3); margin-top:1px; }
   .modal-body { padding:18px 22px; overflow-y:auto; }
   .modal-ftr { padding:14px 22px; border-top:1px solid var(--border); display:flex; gap:10px; justify-content:flex-end; }
-  .missing-list { display:flex; flex-direction:column; gap:8px; }
-  .missing-item { display:grid; grid-template-columns:170px 1fr; gap:10px; align-items:center; padding:8px 10px; border:1px solid var(--border); border-radius:7px; }
-  .missing-item .bc { font-family:Consolas,monospace; font-size:12px; color:var(--kurly); font-weight:700; }
-  .missing-item input { padding:8px 10px; border:1px solid var(--border2); border-radius:6px; font-size:13px; outline:none; }
-  .missing-item input:focus { border-color:var(--pri); box-shadow:0 0 0 3px rgba(26,86,219,0.1); }
-  .missing-item .src-hint { font-size:10px; color:var(--ink4); margin-top:3px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   .code-area { width:100%; min-height:280px; padding:14px; border:1px solid var(--border); border-radius:8px; font-family:'Consolas','Courier New',monospace; font-size:12px; line-height:1.6; background:#fafafa; resize:vertical; outline:none; color:var(--ink); }
   .code-area:focus { border-color:var(--pri); }
@@ -162,7 +165,7 @@
     <div class="hdr-icon">컬리</div>
     <div>
       <div class="hdr-name">Kurly 거래명세서 → WMS 엑셀 변환</div>
-      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v2.1 · CODE-EMBEDDED DB</div>
+      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.0</div>
     </div>
   </div>
   <a href="index.html" class="btn-home">← 메인</a>
@@ -175,7 +178,7 @@
     <div class="status-item s-orders"><div class="num" id="stat-orders">0</div><div class="label">발주 건수</div></div>
     <div class="status-item s-rows"><div class="num" id="stat-rows">0</div><div class="label">상품 행 수</div></div>
     <div class="status-item s-db"><div class="num" id="stat-db">0</div><div class="label">DB(코드내장)</div></div>
-    <div class="status-item s-warn"><div class="num" id="stat-warn">0</div><div class="label">누락/경고</div></div>
+    <div class="status-item s-warn"><div class="num" id="stat-warn">0</div><div class="label">미등록 품명</div></div>
   </div>
 
   <!-- STEP 1: PDF UPLOAD -->
@@ -183,7 +186,7 @@
     <div class="card-title">
       <span class="step">1</span>
       거래명세서 PDF 업로드
-      <span class="desc">컬리 표준 양식 — 여러 파일 동시 가능 / 입고 준수사항 페이지는 자동 무시</span>
+      <span class="desc">컬리 표준 양식 — 여러 파일 동시 가능</span>
     </div>
 
     <div class="upload-zone" id="dropzone">
@@ -200,46 +203,19 @@
     </div>
   </div>
 
-  <!-- STEP 2: BARCODE DB -->
-  <div class="card">
-    <div class="card-title">
-      <span class="step">2</span>
-      바코드 ↔ 품명 마스터 DB
-      <span id="dirtyBadge" class="dirty-badge hidden">미저장 변경</span>
-      <span class="desc">코드에 직접 박혀있어 단일 HTML 파일로 어디서나 동작</span>
-    </div>
-
-    <div class="hint-box" id="dbHintBox">
-      <b>코드 내장 DB:</b> <span id="dbCount">0</span>건 · 새 SKU 등록 후엔 <b>"💾 HTML 갱신본 저장"</b>을 눌러 영구 저장하세요
-    </div>
-
-    <div class="btn-row">
-      <button class="btn btn-suc" id="btnHtmlSave">💾 HTML 갱신본 저장 (DB를 코드에 박기)</button>
-      <button class="btn btn-secondary" id="btnDbCopy">📋 JS 객체로 복사</button>
-      <button class="btn btn-secondary" id="btnDbView">DB 전체보기/편집</button>
-      <button class="btn btn-secondary btn-ghost" id="btnDbUpload">엑셀에서 일괄 추가</button>
-      <button class="btn btn-ghost" id="btnDbClear" style="margin-left:auto;color:var(--dng);">메모리 DB 초기화</button>
-    </div>
-
-    <input type="file" id="dbInput" accept=".xlsx,.xls,.csv" style="display:none">
-
-    <details style="margin-top:10px;">
-      <summary>이 시스템은 어떻게 동작하나요?</summary>
-      <div style="margin-top:8px;font-size:12px;color:var(--ink3);line-height:1.7;">
-        ① <b>SEED_DB</b>는 이 HTML 파일의 &lt;script&gt; 안에 직접 박혀있는 객체입니다. 페이지 로드 시 자동으로 메모리에 로드됩니다.<br>
-        ② 새 PDF의 미등록 바코드를 모달에서 입력하면 <b>메모리에만</b> 추가됩니다 (새로고침 시 사라짐).<br>
-        ③ <b>"💾 HTML 갱신본 저장"</b>을 누르면 현재 메모리 DB를 코드에 박은 새 kurly.html이 다운로드됩니다 → 기존 파일을 덮어쓰면 영구 저장 완료.<br>
-        ④ GitHub에 커밋하면 팀원과 자동 동기화됩니다.
-      </div>
-    </details>
-  </div>
-
-  <!-- STEP 3: PARSED PREVIEW -->
+  <!-- STEP 2: PREVIEW (미등록 입력 + 편집) -->
   <div class="card hidden" id="cardPreview">
     <div class="card-title">
-      <span class="step">3</span>
-      추출 결과 (편집 가능)
-      <span class="desc">모든 셀 클릭하여 수정 가능 · 품명 수정 시 DB도 자동 갱신</span>
+      <span class="step">2</span>
+      추출 결과
+      <span id="dirtyBadge" class="dirty-badge hidden">미저장 변경</span>
+      <span class="desc">표 셀을 직접 수정하세요 · 빨간 셀(미등록 품명)은 입력 시 DB에 자동 등록</span>
+    </div>
+
+    <!-- 미등록 일괄 등록 안내바 -->
+    <div class="action-bar hidden" id="actionBar">
+      <span class="ab-text" id="abText">⚠ 미등록 품명 N건 — 빨간 셀에 직접 입력하거나, 아래 버튼으로 PDF 추출 품명을 그대로 일괄 등록</span>
+      <button class="btn btn-wrn" id="btnBulkRegister">⚡ PDF 품명 그대로 일괄 등록</button>
     </div>
 
     <div class="hint-box" id="parseHint">
@@ -251,68 +227,60 @@
     <div class="table-wrap" id="previewTable"></div>
 
     <div class="legend">
-      <span><i style="background:var(--kurly-l);border:1px solid var(--kurly);"></i> 고정값</span>
-      <span><i style="background:var(--suc-l);border:1px solid var(--suc);"></i> 자동 계산</span>
-      <span><i style="background:var(--dng-l);border:1px solid var(--dng);"></i> 누락/미등록</span>
-      <span style="color:var(--ink3);">💡 셀을 클릭하면 수정 가능합니다</span>
+      <span><i style="background:var(--kurly-l);border:1px solid var(--kurly);"></i> 고정값 "컬리"</span>
+      <span><i style="background:var(--suc-l);border:1px solid var(--suc);"></i> 자동 계산 (박스수)</span>
+      <span><i style="background:var(--dng-l);border:1px solid var(--dng);"></i> 미등록 — 직접 입력 필요</span>
+      <span style="color:var(--ink3);">💡 셀 클릭 후 입력 → 다른 곳 클릭하면 자동 저장</span>
     </div>
   </div>
 
-  <!-- STEP 4: EXPORT -->
+  <!-- STEP 3: SAVE & EXPORT -->
   <div class="card hidden" id="cardExport">
     <div class="card-title">
-      <span class="step">4</span>
-      엑셀 다운로드
-      <span class="desc">편집된 값 그대로 반영 · 박스수에 수식 자동 삽입</span>
+      <span class="step">3</span>
+      저장 및 다운로드
+      <span class="desc">DB는 HTML 갱신본 저장으로 영구화 · 작업 결과는 엑셀로</span>
     </div>
 
-    <div class="config-row">
-      <div class="form-group" style="flex:1;">
-        <label>파일명</label>
-        <input type="text" id="exportName" value="kurly_wms">
-      </div>
-      <div class="form-group" style="flex:0 0 200px;">
-        <label>박스수 출력 방식</label>
-        <select id="boxMode">
-          <option value="formula" selected>수식 (=K/J)</option>
-          <option value="value">계산값 입력</option>
-          <option value="empty">빈 칸 유지</option>
-        </select>
-      </div>
+    <div class="hint-box suc" style="margin-bottom:14px;">
+      <b>📌 저장 흐름:</b> 표 작업이 끝나면 <b>"💾 HTML 갱신본 저장"</b>으로 DB를 영구화 → 그 다음 <b>"📊 엑셀 다운로드"</b>로 작업 결과 출력
     </div>
 
-    <div class="btn-row">
-      <button class="btn btn-kurly" id="btnExport">📊 엑셀 다운로드 (.xlsx)</button>
-      <button class="btn btn-secondary" id="btnExportCsv">CSV 다운로드</button>
-      <button class="btn btn-secondary" id="btnCopy">📋 클립보드 복사</button>
+    <div class="btn-row" style="margin-bottom:16px;">
+      <button class="btn btn-suc" id="btnHtmlSave">💾 HTML 갱신본 저장 (DB를 코드에 박기)</button>
+      <button class="btn btn-secondary btn-ghost" id="btnDbCopy">📋 JS 객체로 복사</button>
+      <button class="btn btn-secondary btn-ghost" id="btnDbView">DB 전체보기/편집</button>
+    </div>
+
+    <div style="border-top:1px solid var(--border); padding-top:16px;">
+      <div class="config-row">
+        <div class="form-group" style="flex:1;">
+          <label>엑셀 파일명</label>
+          <input type="text" id="exportName" value="kurly_wms">
+        </div>
+        <div class="form-group" style="flex:0 0 200px;">
+          <label>박스수 출력 방식</label>
+          <select id="boxMode">
+            <option value="formula" selected>수식 (=K/J)</option>
+            <option value="value">계산값 입력</option>
+            <option value="empty">빈 칸 유지</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-kurly" id="btnExport">📊 엑셀 다운로드 (.xlsx)</button>
+        <button class="btn btn-secondary" id="btnExportCsv">CSV 다운로드</button>
+        <button class="btn btn-secondary" id="btnCopy">📋 클립보드 복사</button>
+      </div>
     </div>
   </div>
 
 </div>
 
-<div class="ftr">WMS · Rocket · Kurly Parser v2.1 — DB는 HTML 코드에 직접 내장 (단일 파일 = 단일 마스터)</div>
+<div class="ftr">WMS · Rocket · Kurly Parser v3.0 — DB는 HTML 코드에 직접 내장 (단일 파일 = 단일 마스터)</div>
 
 <div class="toast" id="toast"></div>
-
-<!-- 미등록 바코드 입력 모달 -->
-<div class="modal-mask" id="modalMissing">
-  <div class="modal">
-    <div class="modal-hdr">
-      <div class="ic">!</div>
-      <div>
-        <div class="ti">미등록 바코드 발견</div>
-        <div class="sub" id="missingSubtitle">DB에 없는 바코드의 품명을 입력해주세요. 메모리에 저장 후 HTML 갱신본 저장으로 영구화하세요.</div>
-      </div>
-    </div>
-    <div class="modal-body">
-      <div class="missing-list" id="missingList"></div>
-    </div>
-    <div class="modal-ftr">
-      <button class="btn btn-ghost" id="btnMissingSkip">건너뛰기 (빈값으로 진행)</button>
-      <button class="btn btn-primary" id="btnMissingSave">메모리 DB에 저장</button>
-    </div>
-  </div>
-</div>
 
 <!-- DB 전체보기/편집 모달 -->
 <div class="modal-mask" id="modalDb">
@@ -345,7 +313,7 @@
       <div class="ic" style="background:var(--suc-l);color:var(--suc);">{ }</div>
       <div>
         <div class="ti">JS 객체 코드</div>
-        <div class="sub">현재 메모리 DB의 객체 리터럴 — 복사해서 다른 코드에 붙여넣기 가능</div>
+        <div class="sub">현재 메모리 DB의 객체 리터럴 — 복사해서 코드에 붙여넣기 가능</div>
       </div>
     </div>
     <div class="modal-body">
@@ -379,23 +347,19 @@ const SEED_DB = {
 const HEADERS = ['발주번호','발주유형','발주현황','SKU ID','품명','바코드','물류센터','입고예정일','발주일','박스당입수','총수량','박스수'];
 
 const state = {
-  files: [],          // {name, ok, error, header:{orderCode,orderDate,arriveDate,center}, rawRows:[{master,barcode,...}]}
-  rows: [],           // 화면/엑셀에 사용할 최종 행
-  barcodeDb: { ...SEED_DB },  // 메모리 DB (페이지 로드 시 SEED_DB로 초기화)
-  dirty: false        // SEED_DB와 다른 변경사항이 있는지
+  files: [],
+  rows: [],
+  barcodeDb: { ...SEED_DB },
+  dirty: false
 };
 
 function markDirty(){
   state.dirty = true;
   $('#dirtyBadge').classList.remove('hidden');
-  $('#dbHintBox').className = 'hint-box wrn';
-  $('#dbHintBox').innerHTML = `<b>⚠ 미저장 변경:</b> 메모리에 변경이 있습니다. <b>"💾 HTML 갱신본 저장"</b>을 눌러 영구화하세요. <span id="dbCount">${Object.keys(state.barcodeDb).length}</span>건`;
 }
 function markClean(){
   state.dirty = false;
   $('#dirtyBadge').classList.add('hidden');
-  $('#dbHintBox').className = 'hint-box';
-  $('#dbHintBox').innerHTML = `<b>코드 내장 DB:</b> <span id="dbCount">${Object.keys(state.barcodeDb).length}</span>건 · 새 SKU 등록 후엔 <b>"💾 HTML 갱신본 저장"</b>을 눌러 영구 저장하세요`;
 }
 
 // ============================================================
@@ -408,7 +372,7 @@ function toast(msg, type){
   t.textContent = msg;
   t.className = 'toast show ' + (type||'');
   clearTimeout(toast._t);
-  toast._t = setTimeout(()=>t.classList.remove('show'), 2800);
+  toast._t = setTimeout(()=>t.classList.remove('show'), 2500);
 }
 function escapeHtml(s){
   return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -424,15 +388,8 @@ function toNum(v){
   return s === '' || isNaN(+s) ? '' : +s;
 }
 
-function renderDbStatus(){
-  const n = Object.keys(state.barcodeDb).length;
-  $('#stat-db').textContent = n;
-  const dc = $('#dbCount');
-  if(dc) dc.textContent = n;
-}
-
 // ============================================================
-// PDF 파싱 (품명은 무시 — 바코드만 정확히)
+// PDF 파싱 (품명은 무시하고 raw값만 보관)
 // ============================================================
 function normKurly(s){
   if(!s) return '';
@@ -540,7 +497,7 @@ function parseRowText(t){
 }
 
 // ============================================================
-// PDF 파일 업로드
+// PDF 파일 업로드 (모달 없이 바로 표 표시)
 // ============================================================
 const dropzone = $('#dropzone');
 const fileInput = $('#fileInput');
@@ -568,61 +525,12 @@ async function handleFiles(files){
   }
   setTimeout(()=>{ $('#progressWrap').classList.add('hidden'); $('#progressBar').style.width='0'; }, 400);
 
-  await processMissingBarcodes();
   rebuildRows();
   renderAll();
 }
 
 // ============================================================
-// 미등록 바코드 모달
-// ============================================================
-function findMissingBarcodes(){
-  const missing = []; const seen = new Set();
-  state.files.filter(f=>f.ok).forEach(f=>{
-    f.rawRows.forEach(r=>{
-      if(!r.barcode || state.barcodeDb[r.barcode] || seen.has(r.barcode)) return;
-      seen.add(r.barcode);
-      missing.push({ barcode: r.barcode, hint: r.rawName || '', master: r.master || '' });
-    });
-  });
-  return missing;
-}
-
-async function processMissingBarcodes(){
-  const missing = findMissingBarcodes();
-  if(!missing.length) return;
-  return new Promise(resolve=>{
-    const modal = $('#modalMissing');
-    const list = $('#missingList');
-    $('#missingSubtitle').textContent = `${missing.length}개의 바코드가 DB에 없습니다. 품명을 입력해주세요.`;
-    list.innerHTML = missing.map(m=>`
-      <div class="missing-item">
-        <div>
-          <div class="bc">${escapeHtml(m.barcode)}</div>
-          <div class="src-hint" title="${escapeHtml(m.hint)}">${m.hint?'PDF: '+escapeHtml(m.hint):'<span style="color:var(--ink4);">힌트 없음</span>'}</div>
-        </div>
-        <input type="text" data-bc="${escapeHtml(m.barcode)}" value="${escapeHtml(m.hint)}" placeholder="이 바코드의 품명을 입력하세요">
-      </div>
-    `).join('');
-    modal.classList.add('show');
-    setTimeout(()=> list.querySelector('input')?.focus(), 100);
-
-    const cleanup = ()=>{ modal.classList.remove('show'); $('#btnMissingSave').onclick = null; $('#btnMissingSkip').onclick = null; resolve(); };
-    $('#btnMissingSave').onclick = ()=>{
-      let saved = 0;
-      list.querySelectorAll('input').forEach(inp=>{
-        const bc = inp.dataset.bc; const name = (inp.value || '').trim();
-        if(name){ state.barcodeDb[bc] = name; saved++; }
-      });
-      if(saved > 0){ markDirty(); renderDbStatus(); toast(`${saved}건 메모리 DB 저장 (HTML 갱신본 저장 필요)`, 'suc'); }
-      cleanup();
-    };
-    $('#btnMissingSkip').onclick = cleanup;
-  });
-}
-
-// ============================================================
-// 행 빌드/렌더링
+// 행 빌드 — DB lookup. 미등록은 빈 값 + rawName을 placeholder로 표시
 // ============================================================
 function rebuildRows(){
   state.rows = [];
@@ -641,6 +549,9 @@ function rebuildRows(){
   });
 }
 
+// ============================================================
+// 렌더링
+// ============================================================
 function renderAll(){
   renderChips(); renderOrderSummary(); renderPreview(); updateStats();
   $('#cardPreview').classList.toggle('hidden', !state.rows.length);
@@ -681,6 +592,17 @@ function renderOrderSummary(){
 function renderPreview(){
   const wrap = $('#previewTable');
   if(!state.rows.length){ wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--ink4);font-size:13px;">추출된 데이터가 없습니다</div>'; $('#parseHintMsg').textContent = '파싱 결과가 없습니다'; return; }
+
+  // 미등록 카운트
+  const missingNames = state.rows.filter(r=>r.meta.missingName).length;
+  const ab = $('#actionBar');
+  if(missingNames > 0){
+    ab.classList.remove('hidden');
+    $('#abText').innerHTML = `⚠ <b>미등록 품명 ${missingNames}건</b> — 빨간 셀에 직접 입력하거나, 우측 버튼으로 PDF 추출 품명을 그대로 일괄 등록`;
+  } else {
+    ab.classList.add('hidden');
+  }
+
   let html = '<table><thead><tr><th class="idx">#</th>';
   HEADERS.forEach(h => html += `<th>${escapeHtml(h)}</th>`);
   html += '<th class="del-col"></th></tr></thead><tbody>';
@@ -696,7 +618,12 @@ function renderPreview(){
       if(ci === 7 && !v) cls = 'miss';
       if((ci === 9 || ci === 10) && (v === '' || v === null || v === undefined)) cls = 'miss';
       const display = v === '' || v === null || v === undefined ? '' : v;
-      html += `<td class="${cls}"><input class="cell-edit" data-r="${ri}" data-c="${ci}" value="${escapeHtml(String(display))}"></td>`;
+      // 품명 셀(ci=4)이 미등록이면 PDF raw 품명을 placeholder로 표시
+      let placeholder = '';
+      if(ci === 4 && r.meta.missingName && r.meta.rawName){
+        placeholder = `placeholder="PDF: ${escapeHtml(r.meta.rawName)}"`;
+      }
+      html += `<td class="${cls}"><input class="cell-edit" data-r="${ri}" data-c="${ci}" value="${escapeHtml(String(display))}" ${placeholder}></td>`;
     });
     html += `<td class="del-col"><button class="del-row" data-r="${ri}" title="이 행 삭제">×</button></td></tr>`;
   });
@@ -707,8 +634,7 @@ function renderPreview(){
   wrap.querySelectorAll('.del-row').forEach(btn=>{ btn.onclick = ()=>{ state.rows.splice(+btn.dataset.r, 1); renderPreview(); updateStats(); }; });
 
   const total = state.rows.length;
-  const missingNames = state.rows.filter(r=>r.meta.missingName).length;
-  $('#parseHintMsg').innerHTML = `${total}개 상품 행 · 품명 매칭 ${total - missingNames}건` + (missingNames ? ` · <b style="color:var(--dng)">${missingNames}건 미등록</b>` : '');
+  $('#parseHintMsg').innerHTML = `${total}개 상품 행 · 품명 매칭 ${total - missingNames}건` + (missingNames ? ` · <b style="color:var(--dng)">${missingNames}건 직접 입력 필요</b>` : ' · <b style="color:var(--suc)">모두 등록됨</b>');
 }
 
 function onCellEdit(e){
@@ -720,6 +646,7 @@ function onCellEdit(e){
   if(String(oldVal) === String(newVal)) return;
   state.rows[ri].cells[ci] = newVal;
 
+  // 박스수 자동 재계산
   if(ci === 9 || ci === 10){
     const bu = +state.rows[ri].cells[9] || 0;
     const tq = +state.rows[ri].cells[10] || 0;
@@ -727,17 +654,28 @@ function onCellEdit(e){
     const tgt = $(`.cell-edit[data-r="${ri}"][data-c="11"]`);
     if(tgt) tgt.value = state.rows[ri].cells[11];
   }
+  // 품명 셀(ci=4) 입력 시 → DB 자동 등록
   if(ci === 4){
     const bc = state.rows[ri].cells[5];
     if(bc && newVal && newVal.trim()){
-      state.barcodeDb[bc] = newVal.trim();
-      markDirty(); renderDbStatus();
-      toast(`DB 갱신: ${bc}`, 'suc');
-      state.rows[ri].meta.missingName = false;
+      const name = newVal.trim();
+      const wasMissing = state.rows[ri].meta.missingName;
+      state.barcodeDb[bc] = name;
+      markDirty();
+      if(wasMissing) toast(`✓ DB 등록: ${bc.slice(0,8)}... → ${name.slice(0,15)}`, 'suc');
+      else toast(`✓ DB 갱신: ${bc.slice(0,8)}...`, 'suc');
+      // 같은 바코드 다른 행도 갱신
       state.rows.forEach((r, idx) => {
-        if(idx !== ri && r.cells[5] === bc){ r.cells[4] = newVal.trim(); r.meta.missingName = false; }
+        if(r.cells[5] === bc){
+          r.cells[4] = name;
+          r.meta.missingName = false;
+          if(idx !== ri){
+            const otherInp = $(`.cell-edit[data-r="${idx}"][data-c="4"]`);
+            if(otherInp) otherInp.value = name;
+          }
+        }
       });
-      renderPreview();
+      renderPreview(); // 미등록 카운트 갱신
     }
   }
   if(ci === 5){
@@ -755,13 +693,41 @@ function updateStats(){
   $('#stat-files').textContent = state.files.length;
   $('#stat-orders').textContent = state.files.filter(f=>f.ok).length;
   $('#stat-rows').textContent = state.rows.length;
-  const warn = state.rows.filter(r => r.meta.missingName || r.meta.missingBarcode || !r.cells[6] || !r.cells[7]).length;
+  $('#stat-db').textContent = Object.keys(state.barcodeDb).length;
+  const warn = state.rows.filter(r => r.meta.missingName).length;
   $('#stat-warn').textContent = warn;
-  renderDbStatus();
 }
 
 // ============================================================
-// DB 관리: HTML 갱신본 저장 / JS 객체 복사 / 일괄 추가 / 전체보기
+// 일괄 등록 (PDF에서 추출한 raw 품명을 그대로 DB에 등록)
+// ============================================================
+$('#btnBulkRegister').onclick = ()=>{
+  const targets = state.rows.filter(r=> r.meta.missingName && r.meta.rawName);
+  if(!targets.length){ toast('일괄 등록할 항목이 없습니다','err'); return; }
+  if(!confirm(`PDF에서 추출한 품명을 그대로 ${targets.length}건 등록합니다.\n(나중에 DB 전체보기에서 수정 가능)`)) return;
+  let count = 0;
+  targets.forEach(r=>{
+    const bc = r.cells[5];
+    const name = r.meta.rawName;
+    if(bc && name){
+      state.barcodeDb[bc] = name;
+      // 같은 바코드 모든 행 갱신
+      state.rows.forEach(rr=>{
+        if(rr.cells[5] === bc){ rr.cells[4] = name; rr.meta.missingName = false; }
+      });
+      count++;
+    }
+  });
+  if(count > 0){
+    markDirty();
+    toast(`✓ ${count}건 일괄 등록 완료 — HTML 갱신본 저장으로 영구화`, 'suc');
+    renderPreview();
+    updateStats();
+  }
+};
+
+// ============================================================
+// HTML 갱신본 저장 / JS 객체 복사 / DB 전체보기
 // ============================================================
 function dbObjectLiteral(){
   const entries = Object.entries(state.barcodeDb).sort((a,b)=> a[0].localeCompare(b[0]));
@@ -783,10 +749,7 @@ $('#btnHtmlSave').onclick = async()=>{
   }
   const newBlock = '// SEED_DB_BEGIN\n' + dbObjectLiteral() + '\n// SEED_DB_END';
   const re = /\/\/ SEED_DB_BEGIN[\s\S]*?\/\/ SEED_DB_END/;
-  if(!re.test(html)){
-    toast('SEED_DB 마커를 찾지 못했습니다', 'err');
-    return;
-  }
+  if(!re.test(html)){ toast('SEED_DB 마커를 찾지 못했습니다', 'err'); return; }
   html = html.replace(re, newBlock);
   const blob = new Blob([html], {type:'text/html;charset=utf-8'});
   const a = document.createElement('a');
@@ -795,7 +758,7 @@ $('#btnHtmlSave').onclick = async()=>{
   a.click();
   setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
   markClean();
-  toast('HTML 갱신본 다운로드 완료 — 기존 kurly.html을 덮어쓰면 영구 저장', 'suc');
+  toast(`✓ kurly.html 다운로드 완료 — 기존 파일을 덮어쓰면 영구 저장 (${Object.keys(state.barcodeDb).length}건 박힘)`, 'suc');
 };
 
 $('#btnDbCopy').onclick = ()=>{
@@ -806,41 +769,6 @@ $('#btnCodeClose').onclick = ()=> $('#modalCode').classList.remove('show');
 $('#btnCodeCopy').onclick = async()=>{
   await navigator.clipboard.writeText($('#codeArea').value);
   toast('클립보드에 복사 완료', 'suc');
-};
-
-$('#btnDbUpload').onclick = ()=> $('#dbInput').click();
-$('#dbInput').addEventListener('change', async e=>{
-  const f = e.target.files[0];
-  if(!f) return;
-  try{
-    const buf = new Uint8Array(await f.arrayBuffer());
-    const wb = XLSX.read(buf, {type:'array'});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
-    if(!aoa.length){ toast('빈 파일', 'err'); return; }
-    const headers = aoa[0].map(h=>String(h||'').trim());
-    let bcIdx = headers.findIndex(h => /바코드|barcode/i.test(h));
-    let nameIdx = headers.findIndex(h => /품명|상품명|name/i.test(h));
-    if(bcIdx < 0) bcIdx = 0;
-    if(nameIdx < 0) nameIdx = 1;
-    let added = 0;
-    for(let i=1; i<aoa.length; i++){
-      const bc = String(aoa[i][bcIdx]||'').trim();
-      const name = String(aoa[i][nameIdx]||'').trim();
-      if(bc && name){ state.barcodeDb[bc] = name; added++; }
-    }
-    markDirty(); renderDbStatus();
-    toast(`${added}건 추가됨 (HTML 갱신본 저장으로 영구화)`, 'suc');
-    rebuildRows(); renderAll();
-  }catch(err){ console.error(err); toast('파일 읽기 실패', 'err'); }
-  e.target.value = '';
-});
-
-$('#btnDbClear').onclick = ()=>{
-  if(!confirm(`현재 메모리 DB ${Object.keys(state.barcodeDb).length}건을 비웁니다.\n(HTML 갱신본 저장 전이라면 코드 안의 SEED_DB는 그대로입니다)`)) return;
-  state.barcodeDb = {}; markDirty(); renderDbStatus();
-  rebuildRows(); renderAll();
-  toast('메모리 DB 초기화', 'suc');
 };
 
 $('#btnDbView').onclick = ()=>{ renderDbModal(); $('#modalDb').classList.add('show'); };
@@ -864,11 +792,11 @@ function renderDbModal(){
   $('#dbTable').querySelectorAll('.db-name-edit').forEach(inp=>{
     inp.onchange = ()=>{
       const bc = inp.dataset.bc; const name = inp.value.trim();
-      if(name){ state.barcodeDb[bc] = name; markDirty(); rebuildRows(); renderPreview(); renderDbStatus(); toast('DB 갱신','suc'); }
+      if(name){ state.barcodeDb[bc] = name; markDirty(); rebuildRows(); renderPreview(); updateStats(); toast('DB 갱신','suc'); }
     };
   });
   $('#dbTable').querySelectorAll('.db-row-del').forEach(btn=>{
-    btn.onclick = ()=>{ delete state.barcodeDb[btn.dataset.bc]; markDirty(); renderDbModal(); rebuildRows(); renderPreview(); renderDbStatus(); toast('1건 삭제', 'suc'); };
+    btn.onclick = ()=>{ delete state.barcodeDb[btn.dataset.bc]; markDirty(); renderDbModal(); rebuildRows(); renderPreview(); updateStats(); toast('1건 삭제', 'suc'); };
   });
 }
 
@@ -933,7 +861,8 @@ window.addEventListener('beforeunload', e=>{
 });
 
 // 초기화
-renderDbStatus(); markClean();
+updateStats();
+markClean();
 </script>
 </body>
 </html>
