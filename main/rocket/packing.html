@@ -359,6 +359,9 @@
 
   /* ======================================================
      PDF 인쇄 전용 페이지 (PDF.js 캔버스 이미지)
+     - 기본(.pdf-page): 비율 유지 + 가운데 letterbox (booking/supplier)
+     - .pdf-page--milkrun: 가로 PDF → 90도 회전 + 페이지 가득 (밀크런 부착리스트)
+     - .pdf-page--truck:  정사각 라벨 → 비율 무시 + 페이지 가득
   ====================================================== */
   .print-stage { display: none; }
   .pdf-page {
@@ -373,6 +376,7 @@
     align-items: center;
     justify-content: center;
     margin: 0;
+    position: relative;
   }
   .pdf-page:last-child { page-break-after: auto; }
   .pdf-page img {
@@ -380,6 +384,33 @@
     max-height: 100%;
     object-fit: contain;
     display: block;
+  }
+
+  /* 밀크런 부착리스트: 가로 PDF를 portrait 페이지에 가로로 가득 채움 */
+  .pdf-page--milkrun { display: block; }
+  .pdf-page--milkrun img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 297mm;
+    height: 210mm;
+    max-width: none;
+    max-height: none;
+    object-fit: fill;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center center;
+  }
+
+  /* 트럭쉽먼트 라벨: 페이지 꽉찬 이미지 (비율 무시 stretch) */
+  .pdf-page--truck { display: block; }
+  .pdf-page--truck img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: fill;
   }
 
   /* ======================================================
@@ -1375,10 +1406,11 @@ async function renderPdfPageToImg(doc, pageNum, scale = 2) {
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
-/* 인쇄용 .pdf-page 엘리먼트 생성 */
-function pdfImgPage(dataUrl) {
+/* 인쇄용 .pdf-page 엘리먼트 생성
+   kind: 'milkrun' | 'truck' | undefined (booking/supplier는 기본 contain) */
+function pdfImgPage(dataUrl, kind) {
   const div = document.createElement('div');
-  div.className = 'pdf-page';
+  div.className = 'pdf-page' + (kind ? ' pdf-page--' + kind : '');
   const img = document.createElement('img');
   img.src = dataUrl;
   div.appendChild(img);
@@ -1575,7 +1607,8 @@ function matchPagesInPdf(item, cn) {
   return allowed.filter(i => pageMatchesCenter(item.pages[i-1], cn));
 }
 
-/* 한 센터에 대한 라벨 페이지(이미지URL 배열) 생성, 인덱스는 팔레트 번호 1..N */
+/* 한 센터에 대한 라벨 페이지([{url, kind}] 배열) 생성, 인덱스는 팔레트 번호 1..N
+   kind: 'truck' (정사각 라벨, 페이지 가득) | 'milkrun' (가로 PDF, 90도 회전 가득) */
 async function getLabelPagesForCenter(center) {
   const cn = normCenter(center);
   // truck 우선
@@ -1583,9 +1616,9 @@ async function getLabelPagesForCenter(center) {
     const matched = matchPagesInPdf(it, cn);
     if (matched.length) {
       console.log('[label match] center=%s → truck %s, pages=%o', center, it.name, matched);
-      const urls = [];
-      for (const i of matched) urls.push(await renderPdfPageToImg(it.doc, i));
-      return urls;
+      const items = [];
+      for (const i of matched) items.push({ url: await renderPdfPageToImg(it.doc, i), kind: 'truck' });
+      return items;
     }
   }
   // download 다음
@@ -1593,9 +1626,9 @@ async function getLabelPagesForCenter(center) {
     const matched = matchPagesInPdf(it, cn);
     if (matched.length) {
       console.log('[label match] center=%s → download %s, pages=%o', center, it.name, matched);
-      const urls = [];
-      for (const i of matched) urls.push(await renderPdfPageToImg(it.doc, i));
-      return urls;
+      const items = [];
+      for (const i of matched) items.push({ url: await renderPdfPageToImg(it.doc, i), kind: 'milkrun' });
+      return items;
     }
   }
   console.warn('[label match] center=%s → 매칭 실패. download 텍스트 sample:', center,
@@ -1634,11 +1667,11 @@ async function buildIntegratedStage() {
       stage.appendChild(palletPages[i].cloneNode(true));
       totalAdded++;
     }
-    // 2) 매칭 라벨 페이지
-    const urls = labelCache[cn] || [];
-    const labelUrl = urls[palletIdx - 1]; // N번째 팔레트
-    if (labelUrl) {
-      stage.appendChild(pdfImgPage(labelUrl));
+    // 2) 매칭 라벨 페이지 (kind에 따라 회전/꽉채움 적용)
+    const items = labelCache[cn] || [];
+    const item = items[palletIdx - 1]; // N번째 팔레트
+    if (item) {
+      stage.appendChild(pdfImgPage(item.url, item.kind));
       totalAdded++;
     }
   }
