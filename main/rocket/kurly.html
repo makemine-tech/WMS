@@ -260,13 +260,15 @@
     </div>
 
     <div class="hint-box suc" style="margin-bottom:14px;">
-      <b>📌 저장 흐름:</b> 표 작업이 끝나면 <b>"💾 HTML 갱신본 저장"</b>으로 DB를 영구화 → 그 다음 <b>"📊 엑셀 다운로드"</b>로 작업 결과 출력
+      <b>📌 저장 흐름:</b> 표 작업 끝 → <b>"💾 JSON 다운로드"</b>로 kurly-db.json 갱신 → rocket 폴더에 덮어쓰고 GitHub push → <b>"📊 엑셀 다운로드"</b>로 결과 출력
     </div>
 
     <div class="btn-row" style="margin-bottom:16px;">
-      <button class="btn btn-suc" id="btnHtmlSave">💾 HTML 갱신본 저장 (DB를 코드에 박기)</button>
-      <button class="btn btn-secondary btn-ghost" id="btnDbCopy">📋 JS 객체로 복사</button>
+      <button class="btn btn-suc" id="btnHtmlSave">💾 JSON 다운로드 (kurly-db.json 갱신)</button>
+      <button class="btn btn-secondary btn-ghost" id="btnDbCopy">📋 JS 객체 미리보기</button>
       <button class="btn btn-secondary btn-ghost" id="btnDbView">DB 전체보기/편집</button>
+      <button class="btn btn-secondary btn-ghost" id="btnDbUpload">📤 JSON/엑셀 업로드</button>
+      <input type="file" id="dbInput" accept=".xlsx,.xls,.csv,.json" style="display:none">
     </div>
 
     <div style="border-top:1px solid var(--border); padding-top:16px;">
@@ -770,26 +772,26 @@ function dbObjectLiteral(){
   return 'const SEED_DB = {\n' + lines.join('\n') + '\n};';
 }
 
-$('#btnHtmlSave').onclick = async function(){
-  let html;
-  try {
-    const res = await fetch(location.href, {cache:'no-store'});
-    html = await res.text();
-  } catch(e) {
-    html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-  }
-  const newBlock = '// SEED_DB_BEGIN\n' + dbObjectLiteral() + '\n// SEED_DB_END';
-  const re = /\/\/ SEED_DB_BEGIN[\s\S]*?\/\/ SEED_DB_END/;
-  if(!re.test(html)){ toast('SEED_DB 마커를 찾지 못했습니다','err'); return; }
-  html = html.replace(re, newBlock);
-  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+$('#btnHtmlSave').onclick = function(){
+  // Step 1-C: HTML 갱신 대신 kurly-db.json 다운로드
+  const data = {
+    _meta: {
+      version: "1.0",
+      description: "Kurly 바코드 ↔ 품명 마스터 DB",
+      updated: new Date().toISOString(),
+      count: Object.keys(state.barcodeDb).length
+    },
+    barcodes: state.barcodeDb
+  };
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], {type:'application/json;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'kurly.html';
+  a.download = 'kurly-db.json';
   a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
   markClean();
-  toast('✓ kurly.html 다운로드 완료 - 기존 파일 덮어쓰면 영구 저장 (' + Object.keys(state.barcodeDb).length + '건)', 'suc');
+  toast('✓ kurly-db.json 다운로드 (' + Object.keys(state.barcodeDb).length + '건) — rocket 폴더에 덮어쓴 뒤 GitHub에 push', 'suc');
 };
 
 $('#btnDbCopy').onclick = function(){
@@ -803,6 +805,48 @@ $('#btnCodeCopy').onclick = async function(){
 };
 
 $('#btnDbView').onclick = function(){ renderDbModal(); $('#modalDb').classList.add('show'); };
+
+$('#btnDbUpload').onclick = function(){ $('#dbInput').click(); };
+$('#dbInput').addEventListener('change', async function(e){
+  const f = e.target.files[0];
+  if(!f) return;
+  const isJson = /\.json$/i.test(f.name);
+  try{
+    let added = 0;
+    if(isJson){
+      const text = await f.text();
+      const data = JSON.parse(text);
+      const db = (data && data.barcodes) ? data.barcodes : data;
+      if(!db || typeof db !== 'object') throw new Error('잘못된 JSON 형식');
+      Object.entries(db).forEach(function(pair){
+        const bc = pair[0], name = pair[1];
+        if(bc && name && typeof name === 'string' && bc !== '_meta'){
+          state.barcodeDb[bc] = name; added++;
+        }
+      });
+    } else {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      const wb = XLSX.read(buf, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      if(!aoa.length){ toast('빈 파일','err'); return; }
+      const headers = aoa[0].map(function(h){ return String(h||'').trim(); });
+      let bcIdx = headers.findIndex(function(h){ return /바코드|barcode/i.test(h); });
+      let nameIdx = headers.findIndex(function(h){ return /품명|상품명|name/i.test(h); });
+      if(bcIdx < 0) bcIdx = 0;
+      if(nameIdx < 0) nameIdx = 1;
+      for(let i=1; i<aoa.length; i++){
+        const bc = String(aoa[i][bcIdx]||'').trim();
+        const name = String(aoa[i][nameIdx]||'').trim();
+        if(bc && name){ state.barcodeDb[bc] = name; added++; }
+      }
+    }
+    markDirty();
+    toast('✓ ' + added + '건 추가됨 (JSON 다운로드로 영구화)', 'suc');
+    rebuildRows(); renderAll();
+  }catch(err){ console.error(err); toast('파일 읽기 실패: ' + err.message, 'err'); }
+  e.target.value = '';
+});
 $('#btnDbModalClose').onclick = function(){ $('#modalDb').classList.remove('show'); };
 $('#dbSearch').addEventListener('input', renderDbModal);
 
@@ -908,12 +952,38 @@ window.addEventListener('error', function(e){
   toast('오류: ' + e.message, 'err');
 });
 
+// ============================================================
+// kurly-db.json 자동 로드 (Step 1-B)
+// ============================================================
+async function loadDbFromJson(){
+  try {
+    const res = await fetch(DB_JSON_PATH + '?v=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const db = (data && typeof data === 'object' && data.barcodes) ? data.barcodes : data;
+    if(!db || typeof db !== 'object'){ throw new Error('잘못된 JSON 형식'); }
+    state.barcodeDb = { ...db };
+    state.dbLoaded = true;
+    const n = Object.keys(state.barcodeDb).length;
+    console.log('[KURLY] kurly-db.json 로드:', n, '건');
+    updateStats();
+    if(n > 0) toast('✓ DB 로드: ' + n + '건 (kurly-db.json)', 'suc');
+    else toast('kurly-db.json 비어있음 — 첫 SKU 등록 후 JSON 다운로드하세요', '');
+    if(state.files.length > 0){ rebuildRows(); renderAll(); }
+  } catch(e) {
+    console.warn('[KURLY] kurly-db.json 로드 실패:', e.message);
+    toast('⚠ kurly-db.json 로드 실패 — 빈 DB로 시작 (' + e.message + ')', 'err');
+    state.dbLoaded = false;
+  }
+}
+
+// 초기화
 updateStats();
 markClean();
+loadDbFromJson();
 
-// 페이지 로드 확인용 (사용자가 최신 버전 보고 있는지 확인)
-console.log('[KURLY v3.0.1] 로드 완료. PDF.js:', typeof pdfjsLib);
-setTimeout(()=>{ toast('Kurly Parser v3.0.1 로드 완료', ''); }, 300);
+console.log('[KURLY v3.1] 로드 완료. PDF.js:', typeof pdfjsLib);
+setTimeout(()=>{ toast('Kurly Parser v3.1 로드 완료', ''); }, 300);
 </script>
 </body>
 </html>
