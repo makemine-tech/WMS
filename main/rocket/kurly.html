@@ -204,18 +204,28 @@
   details summary:hover { color:var(--ink); }
 
   /* 사이드 PDF 도우미 패널 */
-  .side-panel { position:fixed; right:0; top:0; bottom:0; width:420px; background:#fff; border-left:1px solid var(--border); box-shadow:-6px 0 18px rgba(0,0,0,0.06); display:none; flex-direction:column; z-index:50; }
+  .side-panel { position:fixed; right:0; top:0; bottom:0; width:520px; background:#fff; border-left:1px solid var(--border); box-shadow:-6px 0 18px rgba(0,0,0,0.06); display:none; flex-direction:column; z-index:50; }
   .side-panel.open { display:flex; }
-  body.side-open .container { padding-right:440px; transition:padding 0.2s; }
-  .sp-hdr { padding:12px 16px; background:var(--hdr-bg); color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:space-between; }
-  .sp-hdr .sp-title { display:flex; align-items:center; gap:8px; }
-  .sp-hdr .sp-sub { font-size:11px; color:rgba(255,255,255,0.6); font-weight:400; margin-top:2px; }
+  body.side-open .container { padding-right:540px; transition:padding 0.2s; }
+  .sp-hdr { padding:10px 14px; background:var(--hdr-bg); color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .sp-hdr .sp-title { display:flex; align-items:center; gap:8px; flex:1; min-width:0; }
+  .sp-hdr .sp-sub { font-size:11px; color:rgba(255,255,255,0.6); font-weight:400; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px; }
+  .sp-zoom { display:flex; align-items:center; gap:4px; background:rgba(255,255,255,0.12); padding:3px 6px; border-radius:6px; }
+  .sp-zoom button { background:transparent; border:0; color:#fff; cursor:pointer; padding:2px 6px; font-size:14px; font-weight:700; line-height:1; border-radius:3px; }
+  .sp-zoom button:hover { background:rgba(255,255,255,0.18); }
+  .sp-zoom .sp-zoom-val { font-size:11px; min-width:38px; text-align:center; opacity:0.85; }
   .sp-close { background:transparent; border:0; color:#fff; cursor:pointer; font-size:20px; padding:0 6px; }
   .sp-close:hover { opacity:0.7; }
   .sp-body { flex:1; overflow:auto; padding:14px; background:#f3f4f6; position:relative; }
   .sp-empty { padding:60px 20px; text-align:center; color:var(--ink3); font-size:13px; line-height:1.6; }
-  .sp-row-marker { position:absolute; left:0; right:0; height:3px; background:var(--kurly); box-shadow:0 0 8px var(--kurly); pointer-events:none; transition:top 0.2s; opacity:0.85; }
-  .sp-body canvas { display:block; margin:0 auto 12px; box-shadow:0 2px 12px rgba(0,0,0,0.08); max-width:100%; height:auto; background:#fff; }
+  .sp-row-marker { position:absolute; left:14px; right:14px; height:34px; background:rgba(95,0,128,0.22); border:2px solid var(--kurly); border-radius:4px; box-shadow:0 0 12px rgba(95,0,128,0.4); pointer-events:none; transition:top 0.25s; z-index:5; }
+  .sp-body canvas { display:block; margin:0 auto 12px; box-shadow:0 2px 12px rgba(0,0,0,0.08); max-width:none; background:#fff; }
+
+  /* 표 그룹 헤더 + 색상 띠 */
+  .grp-header td { background:linear-gradient(90deg, var(--grp-color, var(--kurly-l)) 0%, #fff 280px) !important; padding:8px 12px !important; font-weight:700; font-size:12px; color:var(--ink); border-top:2px solid var(--grp-color, var(--kurly)); }
+  .grp-header .grp-bar { display:inline-block; width:4px; height:16px; background:var(--grp-color, var(--kurly)); border-radius:2px; vertical-align:middle; margin-right:8px; }
+  .grp-header .grp-meta { color:var(--ink3); font-weight:500; font-size:11px; margin-left:10px; }
+  tr.data-row td.idx { border-left:4px solid var(--grp-color, transparent); }
 
   .o-actions { margin-top:8px; display:flex; gap:6px; }
   .btn-mini { background:#fff; border:1px solid var(--border2); padding:5px 10px; border-radius:5px; font-size:11.5px; color:var(--ink2); cursor:pointer; transition:all 0.15s; }
@@ -411,8 +421,13 @@
 <div class="side-panel" id="sidePanel">
   <div class="sp-hdr">
     <div class="sp-title">
-      📄 PDF 도우미
-      <span class="sp-sub" id="spSub" style="margin-left:8px;">셀 클릭 시 자동 표시</span>
+      📄 <span class="sp-sub" id="spSub">셀 클릭 시 자동 표시</span>
+    </div>
+    <div class="sp-zoom">
+      <button id="btnSpZoomOut" title="축소 (Ctrl-)">−</button>
+      <span class="sp-zoom-val" id="spZoomVal">200%</span>
+      <button id="btnSpZoomIn" title="확대 (Ctrl+)">+</button>
+      <button id="btnSpZoomFit" title="화면맞춤" style="font-size:11px;font-weight:500;">맞춤</button>
     </div>
     <button class="sp-close" id="btnSpClose">×</button>
   </div>
@@ -805,8 +820,29 @@ function renderPreview(){
   let html = '<table><thead><tr><th class="idx">#</th>';
   HEADERS.forEach(h => html += `<th>${escapeHtml(h)}</th>`);
   html += '<th class="del-col"></th></tr></thead><tbody>';
+  // 발주별 색상 팔레트
+  const grpColors = ['#5f0080','#1a56db','#057a55','#d97706','#dc2626','#7c3aed','#0891b2','#be185d'];
+  let lastFile = null, grpIdx = -1;
   state.rows.forEach((r, ri)=>{
-    html += `<tr><td class="idx">${ri+1}</td>`;
+    // 그룹 헤더 (file이 바뀔 때)
+    if(r.meta.file !== lastFile){
+      lastFile = r.meta.file;
+      grpIdx++;
+      const color = grpColors[grpIdx % grpColors.length];
+      const fileEntry = state.files.find(f => f.name === r.meta.file);
+      const h = fileEntry && fileEntry.header || {};
+      const grpRows = state.rows.filter(rr => rr.meta.file === r.meta.file).length;
+      const fileIdx = state.files.indexOf(fileEntry);
+      html += `<tr class="grp-header" style="--grp-color:${color};">`;
+      html += `<td colspan="${HEADERS.length+2}">`;
+      html += `<span class="grp-bar"></span>`;
+      html += `📦 <b>${escapeHtml(h.center || '(센터미상)')}</b>`;
+      html += `<span class="grp-meta">${escapeHtml(h.orderCode || '')} · 입고 ${escapeHtml(formatMD(h.arriveDate) || '-')} · ${grpRows}건</span>`;
+      html += ` <button class="btn-mini" data-act="view" data-i="${fileIdx}" style="float:right;">🖼 원본</button>`;
+      html += `</td></tr>`;
+    }
+    const color = grpColors[grpIdx % grpColors.length];
+    html += `<tr class="data-row" style="--grp-color:${color};"><td class="idx">${ri+1}</td>`;
     r.cells.forEach((v, ci)=>{
       let cls = '';
       if(ci === 0) cls = 'fixed';
@@ -835,6 +871,9 @@ function renderPreview(){
 
   wrap.querySelectorAll('.cell-edit').forEach(inp=>{ inp.addEventListener('change', onCellEdit); inp.addEventListener('blur', onCellEdit); inp.addEventListener('focus', onCellFocus); });
   wrap.querySelectorAll('.del-row').forEach(btn=>{ btn.onclick = ()=>{ state.rows.splice(+btn.dataset.r, 1); renderPreview(); updateStats(); }; });
+  wrap.querySelectorAll('.grp-header .btn-mini').forEach(btn=>{
+    btn.onclick = function(e){ e.stopPropagation(); openPdfModal(+btn.dataset.i); };
+  });
 
   const total = state.rows.length;
   $('#parseHintMsg').innerHTML = `${total}개 상품 행 · 품명 매칭 ${total - missingNames}건` + (missingNames ? ` · <b style="color:var(--dng)">${missingNames}건 직접 입력 필요</b>` : ' · <b style="color:var(--suc)">모두 등록됨</b>');
@@ -1288,6 +1327,20 @@ $('#btnPdfPrint').onclick = function(){ window.print(); };
 let _sidePdfFileIdx = -1;
 let _sidePagePositions = [];  // canvas 누적 Y 위치 (페이지별)
 let _sidePdfPageHeight = 0;
+let _sideZoom = 2.0;  // 초기 줌 (큰 글자)
+let _lastFocusYPos = null;  // 마지막 포커스된 행 yPos (재렌더 후 마커 복원용)
+
+function setSideZoom(scale){
+  _sideZoom = Math.max(0.5, Math.min(5, scale));
+  $('#spZoomVal').textContent = Math.round(_sideZoom * 100) + '%';
+  if(_sidePdfFileIdx >= 0){
+    const idx = _sidePdfFileIdx;
+    _sidePdfFileIdx = -1;  // 강제 리렌더
+    loadSidePdf(idx).then(()=>{
+      if(_lastFocusYPos != null) highlightRowInSidePdf(_lastFocusYPos);
+    });
+  }
+}
 
 async function loadSidePdf(fileIdx){
   const f = state.files[fileIdx];
@@ -1312,7 +1365,7 @@ async function loadSidePdf(fileIdx){
       const tc = await page.getTextContent();
       const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
       if(txt.length < 30) continue;
-      const viewport = page.getViewport({scale: 1.2});
+      const viewport = page.getViewport({scale: _sideZoom});
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
@@ -1333,27 +1386,29 @@ async function loadSidePdf(fileIdx){
 }
 
 function highlightRowInSidePdf(yPdf){
-  // PDF 좌표(원점 좌하)를 canvas 픽셀(원점 좌상)로 변환해서 marker 표시
   if(!_sidePagePositions.length) return;
   const wrap = $('#sidePdfWrap');
-  // 기존 marker 제거
   const old = wrap.querySelector('.sp-row-marker');
   if(old) old.remove();
   if(typeof yPdf !== 'number' || isNaN(yPdf)) return;
-  // 첫 페이지(명세서) 사용
+  _lastFocusYPos = yPdf;
   const p = _sidePagePositions[0];
   if(!p || !p.canvas) return;
-  // PDF 페이지 높이 → canvas 픽셀로 비율 변환
-  const ratio = p.canvas.height / p.pdfHeight;
+  const canvasRect = p.canvas;  // canvas DOM
+  // canvas의 sp-body(wrap) 내 offsetTop (wrap이 position:relative라야 정확)
+  const canvasTopInWrap = canvasRect.offsetTop;
+  // PDF 좌표 → canvas 픽셀 (PDF는 좌하 원점, canvas는 좌상 원점)
+  const ratio = canvasRect.height / p.pdfHeight;
   const yCanvasFromTop = (p.pdfHeight - yPdf) * ratio;
+  // 마커 높이만큼 보정 (행이 약 30~40px이므로 -17px 가운데 정렬)
+  const markerY = canvasTopInWrap + yCanvasFromTop - 17;
   const marker = document.createElement('div');
   marker.className = 'sp-row-marker';
-  // canvas의 wrap 내 position
-  const canvasOffsetTop = p.canvas.offsetTop;
-  marker.style.top = (canvasOffsetTop + yCanvasFromTop) + 'px';
+  marker.style.top = markerY + 'px';
   wrap.appendChild(marker);
-  // 자동 스크롤
-  wrap.scrollTo({ top: Math.max(0, canvasOffsetTop + yCanvasFromTop - 80), behavior:'smooth' });
+  // 자동 스크롤 (마커가 가운데에 오도록)
+  const wrapHeight = wrap.clientHeight;
+  wrap.scrollTo({ top: Math.max(0, markerY - wrapHeight/2 + 17), behavior:'smooth' });
 }
 
 // 셀 포커스 시 호출 (renderPreview에서 input에 focus 이벤트 추가 필요)
@@ -1390,6 +1445,15 @@ function toggleSidePanel(open){
 }
 $('#btnSidePanel').onclick = ()=> toggleSidePanel();
 $('#btnSpClose').onclick = ()=> toggleSidePanel(false);
+$('#btnSpZoomIn').onclick = ()=> setSideZoom(_sideZoom + 0.25);
+$('#btnSpZoomOut').onclick = ()=> setSideZoom(_sideZoom - 0.25);
+$('#btnSpZoomFit').onclick = ()=> setSideZoom(1.2);
+// Ctrl+휠로 줌
+$('#sidePdfWrap').addEventListener('wheel', function(e){
+  if(!e.ctrlKey) return;
+  e.preventDefault();
+  setSideZoom(_sideZoom + (e.deltaY < 0 ? 0.15 : -0.15));
+}, {passive: false});
 
 // ============================================================
 // 일괄 인쇄 (Step 5-A)
@@ -1464,8 +1528,8 @@ function initFirebaseSync(){
 
 updateStats();
 initFirebaseSync();
-console.log('[KURLY v3.6] 로드 완료 — PDF 보기/인쇄 추가');
-setTimeout(()=>toast('Kurly Parser v3.6 로드 완료',''), 300);
+console.log('[KURLY v3.7] 로드 완료 — PDF 줌 + 행 그룹화 — PDF 보기/인쇄 추가');
+setTimeout(()=>toast('Kurly Parser v3.7 로드 완료',''), 300);
 </script>
 </body>
 </html>
