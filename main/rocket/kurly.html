@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kurly 거래명세서 → WMS 엑셀 변환</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -199,7 +200,11 @@
   .legend span { display:inline-flex; align-items:center; gap:5px; }
   .legend i { width:11px;height:11px;border-radius:3px;display:inline-block; }
 
-  .ftr { padding:16px 24px; text-align:center; font-size:11px; color:var(--ink4); }
+  /* Footer — 메인 index와 동일 톤 */
+  .site-footer { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:.6rem; font-family:'Share Tech Mono', 'Consolas', monospace; font-size:11px; letter-spacing:.1em; color:rgba(0,0,0,0.35); padding:18px 24px 24px; border-top:1px solid var(--border); margin-top:24px; }
+  .footer-brand { color:rgba(0,0,0,0.55); font-weight:700; letter-spacing:.12em; }
+  .footer-sep { opacity:.35; }
+  .footer-copy { opacity:.75; }
 
   details summary { cursor:pointer; font-size:12.5px; color:var(--ink3); padding:6px 0; }
   details summary:hover { color:var(--ink); }
@@ -233,6 +238,8 @@
   .o-actions { margin-top:8px; display:flex; gap:6px; }
   .btn-mini { background:#fff; border:1px solid var(--border2); padding:5px 10px; border-radius:5px; font-size:11.5px; color:var(--ink2); cursor:pointer; transition:all 0.15s; }
   .btn-mini:hover { border-color:var(--kurly); color:var(--kurly); background:var(--kurly-l); }
+  .btn-mini.btn-helper { background:var(--kurly-l); border-color:var(--kurly); color:var(--kurly); font-weight:600; }
+  .btn-mini.btn-helper:hover { background:var(--kurly); color:#fff; }
 
   /* PDF 보기 모달 */
   #modalPdf .modal { max-width:900px; }
@@ -284,7 +291,7 @@
       <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.3</div>
     </div>
   </div>
-  <a href="index.html" class="btn-home">← 메인</a>
+  <a href="https://www.makewon.com/" class="btn-home">← 홈으로</a>
 </div>
 
 <div class="container">
@@ -394,7 +401,11 @@
 
 </div>
 
-<div class="ftr">WMS · Rocket · Kurly Parser v3.5 — Firebase Realtime DB 자동 동기화</div>
+<div class="site-footer">
+  <span class="footer-brand">Makemine Design · PKW</span>
+  <span class="footer-sep">·</span>
+  <span class="footer-copy">© 2026 Makemine Design. All rights reserved. CEO Park Kyoung-woo</span>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -790,7 +801,7 @@ function renderOrderSummary(){
       </div>
       ${missing.length ? `<div class="o-warn">⚠ 누락: ${missing.join(', ')}</div>` : ''}
       <div class="o-actions">
-        <button class="btn-mini" data-act="view" data-i="${origIdx}">🖼 원본 보기</button>
+        <button class="btn-mini btn-helper" data-act="helper" data-i="${origIdx}">📄 도우미</button>
         <button class="btn-mini" data-act="print" data-i="${origIdx}">🖨 인쇄</button>
       </div>
     </div>`;
@@ -800,7 +811,10 @@ function renderOrderSummary(){
     btn.onclick = function(){
       const idx = +btn.dataset.i;
       const act = btn.dataset.act;
-      if(act === 'view') openPdfModal(idx);
+      if(act === 'helper'){
+        toggleSidePanel(true);
+        loadSidePdf(idx);
+      }
       else if(act === 'print') printPdfFile(idx);
     };
   });
@@ -842,7 +856,7 @@ function renderPreview(){
       html += `<td colspan="${HEADERS.length+2}"><div class="grp-content">`;
       html += `📦 <b>${escapeHtml(h.center || '(센터미상)')}</b>`;
       html += `<span class="grp-meta">${escapeHtml(h.orderCode || '')} · 입고 ${escapeHtml(formatMD(h.arriveDate) || '-')} · ${grpRows}건</span>`;
-      html += ` <button class="btn-mini" data-act="view" data-i="${fileIdx}">🖼 원본</button>`;
+      html += ` <button class="btn-mini btn-helper" data-act="helper" data-i="${fileIdx}">📄 도우미</button>`;
       html += `</div></td></tr>`;
     }
     const color = grpColors[grpIdx % grpColors.length];
@@ -876,7 +890,17 @@ function renderPreview(){
   wrap.querySelectorAll('.cell-edit').forEach(inp=>{ inp.addEventListener('change', onCellEdit); inp.addEventListener('blur', onCellEdit); inp.addEventListener('focus', onCellFocus); });
   wrap.querySelectorAll('.del-row').forEach(btn=>{ btn.onclick = ()=>{ state.rows.splice(+btn.dataset.r, 1); renderPreview(); updateStats(); }; });
   wrap.querySelectorAll('.grp-header .btn-mini').forEach(btn=>{
-    btn.onclick = function(e){ e.stopPropagation(); openPdfModal(+btn.dataset.i); };
+    btn.onclick = function(e){
+      e.stopPropagation();
+      const idx = +btn.dataset.i;
+      toggleSidePanel(true);
+      loadSidePdf(idx);
+      // 첫 행 yPos로 마커 자동 표시
+      const firstRow = state.rows.find(r => state.files.indexOf(state.files.find(f=>f.name===r.meta.file)) === idx);
+      if(firstRow && firstRow.meta.yPos != null){
+        setTimeout(()=> highlightRowInSidePdf(firstRow.meta.yPos), 600);
+      }
+    };
   });
 
   const total = state.rows.length;
