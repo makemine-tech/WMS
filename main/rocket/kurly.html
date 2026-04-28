@@ -304,24 +304,11 @@
   <div class="card hidden" id="cardExport">
     <div class="card-title">
       <span class="step">3</span>
-      저장 및 다운로드
-      <span class="desc">DB는 HTML 갱신본 저장으로 영구화 · 작업 결과는 엑셀로</span>
+      엑셀 다운로드
+      <span class="desc">DB 도구 + 0001.xlsx 양식으로 결과 출력</span>
     </div>
 
-    <div class="hint-box suc" style="margin-bottom:14px;">
-      <b>📌 저장 흐름:</b> 모든 DB 변경은 <b>자동으로 클라우드에 저장</b>됩니다 → 작업 끝나면 바로 <b>"📊 엑셀 다운로드"</b>로 결과 출력
-    </div>
-
-    <div class="btn-row" style="margin-bottom:16px;">
-      <button class="btn btn-suc" id="btnHtmlSave">💾 JSON 백업 다운로드 (선택사항)</button>
-      <button class="btn btn-secondary btn-ghost" id="btnDbCopy">📋 JS 객체 미리보기</button>
-      <button class="btn btn-secondary btn-ghost" id="btnDbView">DB 전체보기/편집</button>
-      <button class="btn btn-secondary btn-ghost" id="btnDbUpload">📤 JSON/엑셀 업로드</button>
-      <input type="file" id="dbInput" accept=".xlsx,.xls,.csv,.json" style="display:none">
-    </div>
-
-    <div style="border-top:1px solid var(--border); padding-top:16px;">
-      <div class="config-row">
+    <div class="config-row">
         <div class="form-group" style="flex:1;">
           <label>엑셀 파일명</label>
           <input type="text" id="exportName" value="kurly_wms">
@@ -374,25 +361,7 @@
   </div>
 </div>
 
-<!-- JS 코드 복사 모달 -->
-<div class="modal-mask" id="modalCode">
-  <div class="modal" style="max-width:760px;">
-    <div class="modal-hdr">
-      <div class="ic" style="background:var(--suc-l);color:var(--suc);">{ }</div>
-      <div>
-        <div class="ti">JS 객체 코드</div>
-        <div class="sub">현재 메모리 DB의 객체 리터럴 — 복사해서 코드에 붙여넣기 가능</div>
-      </div>
-    </div>
-    <div class="modal-body">
-      <textarea class="code-area" id="codeArea" readonly></textarea>
-    </div>
-    <div class="modal-ftr">
-      <button class="btn btn-secondary" id="btnCodeClose">닫기</button>
-      <button class="btn btn-primary" id="btnCodeCopy">📋 클립보드에 복사</button>
-    </div>
-  </div>
-</div>
+<!-- JS 코드 모달 제거 -->
 
 <script>
 // ============================================================
@@ -883,47 +852,11 @@ $('#btnBulkRegister').onclick = function(){
 // ============================================================
 // HTML 갱신본 저장 / JS 객체 복사 / DB 전체보기
 // ============================================================
-function dbObjectLiteral(){
-  const entries = Object.entries(state.barcodeDb).sort(function(a,b){ return a[0].localeCompare(b[0]); });
-  if(!entries.length) return 'const SEED_DB = {\n};';
-  const lines = entries.map(function(e){
-    const safe = String(e[1]).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
-    return '  "' + e[0] + '": "' + safe + '",';
-  });
-  return 'const SEED_DB = {\n' + lines.join('\n') + '\n};';
-}
+// (dbObjectLiteral 함수 제거 — 잔재)
 
-$('#btnHtmlSave').onclick = function(){
-  // Step 1-C: HTML 갱신 대신 kurly-db.json 다운로드
-  const data = {
-    _meta: {
-      version: "1.0",
-      description: "Kurly 바코드 ↔ 품명 마스터 DB",
-      updated: new Date().toISOString(),
-      count: Object.keys(state.barcodeDb).length
-    },
-    barcodes: state.barcodeDb
-  };
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], {type:'application/json;charset=utf-8'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'kurly-db.json';
-  a.click();
-  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
-  markClean();
-  toast('✓ kurly-db.json 다운로드 (' + Object.keys(state.barcodeDb).length + '건) — rocket 폴더에 덮어쓴 뒤 GitHub에 push', 'suc');
-};
+// (btnHtmlSave 핸들러 제거 — Firebase 자동 저장으로 불필요)
 
-$('#btnDbCopy').onclick = function(){
-  $('#codeArea').value = dbObjectLiteral();
-  $('#modalCode').classList.add('show');
-};
-$('#btnCodeClose').onclick = function(){ $('#modalCode').classList.remove('show'); };
-$('#btnCodeCopy').onclick = async function(){
-  await navigator.clipboard.writeText($('#codeArea').value);
-  toast('클립보드 복사 완료','suc');
-};
+// (btnDbCopy 핸들러 제거 — 잔재)
 
 $('#btnDbView').onclick = function(){ renderDbModal(); $('#modalDb').classList.add('show'); };
 
@@ -1100,41 +1033,31 @@ window.addEventListener('error', function(e){
   toast('오류: ' + e.message, 'err');
 });
 
-// ============================================================
-// Firebase Realtime DB 실시간 동기화 (Step 2-B)
-// ============================================================
-window.toast = toast;  // module script에서 사용 가능하게
-
-function initFirebaseSync(){
-  if(!window.kurlyDb){
-    // Firebase 모듈이 아직 로드 안 됨 → 이벤트 대기
-    window.addEventListener('kurlyDbReady', initFirebaseSync, {once:true});
-    return;
-  }
-  if(!window.kurlyDb.ready){
-    toast('⚠ Firebase 초기화 실패: ' + (window.kurlyDb.error||''), 'err');
-    return;
-  }
-  // 실시간 구독 — DB 어디서든 변경되면 즉시 모든 화면에 반영
-  window.kurlyDb.subscribe(function(data){
-    state.barcodeDb = data || {};
-    state.dbLoaded = true;
-    const n = Object.keys(state.barcodeDb).length;
-    console.log('[KURLY] Firebase 동기화:', n, '건');
-    updateStats();
-    if(state.files.length > 0){ rebuildRows(); renderAll(); }
-    if(!state.firstSyncDone){
-      state.firstSyncDone = true;
-      toast('☁ Firebase 연결 완료 — DB ' + n + '건', 'suc');
-    }
-  });
-}
-
-// 갱신 지점에서 호출하는 헬퍼들
-async function cloudSetBarcode(bc, name){
+async function cloudSetBarcode(bc, dataObj){
   if(!window.kurlyDb || !window.kurlyDb.ready) return false;
-  try { await window.kurlyDb.setBarcode(bc, name); return true; }
+  try { await window.kurlyDb.setBarcode(bc, dataObj); return true; }
   catch(e){ console.error('cloud set fail:', e); toast('☁ 저장 실패: '+e.message, 'err'); return false; }
+}
+async function cloudSetField(bc, field, value){
+  if(!window.kurlyDb || !window.kurlyDb.ready){
+    console.warn('[KURLY] cloudSetField: kurlyDb 미초기화');
+    return false;
+  }
+  if(!window.kurlyDb.updateBarcodeField){
+    console.error('[KURLY] cloudSetField: updateBarcodeField API 누락');
+    toast('☁ Firebase API 누락 — 페이지 새로고침 필요', 'err');
+    return false;
+  }
+  try {
+    const partial = {};
+    partial[field] = value;
+    await window.kurlyDb.updateBarcodeField(bc, partial);
+    return true;
+  } catch(e){
+    console.error('cloud field fail:', e);
+    toast('☁ 저장 실패: '+e.message, 'err');
+    return false;
+  }
 }
 async function cloudUpdateBarcodes(updates){
   if(!window.kurlyDb || !window.kurlyDb.ready) return false;
@@ -1147,12 +1070,45 @@ async function cloudRemoveBarcode(bc){
   catch(e){ console.error('cloud remove fail:', e); toast('☁ 삭제 실패: '+e.message, 'err'); return false; }
 }
 
-// 초기화
+// ============================================================
+// Firebase Realtime DB 실시간 동기화
+// ============================================================
+window.toast = toast;
+
+function initFirebaseSync(){
+  if(!window.kurlyDb){
+    window.addEventListener('kurlyDbReady', initFirebaseSync, {once:true});
+    return;
+  }
+  if(!window.kurlyDb.ready){
+    toast('⚠ Firebase 초기화 실패: ' + (window.kurlyDb.error||''), 'err');
+    return;
+  }
+  window.kurlyDb.subscribe(function(data){
+    const raw = data || {};
+    const normalized = {};
+    Object.entries(raw).forEach(function(pair){
+      const bc = pair[0], val = pair[1];
+      if(typeof val === 'string'){ normalized[bc] = { name: val }; }
+      else if(typeof val === 'object' && val !== null){ normalized[bc] = val; }
+    });
+    state.barcodeDb = normalized;
+    state.dbLoaded = true;
+    const n = Object.keys(state.barcodeDb).length;
+    console.log('[KURLY] Firebase 동기화:', n, '건');
+    updateStats();
+    if(state.files.length > 0){ rebuildRows(); renderAll(); }
+    if(!state.firstSyncDone){
+      state.firstSyncDone = true;
+      toast('☁ Firebase 연결 완료 — DB ' + n + '건', 'suc');
+    }
+  });
+}
+
 updateStats();
 initFirebaseSync();
-
-console.log('[KURLY v3.3] 로드 완료. DB={name,boxUnit}. PDF.js:', typeof pdfjsLib);
-setTimeout(()=>{ toast('Kurly Parser v3.3 로드 완료 (마스터 DB 구조)', ''); }, 300);
+console.log('[KURLY v3.4] 로드 완료');
+setTimeout(()=>toast('Kurly Parser v3.4 로드 완료',''), 300);
 </script>
 </body>
 </html>
