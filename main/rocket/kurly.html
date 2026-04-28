@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kurly 거래명세서 → WMS 엑셀 변환</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
@@ -330,7 +330,7 @@
 // ============================================================
 // PDF.js worker
 // ============================================================
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
 // ============================================================
 // 코드 내장 바코드 DB — "💾 HTML 갱신본 저장" 버튼이 이 영역을 자동 갱신합니다.
@@ -510,8 +510,10 @@ fileInput.addEventListener('change', e=> handleFiles([...e.target.files]));
 async function handleFiles(files){
   files = files.filter(f=> f.name.toLowerCase().endsWith('.pdf'));
   if(!files.length){ toast('PDF 파일이 없습니다','err'); return; }
+  toast('📄 ' + files.length + '개 PDF 분석 시작...', '');
   $('#progressWrap').classList.remove('hidden');
   let done = 0;
+  let totalRowsOk = 0, totalRowsErr = 0;
   for(const f of files){
     let entry = { name: f.name, ok: false, error: '', header: {}, rawRows: [] };
     try{
@@ -527,6 +529,18 @@ async function handleFiles(files){
 
   rebuildRows();
   renderAll();
+
+  // 결과 토스트 (성공/실패 명시)
+  const ok = state.files.filter(f=>f.ok && f.rawRows.length>0).length;
+  const empty = state.files.filter(f=>f.ok && f.rawRows.length===0).length;
+  const failed = state.files.filter(f=>!f.ok).length;
+  if(state.rows.length > 0){
+    toast('✓ ' + state.rows.length + '행 추출 완료 (성공 ' + ok + '건' + (empty?', 빈 결과 '+empty+'건':'') + (failed?', 실패 '+failed+'건':'') + ')', 'suc');
+  } else if(failed > 0){
+    toast('❌ 모든 PDF 파싱 실패 — F12 콘솔 확인', 'err');
+  } else {
+    toast('⚠ PDF는 읽었으나 표 데이터가 추출되지 않음 — F12 콘솔 확인', 'err');
+  }
 }
 
 // ============================================================
@@ -878,6 +892,10 @@ window.addEventListener('error', function(e){
 
 updateStats();
 markClean();
+
+// 페이지 로드 확인용 (사용자가 최신 버전 보고 있는지 확인)
+console.log('[KURLY v3.0.1] 로드 완료. PDF.js:', typeof pdfjsLib);
+setTimeout(()=>{ toast('Kurly Parser v3.0.1 로드 완료', ''); }, 300);
 </script>
 </body>
 </html>
