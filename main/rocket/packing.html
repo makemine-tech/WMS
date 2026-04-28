@@ -15,7 +15,7 @@
 <!-- SheetJS (엑셀 파싱용) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-<!-- PDF.js (PDF 텍스트 추출 + 캔버스 렌더링용) -->
+<!-- PDF.js (PDF 텍스트 추출 + 라벨 캔버스 렌더링용) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
   if (window.pdfjsLib) {
@@ -23,6 +23,9 @@
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
+
+<!-- pdf-lib (거래명세서 PDF 페이지 병합용 — 벡터 그대로 보존) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 
 <style>
   /* ======================================================
@@ -384,6 +387,11 @@
     max-height: 100%;
     object-fit: contain;
     display: block;
+    /* 인쇄 시 브라우저의 이미지 다운스케일 품질을 최대한 끌어올림 */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   /* 밀크런 부착리스트: 가로 PDF를 portrait 페이지에 가로로 가득 채움 */
@@ -1395,15 +1403,22 @@ function pickPagesForCategory(item) {
   return [];
 }
 
-/* PDF 페이지 → canvas 렌더링 (인쇄 품질) */
-async function renderPdfPageToImg(doc, pageNum, scale = 2) {
+/* PDF 페이지 → canvas 렌더링 (라벨 전용, 거래명세서는 사용 안 함)
+   - scale=3 → 약 215dpi (라벨용으로 충분, 메모리·속도 균형)
+   - PNG 무손실 출력
+   - 거래명세서는 pdf-lib으로 벡터 병합되므로 이 함수를 거치지 않음 */
+async function renderPdfPageToImg(doc, pageNum, scale = 3) {
   const page = await doc.getPage(pageNum);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
   canvas.width  = viewport.width;
   canvas.height = viewport.height;
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-  return canvas.toDataURL('image/jpeg', 0.92);
+  // 안티앨리어싱 품질 향상
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas.toDataURL('image/png');  // 무손실 (글자 선명)
 }
 
 /* 인쇄용 .pdf-page 엘리먼트 생성
@@ -1520,11 +1535,12 @@ function updatePrintButtonsState() {
 
 /* =========================================================
    거래명세서인쇄 — booking 전체 + supplier 홀수, 센터별 정렬
+   ----------------------------------------------------------
+   ★ 핵심: pdf-lib으로 페이지를 벡터 그대로 병합 → 단일 PDF 생성 →
+     숨김 iframe에 로드 → 브라우저 네이티브 PDF 뷰어로 인쇄
+     (캔버스 래스터화 없음 → 작은 글자도 원본 그대로 또렷)
 ========================================================= */
-async function buildInvoiceStage() {
-  const stage = document.getElementById('invoiceStage');
-  stage.innerHTML = '';
-  // (item, pageIdx, center) 페어 수집
+function collectInvoiceTasks() {
   const tasks = [];
   for (const it of pdfStore.booking) {
     for (const i of pickPagesForCategory(it)) {
@@ -1544,37 +1560,91 @@ async function buildInvoiceStage() {
     if (a.centerNorm && !b.centerNorm) return -1;
     if (a.centerNorm !== b.centerNorm)
       return a.centerNorm.localeCompare(b.centerNorm, 'ko');
-    // 같은 센터면 booking 먼저
     if (a.kind !== b.kind) return a.kind === 'booking' ? -1 : 1;
     return a.pageIdx - b.pageIdx;
   });
-  // 순서대로 렌더링
-  for (const t of tasks) {
-    const url = await renderPdfPageToImg(t.item.doc, t.pageIdx);
-    stage.appendChild(pdfImgPage(url));
-  }
-  return tasks.length;
+  return tasks;
 }
+
+/* 병합된 PDF Blob URL 생성 (벡터 보존) */
+async function buildInvoicePdfBlobUrl() {
+  if (!window.PDFLib) {
+    throw new Error('pdf-lib 라이브러리 로드 실패 — 인터넷 연결 확인 필요');
+  }
+  const { PDFDocument } = PDFLib;
+  const merged = await PDFDocument.create();
+  const tasks = collectInvoiceTasks();
+  if (!tasks.length) return null;
+
+  // 같은 파일에서 여러 페이지를 가져올 때 PDFDocument 캐시
+  const docCache = new Map();
+  for (const t of tasks) {
+    if (!docCache.has(t.item.name)) {
+      const bytes = await t.item.file.arrayBuffer();
+      docCache.set(t.item.name, await PDFDocument.load(bytes));
+    }
+    const src = docCache.get(t.item.name);
+    const [page] = await merged.copyPages(src, [t.pageIdx - 1]);
+    merged.addPage(page);
+  }
+
+  const bytes = await merged.save();
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  return { url: URL.createObjectURL(blob), pages: tasks.length };
+}
+
+let INVOICE_PRINT_FRAME = null;
+let INVOICE_BLOB_URL   = null;
 
 async function printInvoice() {
   const btn = document.getElementById('btnPrintInvoice');
   btn.disabled = true;
-  setPdfStatus('거래명세서 인쇄용 페이지 생성 중...');
+  setPdfStatus('거래명세서 PDF 병합 중 (벡터 그대로)...');
   try {
-    const n = await buildInvoiceStage();
-    if (!n) { setPdfStatus('인쇄할 거래명세서 페이지가 없습니다.', 'err'); btn.disabled = false; return; }
-    document.body.classList.add('print-invoice');
-    setPdfStatus(`거래명세서 ${n}페이지 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
-    setTimeout(() => window.print(), 100);
+    // 이전 잔재 정리
+    if (INVOICE_PRINT_FRAME) { INVOICE_PRINT_FRAME.remove(); INVOICE_PRINT_FRAME = null; }
+    if (INVOICE_BLOB_URL)    { URL.revokeObjectURL(INVOICE_BLOB_URL); INVOICE_BLOB_URL = null; }
+
+    const result = await buildInvoicePdfBlobUrl();
+    if (!result) {
+      setPdfStatus('인쇄할 거래명세서 페이지가 없습니다.', 'err');
+      btn.disabled = false;
+      return;
+    }
+    INVOICE_BLOB_URL = result.url;
+
+    // 숨김 iframe에 PDF 로드 → 인쇄 다이얼로그
+    INVOICE_PRINT_FRAME = document.createElement('iframe');
+    INVOICE_PRINT_FRAME.style.cssText =
+      'position:fixed;right:-9999px;top:0;width:0;height:0;border:0;visibility:hidden;';
+    INVOICE_PRINT_FRAME.src = INVOICE_BLOB_URL;
+    document.body.appendChild(INVOICE_PRINT_FRAME);
+
+    setPdfStatus(`거래명세서 ${result.pages}페이지 병합 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
+
+    INVOICE_PRINT_FRAME.onload = () => {
+      // PDF 뷰어가 완전히 초기화되도록 약간 지연
+      setTimeout(() => {
+        try {
+          INVOICE_PRINT_FRAME.contentWindow.focus();
+          INVOICE_PRINT_FRAME.contentWindow.print();
+        } catch (e) {
+          console.warn('iframe.print() 실패, 새 탭으로 fallback:', e);
+          window.open(INVOICE_BLOB_URL, '_blank');
+        }
+        btn.disabled = false;
+      }, 800);
+    };
   } catch (e) {
     console.error(e);
-    setPdfStatus('거래명세서 생성 실패: ' + e.message, 'err');
+    setPdfStatus('거래명세서 병합 실패: ' + e.message, 'err');
     btn.disabled = false;
   }
 }
 function exitInvoiceMode() {
+  // 네이티브 PDF 인쇄 방식이므로 본문 클래스 토글은 더 이상 필요 없음
   document.body.classList.remove('print-invoice');
-  document.getElementById('invoiceStage').innerHTML = '';
+  // iframe과 blob URL은 다음 인쇄 시점에 정리되거나 일정 시간 후 정리
   updatePrintButtonsState();
 }
 
