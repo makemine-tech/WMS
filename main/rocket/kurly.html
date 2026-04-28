@@ -701,18 +701,17 @@ function updateStats(){
 // ============================================================
 // 일괄 등록 (PDF에서 추출한 raw 품명을 그대로 DB에 등록)
 // ============================================================
-$('#btnBulkRegister').onclick = ()=>{
-  const targets = state.rows.filter(r=> r.meta.missingName && r.meta.rawName);
+$('#btnBulkRegister').onclick = function(){
+  const targets = state.rows.filter(function(r){ return r.meta.missingName && r.meta.rawName; });
   if(!targets.length){ toast('일괄 등록할 항목이 없습니다','err'); return; }
-  if(!confirm(`PDF에서 추출한 품명을 그대로 ${targets.length}건 등록합니다.\n(나중에 DB 전체보기에서 수정 가능)`)) return;
+  if(!confirm('PDF에서 추출한 품명을 그대로 ' + targets.length + '건 등록합니다.\n(나중에 DB 전체보기에서 수정 가능)')) return;
   let count = 0;
-  targets.forEach(r=>{
+  targets.forEach(function(r){
     const bc = r.cells[5];
     const name = r.meta.rawName;
     if(bc && name){
       state.barcodeDb[bc] = name;
-      // 같은 바코드 모든 행 갱신
-      state.rows.forEach(rr=>{
+      state.rows.forEach(function(rr){
         if(rr.cells[5] === bc){ rr.cells[4] = name; rr.meta.missingName = false; }
       });
       count++;
@@ -720,7 +719,7 @@ $('#btnBulkRegister').onclick = ()=>{
   });
   if(count > 0){
     markDirty();
-    toast(`✓ ${count}건 일괄 등록 완료 — HTML 갱신본 저장으로 영구화`, 'suc');
+    toast('✓ ' + count + '건 일괄 등록 완료 - HTML 갱신본 저장으로 영구화', 'suc');
     renderPreview();
     updateStats();
   }
@@ -730,87 +729,91 @@ $('#btnBulkRegister').onclick = ()=>{
 // HTML 갱신본 저장 / JS 객체 복사 / DB 전체보기
 // ============================================================
 function dbObjectLiteral(){
-  const entries = Object.entries(state.barcodeDb).sort((a,b)=> a[0].localeCompare(b[0]));
+  const entries = Object.entries(state.barcodeDb).sort(function(a,b){ return a[0].localeCompare(b[0]); });
   if(!entries.length) return 'const SEED_DB = {\n};';
-  const lines = entries.map(([bc, nm])=>{
-    const safeName = String(nm).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
-    return `  "${bc}": "${safeName}",`;
+  const lines = entries.map(function(e){
+    const safe = String(e[1]).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+    return '  "' + e[0] + '": "' + safe + '",';
   });
   return 'const SEED_DB = {\n' + lines.join('\n') + '\n};';
 }
 
-$('#btnHtmlSave').onclick = async()=>{
+$('#btnHtmlSave').onclick = async function(){
   let html;
-  try{
+  try {
     const res = await fetch(location.href, {cache:'no-store'});
     html = await res.text();
-  }catch(e){
+  } catch(e) {
     html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   const newBlock = '// SEED_DB_BEGIN\n' + dbObjectLiteral() + '\n// SEED_DB_END';
   const re = /\/\/ SEED_DB_BEGIN[\s\S]*?\/\/ SEED_DB_END/;
-  if(!re.test(html)){ toast('SEED_DB 마커를 찾지 못했습니다', 'err'); return; }
+  if(!re.test(html)){ toast('SEED_DB 마커를 찾지 못했습니다','err'); return; }
   html = html.replace(re, newBlock);
   const blob = new Blob([html], {type:'text/html;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'kurly.html';
   a.click();
-  setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
   markClean();
-  toast(`✓ kurly.html 다운로드 완료 — 기존 파일을 덮어쓰면 영구 저장 (${Object.keys(state.barcodeDb).length}건 박힘)`, 'suc');
+  toast('✓ kurly.html 다운로드 완료 - 기존 파일 덮어쓰면 영구 저장 (' + Object.keys(state.barcodeDb).length + '건)', 'suc');
 };
 
-$('#btnDbCopy').onclick = ()=>{
+$('#btnDbCopy').onclick = function(){
   $('#codeArea').value = dbObjectLiteral();
   $('#modalCode').classList.add('show');
 };
-$('#btnCodeClose').onclick = ()=> $('#modalCode').classList.remove('show');
-$('#btnCodeCopy').onclick = async()=>{
+$('#btnCodeClose').onclick = function(){ $('#modalCode').classList.remove('show'); };
+$('#btnCodeCopy').onclick = async function(){
   await navigator.clipboard.writeText($('#codeArea').value);
-  toast('클립보드에 복사 완료', 'suc');
+  toast('클립보드 복사 완료','suc');
 };
 
-$('#btnDbView').onclick = ()=>{ renderDbModal(); $('#modalDb').classList.add('show'); };
-$('#btnDbModalClose').onclick = ()=> $('#modalDb').classList.remove('show');
+$('#btnDbView').onclick = function(){ renderDbModal(); $('#modalDb').classList.add('show'); };
+$('#btnDbModalClose').onclick = function(){ $('#modalDb').classList.remove('show'); };
 $('#dbSearch').addEventListener('input', renderDbModal);
 
 function renderDbModal(){
   const q = ($('#dbSearch').value||'').toLowerCase().trim();
-  const entries = Object.entries(state.barcodeDb).filter(([bc,nm]) => !q || bc.toLowerCase().includes(q) || nm.toLowerCase().includes(q)).sort((a,b)=> a[0].localeCompare(b[0]));
+  const entries = Object.entries(state.barcodeDb)
+    .filter(function(e){ return !q || e[0].toLowerCase().includes(q) || e[1].toLowerCase().includes(q); })
+    .sort(function(a,b){ return a[0].localeCompare(b[0]); });
   let html = '<thead><tr><th style="width:160px;">바코드</th><th>품명</th><th style="width:50px;"></th></tr></thead><tbody>';
-  entries.forEach(([bc, nm])=>{
-    html += `<tr>
-      <td style="padding:6px 10px;font-family:Consolas,monospace;color:var(--kurly);font-weight:600;">${escapeHtml(bc)}</td>
-      <td><input class="cell-edit db-name-edit" data-bc="${escapeHtml(bc)}" value="${escapeHtml(nm)}"></td>
-      <td class="del-col"><button class="del-row db-row-del" data-bc="${escapeHtml(bc)}">×</button></td>
-    </tr>`;
+  entries.forEach(function(e){
+    const bc = e[0], nm = e[1];
+    html += '<tr><td style="padding:6px 10px;font-family:Consolas,monospace;color:var(--kurly);font-weight:600;">' + escapeHtml(bc) + '</td>';
+    html += '<td><input class="cell-edit db-name-edit" data-bc="' + escapeHtml(bc) + '" value="' + escapeHtml(nm) + '"></td>';
+    html += '<td class="del-col"><button class="del-row db-row-del" data-bc="' + escapeHtml(bc) + '">×</button></td></tr>';
   });
   if(!entries.length) html += '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--ink4);">검색 결과 없음</td></tr>';
   html += '</tbody>';
   $('#dbTable').innerHTML = html;
-  $('#dbTable').querySelectorAll('.db-name-edit').forEach(inp=>{
-    inp.onchange = ()=>{
+  $('#dbTable').querySelectorAll('.db-name-edit').forEach(function(inp){
+    inp.onchange = function(){
       const bc = inp.dataset.bc; const name = inp.value.trim();
       if(name){ state.barcodeDb[bc] = name; markDirty(); rebuildRows(); renderPreview(); updateStats(); toast('DB 갱신','suc'); }
     };
   });
-  $('#dbTable').querySelectorAll('.db-row-del').forEach(btn=>{
-    btn.onclick = ()=>{ delete state.barcodeDb[btn.dataset.bc]; markDirty(); renderDbModal(); rebuildRows(); renderPreview(); updateStats(); toast('1건 삭제', 'suc'); };
+  $('#dbTable').querySelectorAll('.db-row-del').forEach(function(btn){
+    btn.onclick = function(){
+      delete state.barcodeDb[btn.dataset.bc];
+      markDirty(); renderDbModal(); rebuildRows(); renderPreview(); updateStats();
+      toast('1건 삭제','suc');
+    };
   });
 }
 
 // ============================================================
 // 엑셀 다운로드
 // ============================================================
-$('#btnExport').onclick = ()=>{
+$('#btnExport').onclick = function(){
   if(!state.rows.length){ toast('내보낼 데이터가 없습니다','err'); return; }
   const boxMode = $('#boxMode').value;
   const aoa = [HEADERS];
-  state.rows.forEach(r => {
-    const out = [...r.cells];
-    if(boxMode === 'formula') out[11] = '';
-    else if(boxMode === 'empty') out[11] = '';
+  state.rows.forEach(function(r){
+    const out = r.cells.slice();
+    if(boxMode === 'formula' || boxMode === 'empty') out[11] = '';
     aoa.push(out);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -821,10 +824,10 @@ $('#btnExport').onclick = ()=>{
       const K = XLSX.utils.encode_cell({c:10, r:rowZero});
       const L = XLSX.utils.encode_cell({c:11, r:rowZero});
       const tq = state.rows[r].cells[10], bu = state.rows[r].cells[9];
-      if(tq !== '' && bu !== '' && bu){ ws[L] = { t:'n', f:`IFERROR(${K}/${J},"")` }; }
+      if(tq !== '' && bu !== '' && bu){ ws[L] = { t:'n', f: 'IFERROR(' + K + '/' + J + ',"")' }; }
     }
   }
-  ws['!cols'] = HEADERS.map(h=>{
+  ws['!cols'] = HEADERS.map(function(h){
     if(/품명/.test(h)) return {wch:38};
     if(/물류센터/.test(h)) return {wch:24};
     if(/SKU|마스터/.test(h)) return {wch:16};
@@ -836,31 +839,43 @@ $('#btnExport').onclick = ()=>{
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
   const fname = ($('#exportName').value||'kurly_wms') + '.xlsx';
   XLSX.writeFile(wb, fname);
-  toast('엑셀 다운로드: '+fname,'suc');
+  toast('엑셀 다운로드: ' + fname, 'suc');
 };
 
-$('#btnExportCsv').onclick = ()=>{
+$('#btnExportCsv').onclick = function(){
   if(!state.rows.length){ toast('데이터 없음','err'); return; }
-  const rows = [HEADERS, ...state.rows.map(r => r.cells)];
-  const csv = rows.map(r => r.map(c=>{ const s = (c??'').toString(); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }).join(',')).join('\n');
-  const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = ($('#exportName').value||'kurly_wms')+'.csv'; a.click();
+  const rows = [HEADERS].concat(state.rows.map(function(r){ return r.cells; }));
+  const csv = rows.map(function(r){
+    return r.map(function(c){
+      const s = (c==null?'':c).toString();
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+    }).join(',');
+  }).join('\n');
+  const blob = new Blob(['﻿' + csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = ($('#exportName').value||'kurly_wms') + '.csv';
+  a.click();
   toast('CSV 다운로드 완료','suc');
 };
-$('#btnCopy').onclick = async()=>{
+
+$('#btnCopy').onclick = async function(){
   if(!state.rows.length){ toast('데이터 없음','err'); return; }
-  const rows = [HEADERS, ...state.rows.map(r=>r.cells)];
-  const tsv = rows.map(r => r.join('\t')).join('\n');
+  const rows = [HEADERS].concat(state.rows.map(function(r){ return r.cells; }));
+  const tsv = rows.map(function(r){ return r.join('\t'); }).join('\n');
   await navigator.clipboard.writeText(tsv);
   toast('클립보드에 TSV 복사됨','suc');
 };
 
-// 페이지 떠날 때 미저장 변경 경고
-window.addEventListener('beforeunload', e=>{
+window.addEventListener('beforeunload', function(e){
   if(state.dirty){ e.preventDefault(); e.returnValue = ''; }
 });
 
-// 초기화
+window.addEventListener('error', function(e){
+  console.error('[KURLY ERROR]', e.message, e.filename, e.lineno);
+  toast('오류: ' + e.message, 'err');
+});
+
 updateStats();
 markClean();
 </script>
