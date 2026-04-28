@@ -203,6 +203,29 @@
   details summary { cursor:pointer; font-size:12.5px; color:var(--ink3); padding:6px 0; }
   details summary:hover { color:var(--ink); }
 
+  .o-actions { margin-top:8px; display:flex; gap:6px; }
+  .btn-mini { background:#fff; border:1px solid var(--border2); padding:5px 10px; border-radius:5px; font-size:11.5px; color:var(--ink2); cursor:pointer; transition:all 0.15s; }
+  .btn-mini:hover { border-color:var(--kurly); color:var(--kurly); background:var(--kurly-l); }
+
+  /* PDF 보기 모달 */
+  #modalPdf .modal { max-width:900px; }
+  #modalPdf .modal-body { background:#f3f4f6; padding:18px; }
+  .pdf-canvas-wrap { text-align:center; }
+  .pdf-canvas-wrap canvas { display:block; margin:0 auto 14px; box-shadow:0 2px 12px rgba(0,0,0,0.1); max-width:100%; height:auto; background:#fff; }
+  .pdf-loading { padding:60px; text-align:center; color:var(--ink3); font-size:14px; }
+
+  @media print {
+    body * { visibility: hidden; }
+    #modalPdf, #modalPdf * { visibility: visible; }
+    #modalPdf { position:absolute; left:0; top:0; width:100%; height:auto; padding:0; background:#fff; display:block; }
+    #modalPdf .modal-mask, #modalPdf .modal { box-shadow:none; max-height:none; max-width:100%; padding:0; margin:0; border-radius:0; }
+    #modalPdf .modal-hdr, #modalPdf .modal-ftr { display:none !important; }
+    #modalPdf .modal-body { padding:0; background:#fff; overflow:visible; }
+    #modalPdf .pdf-canvas-wrap canvas { box-shadow:none; page-break-after:always; max-width:100%; margin:0 auto; }
+    @page { margin: 10mm; }
+  }
+
+
   .dirty-badge { display:inline-block; background:var(--wrn); color:#fff; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600; margin-left:8px; }
 
   /* Action bar (above table) */
@@ -343,6 +366,28 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- PDF 원본 보기 모달 -->
+<div class="modal-mask" id="modalPdf">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="ic" style="background:var(--kurly-l);color:var(--kurly);">📄</div>
+      <div>
+        <div class="ti">거래명세서 원본</div>
+        <div class="sub" id="pdfModalSub">PDF 원본 페이지를 보면서 빈 셀에 직접 입력하세요</div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="pdf-canvas-wrap" id="pdfCanvasWrap">
+        <div class="pdf-loading">PDF 로딩 중...</div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" id="btnPdfClose">닫기</button>
+      <button class="btn btn-kurly" id="btnPdfPrint">🖨 인쇄</button>
+    </div>
+  </div>
+</div>
+
 <!-- DB 전체보기/편집 모달 -->
 <div class="modal-mask" id="modalDb">
   <div class="modal" style="max-width:880px;">
@@ -440,7 +485,9 @@ function normKurly(s){
 
 async function parseKurlyPdf(file){
   const arr = new Uint8Array(await file.arrayBuffer());
+  const arrCopy = new Uint8Array(arr);  // PDF.js가 데이터를 변형하므로 별도 복사 보관
   const pdf = await pdfjsLib.getDocument({data: arr}).promise;
+  const pageCount = pdf.numPages;
 
   const allLines = [];
   for(let i=1; i<=pdf.numPages; i++){
@@ -499,7 +546,7 @@ async function parseKurlyPdf(file){
   if(cur) groups.push(cur);
 
   const rawRows = groups.map(g => parseRowText(g.lines.map(l=>l.text).join(' ')));
-  return { header:{orderCode,orderDate,arriveDate,center}, rawRows };
+  return { header:{orderCode,orderDate,arriveDate,center}, rawRows, pdfData: arrCopy, pageCount: pageCount };
 }
 
 function parseRowText(t){
@@ -561,6 +608,8 @@ async function handleFiles(files){
     try{
       const result = await parseKurlyPdf(f);
       entry.header = result.header; entry.rawRows = result.rawRows; entry.ok = true;
+      entry.pdfData = result.pdfData;
+      entry.pageCount = result.pageCount;
       if(result.warning) entry.error = result.warning;
     }catch(err){ console.error(err); entry.error = String(err.message || err); }
     state.files.push(entry);
@@ -666,12 +715,15 @@ function renderChips(){
 
 function renderOrderSummary(){
   const sum = $('#orderSummary');
-  sum.innerHTML = state.files.filter(f=>f.ok).map(f=>{
+  const okFiles = state.files.filter(f=>f.ok);
+  sum.innerHTML = okFiles.map(f=>{
     const h = f.header || {}; const missing = [];
     if(!h.center) missing.push('센터');
     if(!h.arriveDate) missing.push('입고일');
     if(!h.orderCode) missing.push('발주코드');
     if(!f.rawRows.length) missing.push('상품행');
+    // 원본 인덱스 (state.files 기준)
+    const origIdx = state.files.indexOf(f);
     return `<div class="order-card">
       <div class="o-code">${escapeHtml(h.orderCode || '(발주코드 없음)')}</div>
       <div class="o-meta">
@@ -681,8 +733,21 @@ function renderOrderSummary(){
         <span><b>상품:</b> ${f.rawRows.length}건</span>
       </div>
       ${missing.length ? `<div class="o-warn">⚠ 누락: ${missing.join(', ')}</div>` : ''}
+      <div class="o-actions">
+        <button class="btn-mini" data-act="view" data-i="${origIdx}">🖼 원본 보기</button>
+        <button class="btn-mini" data-act="print" data-i="${origIdx}">🖨 인쇄</button>
+      </div>
     </div>`;
   }).join('');
+  // 버튼 핸들러
+  sum.querySelectorAll('.btn-mini').forEach(btn=>{
+    btn.onclick = function(){
+      const idx = +btn.dataset.i;
+      const act = btn.dataset.act;
+      if(act === 'view') openPdfModal(idx);
+      else if(act === 'print') printPdfFile(idx);
+    };
+  });
 }
 
 function renderPreview(){
@@ -1109,6 +1174,75 @@ async function cloudRemoveBarcode(bc){
 // ============================================================
 window.toast = toast;
 
+
+// ============================================================
+// PDF 원본 보기 / 인쇄 (Step 4)
+// ============================================================
+let _currentPdfFileIdx = -1;
+
+async function renderPdfInContainer(fileIdx, containerEl){
+  const f = state.files[fileIdx];
+  if(!f || !f.pdfData){
+    containerEl.innerHTML = '<div class="pdf-loading">PDF 데이터 없음</div>';
+    return;
+  }
+  containerEl.innerHTML = '<div class="pdf-loading">PDF 렌더링 중...</div>';
+  try {
+    // arrayBuffer 복사 (PDF.js가 변형하므로)
+    const dataCopy = new Uint8Array(f.pdfData);
+    const pdf = await pdfjsLib.getDocument({data: dataCopy}).promise;
+    containerEl.innerHTML = '';
+    // 입고 준수사항(보통 1페이지)는 자동 스킵 — 명세서 페이지만 (텍스트가 충분한 페이지)
+    for(let i=1; i<=pdf.numPages; i++){
+      const page = await pdf.getPage(i);
+      // 텍스트 양 확인 — 30자 이하면 이미지 페이지로 판단해 스킵
+      const tc = await page.getTextContent();
+      const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
+      if(txt.length < 30){
+        console.log('[PDF] 페이지', i, '스킵 (텍스트 짧음, 이미지로 추정)');
+        continue;
+      }
+      const viewport = page.getViewport({scale: 1.5});
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      containerEl.appendChild(canvas);
+      await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+    }
+    if(!containerEl.querySelector('canvas')){
+      containerEl.innerHTML = '<div class="pdf-loading">표시할 명세서 페이지가 없습니다</div>';
+    }
+  } catch(e){
+    console.error('PDF 렌더 실패:', e);
+    containerEl.innerHTML = '<div class="pdf-loading" style="color:var(--dng);">PDF 렌더 실패: ' + e.message + '</div>';
+  }
+}
+
+function openPdfModal(fileIdx){
+  _currentPdfFileIdx = fileIdx;
+  const f = state.files[fileIdx];
+  if(!f) return;
+  $('#pdfModalSub').textContent = (f.name || '') + (f.header && f.header.orderCode ? ' · ' + f.header.orderCode : '');
+  $('#modalPdf').classList.add('show');
+  renderPdfInContainer(fileIdx, $('#pdfCanvasWrap'));
+}
+
+async function printPdfFile(fileIdx){
+  // 모달 열고 렌더링이 끝나면 print() 호출 (@media print으로 모달만 인쇄)
+  _currentPdfFileIdx = fileIdx;
+  const f = state.files[fileIdx];
+  if(!f) return;
+  $('#pdfModalSub').textContent = (f.name || '') + (f.header && f.header.orderCode ? ' · ' + f.header.orderCode : '');
+  $('#modalPdf').classList.add('show');
+  await renderPdfInContainer(fileIdx, $('#pdfCanvasWrap'));
+  // 렌더링 완료 후 약간 대기 후 인쇄 다이얼로그
+  setTimeout(function(){ window.print(); }, 300);
+}
+
+$('#btnPdfClose').onclick = function(){ $('#modalPdf').classList.remove('show'); $('#pdfCanvasWrap').innerHTML = ''; };
+$('#btnPdfPrint').onclick = function(){ window.print(); };
+
+
 function initFirebaseSync(){
   if(!window.kurlyDb){
     window.addEventListener('kurlyDbReady', initFirebaseSync, {once:true});
@@ -1142,8 +1276,8 @@ function initFirebaseSync(){
 
 updateStats();
 initFirebaseSync();
-console.log('[KURLY v3.5] 로드 완료. handleFiles에서 DB 강제 동기화');
-setTimeout(()=>toast('Kurly Parser v3.5 로드 완료',''), 300);
+console.log('[KURLY v3.6] 로드 완료 — PDF 보기/인쇄 추가');
+setTimeout(()=>toast('Kurly Parser v3.6 로드 완료',''), 300);
 </script>
 </body>
 </html>
