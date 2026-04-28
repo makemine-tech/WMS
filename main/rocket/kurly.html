@@ -35,7 +35,13 @@
           if(window.toast) window.toast('☁ Firebase 읽기 실패: ' + err.message, 'err');
         });
       },
-      async setBarcode(bc, name) { return set(ref(db, 'barcodes/' + bc), name); },
+      async setBarcode(bc, dataObj) {
+        const obj = (typeof dataObj === 'object' && dataObj !== null) ? dataObj : { name: String(dataObj) };
+        return set(ref(db, 'barcodes/' + bc), obj);
+      },
+      async updateBarcodeField(bc, partial) {
+        return update(ref(db, 'barcodes/' + bc), partial);
+      },
       async updateBarcodes(updates) { return update(barcodesRef, updates); },
       async removeBarcode(bc) { return remove(ref(db, 'barcodes/' + bc)); },
       async clearAll() { return remove(barcodesRef); },
@@ -225,7 +231,7 @@
     <div class="hdr-icon">컬리</div>
     <div>
       <div class="hdr-name">Kurly 거래명세서 → WMS 엑셀 변환</div>
-      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.2</div>
+      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.3</div>
     </div>
   </div>
   <a href="index.html" class="btn-home">← 메인</a>
@@ -290,7 +296,7 @@
       <span><i style="background:var(--kurly-l);border:1px solid var(--kurly);"></i> 고정값 "컬리"</span>
       <span><i style="background:var(--suc-l);border:1px solid var(--suc);"></i> 자동 계산 (박스수)</span>
       <span><i style="background:var(--dng-l);border:1px solid var(--dng);"></i> 미등록 — 직접 입력 필요</span>
-      <span style="color:var(--ink3);">💡 셀 클릭 후 입력 → 다른 곳 클릭하면 자동 저장</span>
+      <span style="color:var(--ink3);">💡 빨간 셀(품명/박스당입수)에 입력 → 다른 곳 클릭 시 자동 클라우드 저장</span>
     </div>
   </div>
 
@@ -612,10 +618,22 @@ function rebuildRows(){
   state.files.filter(f=>f.ok).forEach(f=>{
     const h = f.header || {};
     f.rawRows.forEach(r=>{
-      const name = state.barcodeDb[r.barcode] || '';
+      const dbEntry = state.barcodeDb[r.barcode];
+      const dbObj = (dbEntry && typeof dbEntry === 'object') ? dbEntry : (typeof dbEntry === 'string' ? {name: dbEntry} : null);
+      const dbName = dbObj ? (dbObj.name || '') : '';
+      const dbBoxUnit = (dbObj && dbObj.boxUnit !== undefined && dbObj.boxUnit !== null && dbObj.boxUnit !== '') ? dbObj.boxUnit : null;
+      const pdfBoxUnit = toNum(r.boxUnit);
+      const totalQty = toNum(r.totalQty);
+      const boxUnit = (dbBoxUnit !== null) ? dbBoxUnit : (pdfBoxUnit !== '' ? pdfBoxUnit : '');
       const row = {
-        cells: ['컬리','','','', name, r.barcode||'', h.center||'', formatMD(h.arriveDate), h.orderDate||'', toNum(r.boxUnit), toNum(r.totalQty), ''],
-        meta: { file:f.name, orderCode:h.orderCode, master:r.master, rawName:r.rawName, missingName: !name && !!r.barcode, missingBarcode: !r.barcode }
+        cells: ['컬리','','','', dbName, r.barcode||'', h.center||'', formatMD(h.arriveDate), h.orderDate||'', boxUnit, totalQty, ''],
+        meta: {
+          file:f.name, orderCode:h.orderCode, master:r.master,
+          rawName: r.rawName, rawBoxUnit: pdfBoxUnit,
+          missingName: !dbName && !!r.barcode,
+          missingBoxUnit: (dbBoxUnit === null) && !!r.barcode,
+          missingBarcode: !r.barcode
+        }
       };
       const tq = +row.cells[10] || 0, bu = +row.cells[9] || 0;
       if(tq && bu) row.cells[11] = +(tq/bu).toFixed(4);
@@ -691,12 +709,15 @@ function renderPreview(){
       if(ci === 5 && r.meta.missingBarcode) cls = 'miss';
       if(ci === 6 && !v) cls = 'miss';
       if(ci === 7 && !v) cls = 'miss';
-      if((ci === 9 || ci === 10) && (v === '' || v === null || v === undefined)) cls = 'miss';
+      if(ci === 9 && r.meta.missingBoxUnit) cls = 'miss';
+      if(ci === 10 && (v === '' || v === null || v === undefined)) cls = 'miss';
       const display = v === '' || v === null || v === undefined ? '' : v;
-      // 품명 셀(ci=4)이 미등록이면 PDF raw 품명을 placeholder로 표시
       let placeholder = '';
       if(ci === 4 && r.meta.missingName && r.meta.rawName){
         placeholder = `placeholder="PDF: ${escapeHtml(r.meta.rawName)}"`;
+      }
+      if(ci === 9 && r.meta.missingBoxUnit && r.meta.rawBoxUnit !== ''){
+        placeholder = `placeholder="PDF: ${escapeHtml(String(r.meta.rawBoxUnit))}"`;
       }
       const title = display !== '' ? ' title="' + escapeHtml(String(display)) + '"' : '';
       html += `<td class="${cls}"${title}><input class="cell-edit" data-r="${ri}" data-c="${ci}" value="${escapeHtml(String(display))}" ${placeholder}></td>`;
@@ -727,39 +748,77 @@ function onCellEdit(e){
     const bu = +state.rows[ri].cells[9] || 0;
     const tq = +state.rows[ri].cells[10] || 0;
     state.rows[ri].cells[11] = (tq && bu) ? +(tq/bu).toFixed(4) : '';
-    const tgt = $(`.cell-edit[data-r="${ri}"][data-c="11"]`);
+    const tgt = $('.cell-edit[data-r="'+ri+'"][data-c="11"]');
     if(tgt) tgt.value = state.rows[ri].cells[11];
   }
-  // 품명 셀(ci=4) 입력 시 → DB 자동 등록
+
+  // 품명 셀(ci=4) → DB의 name 갱신
   if(ci === 4){
     const bc = state.rows[ri].cells[5];
     if(bc && newVal && newVal.trim()){
       const name = newVal.trim();
       const wasMissing = state.rows[ri].meta.missingName;
-      state.barcodeDb[bc] = name;
-      cloudSetBarcode(bc, name).then(ok => {
-        if(ok && wasMissing) toast('☁ 클라우드 등록: ' + bc.slice(0,8) + '... → ' + name.slice(0,15), 'suc');
-        else if(ok) toast('☁ 클라우드 갱신: ' + bc.slice(0,8) + '...', 'suc');
+      if(typeof state.barcodeDb[bc] !== 'object' || state.barcodeDb[bc] === null){
+        state.barcodeDb[bc] = (typeof state.barcodeDb[bc] === 'string') ? { name: state.barcodeDb[bc] } : {};
+      }
+      state.barcodeDb[bc].name = name;
+      cloudSetField(bc, 'name', name).then(ok => {
+        if(ok && wasMissing) toast('☁ 품명 등록: ' + bc.slice(0,8) + '... → ' + name.slice(0,15), 'suc');
+        else if(ok) toast('☁ 품명 갱신: ' + bc.slice(0,8) + '...', 'suc');
       });
-      // 같은 바코드 다른 행도 갱신
       state.rows.forEach((r, idx) => {
         if(r.cells[5] === bc){
           r.cells[4] = name;
           r.meta.missingName = false;
           if(idx !== ri){
-            const otherInp = $(`.cell-edit[data-r="${idx}"][data-c="4"]`);
+            const otherInp = $('.cell-edit[data-r="'+idx+'"][data-c="4"]');
             if(otherInp) otherInp.value = name;
           }
         }
       });
-      renderPreview(); // 미등록 카운트 갱신
+      renderPreview();
     }
   }
+
+  // 박스당입수 셀(ci=9) → DB의 boxUnit 갱신
+  if(ci === 9){
+    const bc = state.rows[ri].cells[5];
+    const num = toNum(newVal);
+    if(bc && num !== '' && num > 0){
+      const wasMissing = state.rows[ri].meta.missingBoxUnit;
+      if(typeof state.barcodeDb[bc] !== 'object' || state.barcodeDb[bc] === null){
+        state.barcodeDb[bc] = {};
+      }
+      state.barcodeDb[bc].boxUnit = num;
+      cloudSetField(bc, 'boxUnit', num).then(ok => {
+        if(ok && wasMissing) toast('☁ 박스당입수 등록: ' + bc.slice(0,8) + '... → ' + num, 'suc');
+        else if(ok) toast('☁ 박스당입수 갱신: ' + bc.slice(0,8) + '... → ' + num, 'suc');
+      });
+      state.rows.forEach((r, idx) => {
+        if(r.cells[5] === bc){
+          r.cells[9] = num;
+          r.meta.missingBoxUnit = false;
+          const tq = +r.cells[10] || 0;
+          r.cells[11] = (tq && num) ? +(tq/num).toFixed(4) : '';
+          if(idx !== ri){
+            const otherInp = $('.cell-edit[data-r="'+idx+'"][data-c="9"]');
+            if(otherInp) otherInp.value = num;
+            const calcInp = $('.cell-edit[data-r="'+idx+'"][data-c="11"]');
+            if(calcInp) calcInp.value = r.cells[11];
+          }
+        }
+      });
+      renderPreview();
+    }
+  }
+
+  // 바코드 셀(ci=5) → DB lookup으로 품명+박스당입수 자동 채움
   if(ci === 5){
     const newBc = newVal.trim();
-    if(newBc && state.barcodeDb[newBc]){
-      state.rows[ri].cells[4] = state.barcodeDb[newBc];
-      state.rows[ri].meta.missingName = false;
+    const dbEntry = state.barcodeDb[newBc];
+    if(newBc && dbEntry && typeof dbEntry === 'object'){
+      if(dbEntry.name){ state.rows[ri].cells[4] = dbEntry.name; state.rows[ri].meta.missingName = false; }
+      if(dbEntry.boxUnit !== undefined){ state.rows[ri].cells[9] = dbEntry.boxUnit; state.rows[ri].meta.missingBoxUnit = false; }
       renderPreview();
     }
   }
@@ -779,29 +838,45 @@ function updateStats(){
 // 일괄 등록 (PDF에서 추출한 raw 품명을 그대로 DB에 등록)
 // ============================================================
 $('#btnBulkRegister').onclick = function(){
-  const targets = state.rows.filter(function(r){ return r.meta.missingName && r.meta.rawName; });
+  const targets = state.rows.filter(function(r){
+    return (r.meta.missingName && r.meta.rawName) || (r.meta.missingBoxUnit && r.meta.rawBoxUnit !== '' && r.meta.rawBoxUnit > 0);
+  });
   if(!targets.length){ toast('일괄 등록할 항목이 없습니다','err'); return; }
-  if(!confirm('PDF에서 추출한 품명을 그대로 ' + targets.length + '건 등록합니다.\n(나중에 DB 전체보기에서 수정 가능)')) return;
+  if(!confirm('PDF에서 추출한 품명/박스당입수를 ' + targets.length + '행에 일괄 등록합니다.\n(나중에 DB 전체보기에서 수정 가능)')) return;
   let count = 0;
   const updates = {};
   targets.forEach(function(r){
     const bc = r.cells[5];
-    const name = r.meta.rawName;
-    if(bc && name){
-      state.barcodeDb[bc] = name;
-      updates[bc] = name;
+    if(!bc) return;
+    const existing = (typeof state.barcodeDb[bc] === 'object' && state.barcodeDb[bc] !== null) ? state.barcodeDb[bc] : {};
+    const merged = { ...existing };
+    let changed = false;
+    if(r.meta.rawName && r.meta.missingName){ merged.name = r.meta.rawName; changed = true; }
+    if(r.meta.rawBoxUnit !== '' && r.meta.rawBoxUnit > 0 && r.meta.missingBoxUnit){ merged.boxUnit = r.meta.rawBoxUnit; changed = true; }
+    if(changed){
+      state.barcodeDb[bc] = merged;
+      updates[bc] = merged;
       state.rows.forEach(function(rr){
-        if(rr.cells[5] === bc){ rr.cells[4] = name; rr.meta.missingName = false; }
+        if(rr.cells[5] === bc){
+          if(merged.name){ rr.cells[4] = merged.name; rr.meta.missingName = false; }
+          if(merged.boxUnit !== undefined){
+            rr.cells[9] = merged.boxUnit;
+            rr.meta.missingBoxUnit = false;
+            const tq = +rr.cells[10] || 0;
+            rr.cells[11] = (tq && merged.boxUnit) ? +(tq/merged.boxUnit).toFixed(4) : '';
+          }
+        }
       });
       count++;
     }
   });
   if(count > 0){
     cloudUpdateBarcodes(updates).then(ok => {
-      if(ok) toast('☁ ' + count + '건 클라우드 일괄 등록 완료', 'suc');
+      if(ok) toast('☁ ' + count + '건 클라우드 일괄 등록 (품명 + 박스당입수)', 'suc');
     });
-    renderPreview();
-    updateStats();
+    renderPreview(); updateStats();
+  } else {
+    toast('등록할 신규 항목이 없습니다','err');
   }
 };
 
@@ -900,24 +975,47 @@ $('#dbSearch').addEventListener('input', renderDbModal);
 function renderDbModal(){
   const q = ($('#dbSearch').value||'').toLowerCase().trim();
   const entries = Object.entries(state.barcodeDb)
-    .filter(function(e){ return !q || e[0].toLowerCase().includes(q) || e[1].toLowerCase().includes(q); })
+    .filter(function(e){
+      const obj = (typeof e[1] === 'object' && e[1] !== null) ? e[1] : { name: String(e[1]||'') };
+      const nm = obj.name || '';
+      return !q || e[0].toLowerCase().includes(q) || nm.toLowerCase().includes(q);
+    })
     .sort(function(a,b){ return a[0].localeCompare(b[0]); });
-  let html = '<thead><tr><th style="width:160px;">바코드</th><th>품명</th><th style="width:50px;"></th></tr></thead><tbody>';
+  let html = '<thead><tr><th style="width:150px;">바코드</th><th>품명</th><th style="width:120px;">박스당입수</th><th style="width:50px;"></th></tr></thead><tbody>';
   entries.forEach(function(e){
-    const bc = e[0], nm = e[1];
-    html += '<tr><td style="padding:6px 10px;font-family:Consolas,monospace;color:var(--kurly);font-weight:600;">' + escapeHtml(bc) + '</td>';
-    html += '<td><input class="cell-edit db-name-edit" data-bc="' + escapeHtml(bc) + '" value="' + escapeHtml(nm) + '"></td>';
-    html += '<td class="del-col"><button class="del-row db-row-del" data-bc="' + escapeHtml(bc) + '">×</button></td></tr>';
+    const bc = e[0];
+    const obj = (typeof e[1] === 'object' && e[1] !== null) ? e[1] : { name: String(e[1]||'') };
+    const nm = obj.name || '';
+    const bu = (obj.boxUnit !== undefined && obj.boxUnit !== null) ? obj.boxUnit : '';
+    html += '<tr>';
+    html += '<td style="padding:6px 10px;font-family:Consolas,monospace;color:var(--kurly);font-weight:600;">' + escapeHtml(bc) + '</td>';
+    html += '<td><input class="cell-edit db-name-edit" data-bc="' + escapeHtml(bc) + '" value="' + escapeHtml(nm) + '" placeholder="(품명)"></td>';
+    html += '<td><input class="cell-edit db-box-edit" data-bc="' + escapeHtml(bc) + '" value="' + escapeHtml(String(bu)) + '" placeholder="(예: 3)" style="text-align:right;"></td>';
+    html += '<td class="del-col"><button class="del-row db-row-del" data-bc="' + escapeHtml(bc) + '">×</button></td>';
+    html += '</tr>';
   });
-  if(!entries.length) html += '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--ink4);">검색 결과 없음</td></tr>';
+  if(!entries.length) html += '<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--ink4);">검색 결과 없음</td></tr>';
   html += '</tbody>';
   $('#dbTable').innerHTML = html;
   $('#dbTable').querySelectorAll('.db-name-edit').forEach(function(inp){
     inp.onchange = function(){
       const bc = inp.dataset.bc; const name = inp.value.trim();
       if(name){
-        state.barcodeDb[bc] = name;
-        cloudSetBarcode(bc, name).then(ok => { if(ok) toast('☁ DB 갱신', 'suc'); });
+        if(typeof state.barcodeDb[bc] !== 'object' || state.barcodeDb[bc] === null) state.barcodeDb[bc] = {};
+        state.barcodeDb[bc].name = name;
+        cloudSetField(bc, 'name', name).then(ok => { if(ok) toast('☁ 품명 갱신', 'suc'); });
+        rebuildRows(); renderPreview(); updateStats();
+      }
+    };
+  });
+  $('#dbTable').querySelectorAll('.db-box-edit').forEach(function(inp){
+    inp.onchange = function(){
+      const bc = inp.dataset.bc;
+      const num = toNum(inp.value);
+      if(num !== '' && num > 0){
+        if(typeof state.barcodeDb[bc] !== 'object' || state.barcodeDb[bc] === null) state.barcodeDb[bc] = {};
+        state.barcodeDb[bc].boxUnit = num;
+        cloudSetField(bc, 'boxUnit', num).then(ok => { if(ok) toast('☁ 박스당입수 갱신', 'suc'); });
         rebuildRows(); renderPreview(); updateStats();
       }
     };
@@ -1053,8 +1151,8 @@ async function cloudRemoveBarcode(bc){
 updateStats();
 initFirebaseSync();
 
-console.log('[KURLY v3.2] 로드 완료. Firebase 동기화. PDF.js:', typeof pdfjsLib);
-setTimeout(()=>{ toast('Kurly Parser v3.2 로드 완료 (Firebase 동기화)', ''); }, 300);
+console.log('[KURLY v3.3] 로드 완료. DB={name,boxUnit}. PDF.js:', typeof pdfjsLib);
+setTimeout(()=>{ toast('Kurly Parser v3.3 로드 완료 (마스터 DB 구조)', ''); }, 300);
 </script>
 </body>
 </html>
