@@ -203,6 +203,20 @@
   details summary { cursor:pointer; font-size:12.5px; color:var(--ink3); padding:6px 0; }
   details summary:hover { color:var(--ink); }
 
+  /* 사이드 PDF 도우미 패널 */
+  .side-panel { position:fixed; right:0; top:0; bottom:0; width:420px; background:#fff; border-left:1px solid var(--border); box-shadow:-6px 0 18px rgba(0,0,0,0.06); display:none; flex-direction:column; z-index:50; }
+  .side-panel.open { display:flex; }
+  body.side-open .container { padding-right:440px; transition:padding 0.2s; }
+  .sp-hdr { padding:12px 16px; background:var(--hdr-bg); color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:space-between; }
+  .sp-hdr .sp-title { display:flex; align-items:center; gap:8px; }
+  .sp-hdr .sp-sub { font-size:11px; color:rgba(255,255,255,0.6); font-weight:400; margin-top:2px; }
+  .sp-close { background:transparent; border:0; color:#fff; cursor:pointer; font-size:20px; padding:0 6px; }
+  .sp-close:hover { opacity:0.7; }
+  .sp-body { flex:1; overflow:auto; padding:14px; background:#f3f4f6; position:relative; }
+  .sp-empty { padding:60px 20px; text-align:center; color:var(--ink3); font-size:13px; line-height:1.6; }
+  .sp-row-marker { position:absolute; left:0; right:0; height:3px; background:var(--kurly); box-shadow:0 0 8px var(--kurly); pointer-events:none; transition:top 0.2s; opacity:0.85; }
+  .sp-body canvas { display:block; margin:0 auto 12px; box-shadow:0 2px 12px rgba(0,0,0,0.08); max-width:100%; height:auto; background:#fff; }
+
   .o-actions { margin-top:8px; display:flex; gap:6px; }
   .btn-mini { background:#fff; border:1px solid var(--border2); padding:5px 10px; border-radius:5px; font-size:11.5px; color:var(--ink2); cursor:pointer; transition:all 0.15s; }
   .btn-mini:hover { border-color:var(--kurly); color:var(--kurly); background:var(--kurly-l); }
@@ -311,6 +325,11 @@
       <b>안내:</b> <span id="parseHintMsg">PDF 분석 중...</span>
     </div>
 
+    <div class="summary-tools" style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <button class="btn btn-secondary" id="btnPrintAll" style="padding:6px 12px;font-size:12px;">🖨 전체 인쇄 (모든 명세서)</button>
+      <button class="btn btn-secondary" id="btnSidePanel" style="padding:6px 12px;font-size:12px;">📄 PDF 도우미 켜기</button>
+      <span style="font-size:11px;color:var(--ink3);margin-left:auto;">💡 도우미 켜고 빨간 셀 클릭하면 해당 PDF 자동 표시</span>
+    </div>
     <div class="order-summary" id="orderSummary"></div>
 
     <div class="table-wrap" id="previewTable"></div>
@@ -385,6 +404,20 @@
       <button class="btn btn-secondary" id="btnPdfClose">닫기</button>
       <button class="btn btn-kurly" id="btnPdfPrint">🖨 인쇄</button>
     </div>
+  </div>
+</div>
+
+<!-- 사이드 PDF 도우미 패널 -->
+<div class="side-panel" id="sidePanel">
+  <div class="sp-hdr">
+    <div class="sp-title">
+      📄 PDF 도우미
+      <span class="sp-sub" id="spSub" style="margin-left:8px;">셀 클릭 시 자동 표시</span>
+    </div>
+    <button class="sp-close" id="btnSpClose">×</button>
+  </div>
+  <div class="sp-body" id="sidePdfWrap">
+    <div class="sp-empty">📄<br><br>표의 빨간 셀을 클릭하면<br>해당 발주서의 PDF가 여기 표시됩니다.<br><br>원본을 보면서 빈 셀을 채울 수 있습니다.</div>
   </div>
 </div>
 
@@ -540,12 +573,16 @@ async function parseKurlyPdf(file){
     if(endRe.test(ln.text)) break;
     if(masterRe.test(ln.text)){
       if(cur) groups.push(cur);
-      cur = { lines: [ln] };
+      cur = { lines: [ln], yPos: ln.y };  // PDF y 좌표 보관 (좌하 원점)
     } else if(cur){ cur.lines.push(ln); }
   }
   if(cur) groups.push(cur);
 
-  const rawRows = groups.map(g => parseRowText(g.lines.map(l=>l.text).join(' ')));
+  const rawRows = groups.map(function(g){
+    const row = parseRowText(g.lines.map(l=>l.text).join(' '));
+    row.yPos = g.yPos;
+    return row;
+  });
   return { header:{orderCode,orderDate,arriveDate,center}, rawRows, pdfData: arrCopy, pageCount: pageCount };
 }
 
@@ -682,6 +719,7 @@ function rebuildRows(){
         meta: {
           file:f.name, orderCode:h.orderCode, master:r.master,
           rawName: r.rawName, rawBoxUnit: pdfBoxUnit,
+          yPos: r.yPos,  // PDF 행 위치 (좌하 원점)
           missingName: !dbName && !!r.barcode,
           missingBoxUnit: (dbBoxUnit === null) && !!r.barcode,
           missingBarcode: !r.barcode
@@ -795,7 +833,7 @@ function renderPreview(){
   html += '</tbody></table>';
   wrap.innerHTML = html;
 
-  wrap.querySelectorAll('.cell-edit').forEach(inp=>{ inp.addEventListener('change', onCellEdit); inp.addEventListener('blur', onCellEdit); });
+  wrap.querySelectorAll('.cell-edit').forEach(inp=>{ inp.addEventListener('change', onCellEdit); inp.addEventListener('blur', onCellEdit); inp.addEventListener('focus', onCellFocus); });
   wrap.querySelectorAll('.del-row').forEach(btn=>{ btn.onclick = ()=>{ state.rows.splice(+btn.dataset.r, 1); renderPreview(); updateStats(); }; });
 
   const total = state.rows.length;
@@ -1241,6 +1279,156 @@ async function printPdfFile(fileIdx){
 
 $('#btnPdfClose').onclick = function(){ $('#modalPdf').classList.remove('show'); $('#pdfCanvasWrap').innerHTML = ''; };
 $('#btnPdfPrint').onclick = function(){ window.print(); };
+
+
+
+// ============================================================
+// 사이드 PDF 도우미 (Step 5-B/C)
+// ============================================================
+let _sidePdfFileIdx = -1;
+let _sidePagePositions = [];  // canvas 누적 Y 위치 (페이지별)
+let _sidePdfPageHeight = 0;
+
+async function loadSidePdf(fileIdx){
+  const f = state.files[fileIdx];
+  if(!f || !f.pdfData){
+    $('#sidePdfWrap').innerHTML = '<div class="sp-empty">PDF 데이터가 없습니다</div>';
+    return;
+  }
+  if(_sidePdfFileIdx === fileIdx) return;  // 같은 파일이면 다시 안 그림
+  _sidePdfFileIdx = fileIdx;
+  $('#spSub').textContent = (f.name || '').slice(0, 32) + ' · ' + (f.header && f.header.orderCode || '');
+  const wrap = $('#sidePdfWrap');
+  wrap.innerHTML = '<div class="sp-empty">PDF 렌더링 중...</div>';
+  try {
+    const dataCopy = new Uint8Array(f.pdfData);
+    const pdf = await pdfjsLib.getDocument({data: dataCopy}).promise;
+    wrap.innerHTML = '';
+    _sidePagePositions = [];
+    _sidePdfPageHeight = 0;
+    // 텍스트 짧은(이미지) 페이지는 스킵
+    for(let i=1; i<=pdf.numPages; i++){
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
+      if(txt.length < 30) continue;
+      const viewport = page.getViewport({scale: 1.2});
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.dataset.pageNum = i;
+      canvas.dataset.pdfHeight = page.view[3];  // PDF 좌표계 페이지 높이
+      wrap.appendChild(canvas);
+      await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+      _sidePagePositions.push({pageNum: i, canvas, viewport, pdfHeight: page.view[3]});
+    }
+    if(!_sidePagePositions.length){
+      wrap.innerHTML = '<div class="sp-empty">표시할 페이지가 없습니다</div>';
+    }
+  } catch(e){
+    console.error('side PDF 렌더 실패:', e);
+    wrap.innerHTML = '<div class="sp-empty" style="color:var(--dng);">PDF 렌더 실패: ' + e.message + '</div>';
+    _sidePdfFileIdx = -1;
+  }
+}
+
+function highlightRowInSidePdf(yPdf){
+  // PDF 좌표(원점 좌하)를 canvas 픽셀(원점 좌상)로 변환해서 marker 표시
+  if(!_sidePagePositions.length) return;
+  const wrap = $('#sidePdfWrap');
+  // 기존 marker 제거
+  const old = wrap.querySelector('.sp-row-marker');
+  if(old) old.remove();
+  if(typeof yPdf !== 'number' || isNaN(yPdf)) return;
+  // 첫 페이지(명세서) 사용
+  const p = _sidePagePositions[0];
+  if(!p || !p.canvas) return;
+  // PDF 페이지 높이 → canvas 픽셀로 비율 변환
+  const ratio = p.canvas.height / p.pdfHeight;
+  const yCanvasFromTop = (p.pdfHeight - yPdf) * ratio;
+  const marker = document.createElement('div');
+  marker.className = 'sp-row-marker';
+  // canvas의 wrap 내 position
+  const canvasOffsetTop = p.canvas.offsetTop;
+  marker.style.top = (canvasOffsetTop + yCanvasFromTop) + 'px';
+  wrap.appendChild(marker);
+  // 자동 스크롤
+  wrap.scrollTo({ top: Math.max(0, canvasOffsetTop + yCanvasFromTop - 80), behavior:'smooth' });
+}
+
+// 셀 포커스 시 호출 (renderPreview에서 input에 focus 이벤트 추가 필요)
+function onCellFocus(e){
+  if(!$('#sidePanel').classList.contains('open')) return;
+  const inp = e.target;
+  if(!inp || !inp.dataset) return;
+  const ri = +inp.dataset.r;
+  if(isNaN(ri)) return;
+  const row = state.rows[ri];
+  if(!row || !row.meta) return;
+  const fileIdx = state.files.findIndex(f => f.name === row.meta.file);
+  if(fileIdx < 0) return;
+  loadSidePdf(fileIdx).then(()=>{
+    // 행의 Y좌표 표시 — meta에 yPos 있으면 사용
+    if(row.meta.yPos != null) highlightRowInSidePdf(row.meta.yPos);
+  });
+}
+
+// 사이드 패널 토글
+function toggleSidePanel(open){
+  const panel = $('#sidePanel');
+  const btn = $('#btnSidePanel');
+  if(open === undefined) open = !panel.classList.contains('open');
+  if(open){
+    panel.classList.add('open');
+    document.body.classList.add('side-open');
+    if(btn) btn.textContent = '📄 PDF 도우미 끄기';
+  } else {
+    panel.classList.remove('open');
+    document.body.classList.remove('side-open');
+    if(btn) btn.textContent = '📄 PDF 도우미 켜기';
+  }
+}
+$('#btnSidePanel').onclick = ()=> toggleSidePanel();
+$('#btnSpClose').onclick = ()=> toggleSidePanel(false);
+
+// ============================================================
+// 일괄 인쇄 (Step 5-A)
+// ============================================================
+$('#btnPrintAll').onclick = async function(){
+  const okFiles = state.files.filter(f=>f.ok && f.pdfData);
+  if(!okFiles.length){ toast('인쇄할 PDF가 없습니다','err'); return; }
+  // 모달 영역에 모든 PDF의 명세서 페이지를 다 그린 후 print()
+  $('#pdfModalSub').textContent = okFiles.length + '개 거래명세서 일괄 인쇄';
+  $('#modalPdf').classList.add('show');
+  const wrap = $('#pdfCanvasWrap');
+  wrap.innerHTML = '<div class="pdf-loading">전체 PDF 렌더링 중... (' + okFiles.length + '건)</div>';
+  // 모두 렌더링
+  const allCanvases = [];
+  for(let fi=0; fi<okFiles.length; fi++){
+    const f = okFiles[fi];
+    try {
+      const dataCopy = new Uint8Array(f.pdfData);
+      const pdf = await pdfjsLib.getDocument({data: dataCopy}).promise;
+      for(let i=1; i<=pdf.numPages; i++){
+        const page = await pdf.getPage(i);
+        const tc = await page.getTextContent();
+        const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
+        if(txt.length < 30) continue;
+        const viewport = page.getViewport({scale: 1.5});
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        allCanvases.push({canvas, page, viewport});
+      }
+    } catch(e){ console.error('일괄 렌더 실패:', f.name, e); }
+  }
+  wrap.innerHTML = '';
+  for(const item of allCanvases){
+    wrap.appendChild(item.canvas);
+    await item.page.render({canvasContext: item.canvas.getContext('2d'), viewport: item.viewport}).promise;
+  }
+  setTimeout(()=> window.print(), 500);
+};
 
 
 function initFirebaseSync(){
