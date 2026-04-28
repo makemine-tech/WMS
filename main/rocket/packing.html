@@ -278,37 +278,41 @@
   .info-table td { color: #0f172a; font-weight: 500; }
   .info-table td.val-accent { color: #2563eb; font-weight: 700; font-size: 20pt; line-height: 1.2; }
 
-  /* 상품 테이블 — 기본 폰트 원복, 특정 컬럼만 강조 */
+  /* 상품 테이블 — 기본 폰트 원복, 특정 컬럼만 강조
+     ※ font-size / padding / line-height 는 CSS 변수로 노출하여
+       JS auto-fit이 한 페이지(297mm)에 맞게 단계적으로 축소함. */
   .sku-table {
     width: 100%; border-collapse: collapse;
-    font-size: 9.5pt; margin-top: 2mm;
+    font-size: var(--sku-fs, 9.5pt); margin-top: 2mm;
     border: 1px solid #334155;
     table-layout: fixed;
   }
   .sku-table th, .sku-table td {
-    border: 1px solid #cbd5e1; padding: 5px 6px;
+    border: 1px solid #cbd5e1;
+    padding: var(--sku-cell-pad, 5px 6px);
     text-align: center; vertical-align: middle;
-    word-break: break-word; line-height: 1.35;
+    word-break: break-word;
+    line-height: var(--sku-lh, 1.35);
   }
   .sku-table th {
     background: #0f172a; color: #fff; font-weight: 700;
-    font-size: 9pt; letter-spacing: 0.3px;
+    font-size: var(--sku-th-fs, 9pt); letter-spacing: 0.3px;
   }
   /* 박스수 / 수량 값 셀: 2배 + 볼드 */
   .sku-table td.num-emph {
-    font-size: 19pt;
+    font-size: var(--sku-num-fs, 19pt);
     font-weight: 800;
     color: #0f172a;
   }
   /* 비고 값 셀: 박스수/수량보다 2단계 아래 */
   .sku-table td.remark-emph {
-    font-size: 15pt;
+    font-size: var(--sku-remark-fs, 15pt);
     font-weight: 800;
     color: #0f172a;
   }
   /* 소비기한: 기본보다 1pt 크게 + 볼드 */
   .sku-table td.exp-emph {
-    font-size: 10.5pt;
+    font-size: var(--sku-exp-fs, 10.5pt);
     font-weight: 700;
     color: #0f172a;
   }
@@ -346,16 +350,41 @@
 
   /* ======================================================
      인쇄 모드 (기본: A4 세로 · 1부)
+     - 핵심: .page를 정확히 297mm로 고정 + overflow:hidden
+     - 핵심: .preview-stage flex 해제(인쇄 시 page-break 오작동 방지)
   ====================================================== */
   @page { size: A4 portrait; margin: 0; }
   @media print {
-    body { background: #fff; }
+    html, body {
+      background: #fff;
+      margin: 0; padding: 0;
+      width: 210mm;
+    }
+    .app-shell {
+      max-width: none;
+      margin: 0; padding: 0;
+    }
     .app-shell > :not(.preview-stage) { display: none !important; }
-    .preview-stage { margin: 0; gap: 0; }
+    /* flex 컨테이너에서 page-break-after가 무시되는 브라우저 버그 회피 */
+    .preview-stage {
+      margin: 0; padding: 0; gap: 0;
+      display: block;
+    }
     .preview-empty { display: none !important; }
+    /* min-height가 아니라 정확한 height로 고정 + 초과 클립 */
     .page {
       box-shadow: none; margin: 0;
-      width: 210mm; min-height: 297mm;
+      width: 210mm;
+      height: 297mm;
+      min-height: 297mm;
+      max-height: 297mm;
+      overflow: hidden;
+      page-break-after: always;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .page:last-child {
+      page-break-after: auto;
     }
   }
 
@@ -367,6 +396,7 @@
   ====================================================== */
   .duplex-sheet {
     width: 297mm; height: 210mm;
+    max-height: 210mm;
     display: flex; background: #fff;
     box-shadow: 0 6px 28px rgba(15,23,42,.10);
     page-break-after: always;
@@ -377,6 +407,7 @@
   .duplex-sheet:last-child { page-break-after: auto; }
   .duplex-half {
     width: 148.5mm; height: 210mm;
+    max-height: 210mm;
     overflow: hidden; position: relative;
   }
   .duplex-half + .duplex-half {
@@ -384,9 +415,15 @@
   }
   /* transform:scale()은 DOM 크기를 줄이지 않아 페이지 브레이크 오판 발생.
      zoom은 레이아웃 자체를 축소하여 정확히 148.5×210mm 안에 들어감.
-     Chrome/Edge/Safari/최근 Firefox 모두 지원. */
+     Chrome/Edge/Safari/최근 Firefox 모두 지원.
+     ※ 297mm 초과 컨텐츠가 zoom 후 .duplex-half 210mm를 침범하지 않도록
+       max-height + overflow:hidden 으로 강제 고정. */
   .duplex-half > .page {
-    width: 210mm; min-height: 297mm;
+    width: 210mm;
+    height: 297mm;
+    min-height: 297mm;
+    max-height: 297mm;
+    overflow: hidden;
     zoom: 0.707;
     box-shadow: none; margin: 0;
     page-break-after: auto !important;
@@ -395,10 +432,50 @@
   }
 
   @media print {
-    body.print-2up .duplex-sheet { box-shadow: none; }
-    body.print-2up .duplex-half + .duplex-half { border-left: 1px dashed rgba(0,0,0,.4); }
-    /* 원본 .page의 기본 page-break-after:always 를 2부 모드에서 완전 해제 */
+    /* 2부 모드 인쇄 시 @page는 JS에서 landscape로 오버라이드 됨 */
+    body.print-2up {
+      background: #fff;
+      margin: 0; padding: 0;
+      width: 297mm;
+    }
+    body.print-2up .app-shell {
+      max-width: none;
+      margin: 0; padding: 0;
+    }
+    body.print-2up .preview-stage {
+      margin: 0; padding: 0; gap: 0;
+      display: block;
+    }
+    body.print-2up .duplex-sheet {
+      box-shadow: none;
+      width: 297mm;
+      height: 210mm;
+      max-height: 210mm;
+      overflow: hidden;
+      page-break-after: always !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+    body.print-2up .duplex-sheet:last-child {
+      page-break-after: auto !important;
+    }
+    body.print-2up .duplex-half {
+      width: 148.5mm;
+      height: 210mm;
+      max-height: 210mm;
+      overflow: hidden;
+    }
+    body.print-2up .duplex-half + .duplex-half {
+      border-left: 1px dashed rgba(0,0,0,.4);
+    }
+    /* 원본 .page의 기본 page-break-after:always 를 2부 모드에서 완전 해제
+       + 정확한 297mm 고정으로 zoom 후 .duplex-half 침범 차단 */
     body.print-2up .page {
+      width: 210mm;
+      height: 297mm;
+      min-height: 297mm;
+      max-height: 297mm;
+      overflow: hidden;
       page-break-after: auto !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
@@ -859,6 +936,79 @@ function escapeHtml(s){
 function fmt(n){ return Number(n||0).toLocaleString("ko-KR"); }
 
 /* =========================================================
+   3-1. 페이지 자동 맞춤 (Auto-fit)
+   - 한 팔레트 = 한 A4 페이지(297mm) 안에 무조건 들어가도록
+     SKU 테이블 폰트/여백/줄간격을 단계적으로 축소.
+   - SKU 행이 많아도 잘리지 않고 작은 글자로라도 1페이지에 표시.
+========================================================= */
+const A4_PAGE_HEIGHT_PX = 297 * 96 / 25.4;   // 297mm ≈ 1122.52 CSS px
+const FIT_BUFFER_PX     = 2;                  // 서브픽셀 여유
+
+/* 단계별 축소 프리셋 (위에서 아래로 점점 작아짐) */
+const FIT_STEPS = [
+  // {  sku,   num,    remark,  exp,    th,    pad,         lh    }
+  { sku: 9.5, num: 19,   remark: 15,   exp: 10.5, th: 9,   pad: '5px 6px', lh: 1.35 },
+  { sku: 9,   num: 18,   remark: 14,   exp: 10,   th: 8.5, pad: '4px 6px', lh: 1.30 },
+  { sku: 8.5, num: 17,   remark: 13,   exp: 9.5,  th: 8,   pad: '4px 5px', lh: 1.25 },
+  { sku: 8,   num: 16,   remark: 12,   exp: 9,    th: 7.5, pad: '3px 5px', lh: 1.20 },
+  { sku: 7.5, num: 15,   remark: 11,   exp: 8.5,  th: 7,   pad: '3px 4px', lh: 1.20 },
+  { sku: 7,   num: 14,   remark: 10,   exp: 8,    th: 6.5, pad: '2px 4px', lh: 1.15 },
+  { sku: 6.5, num: 13,   remark: 9.5,  exp: 7.5,  th: 6,   pad: '2px 3px', lh: 1.15 },
+  { sku: 6,   num: 12,   remark: 9,    exp: 7,    th: 5.5, pad: '2px 3px', lh: 1.10 },
+  { sku: 5.5, num: 11,   remark: 8.5,  exp: 6.5,  th: 5,   pad: '1px 3px', lh: 1.10 },
+  { sku: 5,   num: 10,   remark: 8,    exp: 6,    th: 5,   pad: '1px 2px', lh: 1.05 },
+  { sku: 4.5, num: 9,    remark: 7.5,  exp: 5.5,  th: 4.5, pad: '1px 2px', lh: 1.05 },
+  { sku: 4,   num: 8,    remark: 7,    exp: 5,    th: 4,   pad: '0 2px',   lh: 1.00 },
+];
+
+function applyFitStep(page, step) {
+  page.style.setProperty('--sku-fs',        step.sku    + 'pt');
+  page.style.setProperty('--sku-num-fs',    step.num    + 'pt');
+  page.style.setProperty('--sku-remark-fs', step.remark + 'pt');
+  page.style.setProperty('--sku-exp-fs',    step.exp    + 'pt');
+  page.style.setProperty('--sku-th-fs',     step.th     + 'pt');
+  page.style.setProperty('--sku-cell-pad',  step.pad);
+  page.style.setProperty('--sku-lh',        step.lh);
+}
+
+function resetFit(page) {
+  ['--sku-fs','--sku-num-fs','--sku-remark-fs','--sku-exp-fs',
+   '--sku-th-fs','--sku-cell-pad','--sku-lh'].forEach(v => page.style.removeProperty(v));
+  delete page.dataset.fitStep;
+  delete page.dataset.fitOverflow;
+}
+
+function fitPageToA4(page) {
+  resetFit(page);
+  // 첫 단계(기본값)부터 적용해보고 안되면 점점 축소
+  for (let i = 0; i < FIT_STEPS.length; i++) {
+    applyFitStep(page, FIT_STEPS[i]);
+    void page.offsetHeight; // 강제 reflow
+    // .page는 min-height:297mm 이므로 scrollHeight 가 297mm 이하면 컨텐츠가 다 들어간 것
+    if (page.scrollHeight <= A4_PAGE_HEIGHT_PX + FIT_BUFFER_PX) {
+      page.dataset.fitStep = String(i);
+      return i;
+    }
+  }
+  // 최소 단계까지도 초과 → 마지막 단계 유지(클립됨, 경고 표시)
+  page.dataset.fitStep = String(FIT_STEPS.length - 1);
+  page.dataset.fitOverflow = '1';
+  return FIT_STEPS.length - 1;
+}
+
+function fitPagesToA4() {
+  const pages = document.querySelectorAll('.preview-stage > .page');
+  let warned = 0;
+  pages.forEach(p => {
+    const step = fitPageToA4(p);
+    if (p.dataset.fitOverflow === '1') warned++;
+  });
+  if (warned > 0) {
+    setStatus(`자동 맞춤 완료 — ${pages.length}장 중 ${warned}장은 최소 폰트로도 한 페이지에 다 안 들어가 일부 잘릴 수 있습니다.`, "err");
+  }
+}
+
+/* =========================================================
    4. 렌더링
 ========================================================= */
 function renderPreview(groups) {
@@ -957,6 +1107,9 @@ function renderPreview(groups) {
     `업체 <b>${escapeHtml(vendor.name)}</b> · 총 <b>${groups.length}</b>개 팔레트 · ` +
     `물류센터 <b>${[...new Set(groups.map(g=>g.center))].length}</b>곳 · ` +
     `SKU행 <b>${groups.reduce((s,g)=>s+g.items.length,0)}</b>건`;
+
+  // 레이아웃 완료 후 각 페이지를 297mm 안에 들어가도록 자동 축소
+  requestAnimationFrame(() => requestAnimationFrame(fitPagesToA4));
 }
 
 /* =========================================================
