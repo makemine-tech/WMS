@@ -6,6 +6,49 @@
 <title>Kurly 거래명세서 → WMS 엑셀 변환</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Firebase Realtime Database (makemine-wms) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+  import { getDatabase, ref, onValue, set, update, remove, get } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAz3R9v_Om-gy6a1A1WAy8nDMeppiK-U1k",
+    authDomain: "makemine-wms.firebaseapp.com",
+    databaseURL: "https://makemine-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "makemine-wms",
+    storageBucket: "makemine-wms.firebasestorage.app",
+    messagingSenderId: "932282805733",
+    appId: "1:932282805733:web:55a17b7871860a50c8130c"
+  };
+
+  try {
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const barcodesRef = ref(db, 'barcodes');
+
+    window.kurlyDb = {
+      ready: true,
+      subscribe(cb) {
+        return onValue(barcodesRef, (snap) => cb(snap.exists() ? snap.val() : {}), (err) => {
+          console.error('[FIREBASE] subscribe error:', err);
+          if(window.toast) window.toast('☁ Firebase 읽기 실패: ' + err.message, 'err');
+        });
+      },
+      async setBarcode(bc, name) { return set(ref(db, 'barcodes/' + bc), name); },
+      async updateBarcodes(updates) { return update(barcodesRef, updates); },
+      async removeBarcode(bc) { return remove(ref(db, 'barcodes/' + bc)); },
+      async clearAll() { return remove(barcodesRef); },
+      async getOnce() { const snap = await get(barcodesRef); return snap.exists() ? snap.val() : {}; }
+    };
+    console.log('[KURLY-FIREBASE] 초기화 완료. DB:', firebaseConfig.projectId);
+    window.dispatchEvent(new Event('kurlyDbReady'));
+  } catch(e) {
+    console.error('[KURLY-FIREBASE] 초기화 실패:', e);
+    window.kurlyDb = { ready: false, error: e.message || String(e) };
+    window.dispatchEvent(new Event('kurlyDbReady'));
+  }
+</script>
 <style>
   :root{
     --bg:#f0f2f5;--surface:#fff;
@@ -182,7 +225,7 @@
     <div class="hdr-icon">컬리</div>
     <div>
       <div class="hdr-name">Kurly 거래명세서 → WMS 엑셀 변환</div>
-      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.0</div>
+      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.2</div>
     </div>
   </div>
   <a href="index.html" class="btn-home">← 메인</a>
@@ -260,11 +303,11 @@
     </div>
 
     <div class="hint-box suc" style="margin-bottom:14px;">
-      <b>📌 저장 흐름:</b> 표 작업 끝 → <b>"💾 JSON 다운로드"</b>로 kurly-db.json 갱신 → rocket 폴더에 덮어쓰고 GitHub push → <b>"📊 엑셀 다운로드"</b>로 결과 출력
+      <b>📌 저장 흐름:</b> 모든 DB 변경은 <b>자동으로 클라우드에 저장</b>됩니다 → 작업 끝나면 바로 <b>"📊 엑셀 다운로드"</b>로 결과 출력
     </div>
 
     <div class="btn-row" style="margin-bottom:16px;">
-      <button class="btn btn-suc" id="btnHtmlSave">💾 JSON 다운로드 (kurly-db.json 갱신)</button>
+      <button class="btn btn-suc" id="btnHtmlSave">💾 JSON 백업 다운로드 (선택사항)</button>
       <button class="btn btn-secondary btn-ghost" id="btnDbCopy">📋 JS 객체 미리보기</button>
       <button class="btn btn-secondary btn-ghost" id="btnDbView">DB 전체보기/편집</button>
       <button class="btn btn-secondary btn-ghost" id="btnDbUpload">📤 JSON/엑셀 업로드</button>
@@ -373,8 +416,7 @@ const state = {
 };
 
 function markDirty(){
-  state.dirty = true;
-  $('#dirtyBadge').classList.remove('hidden');
+  // 이전 호환용 — Firebase 자동 저장으로 더 이상 필요 없음
 }
 function markClean(){
   state.dirty = false;
@@ -695,9 +737,10 @@ function onCellEdit(e){
       const name = newVal.trim();
       const wasMissing = state.rows[ri].meta.missingName;
       state.barcodeDb[bc] = name;
-      markDirty();
-      if(wasMissing) toast(`✓ DB 등록: ${bc.slice(0,8)}... → ${name.slice(0,15)}`, 'suc');
-      else toast(`✓ DB 갱신: ${bc.slice(0,8)}...`, 'suc');
+      cloudSetBarcode(bc, name).then(ok => {
+        if(ok && wasMissing) toast('☁ 클라우드 등록: ' + bc.slice(0,8) + '... → ' + name.slice(0,15), 'suc');
+        else if(ok) toast('☁ 클라우드 갱신: ' + bc.slice(0,8) + '...', 'suc');
+      });
       // 같은 바코드 다른 행도 갱신
       state.rows.forEach((r, idx) => {
         if(r.cells[5] === bc){
@@ -740,11 +783,13 @@ $('#btnBulkRegister').onclick = function(){
   if(!targets.length){ toast('일괄 등록할 항목이 없습니다','err'); return; }
   if(!confirm('PDF에서 추출한 품명을 그대로 ' + targets.length + '건 등록합니다.\n(나중에 DB 전체보기에서 수정 가능)')) return;
   let count = 0;
+  const updates = {};
   targets.forEach(function(r){
     const bc = r.cells[5];
     const name = r.meta.rawName;
     if(bc && name){
       state.barcodeDb[bc] = name;
+      updates[bc] = name;
       state.rows.forEach(function(rr){
         if(rr.cells[5] === bc){ rr.cells[4] = name; rr.meta.missingName = false; }
       });
@@ -752,8 +797,9 @@ $('#btnBulkRegister').onclick = function(){
     }
   });
   if(count > 0){
-    markDirty();
-    toast('✓ ' + count + '건 일괄 등록 완료 - HTML 갱신본 저장으로 영구화', 'suc');
+    cloudUpdateBarcodes(updates).then(ok => {
+      if(ok) toast('☁ ' + count + '건 클라우드 일괄 등록 완료', 'suc');
+    });
     renderPreview();
     updateStats();
   }
@@ -841,8 +887,9 @@ $('#dbInput').addEventListener('change', async function(e){
         if(bc && name){ state.barcodeDb[bc] = name; added++; }
       }
     }
-    markDirty();
-    toast('✓ ' + added + '건 추가됨 (JSON 다운로드로 영구화)', 'suc');
+    cloudUpdateBarcodes(state.barcodeDb).then(ok => {
+      if(ok) toast('☁ ' + added + '건 추가 + 클라우드 동기화', 'suc');
+    });
     rebuildRows(); renderAll();
   }catch(err){ console.error(err); toast('파일 읽기 실패: ' + err.message, 'err'); }
   e.target.value = '';
@@ -868,14 +915,19 @@ function renderDbModal(){
   $('#dbTable').querySelectorAll('.db-name-edit').forEach(function(inp){
     inp.onchange = function(){
       const bc = inp.dataset.bc; const name = inp.value.trim();
-      if(name){ state.barcodeDb[bc] = name; markDirty(); rebuildRows(); renderPreview(); updateStats(); toast('DB 갱신','suc'); }
+      if(name){
+        state.barcodeDb[bc] = name;
+        cloudSetBarcode(bc, name).then(ok => { if(ok) toast('☁ DB 갱신', 'suc'); });
+        rebuildRows(); renderPreview(); updateStats();
+      }
     };
   });
   $('#dbTable').querySelectorAll('.db-row-del').forEach(function(btn){
     btn.onclick = function(){
-      delete state.barcodeDb[btn.dataset.bc];
-      markDirty(); renderDbModal(); rebuildRows(); renderPreview(); updateStats();
-      toast('1건 삭제','suc');
+      const bc = btn.dataset.bc;
+      delete state.barcodeDb[bc];
+      cloudRemoveBarcode(bc).then(ok => { if(ok) toast('☁ 1건 삭제','suc'); });
+      renderDbModal(); rebuildRows(); renderPreview(); updateStats();
     };
   });
 }
@@ -943,9 +995,7 @@ $('#btnCopy').onclick = async function(){
   toast('클립보드에 TSV 복사됨','suc');
 };
 
-window.addEventListener('beforeunload', function(e){
-  if(state.dirty){ e.preventDefault(); e.returnValue = ''; }
-});
+// beforeunload 경고 제거 — Firebase 자동 저장으로 미저장 변경 없음
 
 window.addEventListener('error', function(e){
   console.error('[KURLY ERROR]', e.message, e.filename, e.lineno);
@@ -953,37 +1003,58 @@ window.addEventListener('error', function(e){
 });
 
 // ============================================================
-// kurly-db.json 자동 로드 (Step 1-B)
+// Firebase Realtime DB 실시간 동기화 (Step 2-B)
 // ============================================================
-async function loadDbFromJson(){
-  try {
-    const res = await fetch(DB_JSON_PATH + '?v=' + Date.now(), {cache:'no-store'});
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const db = (data && typeof data === 'object' && data.barcodes) ? data.barcodes : data;
-    if(!db || typeof db !== 'object'){ throw new Error('잘못된 JSON 형식'); }
-    state.barcodeDb = { ...db };
+window.toast = toast;  // module script에서 사용 가능하게
+
+function initFirebaseSync(){
+  if(!window.kurlyDb){
+    // Firebase 모듈이 아직 로드 안 됨 → 이벤트 대기
+    window.addEventListener('kurlyDbReady', initFirebaseSync, {once:true});
+    return;
+  }
+  if(!window.kurlyDb.ready){
+    toast('⚠ Firebase 초기화 실패: ' + (window.kurlyDb.error||''), 'err');
+    return;
+  }
+  // 실시간 구독 — DB 어디서든 변경되면 즉시 모든 화면에 반영
+  window.kurlyDb.subscribe(function(data){
+    state.barcodeDb = data || {};
     state.dbLoaded = true;
     const n = Object.keys(state.barcodeDb).length;
-    console.log('[KURLY] kurly-db.json 로드:', n, '건');
+    console.log('[KURLY] Firebase 동기화:', n, '건');
     updateStats();
-    if(n > 0) toast('✓ DB 로드: ' + n + '건 (kurly-db.json)', 'suc');
-    else toast('kurly-db.json 비어있음 — 첫 SKU 등록 후 JSON 다운로드하세요', '');
     if(state.files.length > 0){ rebuildRows(); renderAll(); }
-  } catch(e) {
-    console.warn('[KURLY] kurly-db.json 로드 실패:', e.message);
-    toast('⚠ kurly-db.json 로드 실패 — 빈 DB로 시작 (' + e.message + ')', 'err');
-    state.dbLoaded = false;
-  }
+    if(!state.firstSyncDone){
+      state.firstSyncDone = true;
+      toast('☁ Firebase 연결 완료 — DB ' + n + '건', 'suc');
+    }
+  });
+}
+
+// 갱신 지점에서 호출하는 헬퍼들
+async function cloudSetBarcode(bc, name){
+  if(!window.kurlyDb || !window.kurlyDb.ready) return false;
+  try { await window.kurlyDb.setBarcode(bc, name); return true; }
+  catch(e){ console.error('cloud set fail:', e); toast('☁ 저장 실패: '+e.message, 'err'); return false; }
+}
+async function cloudUpdateBarcodes(updates){
+  if(!window.kurlyDb || !window.kurlyDb.ready) return false;
+  try { await window.kurlyDb.updateBarcodes(updates); return true; }
+  catch(e){ console.error('cloud update fail:', e); toast('☁ 일괄저장 실패: '+e.message, 'err'); return false; }
+}
+async function cloudRemoveBarcode(bc){
+  if(!window.kurlyDb || !window.kurlyDb.ready) return false;
+  try { await window.kurlyDb.removeBarcode(bc); return true; }
+  catch(e){ console.error('cloud remove fail:', e); toast('☁ 삭제 실패: '+e.message, 'err'); return false; }
 }
 
 // 초기화
 updateStats();
-markClean();
-loadDbFromJson();
+initFirebaseSync();
 
-console.log('[KURLY v3.1] 로드 완료. PDF.js:', typeof pdfjsLib);
-setTimeout(()=>{ toast('Kurly Parser v3.1 로드 완료', ''); }, 300);
+console.log('[KURLY v3.2] 로드 완료. Firebase 동기화. PDF.js:', typeof pdfjsLib);
+setTimeout(()=>{ toast('Kurly Parser v3.2 로드 완료 (Firebase 동기화)', ''); }, 300);
 </script>
 </body>
 </html>
