@@ -1,2 +1,0 @@
-# WMS
-메이크창고 직관적 창고관리 WMS . (제작 Park Kyoung Woo)
