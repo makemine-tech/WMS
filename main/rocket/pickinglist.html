@@ -46,6 +46,16 @@
   .app-title { font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
   .app-title small { display: block; font-size: 12px; color: var(--text-sub); font-weight: 500; margin-top: 2px; }
 
+  .app-header-right { display: flex; align-items: center; gap: 12px; }
+  .home-link {
+    font-size: 12px; color: var(--text); text-decoration: none;
+    padding: 6px 12px; border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); background: #fff;
+    font-weight: 600; transition: all .15s; white-space: nowrap;
+  }
+  .home-link:hover { background: #f8fafc; border-color: var(--accent); }
+  .app-version { font-size: 11px; color: var(--text-sub); }
+
   .panel {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -210,6 +220,26 @@
   .pl-head .c-wait, .pl-head .c-opt { text-align: center; }
   .pl-head .c-stk { text-align: right; padding-right: 2mm; }
 
+  /* 고객사 그룹 구분바: 한 페이지 안에서 그룹 사이 흐름 분리 (페이지 강제 break 없음) */
+  .pl-group-bar {
+    margin-top: 4mm;
+    padding: 4px 8px;
+    background: #f1f5f9;
+    border-left: 3px solid #0f172a;
+    border-radius: 2px;
+    font-size: 9pt; font-weight: 700; color: #0f172a;
+    line-height: 1.4;
+    break-inside: avoid; page-break-inside: avoid;
+    break-after: avoid-page; page-break-after: avoid;
+  }
+  .pl-group-bar:first-child { margin-top: 0; }
+  .pl-group-bar b { font-weight: 800; }
+  .pl-group-bar .sep { color: #94a3b8; font-weight: 400; margin: 0 6px; }
+  body.mode-invoice .pl-group-bar {
+    font-size: 7pt; margin-top: 2mm; padding: 2px 5px;
+  }
+  body.mode-invoice .pl-group-bar .sep { margin: 0 3px; }
+
 
   /* ===== 송장 롤지(107×168mm) 모드 ===== */
   body.mode-invoice .pl-page {
@@ -239,6 +269,9 @@
     .preview-stage { margin: 0; gap: 0; }
     .preview-empty { display: none !important; }
     .pl-page { box-shadow: none; margin: 0; }
+    /* 송장 모드에서 다중 .pl-page 인쇄 시(역순 배치된 페이지들) 페이지 강제 분리.
+       A4 모드는 단일 .pl-page 흐름이라 이 규칙이 매칭되지 않아 영향 없음. */
+    .pl-page + .pl-page { page-break-before: always; break-before: page; }
     /* A4 모드: 상·하 @page 여백(20mm)만큼 .pl-page 높이 축소 → 빈 페이지 방지 */
     body:not(.mode-invoice) .pl-page { min-height: 277mm; }
   }
@@ -265,9 +298,12 @@
   <header class="app-header">
     <div class="app-title">
       피킹리스트 자동 생성기
-      <small>엑셀(.xls/.xlsx) 업로드 → A4 2단 또는 송장 107×168mm 인쇄</small>
+      <small>엑셀(.xls/.xlsx) 업로드 → A4 또는 송장 107×168mm 인쇄</small>
     </div>
-    <div style="font-size:11px; color:var(--text-sub);">v1.0 · WMS / Picking</div>
+    <div class="app-header-right">
+      <a class="home-link" href="https://www.makewon.com">홈으로 (www.makewon.com)</a>
+      <span class="app-version">v1.1 · WMS / Picking</span>
+    </div>
   </header>
 
   <!-- 업로드 패널 -->
@@ -288,8 +324,8 @@
         </div>
       </div>
       <div class="field" style="flex: 1 1 200px;">
-        <label>고객사 (비우면 엑셀 C열 자동 사용)</label>
-        <input type="text" id="vendorName" placeholder="자동" />
+        <label>고객사 (비우면 자동·분리 인쇄)</label>
+        <input type="text" id="vendorName" placeholder="비우면 고객사별 분리" />
       </div>
       <button class="btn" id="btnReset">초기화</button>
     </div>
@@ -416,6 +452,25 @@ function getVendorLabel() {
   return override || META.vendor || "-";
 }
 
+/* 고객사별 그룹화.
+   - 고객사 입력란이 비어 있으면: 엑셀의 vendor 값으로 자동 그룹화 (입력 순서 유지)
+   - 입력란에 값이 있으면: 모든 행을 그 이름의 단일 그룹으로 통합 (덮어쓰기) */
+function getGroupedFilteredList() {
+  const list = getFilteredList();
+  const override = document.getElementById("vendorName").value.trim();
+  if (override) {
+    return [{ vendor: override, items: list }];
+  }
+  const order = [];
+  const map = new Map();
+  for (const r of list) {
+    const v = r.vendor || "(미지정)";
+    if (!map.has(v)) { map.set(v, []); order.push(v); }
+    map.get(v).push(r);
+  }
+  return order.map(v => ({ vendor: v, items: map.get(v) }));
+}
+
 /* ---------- 렌더 조각 ---------- */
 function buildItemRowsHtml(items) {
   return items.map(r => `
@@ -435,28 +490,37 @@ function buildHeaderRow() {
       <div class="c-stk">가용재고</div>
     </div>`;
 }
-function buildPageHtml({ items, vendor, totalCount, totalWait, issued, showHeader = true, showTableHead = true }) {
-  const fullHeader = `
-    <header class="pl-header">
-      <h1>피킹리스트 (Picking List)</h1>
-      <div class="meta">
-        <span>고객사 <b>${escapeHtml(vendor)}</b></span>
-        <span>총 품목 <b>${fmt(totalCount)}</b></span>
-        <span>발송대기 합계 <b>${fmt(totalWait)}</b></span>
-        <span>발행 <b>${escapeHtml(issued)}</b></span>
-      </div>
-    </header>`;
+/* 한 그룹의 미니 헤더 + 표 헤더 + 항목들을 흐름 형태로 (페이지 break 없음) */
+function buildGroupSectionHtml({ items, vendor, totalCount, totalWait, issued }) {
+  return `
+    <div class="pl-group-bar">
+      고객사 <b>${escapeHtml(vendor)}</b>
+      <span class="sep">·</span>총 품목 <b>${fmt(totalCount)}</b>
+      <span class="sep">·</span>발송대기 합계 <b>${fmt(totalWait)}</b>
+      <span class="sep">·</span>발행 <b>${escapeHtml(issued)}</b>
+    </div>
+    ${buildHeaderRow()}
+    ${buildItemRowsHtml(items)}`;
+}
+
+/* 모든 그룹을 단일 페이지 흐름으로 빌드 (콘텐츠가 넘치면 자동 페이지 분할) */
+function buildContinuousPageHtml(groups, issued) {
+  const sections = groups.map(g => buildGroupSectionHtml({
+    items: g.items,
+    vendor: g.vendor,
+    totalCount: g.items.length,
+    totalWait: g.items.reduce((s,r) => s + r.wait, 0),
+    issued,
+  })).join("");
   return `
     <section class="pl-page">
-      ${showHeader ? fullHeader : ""}
       <div class="pl-list">
-        ${showTableHead ? buildHeaderRow() : ""}
-        ${buildItemRowsHtml(items)}
+        ${sections}
       </div>
     </section>`;
 }
 
-/* ---------- 기본 미리보기 (A4 기본 1단, 전체 품목 한 페이지) ---------- */
+/* ---------- 기본 미리보기 (단일 페이지 안에 그룹별 미니 헤더로 연속 흐름) ---------- */
 function renderPreview() {
   const stage = document.getElementById("previewStage");
   if (!ROWS.length) {
@@ -467,19 +531,30 @@ function renderPreview() {
     return;
   }
 
-  const list = getFilteredList();
-  const totalWait = list.reduce((s,r) => s + r.wait, 0);
-  const issued = new Date().toLocaleString("ko-KR", { hour12: false });
-  const vendor = getVendorLabel();
+  const groups = getGroupedFilteredList().filter(g => g.items.length);
+  if (!groups.length) {
+    stage.innerHTML = '<div class="preview-empty">표시할 품목이 없습니다. (필터 조건을 확인하세요)</div>';
+    document.getElementById("btnPrintA4").disabled = true;
+    document.getElementById("btnPrintInvoice").disabled = true;
+    document.getElementById("summary").textContent = "표시할 품목이 없습니다.";
+    return;
+  }
 
-  stage.innerHTML = buildPageHtml({
-    items: list, vendor, totalCount: list.length, totalWait, issued
+  const issued = new Date().toLocaleString("ko-KR", { hour12: false });
+
+  let totalCount = 0, totalWait = 0;
+  groups.forEach(g => {
+    totalCount += g.items.length;
+    totalWait  += g.items.reduce((s,r) => s + r.wait, 0);
   });
+
+  stage.innerHTML = buildContinuousPageHtml(groups, issued);
 
   document.getElementById("btnPrintA4").disabled = false;
   document.getElementById("btnPrintInvoice").disabled = false;
+  const vendorLabel = groups.length > 1 ? `${groups.length}개 고객사` : groups[0].vendor;
   document.getElementById("summary").innerHTML =
-    `고객사 <b>${escapeHtml(vendor)}</b> · 품목 <b>${fmt(list.length)}</b>개 · 발송대기 합계 <b>${fmt(totalWait)}</b>`;
+    `${escapeHtml(vendorLabel)} · 품목 <b>${fmt(totalCount)}</b>개 · 발송대기 합계 <b>${fmt(totalWait)}</b>`;
 }
 
 /* ---------- 파일 처리 ---------- */
@@ -533,12 +608,12 @@ document.getElementById("vendorName").addEventListener("input", renderPreview);
 
 /* =========================================================
    인쇄 모드 전환
-   - A4: 기본 단일 페이지(1단) 인쇄
+   - A4: 단일 .pl-page 흐름 (자동 페이지 분할, 정방향).
    - 송장(107×168): 라벨 프린터 특성(각 페이지 하단부터 인쇄 + 아래로 배출)을
-     이용해 180° 회전 없이 정방향 연결 결과를 얻는다.
-     · 페이지 분할: 전체를 "뒤에서부터" 18개씩 묶음 (첫 페이지만 남은 수)
-     · DOM 배치: 역순 (원래 N페이지가 먼저 출력, 1페이지가 마지막 출력)
-     · 결과: 용지에 위→아래로 [제목 → 품목 1 → 품목 2 → … → 품목 N] 자연 연결
+     이용해 정방향 연결 결과를 얻기 위해, 모든 그룹을 토큰으로 평탄화한 뒤
+     18행씩 묶어 페이지 단위로 분할하고 DOM에는 역순(PN..P1)으로 배치.
+     · 한 송장에 여러 고객사가 연달아 흐름 (빈 공간 최소화)
+     · DOM 배치: 역순 → 라벨 프린터에서 결과적으로 P1, P2, …, PN 자연 연결
 ========================================================= */
 const INVOICE_ROWS_PER_PAGE = 18;  // 마지막 페이지 기준 18행 (뒤에서부터 묶음)
 
@@ -553,6 +628,33 @@ function chunkFromEnd(list, size) {
   }
   chunks.unshift(remain);  // 나머지가 첫 페이지
   return chunks;
+}
+
+/* 그룹 배열을 토큰 리스트로 평탄화: [bar, thead, item, item, ..., bar, thead, item, ...] */
+function flattenGroupsToTokens(groups, issued) {
+  const tokens = [];
+  groups.forEach(g => {
+    const totalWait = g.items.reduce((s,r) => s + r.wait, 0);
+    tokens.push({ kind: 'bar', vendor: g.vendor, count: g.items.length, totalWait, issued });
+    tokens.push({ kind: 'thead' });
+    g.items.forEach(item => tokens.push({ kind: 'item', data: item }));
+  });
+  return tokens;
+}
+
+/* 단일 토큰을 HTML 조각으로 */
+function tokenToHtml(t) {
+  if (t.kind === 'bar') {
+    return `<div class="pl-group-bar">
+      고객사 <b>${escapeHtml(t.vendor)}</b>
+      <span class="sep">·</span>총 품목 <b>${fmt(t.count)}</b>
+      <span class="sep">·</span>발송대기 합계 <b>${fmt(t.totalWait)}</b>
+      <span class="sep">·</span>발행 <b>${escapeHtml(t.issued)}</b>
+    </div>`;
+  }
+  if (t.kind === 'thead') return buildHeaderRow();
+  if (t.kind === 'item') return buildItemRowsHtml([t.data]);
+  return '';
 }
 
 let SNAPSHOT_HTML = null;
@@ -584,33 +686,22 @@ function printA4() {
 }
 
 function printInvoice() {
-  const list = getFilteredList();
-  if (!list.length) { alert("출력할 품목이 없습니다."); return; }
+  const groups = getGroupedFilteredList().filter(g => g.items.length);
+  if (!groups.length) { alert("출력할 품목이 없습니다."); return; }
 
-  /* 1) 뒤에서부터 18개씩 묶어 원본 페이지 순서(P1..PN) 배열 생성
-     2) 1페이지(원본 기준)에만 제목/메타/표헤더 포함
-     3) DOM에는 역순(PN..P1)으로 배치 → 프린터는 원본 N페이지를 먼저, 1페이지를 마지막에 처리 */
-  const chunksForward = chunkFromEnd(list, INVOICE_ROWS_PER_PAGE);
-  const totalWait = list.reduce((s,r)=>s+r.wait,0);
   const issued = new Date().toLocaleString("ko-KR", { hour12: false });
-  const vendor = getVendorLabel();
 
-  // 각 원본 페이지의 HTML (index 0 = 원본 P1 = 헤더 있음)
-  const pagesHtml = chunksForward.map((chunk, pageIdx) => {
-    const isFirstOriginal = pageIdx === 0;
-    return buildPageHtml({
-      items: chunk,
-      vendor,
-      totalCount: list.length,
-      totalWait,
-      issued,
-      showHeader: isFirstOriginal,     // 원본 1페이지에만 제목/메타
-      showTableHead: isFirstOriginal,  // 원본 1페이지에만 표 헤더
-    });
-  });
+  /* 1) 모든 그룹을 토큰(bar/thead/item)으로 평탄화 → 한 흐름
+     2) 뒤에서부터 18행씩 묶어 원본 페이지 순서(P1..PN) 생성
+        (한 송장 안에 여러 고객사가 연달아 흐르고, 페이지가 넘치면 다음 송장으로)
+     3) DOM에는 역순(PN..P1)으로 배치 → 라벨 프린터에서 정방향 자연 연결 */
+  const tokens = flattenGroupsToTokens(groups, issued);
+  const pageChunks = chunkFromEnd(tokens, INVOICE_ROWS_PER_PAGE);
 
-  // DOM 배치는 역순: [PN, PN-1, ..., P2, P1]
-  const html = pagesHtml.slice().reverse().join("");
+  const html = pageChunks.slice().reverse().map(chunk => `
+    <section class="pl-page">
+      <div class="pl-list">${chunk.map(tokenToHtml).join("")}</div>
+    </section>`).join("");
 
   const stage = document.getElementById("previewStage");
   SNAPSHOT_HTML = stage.innerHTML;
