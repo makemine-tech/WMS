@@ -184,6 +184,17 @@ h1 em{color:var(--b);font-style:normal}
 .auto-actions .btn-s{font-size:.78rem;padding:.55rem 1rem}
 
 .manual-mode{margin-top:.8rem;padding-top:1rem;border-top:1px dashed var(--br)}
+
+/* ─── SEGMENT GROUP VISUAL DIVIDER (그룹핑) ─── */
+.seg-grp-hd{display:flex;align-items:center;gap:.5rem;padding:.42rem .9rem .28rem;font-family:var(--mo);font-size:.62rem;letter-spacing:.06em;color:var(--b);background:rgba(91,156,246,.05);border-top:1px solid rgba(91,156,246,.22)}
+.seg-grp-hd:first-child{border-top:none}
+.seg-grp-n{font-weight:700;color:var(--b);background:rgba(91,156,246,.14);padding:.1rem .55rem;border-radius:3px;border:1px solid rgba(91,156,246,.32);font-size:.6rem}
+.seg-grp-info{font-size:.58rem;color:var(--mu);letter-spacing:.04em}
+.seg-grp-l{flex:1;height:1px;background:rgba(91,156,246,.18)}
+.seg-item.grp-a{background:rgba(91,156,246,.022);border-left:3px solid rgba(91,156,246,.18)}
+.seg-item.grp-b{background:transparent;border-left:3px solid rgba(91,156,246,.05)}
+.seg-item.grp-orphan{background:rgba(240,196,74,.04);border-left:3px solid rgba(240,196,74,.25)}
+.seg-item.sel{border-left-color:#ffff55!important}
 </style>
 </head>
 <body>
@@ -445,6 +456,7 @@ var invoices=[],sortedInvoices=[],locGroups=[],grpGroups=[],doneGroups=[];
 var popupSel=null;
 var curFlt='all',grpFlt='all';
 var SESSION_KEY='ebut_picking_v3';
+var currentFormat='?'; /* 'A' | 'B' | 'C' | '?' — runAutoDetect()에서 갱신 */
 
 /* ══ 세션 ══ */
 function saveSession(){try{localStorage.setItem(SESSION_KEY,JSON.stringify({ts:Date.now(),invoices:JSON.parse(JSON.stringify(invoices)),sortedInvoices:JSON.parse(JSON.stringify(sortedInvoices)),locGroups:JSON.parse(JSON.stringify(locGroups)),grpGroups:JSON.parse(JSON.stringify(grpGroups)),doneGroups:JSON.parse(JSON.stringify(doneGroups))}));}catch(e){}}
@@ -605,6 +617,7 @@ function runAutoDetect(){
     return;
   }
   var det=detectFormat(segments);
+  currentFormat=det.format;
   var fb=document.getElementById('fmtBadge');
   if(det.format==='?'){
     fb.textContent='패턴 감지 실패 — 직접 지정 권장';
@@ -772,11 +785,59 @@ function toggleManualMode(){
   }
 }
 
+/* 감지된 포맷에 따라 세그먼트를 "한 아이템" 단위로 묶음 분할 */
+function getItemGroups(segs,format){
+  var groups=[];
+  if(!segs||!segs.length)return groups;
+  if(format==='A'){
+    /* [LOC(N개)] 앵커 위치를 기준으로 다음 앵커 직전까지를 한 그룹 */
+    var anchors=[];
+    segs.forEach(function(s,i){if(/^▶?\[[^\(]+\(\d+개\)\]/.test(s.trim()))anchors.push(i);});
+    if(!anchors.length){
+      groups.push({startIdx:0,endIdx:segs.length-1,itemNum:1,unitSize:segs.length});
+    }else{
+      if(anchors[0]>0)groups.push({startIdx:0,endIdx:anchors[0]-1,itemNum:0,orphan:true,unitSize:anchors[0]});
+      anchors.forEach(function(a,i){
+        var end=(i+1<anchors.length)?anchors[i+1]-1:segs.length-1;
+        groups.push({startIdx:a,endIdx:end,itemNum:groups.filter(function(g){return !g.orphan;}).length+1,unitSize:end-a+1});
+      });
+    }
+  }else if(format==='C'){
+    for(var i=0;i<segs.length;i+=2){
+      groups.push({startIdx:i,endIdx:Math.min(i+1,segs.length-1),itemNum:groups.length+1,unitSize:Math.min(2,segs.length-i)});
+    }
+  }else if(format==='B'){
+    segs.forEach(function(_,i){groups.push({startIdx:i,endIdx:i,itemNum:i+1,unitSize:1});});
+  }else{
+    groups.push({startIdx:0,endIdx:segs.length-1,itemNum:1,unitSize:segs.length});
+  }
+  return groups;
+}
+
 function renderSegList(){
   var ul=document.getElementById('segList');ul.innerHTML='';
   if(!segments.length){ul.innerHTML='<div style="padding:1rem;color:var(--mu);font-size:.82rem;text-align:center">세그먼트 없음</div>';return;}
+  var groups=getItemGroups(segments,currentFormat);
+  /* idx → group 매핑 */
+  var idx2grp={};
+  groups.forEach(function(g){for(var i=g.startIdx;i<=g.endIdx;i++)idx2grp[i]=g;});
   segments.forEach(function(seg,idx){
-    var div=document.createElement('div');div.className='seg-item'+(idx===selSegIdx?' sel':'');
+    var grp=idx2grp[idx];
+    var isFirstOfGroup=grp&&idx===grp.startIdx;
+    /* 그룹 헤더 (첫 세그먼트 직전에 삽입) */
+    if(isFirstOfGroup&&currentFormat!=='?'&&groups.length>1){
+      var hd=document.createElement('div');hd.className='seg-grp-hd';
+      var label=grp.orphan?'미분류':('아이템 '+grp.itemNum);
+      var info=grp.unitSize+'개 세그먼트 = 1 아이템';
+      hd.innerHTML='<span class="seg-grp-n">'+label+'</span><span class="seg-grp-info">'+info+'</span><span class="seg-grp-l"></span>';
+      ul.appendChild(hd);
+    }
+    var grpCls='';
+    if(grp){
+      if(grp.orphan)grpCls=' grp-orphan';
+      else grpCls=' grp-'+(grp.itemNum%2===0?'a':'b');
+    }
+    var div=document.createElement('div');div.className='seg-item'+(idx===selSegIdx?' sel':'')+grpCls;
     var tag=getFieldTag(idx);
     div.innerHTML='<span class="seg-txt">'+escH(seg.substring(0,60))+(seg.length>60?'…':'')+'</span>'+(tag?'<span class="seg-tag '+tag.cls+'">'+tag.label+'</span>':'');
     div.onclick=(function(i,s,el){return function(e){onSegClick(i,s,el,e);};})(idx,seg,div);
