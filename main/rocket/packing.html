@@ -1388,6 +1388,22 @@ async function analyzePdf(file, category) {
     }
     pages.push({ idx: i, text, center, centerNorm: normCenter(center) });
   }
+
+  // 분할 truck_shipment 통합 인쇄용 정렬키 — 라벨(홀수)엔 PALLET 번호가 없고 다음 짝수페이지에만 있음
+  if (category === 'truck') {
+    for (const p of pages) {
+      if (p.idx % 2 === 1) {
+        const next = pages[p.idx]; // 다음 짝수페이지 (배열 인덱스 = p.idx)
+        if (next) {
+          const m = next.text.match(/PALLET[_\s-]*(\d+)/i);
+          if (m) p.palletNo = parseInt(m[1], 10);
+        }
+        const tm = p.text.match(/_TRUCK[_\s-]*(\d+)/i);
+        if (tm) p.truckNo = parseInt(tm[1], 10);
+      }
+    }
+  }
+
   return { file, name: file.name, doc, category, pages, allText, numPages: doc.numPages };
 }
 
@@ -1681,26 +1697,61 @@ function matchPagesInPdf(item, cn) {
    kind: 'truck' (정사각 라벨, 페이지 가득) | 'milkrun' (가로 PDF, 90도 회전 가득) */
 async function getLabelPagesForCenter(center) {
   const cn = normCenter(center);
-  // truck 우선
+
+  // truck: 모든 파일의 매칭 페이지를 누적 → PALLET 번호 오름차순 정렬
+  // (분할된 truck_shipment 파일이 같은 센터에 여러 개 있어도 통합 인쇄)
+  const truckMatches = [];
   for (const it of pdfStore.truck) {
-    const matched = matchPagesInPdf(it, cn);
-    if (matched.length) {
-      console.log('[label match] center=%s → truck %s, pages=%o', center, it.name, matched);
-      const items = [];
-      for (const i of matched) items.push({ url: await renderPdfPageToImg(it.doc, i), kind: 'truck' });
-      return items;
+    const allowed = pickPagesForCategory(it);
+    for (const i of allowed) {
+      const pg = it.pages[i - 1];
+      if (pageMatchesCenter(pg, cn)) truckMatches.push({ item: it, pageIdx: i, page: pg });
     }
   }
-  // download 다음
+  if (truckMatches.length) {
+    truckMatches.sort((a, b) => {
+      const ap = a.page.palletNo, bp = b.page.palletNo;
+      if (ap != null && bp != null && ap !== bp) return ap - bp;
+      if (ap != null && bp == null) return -1;
+      if (ap == null && bp != null) return 1;
+      const at = a.page.truckNo ?? 0, bt = b.page.truckNo ?? 0;
+      if (at !== bt) return at - bt;
+      if (a.item.name !== b.item.name) return a.item.name.localeCompare(b.item.name);
+      return a.pageIdx - b.pageIdx;
+    });
+    console.log('[label match] center=%s → truck files=%d pages=%d order=%o',
+      center,
+      new Set(truckMatches.map(m => m.item.name)).size,
+      truckMatches.length,
+      truckMatches.map(m => `${m.item.name}#${m.pageIdx}(P${m.page.palletNo ?? '?'})`));
+    const items = [];
+    for (const m of truckMatches) {
+      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'truck' });
+    }
+    return items;
+  }
+
+  // download: 모든 파일의 매칭 페이지 누적 (파일 업로드 순서 + 페이지 순서 유지)
+  const dlMatches = [];
   for (const it of pdfStore.download) {
-    const matched = matchPagesInPdf(it, cn);
-    if (matched.length) {
-      console.log('[label match] center=%s → download %s, pages=%o', center, it.name, matched);
-      const items = [];
-      for (const i of matched) items.push({ url: await renderPdfPageToImg(it.doc, i), kind: 'milkrun' });
-      return items;
+    const allowed = pickPagesForCategory(it);
+    for (const i of allowed) {
+      const pg = it.pages[i - 1];
+      if (pageMatchesCenter(pg, cn)) dlMatches.push({ item: it, pageIdx: i });
     }
   }
+  if (dlMatches.length) {
+    console.log('[label match] center=%s → download files=%d pages=%d',
+      center,
+      new Set(dlMatches.map(m => m.item.name)).size,
+      dlMatches.length);
+    const items = [];
+    for (const m of dlMatches) {
+      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'milkrun' });
+    }
+    return items;
+  }
+
   console.warn('[label match] center=%s → 매칭 실패. download 텍스트 sample:', center,
     pdfStore.download.map(it => ({name: it.name, p1text: (it.pages[0]?.text||'').slice(0,150)})));
   return [];
