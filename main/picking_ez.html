@@ -362,10 +362,11 @@ h1 em{color:var(--g);font-style:normal}
 /* ─────────────── 전역 상태 ─────────────── */
 var rawBuffer = null;
 var pdfDoc    = null;
-var invoices  = [];      // { invNum, totalQty, pages[], items[] }
+var invoices  = [];      // { invNum, totalQty, pages[], items[], customer } — 불변
 var locGroups = [];      // 피킹리스트
-var grpGroups = [];      // 그룹 인쇄
-var doneGroups = [];     // 인쇄완료 그룹
+/* 송장 단위 인쇄 추적 (그룹화는 렌더 시점에 동적으로 계산) */
+var printedInvNums = {}; // { invNum: 1 } — 인쇄완료 송장 집합
+var printedBatches = []; // [{ts, isMulti, items, customerSummary, invNums, pages}] — 인쇄 단위 스냅샷
 var curFlt = 'all', grpFlt = 'all', custFlt = 'all';
 var SESSION_KEY = 'ez_picking_v1';
 
@@ -373,11 +374,12 @@ var SESSION_KEY = 'ez_picking_v1';
 function saveSession() {
   try {
     var data = {
+      v: 2,
       ts: Date.now(),
       invoices:  JSON.parse(JSON.stringify(invoices)),
       locGroups: JSON.parse(JSON.stringify(locGroups)),
-      grpGroups: JSON.parse(JSON.stringify(grpGroups)),
-      doneGroups: JSON.parse(JSON.stringify(doneGroups)),
+      printedInvNums: JSON.parse(JSON.stringify(printedInvNums)),
+      printedBatches: JSON.parse(JSON.stringify(printedBatches)),
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(data));
   } catch(e){ console.warn('세션 저장 실패:', e); }
@@ -395,8 +397,33 @@ function restoreSession() {
   if (!data) return;
   invoices   = data.invoices   || [];
   locGroups  = data.locGroups  || [];
-  grpGroups  = data.grpGroups  || [];
-  doneGroups = data.doneGroups || [];
+  /* v2 → 그대로, v1(이전 grpGroups/doneGroups) → 마이그레이션 */
+  if (data.v === 2) {
+    printedInvNums = data.printedInvNums || {};
+    printedBatches = data.printedBatches || [];
+  } else {
+    /* v1 마이그레이션: doneGroups의 송장을 printedInvNums + printedBatches로 변환.
+       grpGroups는 아직 인쇄 안 됨 → 그냥 invoices에 남아있는 상태로 처리. */
+    printedInvNums = {};
+    printedBatches = [];
+    (data.doneGroups || []).forEach(function(grp){
+      var invNums = (grp.invoices||[]).map(function(i){ return i.invNum; }).filter(Boolean);
+      var pgSet = {};
+      (grp.invoices||[]).forEach(function(i){ (i.pages||[]).forEach(function(p){ pgSet[p]=1; }); });
+      var pages = Object.keys(pgSet).map(Number).sort(function(a,b){return a-b;});
+      var custSummary = grp.customer ? { kind:'single', name: grp.customer } : null;
+      invNums.forEach(function(n){ printedInvNums[n] = 1; });
+      printedBatches.push({
+        ts: data.ts || Date.now(),
+        isMulti: !!grp.isMulti,
+        items: grp.items || [],
+        customerSummary: custSummary,
+        invNums: invNums,
+        invCount: invNums.length,
+        pages: pages
+      });
+    });
+  }
   document.getElementById('restoreBanner').style.display = 'none';
   goTo(2);
   renderGrpPage();
@@ -454,8 +481,17 @@ function dismissBanner() {
   var d = new Date(data.ts);
   var timeStr = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+
                 String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-  var doneLen  = (data.doneGroups||[]).length;
-  var pendLen  = (data.grpGroups||[]).length;
+  /* v2: printedBatches 기준. v1: doneGroups 기준 */
+  var doneLen, pendLen;
+  if (data.v === 2) {
+    doneLen = (data.printedBatches||[]).length;
+    var printedSet = data.printedInvNums || {};
+    var pending = (data.invoices||[]).filter(function(i){ return !printedSet[i.invNum]; });
+    pendLen = pending.length; /* 송장 단위 (그룹 수가 아님) */
+  } else {
+    doneLen  = (data.doneGroups||[]).length;
+    pendLen  = (data.grpGroups||[]).length;
+  }
   document.getElementById('restoreInfo').textContent =
     timeStr+' · '+data.invoices.length+'건 송장 · 잔여 '+pendLen+'그룹 · 인쇄완료 '+doneLen+'그룹';
   banner.style.display = 'flex';
@@ -505,7 +541,8 @@ function setMsg(id, cls, html) {
 }
 function resetAll() {
   rawBuffer = null; pdfDoc = null;
-  invoices = []; locGroups = []; grpGroups = []; doneGroups = [];
+  invoices = []; locGroups = [];
+  printedInvNums = {}; printedBatches = [];
 }
 
 /* ─────────────── 드롭존 ─────────────── */
@@ -576,7 +613,9 @@ function processAllPages(doc, pw, pf, pl) {
 
     buildInvoices(pageTexts);
     buildLocGroups();
-    buildGrpGroups();
+    /* 새 분석 시작 → 인쇄 추적 초기화 */
+    printedInvNums = {};
+    printedBatches = [];
     saveSession(); /* ← 자동 저장 */
 
     var withCust = invoices.filter(function(i){ return i.customer; }).length;
@@ -793,28 +832,59 @@ function buildLocGroups() {
   });
 }
 
-/* ─────────────── 그룹 인쇄용 그룹 ─────────────── */
-function buildGrpGroups() {
-  var sorted = invoices.slice().sort(function(a,b){
-    var qa=(a.totalQty||0),qb=(b.totalQty||0);
-    var ma=qa>=2,mb=qb>=2;
-    if(ma&&!mb) return -1; if(!ma&&mb) return 1;
-    return qb-qa;
+/* ─────────────── 동적 그룹화 (송장 단위 추적) ─────────────── */
+/* invoices(불변) + printedInvNums(인쇄완료 등기번호) + 필터 옵션을 받아
+   매번 새로 그룹을 계산한다. 그룹화 키는 모드에 따라 달라짐:
+   - 주문처='all' (전체/합포/단포): 상품구성만 키 → 주문처 무관 묶임
+   - 주문처='특정': 상품구성+주문처 키 → 주문처별로 쪼개짐
+   인쇄된 송장은 항상 제외되어 중복 출력 구조적 차단. */
+function getActiveGroups(opts) {
+  opts = opts || {};
+  var custOpt = opts.custFlt || 'all';
+  var splitByCustomer = (custOpt !== 'all');
+
+  /* 1. 인쇄된 송장 제외, 주문처 필터 적용 */
+  var active = invoices.filter(function(inv){
+    if (printedInvNums[inv.invNum]) return false;
+    if (splitByCustomer) {
+      var c = inv.customer || '(미상)';
+      if (c !== custOpt) return false;
+    }
+    return true;
   });
 
+  /* 2. 그룹화 */
   var gmap = {};
-  sorted.forEach(function(inv){
-    var cust = inv.customer || '';
-    var k = inv.items.map(function(it){
+  active.forEach(function(inv){
+    var prodKey = inv.items.map(function(it){
       return (it.loc||'—')+'|'+(it.prd||'—')+'|'+(it.qty||1);
-    }).sort().join(';;') + '@@cust=' + cust;
-    if(!gmap[k]) gmap[k] = { key:k, items:inv.items, invoices:[], isMulti:(inv.totalQty||0)>=2, customer:cust };
-    gmap[k].invoices.push(inv);
+    }).sort().join(';;');
+    var key = splitByCustomer ? (prodKey + '@@cust=' + (inv.customer||'')) : prodKey;
+    if (!gmap[key]) {
+      gmap[key] = {
+        key: key,
+        items: inv.items,
+        isMulti: (inv.totalQty||0) >= 2,
+        invoices: [],
+        customerCounts: {} /* 그룹 안의 주문처별 송장 수 */
+      };
+    }
+    gmap[key].invoices.push(inv);
+    var c = inv.customer || '(미상)';
+    gmap[key].customerCounts[c] = (gmap[key].customerCounts[c]||0) + 1;
   });
 
-  grpGroups = Object.keys(gmap).map(function(k){ return gmap[k]; });
-  grpGroups.sort(function(a,b){ return b.invoices.length - a.invoices.length; });
+  /* 3. 정렬: 합포 우선, 그 다음 건수 많은 순 */
+  var groups = Object.keys(gmap).map(function(k){ return gmap[k]; });
+  groups.sort(function(a,b){
+    if (a.isMulti !== b.isMulti) return a.isMulti ? -1 : 1;
+    return b.invoices.length - a.invoices.length;
+  });
+  return groups;
 }
+
+/* invoices 안의 어떤 송장이 아직 안 인쇄되었는지 */
+function isPending(inv) { return !printedInvNums[inv.invNum]; }
 
 /* ─────────────── 피킹리스트 렌더 ─────────────── */
 function renderPick() {
@@ -950,24 +1020,15 @@ function renderGrpPage() {
 
 
 function updateGrpStats() {
-  var total = grpGroups.length + doneGroups.length;
-  var allInvs = grpGroups.reduce(function(s,g){return s+g.invoices.length;},0)
-              + doneGroups.reduce(function(s,g){return s+g.invoices.length;},0);
-  var multi = grpGroups.filter(function(g){return g.isMulti;}).length
-            + doneGroups.filter(function(g){return g.isMulti;}).length;
-  var pages = grpGroups.reduce(function(s,g){
-    var pg={};g.invoices.forEach(function(i){i.pages.forEach(function(p){pg[p]=1;});});
-    return s+Object.keys(pg).length;
-  },0) + doneGroups.reduce(function(s,g){
-    var pg={};g.invoices.forEach(function(i){i.pages.forEach(function(p){pg[p]=1;});});
-    return s+Object.keys(pg).length;
-  },0);
-  document.getElementById('pb0').textContent = allInvs || invoices.length;
+  /* 송장 단위 카운트 — invoices 전체 기준 (인쇄 여부 무관) */
+  var totalInv = invoices.length;
+  var multi = invoices.filter(function(i){ return (i.totalQty||0)>=2; }).length;
+  var pgSet = {};
+  invoices.forEach(function(i){ (i.pages||[]).forEach(function(p){ pgSet[p]=1; }); });
+  document.getElementById('pb0').textContent = totalInv;
   document.getElementById('pb1').textContent = multi;
-  document.getElementById('pb2').textContent = total - multi;
-  document.getElementById('pb3').textContent = pages;
-  /* 인쇄 후 그룹이 줄어들면 주문처 옵션도 자동 정리 */
-  populateCustomerFilter();
+  document.getElementById('pb2').textContent = totalInv - multi;
+  document.getElementById('pb3').textContent = Object.keys(pgSet).length;
 }
 
 function toggleDoneList() {
@@ -981,24 +1042,36 @@ function updateDoneSection() {
   var sec  = document.getElementById('doneSection');
   var list = document.getElementById('doneList');
   var cnt  = document.getElementById('doneCnt');
-  cnt.textContent = doneGroups.length + '건';
-  sec.style.display = doneGroups.length ? '' : 'none';
+  cnt.textContent = printedBatches.length + '건';
+  sec.style.display = printedBatches.length ? '' : 'none';
   list.innerHTML = '';
-  doneGroups.forEach(function(grp, di) {
-    var isM = grp.isMulti, invCnt = grp.invoices.length;
+  printedBatches.forEach(function(batch, di) {
+    var isM = batch.isMulti, invCnt = batch.invCount || (batch.invNums||[]).length;
     var card = document.createElement('div');
     card.className = 'grp-card done-card';
-    var ih = grp.items.map(function(it){
+    var ih = (batch.items||[]).map(function(it){
       var p=[];
       if(it.loc&&it.loc!=='—') p.push('<span class="tg tg-l" style="font-size:.67rem">'+escH(it.loc)+'</span>');
       p.push('<span style="font-size:.84rem">'+escH(it.prd||'—')+'</span>');
       if(it.qty>1) p.push('<b style="color:var(--y);font-family:var(--mo)">×'+it.qty+'</b>');
       return '<div style="display:flex;align-items:center;gap:.35rem;padding:.1rem 0">'+p.join('')+'</div>';
     }).join('');
+    /* 주문처 요약 표시 */
+    var custLabel = '';
+    var cs = batch.customerSummary;
+    if (cs) {
+      if (cs.kind === 'single' && cs.name && cs.name !== '(미상)') {
+        custLabel = '<span class="tg" style="font-size:.65rem;background:rgba(80,140,255,.10);color:#7fb0ff;border:1px solid rgba(80,140,255,.25)">'+escH(cs.name)+'</span>';
+      } else if (cs.kind === 'mixed' && cs.counts) {
+        var kk = Object.keys(cs.counts);
+        custLabel = '<span class="tg" style="font-size:.65rem;background:rgba(200,160,80,.10);color:#e0b878;border:1px solid rgba(200,160,80,.25)">주문처 '+kk.length+'종</span>';
+      }
+    }
     card.innerHTML =
       '<div class="grp-body" style="position:relative">'+
         '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
           '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>'+
+          custLabel+
           '<span style="font-size:.65rem;color:rgba(240,88,88,.7);font-family:var(--mo)">✓ 인쇄완료</span>'+
         '</div>'+
         '<div>'+ih+'</div>'+
@@ -1037,15 +1110,16 @@ function setCustFlt(v) {
   renderGrpList();
 }
 
-/* grpGroups + doneGroups의 모든 주문처를 모아 드롭다운 옵션 갱신 */
+/* 미인쇄 송장들의 주문처를 집계해 드롭다운 옵션 갱신 */
 function populateCustomerFilter() {
   var sel = document.getElementById('custFlt');
   var row = document.getElementById('custRow');
   if (!sel || !row) return;
   var cnt = {};
-  grpGroups.forEach(function(g){
-    var c = g.customer || '(미상)';
-    cnt[c] = (cnt[c]||0) + g.invoices.length;
+  invoices.forEach(function(inv){
+    if (printedInvNums[inv.invNum]) return;
+    var c = inv.customer || '(미상)';
+    cnt[c] = (cnt[c]||0) + 1;
   });
   var keys = Object.keys(cnt);
   /* 주문처 정보가 전혀 없거나 1개뿐이면 UI 숨김 */
@@ -1071,14 +1145,13 @@ function populateCustomerFilter() {
 }
 
 function renderGrpList() {
-  var data = grpGroups;
+  var groups = getActiveGroups({ custFlt: custFlt });
+  /* 합포/단포 필터는 그룹화 후 적용 */
+  var data = groups;
   if (grpFlt==='multi')  data = data.filter(function(g){ return g.isMulti; });
   if (grpFlt==='single') data = data.filter(function(g){ return !g.isMulti; });
-  if (custFlt !== 'all') {
-    data = data.filter(function(g){ return (g.customer||'(미상)') === custFlt; });
-  }
 
-  /* 안내 라벨: 현재 표시 중인 그룹 수 / 송장 수 */
+  /* 안내 라벨: 주문처 우선출력일 때 현재 표시 그룹/송장 수 */
   var hint = document.getElementById('custHint');
   if (hint) {
     if (custFlt === 'all') {
@@ -1091,11 +1164,16 @@ function renderGrpList() {
 
   var container = document.getElementById('grpList');
   container.innerHTML = '';
-  data.forEach(function(grp, filtIdx){
-    var origIdx = grpGroups.indexOf(grp);
-    var idx = origIdx !== -1 ? origIdx : filtIdx;
+  data.forEach(function(grp, idx){
     var isM = grp.isMulti, cnt = grp.invoices.length;
-    var cust = grp.customer || '';
+    /* 카드에 그룹의 송장 등기번호 목록을 박제 — 동적 그룹화에 안전 */
+    var invNumsAttr = grp.invoices.map(function(i){ return i.invNum; }).join('|');
+    /* 페이지 인덱스도 미리 계산해서 박제 (중복 제거 + 정렬) */
+    var pageSet = {};
+    grp.invoices.forEach(function(i){ (i.pages||[]).forEach(function(p){ pageSet[p]=1; }); });
+    var pages = Object.keys(pageSet).map(Number).sort(function(a,b){return a-b;});
+    var pagesAttr = pages.join(',');
+
     var card = document.createElement('div');
     card.className = 'grp-card'; card.id = 'gg-'+idx;
 
@@ -1107,12 +1185,23 @@ function renderGrpList() {
       return '<div style="display:flex;align-items:center;gap:.35rem;padding:.1rem 0">'+p.join('')+'</div>';
     }).join('');
 
-    var custBadge = cust
-      ? '<span class="tg" style="font-size:.65rem;background:rgba(80,140,255,.15);color:#7fb0ff;border:1px solid rgba(80,140,255,.35)">'+escH(cust)+'</span>'
-      : '';
+    /* 주문처 뱃지 — 단일 주문처면 뱃지 1개, 혼합이면 'N종 혼합' */
+    var custKeys = Object.keys(grp.customerCounts);
+    var custBadge = '';
+    if (custKeys.length === 1) {
+      var only = custKeys[0];
+      if (only && only !== '(미상)') {
+        custBadge = '<span class="tg" style="font-size:.65rem;background:rgba(80,140,255,.15);color:#7fb0ff;border:1px solid rgba(80,140,255,.35)">'+escH(only)+'</span>';
+      }
+    } else if (custKeys.length > 1) {
+      var top = custKeys.slice().sort(function(a,b){return grp.customerCounts[b]-grp.customerCounts[a];}).slice(0,2);
+      var topLabel = top.map(function(k){ return (k==='(미상)'?'미상':k)+'·'+grp.customerCounts[k]; }).join(', ');
+      if (custKeys.length > 2) topLabel += ' 외';
+      custBadge = '<span class="tg" title="'+escH(topLabel)+'" style="font-size:.65rem;background:rgba(200,160,80,.15);color:#e0b878;border:1px solid rgba(200,160,80,.35)">주문처 '+custKeys.length+'종 ('+escH(topLabel)+')</span>';
+    }
 
     card.innerHTML =
-      '<input class="grp-chk" type="checkbox" id="chk-'+idx+'" data-idx="'+idx+'" onchange="onChkChange(this)">'+
+      '<input class="grp-chk" type="checkbox" id="chk-'+idx+'" data-idx="'+idx+'" data-invs="'+escH(invNumsAttr)+'" data-pages="'+pagesAttr+'" onchange="onChkChange(this)">'+
       '<div class="grp-body" style="position:relative">'+
         '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
           '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>'+
@@ -1125,7 +1214,7 @@ function renderGrpList() {
           '<div style="font-family:var(--mo);font-size:2.2rem;font-weight:900;color:'+(isM?'var(--y)':'var(--tx)')+';line-height:1">'+cnt+'</div>'+
           '<div style="font-size:.63rem;color:var(--mu);font-family:var(--mo)">건</div>'+
         '</div>'+
-        '<button class="grp-prt" id="prt-'+idx+'" onclick="printGrp('+idx+',this)">🖨 인쇄</button>'+
+        '<button class="grp-prt" id="prt-'+idx+'" onclick="printGrp(this)">🖨 인쇄</button>'+
       '</div>';
     container.appendChild(card);
   });
@@ -1152,134 +1241,161 @@ function cropToInvoice(page) {
   page.setMediaBox(0, origH - H_PT, W_PT, H_PT);
 }
 
-/* ─────────────── 개별 그룹 인쇄 ─────────────── */
-function printGrp(idx, btn) {
-  var grp = grpGroups[idx];
-  if (!grp || !rawBuffer) return;
-  btn.textContent = '⏳';
+/* ─────────────── 인쇄 공통 유틸 ─────────────── */
+/* 카드 element 한 개에서 invNum/pages 추출. 박제된 dataset 사용. */
+function extractCardPayload(cardChkEl) {
+  var invs = (cardChkEl.dataset.invs||'').split('|').filter(Boolean);
+  var pages = (cardChkEl.dataset.pages||'').split(',').filter(Boolean).map(Number);
+  return { invNums: invs, pages: pages };
+}
+
+/* 미인쇄 송장 중 invNum 목록을 인쇄완료로 마킹하고 batch 기록 */
+function markInvoicesPrinted(invNums, pages, opts) {
+  opts = opts || {};
+  /* 안전장치: 이미 인쇄된 송장이 있으면 중복 등록 방지 */
+  var fresh = invNums.filter(function(n){ return !printedInvNums[n]; });
+  if (!fresh.length) return false;
+  /* batch 생성용 메타 수집 */
+  var freshInvs = fresh.map(function(n){
+    return invoices.find(function(i){ return i.invNum === n; });
+  }).filter(Boolean);
+  var custCnt = {};
+  freshInvs.forEach(function(i){
+    var c = i.customer || '(미상)';
+    custCnt[c] = (custCnt[c]||0) + 1;
+  });
+  var customerSummary;
+  var custKeys = Object.keys(custCnt);
+  if (custKeys.length === 1) customerSummary = { kind:'single', name: custKeys[0] };
+  else customerSummary = { kind:'mixed', counts: custCnt };
+
+  var items = (opts.items && opts.items.length) ? opts.items :
+              (freshInvs[0] ? freshInvs[0].items : []);
+  var isMulti = (opts.isMulti !== undefined) ? opts.isMulti :
+                (freshInvs[0] ? (freshInvs[0].totalQty||0)>=2 : false);
+
+  printedBatches.unshift({
+    ts: Date.now(),
+    isMulti: isMulti,
+    items: JSON.parse(JSON.stringify(items)),
+    customerSummary: customerSummary,
+    invNums: fresh,
+    invCount: fresh.length,
+    pages: (pages && pages.length) ? pages.slice() :
+           (function(){ var s={}; freshInvs.forEach(function(i){(i.pages||[]).forEach(function(p){s[p]=1;});}); return Object.keys(s).map(Number).sort(function(a,b){return a-b;}); })()
+  });
+  fresh.forEach(function(n){ printedInvNums[n] = 1; });
+  return true;
+}
+
+/* 페이지 인덱스 배열로 PDF 합본 */
+function buildPdfFromPages(pages, cb, errCb) {
   loadPdfLib(function(){
     PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
       return PDFLib.PDFDocument.create().then(function(out){
         var tot=src.getPageCount(), added={}, chain=Promise.resolve();
-        grp.invoices.forEach(function(inv){
-          inv.pages.forEach(function(pg){
-            if (pg<tot && !added[pg]) {
-              added[pg]=1;
-              chain=chain.then(function(){
-                return out.copyPages(src,[pg]).then(function(ps){ cropToInvoice(ps[0]); out.addPage(ps[0]); });
-              });
-            }
-          });
+        pages.forEach(function(pg){
+          if (pg<tot && !added[pg]) {
+            added[pg]=1;
+            chain=chain.then(function(){
+              return out.copyPages(src,[pg]).then(function(ps){ cropToInvoice(ps[0]); out.addPage(ps[0]); });
+            });
+          }
         });
         return chain.then(function(){ return out.save(); });
       });
-    }).then(function(bytes){
-      var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
-      var done=function(){
-        /* 인쇄 완료 → grpGroups에서 제거 후 doneGroups로 이동 */
-        var grpCopy = JSON.parse(JSON.stringify(grp));
-        /* idx는 필터된 인덱스가 아닌 grpGroups 실제 인덱스 사용 */
-        var origIdx = grpGroups.indexOf(grp);
-        if (origIdx !== -1) grpGroups.splice(origIdx, 1);
-        doneGroups.unshift(grpCopy);
-        renderGrpList();
-        updateDoneSection();
-        updateGrpStats();
-        saveSession();
-      };
-      if(location.protocol==='file:'){
-        var a=document.createElement('a'); a.href=url;
-        a.download='그룹'+(idx+1)+'_'+grp.invoices.length+'건.pdf'; a.click();
-        setTimeout(function(){URL.revokeObjectURL(url);done();},1000);
-      } else {
-        var w=window.open(url,'_blank');
-        if(w) w.onload=function(){ w.print(); done(); setTimeout(function(){URL.revokeObjectURL(url);},3000); };
-      }
-    }).catch(function(e){ btn.textContent='❌'; console.error(e); });
+    }).then(cb).catch(errCb || function(e){ console.error(e); });
   });
+}
+
+/* ─────────────── 개별 그룹 인쇄 ─────────────── */
+/* 새 시그니처: 버튼 element 1개. 같은 카드의 체크박스 dataset에서 송장/페이지 추출. */
+function printGrp(btn) {
+  if (!rawBuffer) { alert('PDF가 없습니다. 다시 업로드해주세요.'); return; }
+  var card = btn.closest('.grp-card');
+  if (!card) return;
+  var chk = card.querySelector('.grp-chk');
+  if (!chk) return;
+  var payload = extractCardPayload(chk);
+  if (!payload.invNums.length || !payload.pages.length) { btn.textContent='❌'; return; }
+  /* 카드 박제 시점에 이미 인쇄됐을 가능성 차단 (race condition) */
+  var stillFresh = payload.invNums.some(function(n){ return !printedInvNums[n]; });
+  if (!stillFresh) { btn.textContent='이미 인쇄됨'; renderGrpList(); return; }
+  btn.textContent = '⏳';
+  buildPdfFromPages(payload.pages, function(bytes){
+    var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
+    var done=function(){
+      markInvoicesPrinted(payload.invNums, payload.pages, {});
+      renderGrpList();
+      updateDoneSection();
+      updateGrpStats();
+      populateCustomerFilter();
+      saveSession();
+    };
+    if(location.protocol==='file:'){
+      var a=document.createElement('a'); a.href=url;
+      a.download='그룹_'+payload.invNums.length+'건.pdf'; a.click();
+      setTimeout(function(){URL.revokeObjectURL(url);done();},1000);
+    } else {
+      var w=window.open(url,'_blank');
+      if(w) w.onload=function(){ w.print(); done(); setTimeout(function(){URL.revokeObjectURL(url);},3000); };
+    }
+  }, function(e){ btn.textContent='❌'; console.error(e); });
 }
 
 
 /* ─────────────── 재출력 (인쇄완료 목록에서) ─────────────── */
 function reprintDone(di) {
-  var grp = doneGroups[di];
-  if (!grp || !rawBuffer) return;
+  var batch = printedBatches[di];
+  if (!batch || !rawBuffer) return;
   if (!confirm('재출력합니다. 프린터 확인 후 진행해주세요.')) return;
-  loadPdfLib(function(){
-    PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
-      return PDFLib.PDFDocument.create().then(function(out){
-        var tot=src.getPageCount(),added={},chain=Promise.resolve();
-        grp.invoices.forEach(function(inv){
-          inv.pages.forEach(function(pg){
-            if(pg<tot&&!added[pg]){added[pg]=1;chain=chain.then(function(){return out.copyPages(src,[pg]).then(function(ps){cropToInvoice(ps[0]);out.addPage(ps[0]);});});}
-          });
-        });
-        return chain.then(function(){return out.save();});
-      });
-    }).then(function(bytes){
-      var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
-      if(location.protocol==='file:'){
-        var a=document.createElement('a');a.href=url;a.download='재출력_그룹'+(di+1)+'_'+grp.invoices.length+'건.pdf';a.click();
-        setTimeout(function(){URL.revokeObjectURL(url);},1000);
-      } else {
-        var w=window.open(url,'_blank');
-        if(w) w.onload=function(){w.print();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
-      }
-    }).catch(function(e){console.error(e);});
+  buildPdfFromPages(batch.pages, function(bytes){
+    var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
+    if(location.protocol==='file:'){
+      var a=document.createElement('a');a.href=url;a.download='재출력_'+batch.invCount+'건.pdf';a.click();
+      setTimeout(function(){URL.revokeObjectURL(url);},1000);
+    } else {
+      var w=window.open(url,'_blank');
+      if(w) w.onload=function(){w.print();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
+    }
   });
 }
 
 
 /* ─────────────── 체크 선택 인쇄 ─────────────── */
 function printChecked() {
-  var checked=[];
+  var allInvs = [], allPages = {};
   document.querySelectorAll('.grp-chk:checked').forEach(function(c){
-    var g=grpGroups[parseInt(c.dataset.idx)];
-    if(g) checked.push({idx:parseInt(c.dataset.idx),grp:g});
+    var p = extractCardPayload(c);
+    p.invNums.forEach(function(n){
+      if (!printedInvNums[n] && allInvs.indexOf(n)===-1) allInvs.push(n);
+    });
+    p.pages.forEach(function(pg){ allPages[pg]=1; });
   });
-  if(!checked.length){alert('선택 필요');return;}
-  var totalInv=checked.reduce(function(s,c){return s+c.grp.invoices.length;},0);
+  if(!allInvs.length){alert('선택 필요');return;}
+  var pagesArr = Object.keys(allPages).map(Number).sort(function(a,b){return a-b;});
   var msg=document.getElementById('mpdf');
   msg.style.display='block'; msg.className='msg inf';
-  msg.innerHTML='<span class="sp"></span>'+totalInv+'건 생성 중...';
-  loadPdfLib(function(){
-    PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
-      return PDFLib.PDFDocument.create().then(function(out){
-        var tot=src.getPageCount(),added={},chain=Promise.resolve();
-        checked.forEach(function(c){
-          c.grp.invoices.forEach(function(inv){
-            inv.pages.forEach(function(pg){
-              if(pg<tot&&!added[pg]){added[pg]=1;chain=chain.then(function(){return out.copyPages(src,[pg]).then(function(ps){cropToInvoice(ps[0]);out.addPage(ps[0]);});});}
-            });
-          });
-        });
-        return chain.then(function(){return out.save();});
-      });
-    }).then(function(bytes){
-      var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
-      var markAll=function(){
-        /* 선택 인쇄 완료 → grpGroups에서 제거 후 doneGroups로 이동 */
-        var grpsToMove = checked.map(function(c){ return c.grp; });
-        grpsToMove.forEach(function(g){
-          var oi = grpGroups.indexOf(g);
-          if (oi !== -1) grpGroups.splice(oi, 1);
-          doneGroups.unshift(JSON.parse(JSON.stringify(g)));
-        });
-        renderGrpList();
-        updateDoneSection();
-        updateGrpStats();
-        msg.className='msg ok'; msg.textContent='✅ '+totalInv+'건 완료';
-        saveSession();
-      };
-      if(location.protocol==='file:'){
-        var a=document.createElement('a');a.href=url;a.download='선택_'+totalInv+'건.pdf';a.click();
-        setTimeout(function(){URL.revokeObjectURL(url);markAll();},1000);
-      } else {
-        var w=window.open(url,'_blank');
-        if(w) w.onload=function(){w.print();markAll();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
-      }
-    }).catch(function(e){msg.className='msg er';msg.textContent='❌ '+e.message;});
-  });
+  msg.innerHTML='<span class="sp"></span>'+allInvs.length+'건 생성 중...';
+  buildPdfFromPages(pagesArr, function(bytes){
+    var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
+    var markAll=function(){
+      markInvoicesPrinted(allInvs, pagesArr, {});
+      renderGrpList();
+      updateDoneSection();
+      updateGrpStats();
+      populateCustomerFilter();
+      msg.className='msg ok'; msg.textContent='✅ '+allInvs.length+'건 완료';
+      saveSession();
+    };
+    if(location.protocol==='file:'){
+      var a=document.createElement('a');a.href=url;a.download='선택_'+allInvs.length+'건.pdf';a.click();
+      setTimeout(function(){URL.revokeObjectURL(url);markAll();},1000);
+    } else {
+      var w=window.open(url,'_blank');
+      if(w) w.onload=function(){w.print();markAll();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
+    }
+  }, function(e){msg.className='msg er';msg.textContent='❌ '+e.message;});
 }
 
 /* ─────────────── 유틸 ─────────────── */
