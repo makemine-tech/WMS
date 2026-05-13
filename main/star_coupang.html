@@ -102,6 +102,13 @@ h1 em{color:var(--g);font-style:normal}
 .sd-detail .sd-v.bc-alt{color:var(--p)}
 .sd-detail .sd-v.size{color:#7fb0ff;font-size:1.55rem}
 .sd-detail .sd-v.qty{color:var(--g);font-family:var(--mo);font-size:1.45rem}
+/* 편집 가능한 큰 디스플레이 input */
+.sd-edit{background:transparent;border:1px dashed transparent;color:var(--tx);font-weight:800;font-size:1.3rem;padding:.18rem .45rem;border-radius:5px;font-family:inherit;width:100%;min-width:0;outline:none;transition:border-color .15s,background .15s}
+.sd-edit:hover{border-color:var(--mu)}
+.sd-edit:focus{border-color:var(--g);background:rgba(74,240,168,.06);border-style:solid}
+.sd-edit.size{color:#7fb0ff;font-size:1.55rem}
+.sd-edit.modified{color:var(--y)}
+.sd-edit.modified::after{content:" ✎"}
 .scan-display.warn .sd-detail .sd-v.qty,
 .scan-display.er .sd-detail .sd-v.qty{color:var(--r)}
 @media(max-width:720px){
@@ -322,9 +329,9 @@ h1 em{color:var(--g);font-style:normal}
     <div class="sd-msg" id="sdMsg">대기 중 — 박스 바코드부터 스캔하세요</div>
     <div class="sd-detail hidden" id="sdDetail">
       <div class="sd-k">바코드</div><div class="sd-v bc" id="sdBc">—</div>
-      <div class="sd-k">품명</div><div class="sd-v" id="sdName">—</div>
-      <div class="sd-k">컬러</div><div class="sd-v" id="sdColor">—</div>
-      <div class="sd-k">사이즈</div><div class="sd-v size" id="sdSize">—</div>
+      <div class="sd-k">품명</div><input type="text" class="sd-edit" id="sdName" placeholder="—" onchange="updateScanField('name', this.value)" onfocus="this.select()">
+      <div class="sd-k">컬러</div><input type="text" class="sd-edit" id="sdColor" placeholder="—" onchange="updateScanField('color', this.value)" onfocus="this.select()">
+      <div class="sd-k">사이즈</div><input type="text" class="sd-edit size" id="sdSize" placeholder="—" onchange="updateScanField('size', this.value)" onfocus="this.select()">
       <div class="sd-k">실입고/예정</div><div class="sd-v qty" id="sdQty">—</div>
     </div>
   </div>
@@ -403,6 +410,9 @@ var currentBox = null;
 var boxes = [];             // [{id, ts, items:[{barcode, rowIdx, count}], closed}]
 var lastScans = [];         // [{rowIdx, barcode, ts, boxId}] — undo 용
 var rowFlt = 'all';
+var currentDisplayRow = -1; // 큰 디스플레이에 표시 중인 row 인덱스 (인라인 편집 대상)
+var origName = {};          // {rowIdx: 원본 품명} — 수정 플래그용
+var origColor = {};         // {rowIdx: 원본 컬러}
 var SESSION_KEY = 'star_coupang_v1';
 /* 컬럼 매핑 (실제 엑셀 헤더 기준).
    A=0 박스바코드 | B=1 브랜드 | C=2 품번 | D=3 바코드 | E=4 대비 바코드 | F=5 품명
@@ -507,8 +517,12 @@ function parseWorkbook(wb) {
       qtyReceived: 0,
       sizeMod: false,
       originMod: false,
+      nameMod: false,
+      colorMod: false,
       origSize: rawRow[COL.SIZE],
-      origOrigin: rawRow[COL.ORIGIN]
+      origOrigin: rawRow[COL.ORIGIN],
+      origName: rawRow[COL.NAME],
+      origColor: rawRow[COL.COLOR]
     };
     var rowIdx = rows.length;
     rows.push(row);
@@ -725,18 +739,31 @@ function updateScanDisplay(kind, msg, row, info) {
   m.innerHTML = msg;
   if (!row) {
     detail.classList.add('hidden');
+    currentDisplayRow = -1;
     return;
   }
   detail.classList.remove('hidden');
+  /* 현재 디스플레이된 row 추적 — 인라인 편집 시 어떤 row에 적용할지 */
+  currentDisplayRow = rows.indexOf(row);
+
   var bc = row.vals[COL.BARCODE];
   var ab = row.vals[COL.ALT_BARCODE];
   var bcEl = document.getElementById('sdBc');
   bcEl.className = 'sd-v bc' + (info && info.altUsed ? ' bc-alt' : '');
   bcEl.textContent = (info && info.altUsed ? (ab===null||ab===undefined?'—':String(ab))+' (대체)'
                                             : (bc===null||bc===undefined?'—':String(bc)));
-  document.getElementById('sdName').textContent  = row.vals[COL.NAME] || '—';
-  document.getElementById('sdColor').textContent = row.vals[COL.COLOR] || '—';
-  document.getElementById('sdSize').textContent  = (row.vals[COL.SIZE]===null||row.vals[COL.SIZE]===undefined) ? '—' : String(row.vals[COL.SIZE]);
+
+  /* input.value로 채움 + 수정 플래그에 따라 modified 클래스 */
+  var nameEl  = document.getElementById('sdName');
+  var colorEl = document.getElementById('sdColor');
+  var sizeEl  = document.getElementById('sdSize');
+  nameEl.value  = row.vals[COL.NAME] === null || row.vals[COL.NAME] === undefined ? '' : String(row.vals[COL.NAME]);
+  colorEl.value = row.vals[COL.COLOR] === null || row.vals[COL.COLOR] === undefined ? '' : String(row.vals[COL.COLOR]);
+  sizeEl.value  = row.vals[COL.SIZE] === null || row.vals[COL.SIZE] === undefined ? '' : String(row.vals[COL.SIZE]);
+  nameEl.classList.toggle('modified', !!row.nameMod);
+  colorEl.classList.toggle('modified', !!row.colorMod);
+  sizeEl.classList.toggle('modified', !!row.sizeMod);
+
   var t = info ? info.target : 0;
   var r = info ? info.recv   : 0;
   var qtyTxt = r + ' / ' + t;
@@ -744,6 +771,34 @@ function updateScanDisplay(kind, msg, row, info) {
   else if (info && r === t && t > 0) qtyTxt += '  ✓ 완료';
   else if (info && t > 0)             qtyTxt += '  잔여 ' + (t - r);
   document.getElementById('sdQty').textContent = qtyTxt;
+}
+
+/* 큰 디스플레이에서 품명/컬러/사이즈 인라인 편집 시 호출.
+   현재 표시된 row의 값을 갱신 + modified 플래그 + 테이블 동기. */
+function updateScanField(field, val) {
+  if (currentDisplayRow < 0 || !rows[currentDisplayRow]) return;
+  var r = rows[currentDisplayRow];
+  var nv = (val || '').trim();
+  if (field === 'name') {
+    r.vals[COL.NAME] = nv;
+    var orig = r.origName === null || r.origName === undefined ? '' : String(r.origName);
+    r.nameMod = (nv !== orig);
+  } else if (field === 'color') {
+    r.vals[COL.COLOR] = nv;
+    var origC = r.origColor === null || r.origColor === undefined ? '' : String(r.origColor);
+    r.colorMod = (nv !== origC);
+  } else if (field === 'size') {
+    r.vals[COL.SIZE] = nv;
+    var origS = r.origSize === null || r.origSize === undefined ? '' : String(r.origSize);
+    r.sizeMod = (nv !== origS);
+  }
+  /* 디스플레이 modified 클래스 즉시 반영 */
+  var el = document.getElementById(field === 'name' ? 'sdName' : field === 'color' ? 'sdColor' : 'sdSize');
+  var modKey = field === 'name' ? 'nameMod' : field === 'color' ? 'colorMod' : 'sizeMod';
+  el.classList.toggle('modified', !!r[modKey]);
+  saveSession();
+  /* 작업중/완료 테이블 동기 */
+  renderTable();
 }
 
 /* 하위 호환: 기존 flashFeedback 호출은 큰 디스플레이로 위임 */
@@ -879,7 +934,8 @@ function renderAll() {
 }
 
 function renderHead() {
-  var html =
+  /* 작업 중: 원본 행 기준 12컬럼 */
+  var headActive =
     '<th>#</th>'+
     '<th>품번</th>'+
     '<th>바코드 (D)</th>'+
@@ -892,10 +948,24 @@ function renderHead() {
     '<th style="text-align:right">기존 R</th>'+
     '<th style="text-align:right">실입고</th>'+
     '<th style="text-align:right">잔여</th>';
+  /* 처리 완료: 박스 × SKU 단위 — 박스 ID + 시간 + 박스 내 수량 */
+  var headDone =
+    '<th>박스</th>'+
+    '<th>시간</th>'+
+    '<th>품번</th>'+
+    '<th>바코드</th>'+
+    '<th>품명</th>'+
+    '<th>컬러</th>'+
+    '<th>사이즈</th>'+
+    '<th>원산지</th>'+
+    '<th style="text-align:right">박스 내</th>'+
+    '<th style="text-align:right">SKU 누적</th>'+
+    '<th style="text-align:right">예정 Q</th>'+
+    '<th style="text-align:right">상태</th>';
   var a = document.getElementById('tblHeadA');
   var d = document.getElementById('tblHeadD');
-  if (a) a.innerHTML = html;
-  if (d) d.innerHTML = html;
+  if (a) a.innerHTML = headActive;
+  if (d) d.innerHTML = headDone;
 }
 
 function setRowFlt(type, btn) {
@@ -930,25 +1000,26 @@ function renderTable() {
   var td = document.getElementById('tblBodyDone');
   if (!ta || !td) return;
   var q = document.getElementById('searchInp').value.trim().toLowerCase();
-  var activeHtml = '', doneHtml = '';
-  var activeCnt = 0, doneCnt = 0;
 
+  /* ─ 1) 작업 중 영역 — 원본 row 기준, 미달/초과/일부진행만 표시 ─ */
+  var activeHtml = '';
+  var activeCnt = 0;
   rows.forEach(function(r, idx){
     var c = classifyRow(r);
+    if (c.zone !== 'active') return;
+
     var exp = +r.vals[COL.EXPECT_QTY] || 0;
     var existing = +r.vals[COL.EXISTING_QTY] || 0;
     var target = c.target;
     var recv = c.recv;
     var remain = target - recv;
-    var isOver = c.kind === 'over';
-    var isOk = c.kind === 'ok';
     var isPartial = c.kind === 'partial';
     var isPending = c.kind === 'pending';
 
-    /* 필터 (영역과 별개로 적용) */
+    /* 필터 */
     if (rowFlt === 'pending' && !isPending) return;
-    if (rowFlt === 'done' && !isOk) return;
-    if (rowFlt === 'over' && !isOver) return;
+    if (rowFlt === 'done' && c.kind !== 'ok') return;
+    if (rowFlt === 'over' && c.kind !== 'over') return;
 
     /* 검색 */
     if (q) {
@@ -959,45 +1030,102 @@ function renderTable() {
       if (hay.indexOf(q) === -1) return;
     }
 
-    /* 행 클래스 */
-    var rowCls = '';
-    if (isOver) rowCls += ' over';
-    else if (isOk) rowCls += ' done-row';
-    else if (isPartial) rowCls += ' under';
-
+    var rowCls = isPartial ? 'under' : '';
     var sz = r.vals[COL.SIZE]===null||r.vals[COL.SIZE]===undefined?'':String(r.vals[COL.SIZE]);
     var og = r.vals[COL.ORIGIN]===null||r.vals[COL.ORIGIN]===undefined?'':String(r.vals[COL.ORIGIN]);
     var szCls = 'cell-edit'+(r.sizeMod?' modified':'');
     var ogCls = 'cell-edit'+(r.originMod?' modified':'');
     var szMark = r.sizeMod?'<span class="tag tag-mod">수정</span>':'';
     var ogMark = r.originMod?'<span class="tag tag-mod">수정</span>':'';
+    var nameMark = r.nameMod?'<span class="tag tag-mod">수정</span>':'';
+    var colorMark = r.colorMod?'<span class="tag tag-mod">수정</span>':'';
 
-    var rowHtml =
+    activeHtml +=
       '<tr id="tr-'+idx+'" class="'+rowCls+'">'+
         '<td style="color:var(--mu);font-family:var(--mo);font-size:.7rem">'+r.r+'</td>'+
         '<td>'+escH(r.vals[COL.CODE])+'</td>'+
         '<td class="cell-bc">'+escH(r.vals[COL.BARCODE])+'</td>'+
         '<td class="cell-bc-alt">'+escH(r.vals[COL.ALT_BARCODE])+'</td>'+
-        '<td class="cell-name" title="'+escAttr(r.vals[COL.NAME])+'">'+escH(r.vals[COL.NAME])+'</td>'+
-        '<td>'+escH(r.vals[COL.COLOR])+'</td>'+
+        '<td class="cell-name" title="'+escAttr(r.vals[COL.NAME])+'">'+escH(r.vals[COL.NAME])+nameMark+'</td>'+
+        '<td>'+escH(r.vals[COL.COLOR])+colorMark+'</td>'+
         '<td><input type="text" class="'+szCls+'" value="'+escAttr(sz)+'" onchange="updateSize('+idx+',this.value)" onfocus="this.select()">'+szMark+'</td>'+
         '<td><input type="text" class="'+ogCls+'" value="'+escAttr(og)+'" onchange="updateOrigin('+idx+',this.value)" onfocus="this.select()">'+ogMark+'</td>'+
         '<td class="cell-num exp">'+(exp||'')+'</td>'+
         '<td class="cell-num" style="color:var(--mu)">'+(existing||'')+'</td>'+
-        '<td class="cell-num '+(isOver?'over':'recv')+'">'+(recv||'')+'</td>'+
+        '<td class="cell-num '+(c.kind==='over'?'over':'recv')+'">'+(recv||'')+'</td>'+
         '<td class="cell-num '+(remain<0?'over':(remain>0?'rem':'recv'))+'">'+(target>0?(remain<0?'+'+Math.abs(remain):remain):'')+'</td>'+
       '</tr>';
+    activeCnt++;
+  });
 
-    if (c.zone === 'active') { activeHtml += rowHtml; activeCnt++; }
-    else { doneHtml += rowHtml; doneCnt++; }
+  /* ─ 2) 처리 완료 영역 — 박스 × SKU 단위로 펼침 ─
+     boxes의 items를 모두 펼쳐 (boxId, SKU) 쌍 1개당 1행.
+     같은 SKU가 박스 2개에 분산되면 2행으로 표시. */
+  var doneHtml = '';
+  var doneCnt = 0;
+  /* 박스를 시작 시간 역순(최근 위) */
+  var sortedBoxes = boxes.slice().sort(function(a,b){ return b.ts - a.ts; });
+  sortedBoxes.forEach(function(box){
+    box.items.forEach(function(it){
+      if (it.count <= 0) return;
+      var r = rows[it.rowIdx];
+      if (!r) return;
+
+      /* 검색 — 박스 ID 또는 SKU 정보 */
+      if (q) {
+        var hay = [
+          box.id, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.ALT_BARCODE],
+          r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE]
+        ].map(function(v){ return v===null||v===undefined?'':String(v).toLowerCase(); }).join('|');
+        if (hay.indexOf(q) === -1) return;
+      }
+
+      var exp = +r.vals[COL.EXPECT_QTY] || 0;
+      var existing = +r.vals[COL.EXISTING_QTY] || 0;
+      var target = exp - existing;
+      var skuRecv = r.qtyReceived || 0;
+      /* 박스 단위 행의 클래스: SKU 전체가 초과면 over, 완료면 done-row */
+      var rowCls = '';
+      var statusTxt = '';
+      if (target <= 0) {
+        rowCls = ' over'; statusTxt = '예정0';
+      } else if (skuRecv > target) {
+        rowCls = ' over'; statusTxt = '⚠ 초과 +'+(skuRecv-target);
+      } else if (skuRecv === target) {
+        rowCls = ' done-row'; statusTxt = '✓ 완료';
+      } else {
+        statusTxt = '진행 ('+skuRecv+'/'+target+')';
+      }
+      var d = new Date(box.ts);
+      var t = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      var isActiveBox = currentBox && currentBox.id === box.id;
+      var boxLabel = escH(box.id) + (isActiveBox ? ' <span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.25rem">진행</span>' : '');
+
+      doneHtml +=
+        '<tr class="'+rowCls+'">'+
+          '<td><span style="font-family:var(--mo);color:var(--y);font-weight:700">'+boxLabel+'</span></td>'+
+          '<td style="color:var(--mu);font-family:var(--mo);font-size:.7rem">'+t+'</td>'+
+          '<td>'+escH(r.vals[COL.CODE])+'</td>'+
+          '<td class="cell-bc">'+escH(r.vals[COL.BARCODE])+'</td>'+
+          '<td class="cell-name" title="'+escAttr(r.vals[COL.NAME])+'">'+escH(r.vals[COL.NAME])+'</td>'+
+          '<td>'+escH(r.vals[COL.COLOR])+'</td>'+
+          '<td>'+escH(r.vals[COL.SIZE])+'</td>'+
+          '<td>'+escH(r.vals[COL.ORIGIN])+'</td>'+
+          '<td class="cell-num recv">'+it.count+'</td>'+
+          '<td class="cell-num" style="color:var(--mu)">'+skuRecv+'</td>'+
+          '<td class="cell-num exp">'+(exp||'')+'</td>'+
+          '<td class="cell-num '+(skuRecv>target?'over':(skuRecv===target?'recv':'rem'))+'" style="text-align:right;font-family:var(--mo);font-size:.74rem">'+statusTxt+'</td>'+
+        '</tr>';
+      doneCnt++;
+    });
   });
 
   ta.innerHTML = activeHtml || '<tr><td colspan="12" class="empty-row">작업 중인 행 없음 — 모두 처리되었거나 필터 조건에 맞는 행 없음</td></tr>';
-  td.innerHTML = doneHtml || '<tr><td colspan="12" class="empty-row">처리 완료 행 없음</td></tr>';
+  td.innerHTML = doneHtml || '<tr><td colspan="12" class="empty-row">아직 박스 입고 기록 없음</td></tr>';
   var cA = document.getElementById('cntActive');
   var cD = document.getElementById('cntDone');
   if (cA) cA.textContent = activeCnt + '건';
-  if (cD) cD.textContent = doneCnt + '건';
+  if (cD) cD.textContent = doneCnt + '셀';
 }
 
 function updateSize(idx, val) {
@@ -1062,32 +1190,24 @@ function downloadResult() {
     var wb = XLSX.read(new Uint8Array(workbookRaw), { type:'array', cellStyles:true, cellDates:true });
     var sheetName = wb.SheetNames[0];
     var ws = wb.Sheets[sheetName];
+    /* 셀 값 업데이트 헬퍼 */
+    function setCell(rIdx, cIdx, val, type) {
+      var addr = XLSX.utils.encode_cell({ r: rIdx, c: cIdx });
+      if (!ws[addr]) ws[addr] = {};
+      ws[addr].v = val;
+      ws[addr].t = type || 's';
+      delete ws[addr].w;
+    }
     /* 각 row의 변경 사항을 시트에 반영 */
     rows.forEach(function(r){
-      /* L 사이즈, N 원산지 — 수정된 경우 */
-      if (r.sizeMod) {
-        var addr = XLSX.utils.encode_cell({ r: r.r-1, c: COL.SIZE });
-        if (!ws[addr]) ws[addr] = {};
-        ws[addr].v = r.vals[COL.SIZE];
-        ws[addr].t = 's';
-        delete ws[addr].w;
-      }
-      if (r.originMod) {
-        var addr2 = XLSX.utils.encode_cell({ r: r.r-1, c: COL.ORIGIN });
-        if (!ws[addr2]) ws[addr2] = {};
-        ws[addr2].v = r.vals[COL.ORIGIN];
-        ws[addr2].t = 's';
-        delete ws[addr2].w;
-      }
-      /* R 직영수량 = 기존 R + 실입고 */
+      if (r.nameMod)   setCell(r.r-1, COL.NAME,   r.vals[COL.NAME],   's');
+      if (r.colorMod)  setCell(r.r-1, COL.COLOR,  r.vals[COL.COLOR],  's');
+      if (r.sizeMod)   setCell(r.r-1, COL.SIZE,   r.vals[COL.SIZE],   's');
+      if (r.originMod) setCell(r.r-1, COL.ORIGIN, r.vals[COL.ORIGIN], 's');
+      /* R 물류실물수량 = 기존 R + 실입고 */
       if (r.qtyReceived > 0) {
-        var addrR = XLSX.utils.encode_cell({ r: r.r-1, c: COL.EXISTING_QTY });
         var existingOrig = +r.vals[COL.EXISTING_QTY] || 0;
-        var newR = existingOrig + r.qtyReceived;
-        if (!ws[addrR]) ws[addrR] = {};
-        ws[addrR].v = newR;
-        ws[addrR].t = 'n';
-        delete ws[addrR].w;
+        setCell(r.r-1, COL.EXISTING_QTY, existingOrig + r.qtyReceived, 'n');
       }
     });
     /* dimension은 그대로. 다운로드 */
