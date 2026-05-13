@@ -1369,7 +1369,6 @@ function reprintDone(di) {
 function printChecked() {
   /* 1) 체크된 카드를 화면 위에서 아래 순서로 수집 (선택1 → 선택3 → 선택9) */
   var cardPayloads = [];
-  var allPagesSet = {};
   var totalInv = 0;
   document.querySelectorAll('.grp-chk:checked').forEach(function(c){
     var p = extractCardPayload(c);
@@ -1377,11 +1376,19 @@ function printChecked() {
     var fresh = p.invNums.filter(function(n){ return !printedInvNums[n]; });
     if (!fresh.length) return;
     cardPayloads.push({ invNums: fresh, pages: p.pages });
-    p.pages.forEach(function(pg){ allPagesSet[pg]=1; });
     totalInv += fresh.length;
   });
   if (!cardPayloads.length) { alert('선택 필요'); return; }
-  var pagesArr = Object.keys(allPagesSet).map(Number).sort(function(a,b){return a-b;});
+  /* 카드 순서를 보존하며 페이지 이어붙이기 — 절대 sort 하지 않음.
+     PDF는 주문처별로 페이지가 흩어져 있어 sort하면 카드 순서가 깨지고
+     주문처별로 묶여 출력됨(=사용자 신고 버그의 원인). */
+  var seenPages = {};
+  var pagesArr = [];
+  cardPayloads.forEach(function(cp){
+    cp.pages.forEach(function(pg){
+      if (!seenPages[pg]) { seenPages[pg] = 1; pagesArr.push(pg); }
+    });
+  });
   var msg=document.getElementById('mpdf');
   msg.style.display='block'; msg.className='msg inf';
   msg.innerHTML='<span class="sp"></span>'+totalInv+'건 생성 중...';
