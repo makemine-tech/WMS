@@ -1363,33 +1363,46 @@ function reprintDone(di) {
 
 
 /* ─────────────── 체크 선택 인쇄 ─────────────── */
+/* PDF는 선택 카드들을 합쳐 한 번만 생성/출력하지만,
+   인쇄완료 기록(batch)은 선택한 카드(그룹) 단위로 1건씩 분리 등록.
+   ex) 3개 그룹 체크 인쇄 → PDF 1개(연속 출력) + printedBatches 3개 추가. */
 function printChecked() {
-  var allInvs = [], allPages = {};
+  /* 1) 체크된 카드를 화면 위에서 아래 순서로 수집 (선택1 → 선택3 → 선택9) */
+  var cardPayloads = [];
+  var allPagesSet = {};
+  var totalInv = 0;
   document.querySelectorAll('.grp-chk:checked').forEach(function(c){
     var p = extractCardPayload(c);
-    p.invNums.forEach(function(n){
-      if (!printedInvNums[n] && allInvs.indexOf(n)===-1) allInvs.push(n);
-    });
-    p.pages.forEach(function(pg){ allPages[pg]=1; });
+    /* 이미 인쇄된 송장은 그 카드의 invNums에서 제거 */
+    var fresh = p.invNums.filter(function(n){ return !printedInvNums[n]; });
+    if (!fresh.length) return;
+    cardPayloads.push({ invNums: fresh, pages: p.pages });
+    p.pages.forEach(function(pg){ allPagesSet[pg]=1; });
+    totalInv += fresh.length;
   });
-  if(!allInvs.length){alert('선택 필요');return;}
-  var pagesArr = Object.keys(allPages).map(Number).sort(function(a,b){return a-b;});
+  if (!cardPayloads.length) { alert('선택 필요'); return; }
+  var pagesArr = Object.keys(allPagesSet).map(Number).sort(function(a,b){return a-b;});
   var msg=document.getElementById('mpdf');
   msg.style.display='block'; msg.className='msg inf';
-  msg.innerHTML='<span class="sp"></span>'+allInvs.length+'건 생성 중...';
+  msg.innerHTML='<span class="sp"></span>'+totalInv+'건 생성 중...';
   buildPdfFromPages(pagesArr, function(bytes){
     var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
     var markAll=function(){
-      markInvoicesPrinted(allInvs, pagesArr, {});
+      /* 2) 카드별로 batch 분리 등록.
+         unshift 특성상 역순 순회해야 화면에서 위→아래가 선택순서대로 보임 */
+      for (var i = cardPayloads.length - 1; i >= 0; i--) {
+        var cp = cardPayloads[i];
+        markInvoicesPrinted(cp.invNums, cp.pages, {});
+      }
       renderGrpList();
       updateDoneSection();
       updateGrpStats();
       populateCustomerFilter();
-      msg.className='msg ok'; msg.textContent='✅ '+allInvs.length+'건 완료';
+      msg.className='msg ok'; msg.textContent='✅ '+totalInv+'건 완료 ('+cardPayloads.length+'그룹)';
       saveSession();
     };
     if(location.protocol==='file:'){
-      var a=document.createElement('a');a.href=url;a.download='선택_'+allInvs.length+'건.pdf';a.click();
+      var a=document.createElement('a');a.href=url;a.download='선택_'+totalInv+'건.pdf';a.click();
       setTimeout(function(){URL.revokeObjectURL(url);markAll();},1000);
     } else {
       var w=window.open(url,'_blank');
