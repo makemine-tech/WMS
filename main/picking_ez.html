@@ -327,7 +327,7 @@ h1 em{color:var(--g);font-style:normal}
         <span style="display:inline-flex;align-items:center;gap:.2rem"><span style="width:9px;height:9px;background:#e85555;display:inline-block;border-radius:1px"></span>중복(이상)</span>
       </div>
     </div>
-    <div id="invProgress" style="display:flex;flex-wrap:wrap;gap:1px;padding:6px;background:#0c0c0c;border:1px solid #1f1f1f;border-radius:6px;min-height:18px"></div>
+    <div id="invProgress" style="display:flex;flex-wrap:nowrap;gap:0;padding:4px;background:#0c0c0c;border:1px solid #1f1f1f;border-radius:6px;min-height:22px;overflow:hidden"></div>
   </div>
   <div class="frow">
     <button class="fb on" id="gf-all"    onclick="setGFlt('all',this)">전체</button>
@@ -932,30 +932,22 @@ function renderInvoiceProgress() {
   var total = sorted.length;
   var done = 0, dupCount = 0;
 
-  /* 셀 너비를 컨테이너 폭에 맞춰 자동 조정. 송장이 많으면 좁게, 적으면 넓게.
-     CSS의 flex-wrap:wrap을 활용해 가로 가득 채움. */
-  var barWidth = bar.clientWidth || 800;
-  var paddingX = 12; /* 내부 padding 6+6 */
-  var usable = Math.max(200, barWidth - paddingX);
-  /* 셀당 권장 폭: 최소 2px ~ 최대 14px. flex-basis로 행 가득 채우게 */
-  var perRow = Math.min(total, Math.max(40, Math.floor(usable / 4))); /* 한 줄당 셀 수 */
-  var cellBasis = Math.floor(usable / perRow) - 1;
-  if (cellBasis < 2) cellBasis = 2;
-
+  /* 한 줄 100% 비율 막대 — 모든 송장 셀이 전체 폭을 균등 분할 */
   var html = '';
   sorted.forEach(function(inv, idx){
     var n = inv.invNum;
     var isPrinted = !!printedInvNums[n];
     var isDup = !!dup[n];
-    var color = '#2a2a2a', border = '1px solid #3a3a3a';
-    if (isPrinted) { color = '#3fa860'; border = '1px solid #2a8048'; done++; }
-    if (isDup) { color = '#e85555'; border = '1px solid #b03838'; dupCount++; }
+    var color = '#2a2a2a';
+    if (isPrinted) { color = '#3fa860'; done++; }
+    if (isDup) { color = '#e85555'; dupCount++; }
     var tip = '#'+(idx+1)+' · 등기 '+escH(n)+
               ' · '+(inv.customer||'(미상)')+
               ' · 페이지 '+((inv.pages||[])[0]+1||'—')+
               ' · '+(isPrinted ? '인쇄완료' : '미인쇄')+
               (isDup ? ' ⚠️ 중복' : '');
-    html += '<span title="'+tip+'" style="display:inline-block;flex:0 0 '+cellBasis+'px;height:14px;background:'+color+';border:'+border+';border-radius:1px;cursor:default"></span>';
+    /* flex:1 1 0 → 모든 셀이 동일 너비로 한 줄에 균등 배치. 테두리 제거해 막대로 연결됨. */
+    html += '<span title="'+tip+'" style="flex:1 1 0;min-width:0;height:14px;background:'+color+';cursor:default"></span>';
   });
   bar.innerHTML = html;
 
