@@ -373,6 +373,22 @@ async function handleUser(user){
 }
 
 showLoading('초기화 중...');
+
+/* signInWithRedirect 후 돌아왔을 때 명시적으로 결과 처리 — 일부 환경에서 onAuthStateChanged가 자동 발화 안 함 */
+auth.getRedirectResult().then(function(result){
+  /* 성공 시 user가 result.user에 있고 onAuthStateChanged도 자동 발화함 */
+  if(result && result.user){
+    /* 안전망: onAuthStateChanged가 아직 발화 안 했으면 직접 handleUser 호출 */
+    if(!auth.currentUser) return; /* 더 기다림 */
+  }
+}).catch(function(err){
+  /* redirect 인증 자체가 실패한 경우만 메시지 */
+  if(err && err.code && err.code !== 'auth/null-user' && err.code !== 'auth/no-auth-event'){
+    console.warn('getRedirectResult error:', err);
+    showLogin('로그인 처리 실패: '+(err.message||err.code));
+  }
+});
+
 auth.onAuthStateChanged(function(user){
   if(user){handleUser(user);}
   else{showLogin();}
