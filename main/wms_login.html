@@ -333,7 +333,8 @@ async function useInviteCode(){
     await db.ref('userGroup/'+user.uid).set(gid);
     await db.ref('inviteCodes/'+code+'/usedBy').set(user.uid);
     status.innerHTML='<span style="color:#34D399;font-size:11px;">✅ 참가 완료!</span>';
-    setTimeout(function(){window.location.replace(getWmsPath());},500);
+    var rUrl=getReturnUrl();
+    setTimeout(function(){window.location.replace(rUrl||getWmsPath());},500);
   }catch(e){status.innerHTML='<span style="color:#F87171;font-size:11px;">오류: '+e.message+'</span>';}
 }
 
@@ -354,20 +355,38 @@ async function googleLogin(){
   }
 }
 
+/* same-origin 상대 경로 + .html 만 허용 (open redirect 방지) */
+function getReturnUrl(){
+  try{
+    var params=new URLSearchParams(location.search);
+    var raw=params.get('return');
+    if(!raw) return null;
+    var u=new URL(raw, location.origin);
+    if(u.origin !== location.origin) return null;
+    if(!/\.html?$/i.test(u.pathname)) return null;
+    return u.pathname+u.search+u.hash;
+  }catch(e){return null;}
+}
+
 async function handleUser(user){
   showLoading('정보 확인 중...');
   try{
+    /* 권한 확인 후 returnUrl로 보낼지 결정.
+       슈퍼관리자도 returnUrl 우선 (star_coupang 등으로 직접 진입). */
+    var returnUrl=getReturnUrl();
     var adminSnap=await db.ref('superadmins/'+user.uid).get();
     if(adminSnap.exists()){
+      if(returnUrl){ window.location.replace(returnUrl); return; }
       var groupsSnap=await db.ref('groups').get();
       showAdminView(user, groupsSnap.val()||{});
       return;
     }
     var groupSnap=await db.ref('userGroup/'+user.uid).get();
     if(groupSnap.exists()){
-      window.location.replace(getWmsPath());
+      window.location.replace(returnUrl || getWmsPath());
       return;
     }
+    /* userGroup 미등록 — 코드 입력 화면. returnUrl은 코드 입력 성공 후 사용 */
     showSetup(user);
   }catch(e){showLogin('오류: '+e.message);}
 }
