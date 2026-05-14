@@ -157,6 +157,17 @@
     return ref.once('value').then(function(s){ return s.val(); });
   }
 
+  /* 클라우드의 이 앱 데이터 삭제 — 작업 종료 후 정리 */
+  function clearRemote() {
+    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; pushPending = null; }
+    lastLocalTs = Date.now();
+    lastRemoteTs = lastLocalTs; /* echo 무시 */
+    if (!ref) return Promise.resolve();
+    return ref.remove().catch(function(err){
+      console.error('[WMSync] clearRemote 실패:', err);
+    });
+  }
+
   function getUser() { return currentUser; }
   function isReady() { return initialized && !!auth; }
   function isSignedIn() { return !!currentUser; }
@@ -170,6 +181,7 @@
     push: push,
     pushNow: pushNow,
     pullOnce: pullOnce,
+    clearRemote: clearRemote,
     getUser: getUser,
     isReady: isReady,
     isSignedIn: isSignedIn
