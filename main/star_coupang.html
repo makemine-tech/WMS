@@ -67,7 +67,7 @@ h1 em{color:var(--g);font-style:normal}
 .scan-row{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-bottom:.45rem}
 @media(max-width:720px){.scan-row{grid-template-columns:1fr}}
 .scan-fld{display:flex;flex-direction:column;gap:.25rem}
-.scan-lbl{font-size:.65rem;color:var(--mu);font-family:var(--mo);letter-spacing:.05em;display:flex;align-items:center;gap:.4rem}
+.scan-lbl{font-size:.65rem;color:var(--mu);font-family:var(--mo);letter-spacing:.05em;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
 .scan-lbl .scan-state{font-size:.62rem;padding:.05rem .35rem;border-radius:3px;background:rgba(255,255,255,.05)}
 .scan-lbl .scan-state.act{background:rgba(74,240,168,.18);color:var(--g)}
 .scan-inp{width:100%;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.7rem .85rem;font-size:1.1rem;font-family:var(--mo);outline:none;letter-spacing:.04em;transition:border-color .15s}
@@ -135,6 +135,30 @@ h1 em{color:var(--g);font-style:normal}
 .tbl tbody tr.under{background:rgba(240,196,74,.04);border-left:3px solid rgba(240,196,74,.35)}
 .tbl tbody tr.done-row td:first-child{border-left:3px solid var(--g)}
 .empty-row{text-align:center;padding:1rem;color:var(--mu);font-size:.78rem}
+
+/* ─── 박스바코드 생성 모달 ─── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:none;align-items:flex-start;justify-content:center;padding:2rem 1rem;overflow-y:auto}
+.modal-bg.open{display:flex}
+.modal{background:var(--s1);border:1.5px solid var(--br);border-radius:12px;padding:1.2rem 1.4rem;width:100%;max-width:680px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.modal h2{font-size:1.15rem;font-weight:900;margin-bottom:.35rem;display:flex;align-items:center;gap:.5rem}
+.modal h2 .close{margin-left:auto;background:transparent;border:none;color:var(--mu);font-size:1.2rem;cursor:pointer;padding:.2rem .5rem;border-radius:4px}
+.modal h2 .close:hover{color:var(--tx);background:var(--s2)}
+.modal-sub{font-size:.76rem;color:var(--mu);margin-bottom:1rem;line-height:1.5}
+.modal-row{display:grid;grid-template-columns:120px 1fr;gap:.6rem;align-items:center;margin-bottom:.55rem}
+.modal-row label{font-size:.78rem;color:var(--mu)}
+.modal-row input{background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.55rem .7rem;font-size:.95rem;font-family:var(--mo);outline:none;width:100%}
+.modal-row input:focus{border-color:var(--g)}
+.modal-info{background:var(--s2);border:1px solid var(--br);border-radius:6px;padding:.7rem .9rem;font-size:.8rem;line-height:1.7;margin:.7rem 0}
+.modal-info b{color:var(--g);font-family:var(--mo)}
+.modal-info .range{color:var(--y);font-family:var(--mo);font-weight:700}
+.modal-prg{height:8px;background:var(--br);border-radius:4px;overflow:hidden;margin:.4rem 0 .25rem}
+.modal-prg .fill{height:100%;background:var(--g);transition:width .2s;width:0}
+.modal-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem}
+.modal-actions .btn{padding:.5rem 1rem;font-size:.82rem}
+.reprint-row{display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:center}
+.reprint-row input{background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.5rem .7rem;font-size:.85rem;font-family:var(--mo);outline:none}
+.reprint-row input:focus{border-color:var(--y)}
+.divider{height:1px;background:var(--br);margin:1rem 0}
 
 /* ─────────────── 진행 막대 ─────────────── */
 .prg-wrap{margin:.5rem 0 .8rem}
@@ -309,7 +333,9 @@ h1 em{color:var(--g);font-style:normal}
   <div class="scan-panel">
     <div class="scan-row">
       <div class="scan-fld">
-        <div class="scan-lbl">📦 박스 바코드 <span class="scan-state" id="boxState">대기</span></div>
+        <div class="scan-lbl">📦 박스 바코드 <span class="scan-state" id="boxState">대기</span>
+          <button onclick="openBoxGenModal()" style="margin-left:auto;font-size:.65rem;padding:.2rem .55rem;border-radius:4px;border:1px solid var(--br);background:var(--s2);color:var(--y);cursor:pointer;font-weight:700">＋ 바코드 생성/인쇄</button>
+        </div>
         <input type="text" id="boxInp" class="scan-inp box" placeholder="박스를 스캔하세요" autocomplete="off" onkeydown="onBoxKey(event)">
       </div>
       <div class="scan-fld">
@@ -395,12 +421,63 @@ h1 em{color:var(--g);font-style:normal}
 
 </div><!-- .app -->
 
+<!-- 박스바코드 생성/인쇄 모달 -->
+<div class="modal-bg" id="boxGenModal" onclick="if(event.target===this)closeBoxGenModal()">
+  <div class="modal">
+    <h2>📦 박스바코드 생성/인쇄 <button class="close" onclick="closeBoxGenModal()">✕</button></h2>
+    <div class="modal-sub">시작 바코드 + 생성 수량을 입력하면 순차 바코드가 만들어집니다. 50×30mm 라벨로 인쇄, 100장씩 끊어 출력. 중간 손실 시 번호로 재출력 가능.</div>
+
+    <!-- 1) 생성 폼 -->
+    <div class="modal-row">
+      <label>시작 바코드</label>
+      <input type="text" id="genStart" placeholder="예: ST05050001" autocomplete="off">
+    </div>
+    <div class="modal-row">
+      <label>생성 수량</label>
+      <input type="number" id="genCount" placeholder="예: 3000" min="1" max="100000" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-g" onclick="generateBoxLabels()">▶ 생성하기</button>
+      <button class="btn btn-r" onclick="clearBoxLabels()">🗑 생성된 목록 초기화</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 2) 생성된 목록 / 인쇄 진행 -->
+    <div class="modal-info" id="genInfo" style="display:none">
+      <div>생성 범위 <span class="range" id="genRange">—</span> · 총 <b id="genTotal">0</b>장</div>
+      <div>인쇄 완료 <b id="printedCnt">0</b>/<b id="printedTotal">0</b>장 (<b id="printedPct">0%</b>)</div>
+      <div class="modal-prg"><div class="fill" id="printedFill"></div></div>
+      <div style="font-size:.72rem;color:var(--mu);margin-top:.35rem">※ 인쇄 다이얼로그에서 프린터를 50×30mm 라벨용으로 설정하세요. 여백 0, 배율 100%.</div>
+    </div>
+    <div class="modal-actions" id="printActions" style="display:none">
+      <button class="btn btn-y" onclick="printNextChunk()" id="printNextBtn">🖨 다음 100장 인쇄</button>
+      <button class="btn btn-s" onclick="resetPrintedCount()" id="resetPrintBtn">↺ 인쇄 진행 초기화</button>
+    </div>
+
+    <div class="divider" id="reprintDivider" style="display:none"></div>
+
+    <!-- 3) 재출력 -->
+    <div id="reprintSection" style="display:none">
+      <div style="font-size:.85rem;font-weight:700;margin-bottom:.4rem;color:var(--y)">↻ 재출력 (찢어짐/누락 대응)</div>
+      <div class="modal-sub" style="margin-bottom:.5rem">바코드 전체(ST05051234) 또는 번호만(1234), 범위(1234-1240)도 가능. 콤마로 여러 개 (1,5,100).</div>
+      <div class="reprint-row">
+        <input type="text" id="reprintInp" placeholder="예: ST05051234 / 1234 / 1234-1240 / 1,5,100" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();reprintBoxLabels();}">
+        <button class="btn btn-y" onclick="reprintBoxLabels()" style="padding:.5rem .9rem;font-size:.82rem">🖨 재출력</button>
+      </div>
+      <div id="reprintMsg" style="font-size:.75rem;color:var(--mu);margin-top:.4rem;font-family:var(--mo)"></div>
+    </div>
+  </div>
+</div>
+
 <div class="unified-ftr">
   © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
 </div>
 
 <!-- SheetJS -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- JsBarcode (CODE128 라벨 생성) -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script>
 /* ─────────────── 전역 상태 ─────────────── */
 var workbookRaw = null;     // 원본 파일 ArrayBuffer (다운로드 시 재로드)
@@ -1430,6 +1507,287 @@ function downloadFallback(kind) {
 
 function loadSampleNotice() {
   setMsg('m0','inf','💡 D열 바코드 또는 E열 대비바코드로 매칭됩니다. 사이즈(L)·원산지(N)는 작업 중 인라인 수정 가능. 다운로드 시 R(직영수량) = R + 실입고로 갱신, 수정된 사이즈/원산지 반영.');
+}
+
+/* ─────────────── 박스바코드 생성/인쇄 ─────────────── */
+var boxLabels = [];        // 생성된 바코드 문자열 배열
+var labelStart = '';       // 시작 바코드 (예: ST05050001)
+var labelPrefix = '';      // 숫자 앞 부분 (예: ST0505)
+var labelNumStart = 0;     // 시작 숫자
+var labelPad = 4;          // 숫자 자릿수
+var printedCount = 0;      // 인쇄 완료 누적
+var LABEL_KEY = 'star_coupang_labels_v1';
+
+/* 모달 열기/닫기 */
+function openBoxGenModal() {
+  document.getElementById('boxGenModal').classList.add('open');
+  loadBoxLabels();
+  renderGenInfo();
+  setTimeout(function(){ document.getElementById('genStart').focus(); }, 50);
+}
+function closeBoxGenModal() {
+  document.getElementById('boxGenModal').classList.remove('open');
+}
+
+/* 입력 파싱: 'ST05050001' → { prefix:'ST0505', num:1, pad:4 } */
+function parseBarcodeStart(s) {
+  var m = (s||'').trim().match(/^(.*?)(\d+)$/);
+  if (!m) return null;
+  return { prefix: m[1], num: parseInt(m[2], 10), pad: m[2].length };
+}
+
+/* 번호 → 바코드 문자열. labelPad보다 길어지면 자릿수 자동 증가 */
+function buildLabel(n) {
+  var s = String(n);
+  if (s.length < labelPad) s = ('0000000000' + s).slice(-labelPad);
+  return labelPrefix + s;
+}
+
+/* 생성하기 */
+function generateBoxLabels() {
+  var startVal = document.getElementById('genStart').value;
+  var count = parseInt(document.getElementById('genCount').value, 10);
+  var p = parseBarcodeStart(startVal);
+  if (!p) { alert('시작 바코드는 끝이 숫자여야 합니다 (예: ST05050001)'); return; }
+  if (!count || count < 1) { alert('생성 수량을 입력하세요'); return; }
+  if (count > 100000) { alert('한 번에 최대 10만 장까지 생성 가능합니다'); return; }
+  if (boxLabels.length && !confirm('기존 생성 목록('+boxLabels.length+'장, 인쇄 '+printedCount+'장)이 있습니다.\n새로 생성하면 진행 상태도 초기화됩니다. 계속할까요?')) return;
+  labelStart = startVal.trim();
+  labelPrefix = p.prefix;
+  labelNumStart = p.num;
+  labelPad = p.pad;
+  boxLabels = [];
+  for (var i = 0; i < count; i++) boxLabels.push(buildLabel(labelNumStart + i));
+  printedCount = 0;
+  saveBoxLabels();
+  renderGenInfo();
+}
+
+function clearBoxLabels() {
+  if (!boxLabels.length) return;
+  if (!confirm('생성된 바코드 목록을 초기화합니다. 계속할까요?')) return;
+  boxLabels = []; printedCount = 0;
+  labelStart = ''; labelPrefix = ''; labelNumStart = 0; labelPad = 4;
+  saveBoxLabels();
+  renderGenInfo();
+}
+
+function resetPrintedCount() {
+  if (!boxLabels.length) return;
+  if (!confirm('인쇄 진행 상태만 초기화합니다 (목록은 그대로). 다음 인쇄가 처음부터 시작됩니다. 계속할까요?')) return;
+  printedCount = 0;
+  saveBoxLabels();
+  renderGenInfo();
+}
+
+function renderGenInfo() {
+  var info = document.getElementById('genInfo');
+  var actions = document.getElementById('printActions');
+  var divider = document.getElementById('reprintDivider');
+  var section = document.getElementById('reprintSection');
+  if (!boxLabels.length) {
+    info.style.display = 'none';
+    actions.style.display = 'none';
+    divider.style.display = 'none';
+    section.style.display = 'none';
+    return;
+  }
+  info.style.display = '';
+  actions.style.display = 'flex';
+  divider.style.display = '';
+  section.style.display = '';
+  document.getElementById('genRange').textContent = boxLabels[0] + ' ~ ' + boxLabels[boxLabels.length-1];
+  document.getElementById('genTotal').textContent = boxLabels.length;
+  document.getElementById('printedCnt').textContent = printedCount;
+  document.getElementById('printedTotal').textContent = boxLabels.length;
+  var pct = boxLabels.length ? Math.round(printedCount/boxLabels.length*100) : 0;
+  document.getElementById('printedPct').textContent = pct + '%';
+  document.getElementById('printedFill').style.width = pct + '%';
+  /* 인쇄 완료 시 다음 버튼 disable */
+  var nextBtn = document.getElementById('printNextBtn');
+  if (printedCount >= boxLabels.length) {
+    nextBtn.disabled = true;
+    nextBtn.textContent = '✓ 전체 인쇄 완료';
+  } else {
+    nextBtn.disabled = false;
+    var remain = boxLabels.length - printedCount;
+    var chunk = Math.min(100, remain);
+    nextBtn.textContent = '🖨 다음 ' + chunk + '장 인쇄 (' + (printedCount+1) + '~' + (printedCount+chunk) + ')';
+  }
+}
+
+function saveBoxLabels() {
+  try {
+    localStorage.setItem(LABEL_KEY, JSON.stringify({
+      v:1, ts:Date.now(),
+      labelStart: labelStart, labelPrefix: labelPrefix,
+      labelNumStart: labelNumStart, labelPad: labelPad,
+      total: boxLabels.length, printedCount: printedCount
+    }));
+  } catch(e) { console.warn('label save failed:', e); }
+}
+
+function loadBoxLabels() {
+  try {
+    var raw = localStorage.getItem(LABEL_KEY);
+    if (!raw) return;
+    var d = JSON.parse(raw);
+    if (!d || !d.total) return;
+    labelStart = d.labelStart || '';
+    labelPrefix = d.labelPrefix || '';
+    labelNumStart = d.labelNumStart || 0;
+    labelPad = d.labelPad || 4;
+    printedCount = d.printedCount || 0;
+    /* 목록은 메타에서 재생성 (저장 용량 절약) */
+    boxLabels = [];
+    for (var i = 0; i < d.total; i++) boxLabels.push(buildLabel(labelNumStart + i));
+  } catch(e) { console.warn('label load failed:', e); }
+}
+
+/* 다음 100장 청크 인쇄 */
+function printNextChunk() {
+  if (printedCount >= boxLabels.length) return;
+  var from = printedCount;
+  var to = Math.min(from + 100, boxLabels.length);
+  printLabelRange(from, to, function(){
+    printedCount = to;
+    saveBoxLabels();
+    renderGenInfo();
+  });
+}
+
+/* 범위 인쇄 — fromIdx 포함, toIdx 미포함 (boxLabels 0-indexed) */
+function printLabelRange(fromIdx, toIdx, doneCb) {
+  var slice = boxLabels.slice(fromIdx, toIdx);
+  printLabels(slice, doneCb);
+}
+
+/* 임의 코드 배열 인쇄 (재출력 용) */
+function printLabels(codes, doneCb) {
+  if (!codes || !codes.length) { alert('인쇄할 항목이 없습니다'); return; }
+  if (typeof JsBarcode === 'undefined') { alert('바코드 라이브러리 로딩 실패. 페이지를 새로고침하세요.'); return; }
+  var w = window.open('', '_blank', 'width=420,height=600');
+  if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
+
+  /* 라벨 페이지 HTML — 50×30mm 페이지 1장 = 라벨 1개 */
+  var labelsHtml = codes.map(function(c){
+    return '<div class="label"><div class="inner"><svg class="bc" data-code="'+escH(c)+'"></svg><div class="txt">'+escH(c)+'</div></div></div>';
+  }).join('');
+
+  w.document.open();
+  w.document.write(
+    '<!doctype html><html><head><meta charset="utf-8"><title>박스 라벨 '+codes.length+'장</title>'+
+    '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>'+
+    '<style>'+
+      '@page { size: 50mm 30mm; margin: 0 }'+
+      'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
+      '.label { width:50mm; height:30mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
+      '.label:last-child { page-break-after:auto }'+
+      '.inner { width:40mm; height:25mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.5mm }'+
+      '.bc { width:40mm; height:18mm }'+
+      '.txt { font-family:"Courier New",monospace; font-size:9pt; font-weight:700; letter-spacing:.02em; line-height:1 }'+
+      '@media screen { body{padding:12px;background:#222;color:#fff} .label{background:#fff;color:#000;margin:0 auto 4px;border:1px dashed #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
+      '@media print { .toolbar{display:none} .label{margin:0} }'+
+    '</style></head><body>'+
+    '<div class="toolbar">'+
+      '<span style="margin-right:12px;font-size:13px">📋 박스 라벨 '+codes.length+'장 — '+escH(codes[0])+(codes.length>1?' ~ '+escH(codes[codes.length-1]):'')+'</span>'+
+      '<button onclick="window.print()">🖨 인쇄</button>'+
+      '<button class="s" onclick="window.close()">닫기</button>'+
+    '</div>'+
+    labelsHtml +
+    '<script>'+
+      'window.addEventListener("load",function(){'+
+        'var svgs = document.querySelectorAll("svg.bc");'+
+        'svgs.forEach(function(s){'+
+          'try { JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:false, margin:0, width:1.4, height:50 }); }'+
+          'catch(e) { console.error(e); }'+
+        '});'+
+        'setTimeout(function(){ window.print(); }, 300);'+
+      '});'+
+      'window.addEventListener("afterprint",function(){ try{ window.opener && window.opener.postMessage({type:"labelPrinted",count:'+codes.length+'},"*"); }catch(e){} });'+
+    '<\/script>'+
+    '</body></html>'
+  );
+  w.document.close();
+
+  /* 메인 윈도우에서 인쇄 완료 메시지 수신 — chunk 진행 시에만 콜백 */
+  if (typeof doneCb === 'function') {
+    var handler = function(ev){
+      if (ev.data && ev.data.type === 'labelPrinted') {
+        window.removeEventListener('message', handler);
+        doneCb();
+      }
+    };
+    window.addEventListener('message', handler);
+    /* 사용자가 인쇄 다이얼로그 취소 시에도 진행되도록 시간 안전망 */
+    setTimeout(function(){
+      window.removeEventListener('message', handler);
+      /* fallback: 진행 카운트는 사용자가 명시적으로 처리 — 자동 증가 안 함 */
+    }, 60000);
+  }
+}
+
+/* 재출력 — 다양한 입력 포맷 파싱 */
+function reprintBoxLabels() {
+  var raw = document.getElementById('reprintInp').value.trim();
+  var msg = document.getElementById('reprintMsg');
+  if (!raw) { msg.textContent = '입력값이 없습니다'; return; }
+  if (!boxLabels.length) { msg.textContent = '먼저 바코드를 생성하세요'; return; }
+  var codes = parseReprintInput(raw);
+  if (!codes.length) { msg.textContent = '해당하는 바코드를 찾지 못했습니다'; return; }
+  msg.textContent = codes.length + '장 인쇄 창 열림: ' + codes.slice(0,3).join(', ') + (codes.length>3?' …':'');
+  printLabels(codes); /* 재출력은 진행 카운트에 누적 안 함 */
+}
+
+/* 입력 파싱: 'ST05051234' | '1234' | '1234-1240' | '1,5,100' | 'ST05051234,ST05051250' */
+function parseReprintInput(raw) {
+  var result = [];
+  var seen = {};
+  raw.split(/[,;]+/).forEach(function(seg){
+    seg = seg.trim();
+    if (!seg) return;
+    var rngM = seg.match(/^(.+?)\s*[-~]\s*(.+)$/);
+    if (rngM) {
+      var a = codeOrNumberToIndex(rngM[1]);
+      var b = codeOrNumberToIndex(rngM[2]);
+      if (a < 0 || b < 0) return;
+      var from = Math.min(a, b), to = Math.max(a, b);
+      for (var i = from; i <= to; i++) {
+        if (i >= 0 && i < boxLabels.length && !seen[i]) { seen[i] = 1; result.push(boxLabels[i]); }
+      }
+      return;
+    }
+    var idx = codeOrNumberToIndex(seg);
+    if (idx >= 0 && idx < boxLabels.length && !seen[idx]) { seen[idx] = 1; result.push(boxLabels[idx]); }
+  });
+  return result;
+}
+
+/* 'ST05051234' 또는 '1234' → boxLabels 안의 인덱스 (못 찾으면 -1).
+   여러 해석 우선순위: 완전 일치 → 1-based 인덱스 → 시작번호 오프셋 → padding 결합 → 끝자리 매칭 */
+function codeOrNumberToIndex(s) {
+  s = String(s||'').trim();
+  if (!s) return -1;
+  /* 1) 완전 일치 */
+  var direct = boxLabels.indexOf(s);
+  if (direct !== -1) return direct;
+  if (/^\d+$/.test(s)) {
+    var n = parseInt(s, 10);
+    /* 2) 1-based 인덱스 (1=첫번째 ~ total=마지막) — 가장 직관적 */
+    if (n >= 1 && n <= boxLabels.length) return n - 1;
+    /* 3) labelNumStart 기준 오프셋 */
+    var off = n - labelNumStart;
+    if (off >= 0 && off < boxLabels.length) return off;
+    /* 4) padding 결합 */
+    var padded = labelPrefix + (('0000000000'+s).slice(-labelPad));
+    var di = boxLabels.indexOf(padded);
+    if (di !== -1) return di;
+    /* 5) 끝자리 매칭 — 라벨 코드가 그 숫자로 끝나는 첫 항목 */
+    for (var i = 0; i < boxLabels.length; i++) {
+      if (String(boxLabels[i]).endsWith(s)) return i;
+    }
+  }
+  return -1;
 }
 
 /* ─────────────── 유틸 ─────────────── */
