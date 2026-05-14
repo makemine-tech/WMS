@@ -601,7 +601,11 @@ function wmsHandleAuthState(state) {
     window.location.replace(returnUrl);
     return;
   }
-  /* 인증 + 그룹 OK — 현재 파일이 있으면 클라우드 ref 부착 */
+  /* 인증 + 그룹 OK — 클라우드 동기화가 우선이므로 로컬 복원 배너 숨김 */
+  var banner = document.getElementById('restoreBanner');
+  if (banner) banner.style.display = 'none';
+
+  /* 현재 파일이 있으면 클라우드 ref 부착 */
   if (typeof workbookFile !== 'undefined' && workbookFile) {
     WMSync.setFileKey(workbookFile.name);
   } else if (typeof loadSessionData === 'function') {
@@ -779,6 +783,10 @@ function goTo(n) {
   }
   if (n === 1) {
     setTimeout(function(){ document.getElementById('boxInp').focus(); }, 50);
+  }
+  /* STEP 1 진입 시 클라우드 작업 목록 즉시 갱신 — 본인 또는 다른 PC가 방금 만든 작업도 즉시 반영 */
+  if (n === 0 && window.WMSync && WMSync.isReady() && WMSync.hasGroup()) {
+    loadCloudFiles();
   }
 }
 
