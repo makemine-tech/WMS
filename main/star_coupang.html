@@ -299,8 +299,20 @@ h1 em{color:var(--g);font-style:normal}
 
 <!-- STEP 1 : 업로드 -->
 <div class="pg on" id="pg0">
+  <!-- 클라우드 진행 중 작업 목록 — 로그인 + 그룹 멤버에게만 표시 -->
+  <div id="cloudFilesSection" style="display:none;margin-bottom:1.2rem;border:1.5px solid rgba(74,240,168,.35);border-radius:10px;padding:.85rem 1rem;background:linear-gradient(180deg,rgba(74,240,168,.06),rgba(74,240,168,.01))">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:900;font-size:1.05rem;color:var(--g)">☁️ 클라우드에 저장된 작업 <span id="cloudFilesCnt" style="font-family:var(--mo);font-size:.78rem;color:var(--mu);font-weight:500;margin-left:.2rem"></span></div>
+        <div style="font-size:.72rem;color:var(--mu);margin-top:.15rem">같은 그룹 멤버가 다른 PC에서 작업 중인 파일. 클릭하면 그 시점부터 이어서 작업 가능합니다.</div>
+      </div>
+      <button onclick="loadCloudFiles()" style="font-size:.7rem;padding:.32rem .7rem;border-radius:5px;border:1px solid var(--br);background:transparent;color:var(--mu);cursor:pointer;font-family:var(--mo)">↻ 새로고침</button>
+    </div>
+    <div id="cloudFilesList" style="display:grid;gap:.4rem"></div>
+  </div>
+
   <div class="pg-t">입고 예정 엑셀 업로드</div>
-  <div class="pg-s">쿠팡 입고 예정 양식 (.xlsx) 드래그 또는 클릭</div>
+  <div class="pg-s">쿠팡 입고 예정 양식 (.xlsx) 드래그 또는 클릭. 클라우드에 같은 파일명 작업이 있으면 자동 이어받기.</div>
 
   <div class="dz" id="dz">
     <input type="file" id="fi" accept=".xlsx,.xls" onchange="handleFile(this.files[0])">
@@ -598,6 +610,85 @@ function wmsHandleAuthState(state) {
       WMSync.setFileKey(data.fileName);
     }
   }
+  /* 클라우드의 진행 중 작업 목록 로드 (STEP 1에 표시) */
+  loadCloudFiles();
+}
+
+/* 클라우드의 다른 PC 작업 목록 가져와 표시 */
+function loadCloudFiles() {
+  if (!window.WMSync || !WMSync.isReady() || !WMSync.hasGroup()) return;
+  WMSync.listFiles().then(function(files){
+    /* listFiles는 메타만 반환 — 더 풍부한 정보를 위해 각 파일 fetch */
+    return Promise.all(files.map(function(f){
+      return new Promise(function(res){
+        var gid = WMSync.getGroupId();
+        firebase.database().ref('wms_sync/groups/'+gid+'/star_coupang/files/'+f.fileKey).once('value').then(function(snap){
+          var v = snap.val() || {};
+          var p = v.payload || {};
+          var rowsLite = p.rowsLite || [];
+          var totalRecv = rowsLite.reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
+          var totalRows = rowsLite.length;
+          res({
+            fileKey: f.fileKey,
+            fileName: p.fileName || f.fileName,
+            ts: v.ts || f.ts,
+            by: v._by || null,
+            rows: totalRows,
+            recv: totalRecv,
+            boxes: (p.boxes||[]).length
+          });
+        }).catch(function(){ res(null); });
+      });
+    })).then(function(arr){ return arr.filter(Boolean); });
+  }).then(renderCloudFiles).catch(function(e){
+    console.warn('[cloud files] load failed:', e);
+  });
+}
+
+function renderCloudFiles(files) {
+  var section = document.getElementById('cloudFilesSection');
+  var list = document.getElementById('cloudFilesList');
+  var cnt = document.getElementById('cloudFilesCnt');
+  if (!section || !list) return;
+  if (!files || !files.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  cnt.textContent = '· ' + files.length + '개';
+  list.innerHTML = files.map(function(f){
+    var d = new Date(f.ts);
+    var timeStr = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    var byStr = f.by ? ' · '+escH(f.by) : '';
+    var progress = f.rows ? Math.round(f.recv / Math.max(1, f.rows) * 100) : 0;
+    return '<button onclick="loadCloudFile(\''+escAttr(f.fileKey)+'\')" style="text-align:left;background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.7rem .85rem;color:var(--tx);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:center;transition:border-color .15s,background .15s" onmouseover="this.style.borderColor=\'var(--g)\';this.style.background=\'rgba(74,240,168,.04)\'" onmouseout="this.style.borderColor=\'var(--br)\';this.style.background=\'var(--s1)\'">'+
+      '<div style="min-width:0">'+
+        '<div style="font-weight:800;font-size:.95rem;font-family:var(--mo);color:var(--y);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(f.fileName)+'</div>'+
+        '<div style="font-size:.7rem;color:var(--mu);margin-top:.18rem;font-family:var(--mo)">'+timeStr+byStr+' · 행 '+f.rows+' · 실입고 '+f.recv+' · 박스 '+f.boxes+'</div>'+
+      '</div>'+
+      '<div style="text-align:right">'+
+        '<div style="font-family:var(--mo);font-size:1.05rem;font-weight:900;color:'+(progress>=100?'var(--g)':(progress>0?'var(--b)':'var(--mu)'))+';line-height:1">'+progress+'%</div>'+
+        '<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">이어받기 →</div>'+
+      '</div>'+
+    '</button>';
+  }).join('');
+}
+
+/* 클라우드 파일 클릭 → 그 시점부터 이어받기 */
+function loadCloudFile(fileKey) {
+  if (!window.WMSync || !WMSync.hasGroup()) return;
+  /* 같은 파일 ref 부착 */
+  WMSync.setFileKey(fileKey);
+  /* 전체 데이터 가져와 localStorage에 저장 후 restoreSession */
+  WMSync.pullOnce().then(function(data){
+    if (!data || !data.payload) {
+      alert('해당 파일의 작업 데이터를 가져오지 못했습니다.');
+      return;
+    }
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(data.payload)); } catch(e){}
+    wmsSuppressNextSave = true;
+    /* restoreSession이 STEP 2로 이동 + 모든 데이터 렌더 */
+    restoreSession();
+  }).catch(function(err){
+    alert('이어받기 실패: ' + (err && err.message || err));
+  });
 }
 
 /* 클라우드 → 로컬 적용 */
