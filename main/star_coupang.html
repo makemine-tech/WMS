@@ -134,6 +134,8 @@ h1 em{color:var(--g);font-style:normal}
 .tbl tbody tr.over{background:rgba(240,88,88,.07);border-left:3px solid var(--r)}
 .tbl tbody tr.under{background:rgba(240,196,74,.04);border-left:3px solid rgba(240,196,74,.35)}
 .tbl tbody tr.done-row td:first-child{border-left:3px solid var(--g)}
+.tbl tbody tr.new-row{background:rgba(192,132,252,.06);border-left:3px solid var(--p)}
+.tbl tbody tr.new-row td:first-child{font-weight:700}
 .empty-row{text-align:center;padding:1rem;color:var(--mu);font-size:.78rem}
 
 /* ─── 박스바코드 생성 모달 ─── */
@@ -492,6 +494,8 @@ var rowFlt = 'all';
 var currentDisplayRow = -1; // 큰 디스플레이에 표시 중인 row 인덱스 (인라인 편집 대상)
 var origName = {};          // {rowIdx: 원본 품명} — 수정 플래그용
 var origColor = {};         // {rowIdx: 원본 컬러}
+var pendingUnknownBarcode = null; // 미등록 바코드 키 (정규화)
+var pendingUnknownRaw = null;     // 미등록 바코드 원본 값
 var SESSION_KEY = 'star_coupang_v1';
 /* 컬럼 매핑 (실제 엑셀 헤더 기준).
    A=0 박스바코드 | B=1 브랜드 | C=2 품번 | D=3 바코드 | E=4 대비 바코드 | F=5 품명
@@ -745,6 +749,96 @@ function onBoxKey(ev) {
   saveSession();
 }
 
+/* 미등록 바코드 → 신규 row 생성 + 현재 박스에 입고 처리 */
+function addUnknownBarcode() {
+  if (!pendingUnknownBarcode) return;
+  if (!currentBox) {
+    updateScanDisplay('er', '⚠️ 박스를 먼저 스캔하세요', null);
+    pendingUnknownBarcode = null; pendingUnknownRaw = null;
+    return;
+  }
+  var key = pendingUnknownBarcode;
+  var raw = pendingUnknownRaw;
+  /* 다른 작업 중에 같은 바코드가 이미 추가됐을 수 있음 — 중복 방지 */
+  if (byBarcode[key] !== undefined) {
+    pendingUnknownBarcode = null; pendingUnknownRaw = null;
+    /* 그냥 일반 스캔처럼 처리 */
+    handleNormalScan(byBarcode[key], key);
+    return;
+  }
+  /* 새 row 생성 — vals는 헤더 길이만큼 빈 배열, D열에 바코드 값 세팅 */
+  var vals = new Array(Math.max(headers.length, COL.EXISTING_QTY + 1)).fill(null);
+  /* raw가 숫자 형태면 숫자로 저장 (원본 D열 타입과 일치) */
+  var bcStored = /^\d+$/.test(raw) ? Number(raw) : raw;
+  vals[COL.BARCODE] = bcStored;
+  var newRow = {
+    r: (rows.length ? rows[rows.length-1].r : 1) + 1, /* 마지막 r 다음 */
+    vals: vals,
+    qtyReceived: 0,
+    sizeMod: false, originMod: false, nameMod: false, colorMod: false,
+    origSize: null, origOrigin: null, origName: null, origColor: null,
+    isNew: true /* 미등록 신규 행 표시 */
+  };
+  var newIdx = rows.length;
+  rows.push(newRow);
+  byBarcode[key] = newIdx;
+  /* 새 row를 일반 스캔처럼 처리해 박스에 추가 + 디스플레이 갱신 */
+  pendingUnknownBarcode = null; pendingUnknownRaw = null;
+  handleNormalScan(newIdx, key);
+}
+
+/* 미등록 바코드 무시 */
+function ignoreUnknownBarcode() {
+  pendingUnknownBarcode = null; pendingUnknownRaw = null;
+  updateScanDisplay('idle', '대기 중 — 다음 제품 바코드를 스캔하세요', null);
+  document.getElementById('prodInp').focus();
+}
+
+/* 일반 스캔 처리 — rowIdx 매칭 후 공통 로직 (정상/신규 둘 다 사용) */
+function handleNormalScan(rowIdx, key) {
+  var row = rows[rowIdx];
+  row.qtyReceived = (row.qtyReceived || 0) + 1;
+  /* 박스 내부 누적 */
+  var bItem = currentBox.items.find(function(it){ return it.rowIdx === rowIdx; });
+  if (bItem) bItem.count++;
+  else currentBox.items.push({ rowIdx: rowIdx, barcode: key, count: 1 });
+  /* 마지막 스캔 기록 (undo 용) */
+  lastScans.push({ rowIdx: rowIdx, barcode: key, boxId: currentBox.id, ts: Date.now() });
+  if (lastScans.length > 200) lastScans = lastScans.slice(-200);
+
+  /* 큰 디스플레이 갱신 */
+  var exp = +row.vals[COL.EXPECT_QTY] || 0;
+  var existing = +row.vals[COL.EXISTING_QTY] || 0;
+  var target = exp - existing;
+  var recv = row.qtyReceived;
+  var altUsed = (key === normBarcode(row.vals[COL.ALT_BARCODE]) && key !== normBarcode(row.vals[COL.BARCODE]));
+  var kind, msg;
+  if (row.isNew) {
+    kind = 'warn';
+    msg = '➕ 신규 입고 +'+recv+' <span style="font-size:.95rem;color:var(--mu);font-weight:600">— 품명/컬러/사이즈/원산지를 아래에서 기입하세요</span>';
+  } else if (target > 0 && recv > target) {
+    kind = 'warn';
+    msg = '⚠️ 초과 +' + (recv - target);
+  } else if (target > 0 && recv === target) {
+    kind = 'complete';
+    msg = '🎉 완료! ('+recv+'/'+target+')';
+  } else if (target > 0) {
+    kind = 'ok';
+    msg = '✓ 진행 중 — 잔여 ' + (target - recv);
+  } else {
+    kind = 'warn';
+    msg = '⚠️ 예정 수량 0 (초과 +' + recv + ')';
+  }
+  updateScanDisplay(kind, msg, row, { target: target, recv: recv, altUsed: altUsed });
+
+  renderTable();
+  highlightRow(rowIdx);
+  updateStats();
+  renderBoxList();
+  updateUndoBtn();
+  saveSession();
+}
+
 function onProdKey(ev) {
   if (ev.key !== 'Enter') return;
   ev.preventDefault();
@@ -759,50 +853,22 @@ function onProdKey(ev) {
   var key = normBarcode(val);
   var rowIdx = byBarcode[key];
   if (rowIdx === undefined) {
-    updateScanDisplay('er', '❌ 매칭 안 됨<div style="font-size:.9rem;font-weight:700;margin-top:.35rem;color:var(--mu);font-family:var(--mo)">스캔 값: '+escH(val)+'</div>', null);
+    /* 미등록 바코드 — 보류 상태로 큰 디스플레이에 신규 추가 버튼 표시.
+       작업자가 [+ 신규로 추가]를 누르면 새 row가 생성되어 완료 영역에 들어감. */
+    pendingUnknownBarcode = key;
+    pendingUnknownRaw = val;
+    var addBtn = '<button onclick="addUnknownBarcode()" style="margin-top:.5rem;padding:.5rem 1rem;background:var(--y);color:#0f1117;border:none;border-radius:6px;font-weight:800;font-size:.95rem;cursor:pointer">＋ 신규로 추가 (이번 박스에 입고)</button>';
+    var skipBtn = '<button onclick="ignoreUnknownBarcode()" style="margin-top:.5rem;margin-left:.4rem;padding:.5rem 1rem;background:transparent;color:var(--mu);border:1px solid var(--mu);border-radius:6px;font-weight:700;font-size:.9rem;cursor:pointer">무시</button>';
+    updateScanDisplay('warn',
+      '❓ 등록되지 않은 바코드'+
+      '<div style="font-size:.95rem;font-weight:700;margin-top:.3rem;color:var(--mu);font-family:var(--mo)">스캔 값: <span style="color:var(--y)">'+escH(val)+'</span></div>'+
+      '<div style="margin-top:.35rem;font-size:.78rem;color:var(--mu);font-weight:500">엑셀에 없는 바코드입니다. 신규로 추가하면 입고 처리되고, 품명/컬러/사이즈/원산지는 아래에서 직접 기입할 수 있습니다.</div>'+
+      addBtn + skipBtn,
+      null);
     return;
   }
-  var row = rows[rowIdx];
-  row.qtyReceived = (row.qtyReceived || 0) + 1;
-  /* 박스 내부 누적 */
-  var bItem = currentBox.items.find(function(it){ return it.rowIdx === rowIdx; });
-  if (bItem) bItem.count++;
-  else currentBox.items.push({ rowIdx: rowIdx, barcode: key, count: 1 });
-
-  /* 마지막 스캔 기록 (undo 용) */
-  lastScans.push({ rowIdx: rowIdx, barcode: key, boxId: currentBox.id, ts: Date.now() });
-  if (lastScans.length > 200) lastScans = lastScans.slice(-200);
-
-  /* 큰 디스플레이 갱신 */
-  var exp = +row.vals[COL.EXPECT_QTY] || 0;
-  var existing = +row.vals[COL.EXISTING_QTY] || 0;
-  var target = exp - existing;
-  var recv = row.qtyReceived;
-  var altUsed = (key === normBarcode(row.vals[COL.ALT_BARCODE]) && key !== normBarcode(row.vals[COL.BARCODE]));
-  var kind, msg;
-  if (target > 0 && recv > target) {
-    kind = 'warn';
-    msg = '⚠️ 초과 +' + (recv - target);
-  } else if (target > 0 && recv === target) {
-    kind = 'complete';
-    msg = '🎉 완료! ('+recv+'/'+target+')';
-  } else if (target > 0) {
-    kind = 'ok';
-    msg = '✓ 진행 중 — 잔여 ' + (target - recv);
-  } else {
-    /* 이번에 받을 게 없는데 받음 → 초과 */
-    kind = 'warn';
-    msg = '⚠️ 예정 수량 0 (초과 +' + recv + ')';
-  }
-  updateScanDisplay(kind, msg, row, { target: target, recv: recv, altUsed: altUsed });
-
-  /* 영역 재분류 (활성 ↔ 완료 자동 이동) + 하이라이트 */
-  renderTable();
-  highlightRow(rowIdx);
-  updateStats();
-  renderBoxList();
-  updateUndoBtn();
-  saveSession();
+  /* 정상 매칭 → 공통 처리 */
+  handleNormalScan(rowIdx, key);
 }
 
 /* 스캔 결과 큰 디스플레이 갱신.
@@ -1068,11 +1134,10 @@ function classifyRow(r) {
   var existing = +r.vals[COL.EXISTING_QTY] || 0;
   var target = exp - existing;
   var recv = r.qtyReceived || 0;
-  /* target<=0이고 recv=0 → 받을 거 없음(=완료 영역) */
-  /* recv > 0 이고 recv == target → 완료 */
-  /* recv > target → 초과 (완료 영역에 빨강) */
-  /* recv < target → 작업 중 */
-  /* recv > 0 이고 target<=0 → 초과 (완료 영역) */
+  /* 신규 추가 행(미등록 바코드) → 'new' kind, done 영역 (사용자 의도) */
+  if (r.isNew && recv > 0) {
+    return { zone:'done', kind:'new', target:target, recv:recv };
+  }
   if (target <= 0) {
     return recv > 0 ? { zone:'done', kind:'over', target:target, recv:recv } : { zone:'done', kind:'none', target:0, recv:0 };
   }
@@ -1171,10 +1236,12 @@ function renderTable() {
       var existing = +r.vals[COL.EXISTING_QTY] || 0;
       var target = exp - existing;
       var skuRecv = r.qtyReceived || 0;
-      /* 박스 단위 행의 클래스: SKU 전체가 초과면 over, 완료면 done-row */
+      /* 박스 단위 행의 클래스 */
       var rowCls = '';
       var statusTxt = '';
-      if (target <= 0) {
+      if (r.isNew) {
+        rowCls = ' new-row'; statusTxt = '➕ 신규';
+      } else if (target <= 0) {
         rowCls = ' over'; statusTxt = '예정0';
       } else if (skuRecv > target) {
         rowCls = ' over'; statusTxt = '⚠ 초과 +'+(skuRecv-target);
@@ -1349,11 +1416,34 @@ function downloadAll() {
       });
     });
 
+    /* 신규(미등록) row는 원본 시트 끝에 새 행으로 추가 — !ref 확장 필요 */
+    var ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s:{r:0,c:0}, e:{r:0,c:0} };
+    var nextNewRowIdx = ref.e.r + 1;
     rows.forEach(function(r, idx){
       var boxIds = rowBoxes[idx];
       var boxIdStr = boxIds ? boxIds.join(', ') : null;
-      applyRowChanges(ws, r.r-1, r, undefined, boxIdStr);
+      if (r.isNew) {
+        /* 신규 row: 원본 시트의 다음 빈 행에 작성. vals 전체 복사 + 박스ID + R열에 실입고 */
+        var targetRowIdx = nextNewRowIdx++;
+        for (var c = 0; c < r.vals.length; c++) {
+          var v = r.vals[c];
+          if (v === null || v === undefined || v === '') continue;
+          var type = (typeof v === 'number') ? 'n' : 's';
+          setCellRaw(ws, targetRowIdx, c, v, type);
+        }
+        if (boxIdStr) setCellRaw(ws, targetRowIdx, COL.BOX_BARCODE, boxIdStr, 's');
+        setCellRaw(ws, targetRowIdx, COL.EXISTING_QTY, r.qtyReceived, 'n');
+        /* 신규 표시 — 가장 끝 컬럼 다음에 '신규' 마커 코멘트 */
+        var idCell = ws[XLSX.utils.encode_cell({r:targetRowIdx, c:COL.BARCODE})];
+        if (idCell) idCell.c = [{ a:'입고검수시스템', t:'미등록 바코드 — 작업 중 신규 추가' }];
+      } else {
+        applyRowChanges(ws, r.r-1, r, undefined, boxIdStr);
+      }
     });
+    /* !ref 갱신 — 신규 row 만큼 확장 */
+    if (nextNewRowIdx > ref.e.r + 1) {
+      ws['!ref'] = XLSX.utils.encode_range({ s: ref.s, e: { r: nextNewRowIdx - 1, c: ref.e.c } });
+    }
 
     /* 수정사항 시트 추가 */
     var modSheet = buildModSheet();
@@ -1669,9 +1759,11 @@ function printLabels(codes, doneCb) {
   var w = window.open('', '_blank', 'width=420,height=600');
   if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
 
-  /* 라벨 페이지 HTML — 50×30mm 페이지 1장 = 라벨 1개 */
+  /* 라벨 페이지 HTML — 50×30mm 페이지 1장 = 라벨 1개.
+     바코드 + 코드 텍스트를 모두 한 SVG로 — displayValue:true 옵션으로 텍스트가
+     바코드 가로 폭(40mm)에 자동 맞춰 렌더링됨. 자릿수와 무관하게 항상 가득 차게 가독 확보. */
   var labelsHtml = codes.map(function(c){
-    return '<div class="label"><div class="inner"><svg class="bc" data-code="'+escH(c)+'"></svg><div class="txt">'+escH(c)+'</div></div></div>';
+    return '<div class="label"><div class="inner"><svg class="bc" data-code="'+escH(c)+'"></svg></div></div>';
   }).join('');
 
   w.document.open();
@@ -1683,9 +1775,8 @@ function printLabels(codes, doneCb) {
       'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
       '.label { width:50mm; height:30mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
       '.label:last-child { page-break-after:auto }'+
-      '.inner { width:40mm; height:25mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.5mm }'+
-      '.bc { width:40mm; height:18mm }'+
-      '.txt { font-family:"Courier New",monospace; font-size:9pt; font-weight:700; letter-spacing:.02em; line-height:1 }'+
+      '.inner { width:40mm; height:25mm; display:flex; flex-direction:column; align-items:center; justify-content:center }'+
+      '.bc { width:40mm; height:25mm }'+
       '@media screen { body{padding:12px;background:#222;color:#fff} .label{background:#fff;color:#000;margin:0 auto 4px;border:1px dashed #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
       '@media print { .toolbar{display:none} .label{margin:0} }'+
     '</style></head><body>'+
@@ -1699,7 +1790,10 @@ function printLabels(codes, doneCb) {
       'window.addEventListener("load",function(){'+
         'var svgs = document.querySelectorAll("svg.bc");'+
         'svgs.forEach(function(s){'+
-          'try { JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:false, margin:0, width:1.4, height:50 }); }'+
+          /* displayValue:true → SVG 안에 코드 텍스트 자동 포함.
+             fontSize/font/fontOptions로 굵게 + 큰 텍스트. SVG가 width:40mm로 잡혀있어
+             내용물이 자동으로 폭에 맞춰 스케일됨 → 자릿수와 무관하게 가로 폭 가득. */
+          'try { JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:28, fontOptions:"bold", textMargin:3, margin:0, width:2, height:65, textAlign:"center" }); }'+
           'catch(e) { console.error(e); }'+
         '});'+
         'setTimeout(function(){ window.print(); }, 300);'+
