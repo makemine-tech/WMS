@@ -332,6 +332,7 @@ h1 em{color:var(--g);font-style:normal}
       <div class="sd-k">품명</div><input type="text" class="sd-edit" id="sdName" placeholder="—" onchange="updateScanField('name', this.value)" onfocus="this.select()">
       <div class="sd-k">컬러</div><input type="text" class="sd-edit" id="sdColor" placeholder="—" onchange="updateScanField('color', this.value)" onfocus="this.select()">
       <div class="sd-k">사이즈</div><input type="text" class="sd-edit size" id="sdSize" placeholder="—" onchange="updateScanField('size', this.value)" onfocus="this.select()">
+      <div class="sd-k">원산지</div><input type="text" class="sd-edit" id="sdOrigin" placeholder="—" onchange="updateScanField('origin', this.value)" onfocus="this.select()">
       <div class="sd-k">실입고/예정</div><div class="sd-v qty" id="sdQty">—</div>
     </div>
   </div>
@@ -383,7 +384,8 @@ h1 em{color:var(--g);font-style:normal}
 
   <!-- 하단 액션 -->
   <div class="brow" style="margin-top:1rem">
-    <button class="btn btn-g" onclick="downloadResult()" id="downloadBtn">📥 결과 엑셀 다운로드</button>
+    <button class="btn btn-g" onclick="downloadAll()" id="downloadAllBtn" title="모든 행 포함 (입고된 것 + 미입고) · 원본 양식 유지 + A열 박스ID + 수정 셀 표시">📥 전체 엑셀 다운로드</button>
+    <button class="btn btn-y" onclick="downloadDone()" id="downloadDoneBtn" title="박스 × SKU 단위로 펼침 — 같은 SKU가 박스 2개에 분산되면 2행으로">📥 완료건 엑셀 다운로드</button>
     <button class="btn btn-s" onclick="goTo(0)">← 새 파일 업로드</button>
     <button class="btn btn-r" onclick="clearSession()" style="margin-left:auto">🗑 세션 삭제</button>
   </div>
@@ -754,15 +756,18 @@ function updateScanDisplay(kind, msg, row, info) {
                                             : (bc===null||bc===undefined?'—':String(bc)));
 
   /* input.value로 채움 + 수정 플래그에 따라 modified 클래스 */
-  var nameEl  = document.getElementById('sdName');
-  var colorEl = document.getElementById('sdColor');
-  var sizeEl  = document.getElementById('sdSize');
-  nameEl.value  = row.vals[COL.NAME] === null || row.vals[COL.NAME] === undefined ? '' : String(row.vals[COL.NAME]);
-  colorEl.value = row.vals[COL.COLOR] === null || row.vals[COL.COLOR] === undefined ? '' : String(row.vals[COL.COLOR]);
-  sizeEl.value  = row.vals[COL.SIZE] === null || row.vals[COL.SIZE] === undefined ? '' : String(row.vals[COL.SIZE]);
+  var nameEl   = document.getElementById('sdName');
+  var colorEl  = document.getElementById('sdColor');
+  var sizeEl   = document.getElementById('sdSize');
+  var originEl = document.getElementById('sdOrigin');
+  nameEl.value   = row.vals[COL.NAME]   === null || row.vals[COL.NAME]   === undefined ? '' : String(row.vals[COL.NAME]);
+  colorEl.value  = row.vals[COL.COLOR]  === null || row.vals[COL.COLOR]  === undefined ? '' : String(row.vals[COL.COLOR]);
+  sizeEl.value   = row.vals[COL.SIZE]   === null || row.vals[COL.SIZE]   === undefined ? '' : String(row.vals[COL.SIZE]);
+  originEl.value = row.vals[COL.ORIGIN] === null || row.vals[COL.ORIGIN] === undefined ? '' : String(row.vals[COL.ORIGIN]);
   nameEl.classList.toggle('modified', !!row.nameMod);
   colorEl.classList.toggle('modified', !!row.colorMod);
   sizeEl.classList.toggle('modified', !!row.sizeMod);
+  originEl.classList.toggle('modified', !!row.originMod);
 
   var t = info ? info.target : 0;
   var r = info ? info.recv   : 0;
@@ -791,11 +796,16 @@ function updateScanField(field, val) {
     r.vals[COL.SIZE] = nv;
     var origS = r.origSize === null || r.origSize === undefined ? '' : String(r.origSize);
     r.sizeMod = (nv !== origS);
+  } else if (field === 'origin') {
+    r.vals[COL.ORIGIN] = nv;
+    var origO = r.origOrigin === null || r.origOrigin === undefined ? '' : String(r.origOrigin);
+    r.originMod = (nv !== origO);
   }
   /* 디스플레이 modified 클래스 즉시 반영 */
-  var el = document.getElementById(field === 'name' ? 'sdName' : field === 'color' ? 'sdColor' : 'sdSize');
-  var modKey = field === 'name' ? 'nameMod' : field === 'color' ? 'colorMod' : 'sizeMod';
-  el.classList.toggle('modified', !!r[modKey]);
+  var idMap   = { name:'sdName',  color:'sdColor', size:'sdSize', origin:'sdOrigin' };
+  var modMap  = { name:'nameMod', color:'colorMod', size:'sizeMod', origin:'originMod' };
+  var el = document.getElementById(idMap[field]);
+  if (el) el.classList.toggle('modified', !!r[modMap[field]]);
   saveSession();
   /* 작업중/완료 테이블 동기 */
   renderTable();
@@ -1179,75 +1189,242 @@ function renderBoxList() {
 }
 
 /* ─────────────── 다운로드 ─────────────── */
-function downloadResult() {
+
+/* SheetJS cellStyles write는 Pro 전용. Community에선 .s 설정해도 무시될 수 있음.
+   안전한 폴백으로 코멘트 + "수정 사항" 별도 시트 추가. 코멘트는 안정적으로 보존됨. */
+function setCellRaw(ws, rIdx, cIdx, val, type) {
+  var addr = XLSX.utils.encode_cell({ r: rIdx, c: cIdx });
+  if (!ws[addr]) ws[addr] = {};
+  ws[addr].v = val;
+  ws[addr].t = type || 's';
+  delete ws[addr].w;
+  return ws[addr];
+}
+
+/* 셀에 수정 마킹 — fill(가능하면) + 코멘트(확실) + 셀 값 prefix(✎) */
+function markCellAsModified(ws, rIdx, cIdx, origVal, newVal, label) {
+  var cell = setCellRaw(ws, rIdx, cIdx, '✎ ' + (newVal===null||newVal===undefined?'':String(newVal)), 's');
+  /* SheetJS Community write — 일부 환경에서 fill 보존됨 */
+  cell.s = {
+    fill: { patternType:'solid', fgColor:{ rgb:'FFFFFFC4' }, bgColor:{ rgb:'FFFFFFC4' } },
+    font: { color:{ rgb:'FF8B6914' }, bold:true }
+  };
+  /* 코멘트로 원본 값 보존 (어느 환경에서도 보임) */
+  cell.c = [{
+    a: '입고검수시스템',
+    t: (label||'수정')+'\n원본: '+(origVal===null||origVal===undefined?'(빈)':String(origVal))+'\n변경: '+(newVal===null||newVal===undefined?'(빈)':String(newVal))
+  }];
+  return cell;
+}
+
+/* 한 row의 모든 수정사항을 시트에 적용 (전체/완료건 공통).
+   boxId가 있으면 A열에 박스 ID 기록. */
+function applyRowChanges(ws, rIdx, row, recvOverride, boxId) {
+  /* A열 박스 ID */
+  if (boxId) {
+    setCellRaw(ws, rIdx, COL.BOX_BARCODE, boxId, 's');
+  }
+  /* 품명 / 컬러 / 사이즈 / 원산지 수정 */
+  if (row.nameMod)   markCellAsModified(ws, rIdx, COL.NAME,   row.origName,   row.vals[COL.NAME],   '품명 수정');
+  if (row.colorMod)  markCellAsModified(ws, rIdx, COL.COLOR,  row.origColor,  row.vals[COL.COLOR],  '컬러 수정');
+  if (row.sizeMod)   markCellAsModified(ws, rIdx, COL.SIZE,   row.origSize,   row.vals[COL.SIZE],   '사이즈 수정');
+  if (row.originMod) markCellAsModified(ws, rIdx, COL.ORIGIN, row.origOrigin, row.vals[COL.ORIGIN], '원산지 수정');
+  /* R 물류실물수량 = 기존 R + (recvOverride 또는 실입고) */
+  var recv = (recvOverride !== undefined) ? recvOverride : (row.qtyReceived || 0);
+  if (recv > 0) {
+    var existingOrig = +row.vals[COL.EXISTING_QTY] || 0;
+    setCellRaw(ws, rIdx, COL.EXISTING_QTY, existingOrig + recv, 'n');
+  }
+}
+
+/* "수정 사항" 시트 — 어느 row의 어느 컬럼이 무엇으로 바뀌었는지 별도 표 */
+function buildModSheet() {
+  var aoa = [['엑셀행', '품번', '바코드', '컬럼', '원본', '변경']];
+  rows.forEach(function(r){
+    if (r.nameMod)   aoa.push([r.r, r.vals[COL.CODE], r.vals[COL.BARCODE], '품명',   r.origName,   r.vals[COL.NAME]]);
+    if (r.colorMod)  aoa.push([r.r, r.vals[COL.CODE], r.vals[COL.BARCODE], '컬러',   r.origColor,  r.vals[COL.COLOR]]);
+    if (r.sizeMod)   aoa.push([r.r, r.vals[COL.CODE], r.vals[COL.BARCODE], '사이즈', r.origSize,   r.vals[COL.SIZE]]);
+    if (r.originMod) aoa.push([r.r, r.vals[COL.CODE], r.vals[COL.BARCODE], '원산지', r.origOrigin, r.vals[COL.ORIGIN]]);
+  });
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
+
+/* 전체 다운로드 — 원본 양식 유지. 모든 행(입고된 것 + 미입고).
+   같은 SKU가 박스 여러 개에 분산되면 A열에 박스ID 콤마 결합. */
+function downloadAll() {
   if (!workbookRaw) {
-    /* 세션 복원 후 다운로드 — 원본 파일 재업로드 안내 */
-    if (!confirm('원본 .xlsx 파일이 없습니다.\n다시 업로드 후 다운로드해야 양식이 보존됩니다. 그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
-    downloadFallback();
+    if (!confirm('원본 .xlsx 파일이 없습니다. 다시 업로드 후 다운로드해야 양식이 보존됩니다.\n그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
+    downloadFallback('all');
     return;
   }
   try {
     var wb = XLSX.read(new Uint8Array(workbookRaw), { type:'array', cellStyles:true, cellDates:true });
     var sheetName = wb.SheetNames[0];
     var ws = wb.Sheets[sheetName];
-    /* 셀 값 업데이트 헬퍼 */
-    function setCell(rIdx, cIdx, val, type) {
-      var addr = XLSX.utils.encode_cell({ r: rIdx, c: cIdx });
-      if (!ws[addr]) ws[addr] = {};
-      ws[addr].v = val;
-      ws[addr].t = type || 's';
-      delete ws[addr].w;
-    }
-    /* 각 row의 변경 사항을 시트에 반영 */
-    rows.forEach(function(r){
-      if (r.nameMod)   setCell(r.r-1, COL.NAME,   r.vals[COL.NAME],   's');
-      if (r.colorMod)  setCell(r.r-1, COL.COLOR,  r.vals[COL.COLOR],  's');
-      if (r.sizeMod)   setCell(r.r-1, COL.SIZE,   r.vals[COL.SIZE],   's');
-      if (r.originMod) setCell(r.r-1, COL.ORIGIN, r.vals[COL.ORIGIN], 's');
-      /* R 물류실물수량 = 기존 R + 실입고 */
-      if (r.qtyReceived > 0) {
-        var existingOrig = +r.vals[COL.EXISTING_QTY] || 0;
-        setCell(r.r-1, COL.EXISTING_QTY, existingOrig + r.qtyReceived, 'n');
-      }
+
+    /* row별 박스 ID 목록 수집 */
+    var rowBoxes = {}; /* rowIdx -> ['BOX-001', 'BOX-002', ...] */
+    boxes.forEach(function(box){
+      box.items.forEach(function(it){
+        if (it.count <= 0) return;
+        if (!rowBoxes[it.rowIdx]) rowBoxes[it.rowIdx] = [];
+        if (rowBoxes[it.rowIdx].indexOf(box.id) === -1) rowBoxes[it.rowIdx].push(box.id);
+      });
     });
-    /* dimension은 그대로. 다운로드 */
+
+    rows.forEach(function(r, idx){
+      var boxIds = rowBoxes[idx];
+      var boxIdStr = boxIds ? boxIds.join(', ') : null;
+      applyRowChanges(ws, r.r-1, r, undefined, boxIdStr);
+    });
+
+    /* 수정사항 시트 추가 */
+    var modSheet = buildModSheet();
+    if (!wb.SheetNames.includes('수정사항')) {
+      XLSX.utils.book_append_sheet(wb, modSheet, '수정사항');
+    } else {
+      wb.Sheets['수정사항'] = modSheet;
+    }
+
     var out = XLSX.write(wb, { bookType:'xlsx', type:'array', cellStyles:true });
-    var blob = new Blob([out], { type:'application/octet-stream' });
-    var fname = (workbookFile && workbookFile.name) ?
-      workbookFile.name.replace(/\.xlsx?$/i, '') + '_입고결과.xlsx' :
-      '입고결과.xlsx';
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = fname;
-    a.click();
-    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
-    setMsg('m1','ok','✅ 다운로드 완료: '+fname);
+    saveBlob(out, '_전체입고결과.xlsx');
+    setMsg('m1','ok','✅ 전체 다운로드 완료 · 수정 셀에 ✎ 표시 + 별도 "수정사항" 시트 포함');
   } catch(err) {
     console.error(err);
-    setMsg('m1','er','❌ 다운로드 실패: '+err.message);
+    setMsg('m1','er','❌ 전체 다운로드 실패: '+err.message);
   }
 }
 
-function downloadFallback() {
-  /* 원본 워크북 없이 단순 시트 생성 */
-  var aoa = [headers];
-  rows.forEach(function(r){
-    var newR = r.vals.slice();
-    if (r.qtyReceived > 0) {
-      newR[COL.EXISTING_QTY] = (+r.vals[COL.EXISTING_QTY]||0) + r.qtyReceived;
+/* 완료건 다운로드 — 박스 × SKU 단위로 펼침. 입고된 행만.
+   원본 양식의 헤더는 유지, 데이터는 박스마다 행 복제. */
+function downloadDone() {
+  if (!workbookRaw) {
+    if (!confirm('원본 .xlsx 파일이 없습니다. 다시 업로드 후 다운로드해야 양식이 보존됩니다.\n그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
+    downloadFallback('done');
+    return;
+  }
+  try {
+    /* 원본 워크북을 base로 로드 → 첫 시트에서 데이터 행만 모두 클리어 →
+       박스×SKU 단위로 행 새로 채움 (헤더는 1행 그대로 유지) */
+    var wb = XLSX.read(new Uint8Array(workbookRaw), { type:'array', cellStyles:true, cellDates:true });
+    var sheetName = wb.SheetNames[0];
+    var ws = wb.Sheets[sheetName];
+
+    /* 시트의 ref 범위 파악 */
+    var ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s:{r:0,c:0}, e:{r:0,c:0} };
+    var maxC = ref.e.c;
+    var maxR = ref.e.r;
+
+    /* 1행(헤더) 제외하고 모든 데이터 셀 제거 */
+    for (var rr = 1; rr <= maxR; rr++) {
+      for (var cc = 0; cc <= maxC; cc++) {
+        var addr = XLSX.utils.encode_cell({ r: rr, c: cc });
+        if (ws[addr]) delete ws[addr];
+      }
     }
-    aoa.push(newR);
-  });
+
+    /* 박스×SKU 단위로 행 채우기 — 박스 시간 역순 → 박스 안 추가순 */
+    var records = [];
+    var sortedBoxes = boxes.slice().sort(function(a,b){ return b.ts - a.ts; });
+    sortedBoxes.forEach(function(box){
+      box.items.forEach(function(it){
+        if (it.count <= 0) return;
+        records.push({ box: box, rowIdx: it.rowIdx, count: it.count });
+      });
+    });
+
+    var newRowIdx = 1;
+    records.forEach(function(rec){
+      var r = rows[rec.rowIdx];
+      /* 원본 행의 모든 셀 값을 복사 */
+      for (var c = 0; c <= maxC; c++) {
+        var v = r.vals[c];
+        if (v === null || v === undefined || v === '') continue;
+        var type = (typeof v === 'number') ? 'n' : 's';
+        setCellRaw(ws, newRowIdx, c, v, type);
+      }
+      /* 박스 ID, 박스 내 수량으로 R열 덮어쓰기 */
+      setCellRaw(ws, newRowIdx, COL.BOX_BARCODE, rec.box.id, 's');
+      setCellRaw(ws, newRowIdx, COL.EXISTING_QTY, rec.count, 'n');
+      /* 수정 마킹 */
+      if (r.nameMod)   markCellAsModified(ws, newRowIdx, COL.NAME,   r.origName,   r.vals[COL.NAME],   '품명 수정');
+      if (r.colorMod)  markCellAsModified(ws, newRowIdx, COL.COLOR,  r.origColor,  r.vals[COL.COLOR],  '컬러 수정');
+      if (r.sizeMod)   markCellAsModified(ws, newRowIdx, COL.SIZE,   r.origSize,   r.vals[COL.SIZE],   '사이즈 수정');
+      if (r.originMod) markCellAsModified(ws, newRowIdx, COL.ORIGIN, r.origOrigin, r.vals[COL.ORIGIN], '원산지 수정');
+      newRowIdx++;
+    });
+
+    /* dimension 갱신 */
+    ws['!ref'] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:Math.max(newRowIdx-1, 0), c:maxC} });
+
+    /* 수정사항 시트 추가 */
+    var modSheet = buildModSheet();
+    if (!wb.SheetNames.includes('수정사항')) {
+      XLSX.utils.book_append_sheet(wb, modSheet, '수정사항');
+    } else {
+      wb.Sheets['수정사항'] = modSheet;
+    }
+
+    var out = XLSX.write(wb, { bookType:'xlsx', type:'array', cellStyles:true });
+    saveBlob(out, '_완료건_박스별.xlsx');
+    setMsg('m1','ok','✅ 완료건 다운로드 완료 · '+records.length+'행 (박스×SKU)');
+  } catch(err) {
+    console.error(err);
+    setMsg('m1','er','❌ 완료건 다운로드 실패: '+err.message);
+  }
+}
+
+function saveBlob(out, suffix) {
+  var blob = new Blob([out], { type:'application/octet-stream' });
+  var fname = (workbookFile && workbookFile.name) ?
+    workbookFile.name.replace(/\.xlsx?$/i, '') + suffix :
+    '입고결과' + suffix;
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+}
+
+function downloadFallback(kind) {
+  /* 원본 워크북 없는 경우 — 단순 표로 */
+  var aoa, fname;
+  if (kind === 'done') {
+    aoa = [['박스', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '박스내 수량', '예정 Q']];
+    boxes.slice().sort(function(a,b){return b.ts-a.ts;}).forEach(function(box){
+      var d = new Date(box.ts);
+      var t = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      box.items.forEach(function(it){
+        if (it.count<=0) return;
+        var r = rows[it.rowIdx];
+        aoa.push([box.id, t, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE], r.vals[COL.ORIGIN], it.count, r.vals[COL.EXPECT_QTY]]);
+      });
+    });
+    fname = '_완료건_박스별.xlsx';
+  } else {
+    aoa = [headers];
+    var rowBoxes = {};
+    boxes.forEach(function(box){
+      box.items.forEach(function(it){
+        if (it.count<=0) return;
+        if (!rowBoxes[it.rowIdx]) rowBoxes[it.rowIdx] = [];
+        if (rowBoxes[it.rowIdx].indexOf(box.id) === -1) rowBoxes[it.rowIdx].push(box.id);
+      });
+    });
+    rows.forEach(function(r, idx){
+      var nv = r.vals.slice();
+      if (r.qtyReceived > 0) nv[COL.EXISTING_QTY] = (+r.vals[COL.EXISTING_QTY]||0) + r.qtyReceived;
+      if (rowBoxes[idx]) nv[COL.BOX_BARCODE] = rowBoxes[idx].join(', ');
+      aoa.push(nv);
+    });
+    fname = '_전체입고결과.xlsx';
+  }
   var ws = XLSX.utils.aoa_to_sheet(aoa);
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  XLSX.utils.book_append_sheet(wb, buildModSheet(), '수정사항');
   var out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-  var blob = new Blob([out], { type:'application/octet-stream' });
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = '입고결과.xlsx';
-  a.click();
-  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  saveBlob(out, fname);
   setMsg('m1','warn','⚠️ 원본 양식 없이 단순 표로 저장됨');
 }
 
