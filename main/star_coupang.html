@@ -658,17 +658,42 @@ function renderCloudFiles(files) {
     var timeStr = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     var byStr = f.by ? ' · '+escH(f.by) : '';
     var progress = f.rows ? Math.round(f.recv / Math.max(1, f.rows) * 100) : 0;
-    return '<button onclick="loadCloudFile(\''+escAttr(f.fileKey)+'\')" style="text-align:left;background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.7rem .85rem;color:var(--tx);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:center;transition:border-color .15s,background .15s" onmouseover="this.style.borderColor=\'var(--g)\';this.style.background=\'rgba(74,240,168,.04)\'" onmouseout="this.style.borderColor=\'var(--br)\';this.style.background=\'var(--s1)\'">'+
-      '<div style="min-width:0">'+
-        '<div style="font-weight:800;font-size:.95rem;font-family:var(--mo);color:var(--y);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(f.fileName)+'</div>'+
-        '<div style="font-size:.7rem;color:var(--mu);margin-top:.18rem;font-family:var(--mo)">'+timeStr+byStr+' · 행 '+f.rows+' · 실입고 '+f.recv+' · 박스 '+f.boxes+'</div>'+
-      '</div>'+
-      '<div style="text-align:right">'+
-        '<div style="font-family:var(--mo);font-size:1.05rem;font-weight:900;color:'+(progress>=100?'var(--g)':(progress>0?'var(--b)':'var(--mu)'))+';line-height:1">'+progress+'%</div>'+
-        '<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">이어받기 →</div>'+
-      '</div>'+
-    '</button>';
+    return '<div style="display:grid;grid-template-columns:1fr auto auto;gap:.4rem;align-items:stretch">'+
+      /* 카드 본문 (클릭 = 이어받기) */
+      '<button onclick="loadCloudFile(\''+escAttr(f.fileKey)+'\')" style="text-align:left;background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.7rem .85rem;color:var(--tx);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:center;transition:border-color .15s,background .15s;min-width:0" onmouseover="this.style.borderColor=\'var(--g)\';this.style.background=\'rgba(74,240,168,.04)\'" onmouseout="this.style.borderColor=\'var(--br)\';this.style.background=\'var(--s1)\'">'+
+        '<div style="min-width:0">'+
+          '<div style="font-weight:800;font-size:.95rem;font-family:var(--mo);color:var(--y);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(f.fileName)+'</div>'+
+          '<div style="font-size:.7rem;color:var(--mu);margin-top:.18rem;font-family:var(--mo)">'+timeStr+byStr+' · 행 '+f.rows+' · 실입고 '+f.recv+' · 박스 '+f.boxes+'</div>'+
+        '</div>'+
+        '<div style="text-align:right">'+
+          '<div style="font-family:var(--mo);font-size:1.05rem;font-weight:900;color:'+(progress>=100?'var(--g)':(progress>0?'var(--b)':'var(--mu)'))+';line-height:1">'+progress+'%</div>'+
+          '<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">이어받기 →</div>'+
+        '</div>'+
+      '</button>'+
+      /* 삭제 버튼 (별도 — 카드 클릭과 분리) */
+      '<button onclick="deleteCloudFile(\''+escAttr(f.fileKey)+'\',\''+escAttr(f.fileName)+'\')" title="이 파일의 클라우드 작업 데이터 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.35);border-radius:8px;padding:0 .8rem;color:rgba(240,88,88,.8);cursor:pointer;font-size:1.05rem;font-weight:700;transition:background .15s,color .15s" onmouseover="this.style.background=\'rgba(240,88,88,.12)\';this.style.color=\'var(--r)\'" onmouseout="this.style.background=\'transparent\';this.style.color=\'rgba(240,88,88,.8)\'">🗑</button>'+
+    '</div>';
   }).join('');
+}
+
+/* 클라우드 파일 삭제 — 그룹 내 해당 파일 작업 데이터 영구 삭제 */
+function deleteCloudFile(fileKey, fileName) {
+  if (!window.WMSync || !WMSync.hasGroup()) return;
+  if (!confirm('"'+fileName+'" 작업 데이터를 클라우드에서 삭제합니다.\n같은 그룹의 다른 PC에서도 사라집니다. 계속할까요?')) return;
+  var gid = WMSync.getGroupId();
+  firebase.database().ref('wms_sync/groups/'+gid+'/star_coupang/files/'+fileKey).remove().then(function(){
+    /* 현재 로컬 작업이 이 파일이면 로컬도 정리 */
+    try {
+      var cur = JSON.parse(localStorage.getItem(SESSION_KEY)||'{}');
+      var curKey = cur.fileName ? WMSync.sanitizeKey(cur.fileName) : null;
+      if (curKey === fileKey) {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    } catch(e){}
+    loadCloudFiles(); /* 목록 새로고침 */
+  }).catch(function(err){
+    alert('삭제 실패: ' + (err && err.message || err));
+  });
 }
 
 /* 클라우드 파일 클릭 → 그 시점부터 이어받기 */
