@@ -343,6 +343,16 @@ h1 em{color:var(--g);font-style:normal}
   <div class="pg-t">입고 작업 · 바코드 스캔</div>
   <div class="pg-s">박스 바코드 → 제품 바코드 순으로 스캔. 매칭 시 실입고 +1 누적.</div>
 
+  <!-- 동기화 행 -->
+  <div id="syncRow" style="display:none;align-items:center;gap:.5rem;margin-bottom:.7rem;flex-wrap:wrap;padding:.6rem .8rem;border:1px solid rgba(74,240,168,.3);border-radius:8px;background:rgba(74,240,168,.04)">
+    <button class="btn btn-g" onclick="syncWithCloud()" style="padding:.45rem 1rem;font-size:.82rem">📥 다른 작업장 동기화</button>
+    <label style="font-size:.75rem;color:var(--mu);display:flex;align-items:center;gap:.3rem;cursor:pointer">
+      <input type="checkbox" id="autoSyncChk" checked onchange="onAutoSyncToggle(this.checked)" style="cursor:pointer;accent-color:var(--g)">박스 종료 시 자동 동기
+    </label>
+    <span id="lastSyncLabel" style="font-size:.7rem;color:var(--mu);font-family:var(--mo);margin-left:auto"></span>
+  </div>
+  <div id="syncStatus" class="msg" style="display:none"></div>
+
   <!-- 통계 -->
   <div class="stats">
     <div class="sc"><div class="sc-l">SKU 수</div><div class="sc-v" id="s0">—</div></div>
@@ -524,6 +534,15 @@ h1 em{color:var(--g);font-style:normal}
       </div>
       <div id="reprintMsg" style="font-size:.75rem;color:var(--mu);margin-top:.4rem;font-family:var(--mo)"></div>
     </div>
+
+    <div class="divider"></div>
+
+    <!-- 4) 포커스 이동 특수 바코드 -->
+    <div>
+      <div style="font-size:.85rem;font-weight:700;margin-bottom:.4rem;color:var(--g)">🎯 포커스 이동 바코드 (작업장에 부착용)</div>
+      <div class="modal-sub" style="margin-bottom:.6rem">스캐너로 <span style="color:var(--y);font-family:var(--mo)">#BOX#</span> 찍으면 박스 입력으로, <span style="color:var(--y);font-family:var(--mo)">#PROD#</span> 찍으면 제품 입력으로 자동 이동. 한 번 인쇄해 작업대 두 곳에 붙이세요.</div>
+      <button class="btn btn-g" onclick="printFocusCodes()" style="padding:.5rem .9rem;font-size:.82rem">🖨 포커스 바코드 2장 인쇄</button>
+    </div>
   </div>
 </div>
 
@@ -616,6 +635,27 @@ function wmsHandleAuthState(state) {
   }
   /* 클라우드의 진행 중 작업 목록 로드 (STEP 1에 표시) */
   loadCloudFiles();
+  /* 동기화 행 표시 — 그룹 멤버에게만 */
+  var syncRow = document.getElementById('syncRow');
+  if (syncRow) syncRow.style.display = 'flex';
+}
+
+/* 박스 종료 시 자동 동기화 토글 — localStorage 기억 */
+function onAutoSyncToggle(checked) {
+  try { localStorage.setItem('star_autosync', checked ? '1' : '0'); } catch(e){}
+}
+(function initAutoSync(){
+  try {
+    var saved = localStorage.getItem('star_autosync');
+    if (saved === '0') {
+      var c = document.getElementById('autoSyncChk');
+      if (c) c.checked = false;
+    }
+  } catch(e){}
+})();
+function isAutoSyncOn() {
+  var c = document.getElementById('autoSyncChk');
+  return c ? c.checked : true;
 }
 
 /* 클라우드의 다른 PC 작업 목록 가져와 표시 */
@@ -752,6 +792,9 @@ var origName = {};          // {rowIdx: 원본 품명} — 수정 플래그용
 var origColor = {};         // {rowIdx: 원본 컬러}
 var pendingUnknownBarcode = null; // 미등록 바코드 키 (정규화)
 var pendingUnknownRaw = null;     // 미등록 바코드 원본 값
+/* 포커스 이동 특수 바코드 — 작업장에 인쇄해 두고 스캔하면 input 포커스 이동 */
+var FOCUS_BOX_CODE  = '#BOX#';
+var FOCUS_PROD_CODE = '#PROD#';
 var SESSION_KEY = 'star_coupang_v1';
 /* 컬럼 매핑 (실제 엑셀 헤더 기준).
    A=0 박스바코드 | B=1 브랜드 | C=2 품번 | D=3 바코드 | E=4 대비 바코드 | F=5 품명
@@ -947,6 +990,8 @@ function restoreSession() {
   boxes = data.boxes || [];
   currentBox = data.currentBox || null;
   lastScans = data.lastScans || [];
+  /* boxes를 source of truth로 row.qtyReceived 재계산 — 다른 작업장 데이터 합산 후에도 정합성 보장 */
+  recalcRowQtys();
   document.getElementById('restoreBanner').style.display = 'none';
   goTo(1);
   renderAll();
@@ -1023,7 +1068,15 @@ function onBoxKey(ev) {
   if (ev.key !== 'Enter') return;
   ev.preventDefault();
   var val = ev.target.value.trim();
+  ev.target.value = '';
   if (!val) return;
+  /* 포커스 이동 특수 바코드 처리 */
+  if (val === FOCUS_BOX_CODE) { ev.target.focus(); return; }
+  if (val === FOCUS_PROD_CODE) {
+    if (!currentBox) { flashFeedback('warn','⚠️ 박스를 먼저 스캔하세요'); return; }
+    document.getElementById('prodInp').focus();
+    return;
+  }
   /* 같은 박스 ID이면 무시, 다르면 새 박스 시작. 기존 박스 자동 종료. */
   if (currentBox && currentBox.id === val) {
     flashFeedback('inf', '같은 박스 — 계속 진행');
@@ -1157,6 +1210,9 @@ function onProdKey(ev) {
   var val = ev.target.value.trim();
   if (!val) return;
   ev.target.value = '';
+  /* 포커스 이동 특수 바코드 처리 */
+  if (val === FOCUS_PROD_CODE) { ev.target.focus(); return; }
+  if (val === FOCUS_BOX_CODE)  { document.getElementById('boxInp').focus(); return; }
   if (!currentBox) {
     updateScanDisplay('er', '⚠️ 박스를 먼저 스캔하세요', null);
     document.getElementById('boxInp').focus();
@@ -1302,6 +1358,10 @@ function endBox() {
   document.getElementById('boxInp').focus();
   renderBoxList();
   saveSession();
+  /* 박스 종료 시 자동 동기화 (토글 ON일 때만) */
+  if (isAutoSyncOn() && window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+    setTimeout(syncWithCloud, 1200); /* 디바운싱 push가 끝난 후 */
+  }
 }
 
 function undoLastScan() {
@@ -2148,6 +2208,121 @@ function printLabels(codes, doneCb) {
       /* fallback: 진행 카운트는 사용자가 명시적으로 처리 — 자동 증가 안 함 */
     }, 60000);
   }
+}
+
+/* 포커스 이동 특수 바코드 2장 인쇄 — 작업장 부착용 */
+function printFocusCodes() {
+  printLabels([FOCUS_BOX_CODE, FOCUS_PROD_CODE]);
+}
+
+/* boxes를 source of truth로 row.qtyReceived 재계산.
+   동기화/병합 직후 호출되어 양쪽 작업 합산 결과를 row에 반영. */
+function recalcRowQtys() {
+  rows.forEach(function(r){ r.qtyReceived = 0; });
+  boxes.forEach(function(b){
+    (b.items||[]).forEach(function(it){
+      if (rows[it.rowIdx]) rows[it.rowIdx].qtyReceived += (it.count || 0);
+    });
+  });
+}
+
+/* 로컬 boxes와 클라우드 boxes를 박스 ID 기준 병합.
+   - 안 겹치는 박스: 그대로 추가
+   - 같은 ID 박스: items를 rowIdx 기준 max(count)로 합산 (보수적, 데이터 손실 없음)
+   - ts는 더 최신 값 채택 */
+function mergeBoxes(local, remote) {
+  var map = {};
+  (local||[]).forEach(function(b){ map[b.id] = JSON.parse(JSON.stringify(b)); });
+  (remote||[]).forEach(function(rb){
+    if (!map[rb.id]) {
+      map[rb.id] = JSON.parse(JSON.stringify(rb));
+      return;
+    }
+    var loc = map[rb.id];
+    var itemMap = {};
+    (loc.items||[]).forEach(function(it){ itemMap[it.rowIdx] = it; });
+    (rb.items||[]).forEach(function(it){
+      if (itemMap[it.rowIdx]) {
+        itemMap[it.rowIdx].count = Math.max(itemMap[it.rowIdx].count||0, it.count||0);
+      } else {
+        loc.items.push(JSON.parse(JSON.stringify(it)));
+        itemMap[it.rowIdx] = loc.items[loc.items.length - 1];
+      }
+    });
+    if ((rb.ts||0) > (loc.ts||0)) loc.ts = rb.ts;
+    if (rb.closed) loc.closed = true;
+  });
+  /* 배열로 변환 + 시작 시각 순서 (최근 위) */
+  return Object.keys(map).map(function(k){ return map[k]; })
+    .sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+}
+
+/* 클라우드와 수동 동기화 — 다른 작업장 진행분 합산 */
+var lastSyncTs = 0;
+var isSyncing = false;
+function syncWithCloud(opts) {
+  opts = opts || {};
+  if (!window.WMSync || !WMSync.hasGroup() || !WMSync.getFileKey()) return Promise.resolve();
+  if (isSyncing) return Promise.resolve();
+  isSyncing = true;
+  setSyncStatus('inf', '⟳ 동기화 중...');
+  return WMSync.pullOnce().then(function(remote){
+    if (remote && remote.payload) {
+      var p = remote.payload;
+      /* 1) boxes 합산 */
+      var newBoxes = mergeBoxes(boxes, p.boxes || []);
+      var added = newBoxes.length - boxes.length;
+      boxes = newBoxes;
+      /* 2) row 인라인 수정값(품명/컬러/사이즈/원산지)은 더 최신 ts 우선 */
+      if (p.rowsLite && remote.ts > lastSyncTs) {
+        p.rowsLite.forEach(function(rr, i){
+          if (!rows[i]) return;
+          /* 클라우드의 mod 플래그가 있으면 채택 */
+          ['NAME','COLOR','SIZE','ORIGIN'].forEach(function(field){
+            var modKey = field.toLowerCase()+'Mod';
+            if (rr[modKey] && !rows[i][modKey]) {
+              rows[i].vals[COL[field]] = rr.vals[COL[field]];
+              rows[i][modKey] = true;
+            }
+          });
+        });
+      }
+      /* 3) row.qtyReceived는 boxes로부터 완전 재계산 */
+      recalcRowQtys();
+      /* 4) lastScans 합산 (중복 무시) */
+      var seen = {};
+      lastScans.forEach(function(s){ seen[s.ts+'|'+s.barcode] = 1; });
+      (p.lastScans||[]).forEach(function(s){
+        var k = s.ts+'|'+s.barcode;
+        if (!seen[k]) { lastScans.push(s); seen[k]=1; }
+      });
+      lastScans.sort(function(a,b){ return a.ts - b.ts; });
+      if (lastScans.length > 200) lastScans = lastScans.slice(-200);
+      lastSyncTs = remote.ts;
+      /* 5) 화면 갱신 + 클라우드에 합산 결과 푸시 */
+      renderTable();
+      renderBoxList();
+      updateStats();
+      updateUndoBtn();
+      saveSession(); /* push to cloud (디바운싱 1초 후) */
+      setSyncStatus('ok', '✓ 동기 완료 · 신규 박스 '+Math.max(0,added)+'개 · ' + new Date().toLocaleTimeString());
+    } else {
+      setSyncStatus('inf', '동기화 완료 — 다른 작업장 데이터 없음');
+    }
+  }).catch(function(err){
+    setSyncStatus('er', '동기화 실패: '+(err && err.message || err));
+  }).then(function(){
+    isSyncing = false;
+  });
+}
+
+function setSyncStatus(kind, msg) {
+  var el = document.getElementById('syncStatus');
+  if (!el) return;
+  el.className = 'msg ' + kind;
+  el.textContent = msg;
+  el.style.display = '';
+  if (kind === 'ok') setTimeout(function(){ if(el.textContent===msg) el.style.display='none'; }, 4000);
 }
 
 /* 재출력 — 다양한 입력 포맷 파싱 */
