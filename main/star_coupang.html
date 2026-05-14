@@ -537,11 +537,15 @@ h1 em{color:var(--g);font-style:normal}
 
     <div class="divider"></div>
 
-    <!-- 4) 포커스 이동 특수 바코드 -->
+    <!-- 4) 포커스/동기화 특수 바코드 -->
     <div>
-      <div style="font-size:.85rem;font-weight:700;margin-bottom:.4rem;color:var(--g)">🎯 포커스 이동 바코드 (작업장에 부착용)</div>
-      <div class="modal-sub" style="margin-bottom:.6rem">스캐너로 <span style="color:var(--y);font-family:var(--mo)">#BOX#</span> 찍으면 박스 입력으로, <span style="color:var(--y);font-family:var(--mo)">#PROD#</span> 찍으면 제품 입력으로 자동 이동. 한 번 인쇄해 작업대 두 곳에 붙이세요.</div>
-      <button class="btn btn-g" onclick="printFocusCodes()" style="padding:.5rem .9rem;font-size:.82rem">🖨 포커스 바코드 2장 인쇄</button>
+      <div style="font-size:.85rem;font-weight:700;margin-bottom:.4rem;color:var(--g)">🎯 단축 바코드 (작업장에 부착용 · 한글 라벨 포함)</div>
+      <div class="modal-sub" style="margin-bottom:.6rem">스캔만으로 동작:
+        <span style="color:var(--y);font-family:var(--mo)">#BOX#</span>(<b>박스로</b>) ·
+        <span style="color:var(--y);font-family:var(--mo)">#PROD#</span>(<b>제품으로</b>) ·
+        <span style="color:var(--y);font-family:var(--mo)">#SYNC#</span>(<b>동기화</b>).
+        한 번 인쇄해 작업대 세 곳에 붙이세요.</div>
+      <button class="btn btn-g" onclick="printFocusCodes()" style="padding:.5rem .9rem;font-size:.82rem">🖨 단축 바코드 3장 인쇄</button>
     </div>
   </div>
 </div>
@@ -795,6 +799,7 @@ var pendingUnknownRaw = null;     // 미등록 바코드 원본 값
 /* 포커스 이동 특수 바코드 — 작업장에 인쇄해 두고 스캔하면 input 포커스 이동 */
 var FOCUS_BOX_CODE  = '#BOX#';
 var FOCUS_PROD_CODE = '#PROD#';
+var FOCUS_SYNC_CODE = '#SYNC#';
 var SESSION_KEY = 'star_coupang_v1';
 /* 컬럼 매핑 (실제 엑셀 헤더 기준).
    A=0 박스바코드 | B=1 브랜드 | C=2 품번 | D=3 바코드 | E=4 대비 바코드 | F=5 품명
@@ -1077,6 +1082,10 @@ function onBoxKey(ev) {
     document.getElementById('prodInp').focus();
     return;
   }
+  if (val === FOCUS_SYNC_CODE) {
+    syncWithCloud();
+    return;
+  }
   /* 같은 박스 ID이면 무시, 다르면 새 박스 시작. 기존 박스 자동 종료. */
   if (currentBox && currentBox.id === val) {
     flashFeedback('inf', '같은 박스 — 계속 진행');
@@ -1213,6 +1222,7 @@ function onProdKey(ev) {
   /* 포커스 이동 특수 바코드 처리 */
   if (val === FOCUS_PROD_CODE) { ev.target.focus(); return; }
   if (val === FOCUS_BOX_CODE)  { document.getElementById('boxInp').focus(); return; }
+  if (val === FOCUS_SYNC_CODE) { syncWithCloud(); return; }
   if (!currentBox) {
     updateScanDisplay('er', '⚠️ 박스를 먼저 스캔하세요', null);
     document.getElementById('boxInp').focus();
@@ -2145,32 +2155,40 @@ function printLabelRange(fromIdx, toIdx, doneCb) {
 function printLabels(codes, doneCb) {
   if (!codes || !codes.length) { alert('인쇄할 항목이 없습니다'); return; }
   if (typeof JsBarcode === 'undefined') { alert('바코드 라이브러리 로딩 실패. 페이지를 새로고침하세요.'); return; }
+  /* 시그니처 확장: 문자열 또는 {code, label} 객체 모두 허용.
+     label 있으면 바코드 아래 한글 표시 (예: 박스로/제품으로/동기화) */
+  var items = codes.map(function(c){ return typeof c === 'string' ? { code:c, label:'' } : c; });
   var w = window.open('', '_blank', 'width=420,height=600');
   if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
 
-  /* 라벨 페이지 HTML — 50×30mm 페이지 1장 = 라벨 1개.
-     바코드 + 코드 텍스트를 모두 한 SVG로 — displayValue:true 옵션으로 텍스트가
-     바코드 가로 폭(40mm)에 자동 맞춰 렌더링됨. 자릿수와 무관하게 항상 가득 차게 가독 확보. */
-  var labelsHtml = codes.map(function(c){
-    return '<div class="label"><div class="inner"><svg class="bc" data-code="'+escH(c)+'"></svg></div></div>';
+  /* 라벨 HTML — label이 있으면 .with-label 클래스 + 한글 div 추가 */
+  var labelsHtml = items.map(function(it){
+    var cls = it.label ? 'label with-label' : 'label';
+    var ko = it.label ? '<div class="ko">'+escH(it.label)+'</div>' : '';
+    return '<div class="'+cls+'"><div class="inner"><svg class="bc" data-code="'+escH(it.code)+'"></svg>'+ko+'</div></div>';
   }).join('');
+  var firstCode = items[0].code;
+  var lastCode = items[items.length-1].code;
 
   w.document.open();
   w.document.write(
-    '<!doctype html><html><head><meta charset="utf-8"><title>박스 라벨 '+codes.length+'장</title>'+
+    '<!doctype html><html><head><meta charset="utf-8"><title>박스 라벨 '+items.length+'장</title>'+
     '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>'+
     '<style>'+
       '@page { size: 50mm 30mm; margin: 0 }'+
       'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
       '.label { width:50mm; height:30mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
       '.label:last-child { page-break-after:auto }'+
-      '.inner { width:40mm; height:25mm; display:flex; flex-direction:column; align-items:center; justify-content:center }'+
+      '.inner { width:40mm; height:25mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.6mm }'+
       '.bc { width:40mm; height:25mm }'+
+      /* 한글 라벨 있는 경우: 바코드 영역 조금 줄이고 한글 추가 */
+      '.label.with-label .bc { height:19mm }'+
+      '.ko { font-size:14pt; font-weight:900; line-height:1; letter-spacing:.04em; color:#000 }'+
       '@media screen { body{padding:12px;background:#222;color:#fff} .label{background:#fff;color:#000;margin:0 auto 4px;border:1px dashed #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
       '@media print { .toolbar{display:none} .label{margin:0} }'+
     '</style></head><body>'+
     '<div class="toolbar">'+
-      '<span style="margin-right:12px;font-size:13px">📋 박스 라벨 '+codes.length+'장 — '+escH(codes[0])+(codes.length>1?' ~ '+escH(codes[codes.length-1]):'')+'</span>'+
+      '<span style="margin-right:12px;font-size:13px">📋 라벨 '+items.length+'장 — '+escH(firstCode)+(items.length>1?' ~ '+escH(lastCode):'')+'</span>'+
       '<button onclick="window.print()">🖨 인쇄</button>'+
       '<button class="s" onclick="window.close()">닫기</button>'+
     '</div>'+
@@ -2179,19 +2197,19 @@ function printLabels(codes, doneCb) {
       'window.addEventListener("load",function(){'+
         'var svgs = document.querySelectorAll("svg.bc");'+
         'svgs.forEach(function(s){'+
-          /* displayValue:true → SVG 안에 코드 텍스트 자동 포함.
-             fontSize/font/fontOptions로 굵게 + 큰 텍스트. SVG가 width:40mm로 잡혀있어
-             내용물이 자동으로 폭에 맞춰 스케일됨 → 자릿수와 무관하게 가로 폭 가득. */
-          'try { JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:28, fontOptions:"bold", textMargin:3, margin:0, width:2, height:65, textAlign:"center" }); }'+
+          'var height = s.closest(".label.with-label") ? 50 : 65;'+
+          'try { JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:24, fontOptions:"bold", textMargin:2, margin:0, width:2, height:height, textAlign:"center" }); }'+
           'catch(e) { console.error(e); }'+
         '});'+
         'setTimeout(function(){ window.print(); }, 300);'+
       '});'+
-      'window.addEventListener("afterprint",function(){ try{ window.opener && window.opener.postMessage({type:"labelPrinted",count:'+codes.length+'},"*"); }catch(e){} });'+
+      'window.addEventListener("afterprint",function(){ try{ window.opener && window.opener.postMessage({type:"labelPrinted",count:'+items.length+'},"*"); }catch(e){} });'+
     '<\/script>'+
     '</body></html>'
   );
   w.document.close();
+  /* codes 변수가 아래에서 length 참조 — items.length로 맞춤 */
+  codes = items;
 
   /* 메인 윈도우에서 인쇄 완료 메시지 수신 — chunk 진행 시에만 콜백 */
   if (typeof doneCb === 'function') {
@@ -2210,9 +2228,13 @@ function printLabels(codes, doneCb) {
   }
 }
 
-/* 포커스 이동 특수 바코드 2장 인쇄 — 작업장 부착용 */
+/* 포커스/동기 특수 바코드 3장 인쇄 — 작업장 부착용. 각 바코드 아래 한글 라벨 표시 */
 function printFocusCodes() {
-  printLabels([FOCUS_BOX_CODE, FOCUS_PROD_CODE]);
+  printLabels([
+    { code: FOCUS_BOX_CODE,  label: '박스로' },
+    { code: FOCUS_PROD_CODE, label: '제품으로' },
+    { code: FOCUS_SYNC_CODE, label: '동기화' }
+  ]);
 }
 
 /* boxes를 source of truth로 row.qtyReceived 재계산.
