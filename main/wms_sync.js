@@ -22,7 +22,7 @@
 
   var FIREBASE_CONFIG = {
     apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
-    authDomain:"makewon.com",
+    authDomain:"makechango-wms.firebaseapp.com",
     databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId:"makechango-wms",
     storageBucket:"makechango-wms.firebasestorage.app",
