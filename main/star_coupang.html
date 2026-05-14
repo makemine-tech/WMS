@@ -245,6 +245,11 @@ h1 em{color:var(--g);font-style:normal}
       <div style="font-size:9px;color:rgba(255,255,255,.45);letter-spacing:.06em;white-space:nowrap">STAR INBOUND · COUPANG v1</div>
     </div>
   </div>
+  <div id="syncBox" style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.72);font-family:system-ui,-apple-system,sans-serif">
+    <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#666;display:inline-block" title="오프라인"></span>
+    <span id="syncLabel" style="font-weight:700;letter-spacing:.04em;white-space:nowrap">오프라인</span>
+    <button id="syncBtn" onclick="wmsHandleSync()" style="font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap">🔑 로그인</button>
+  </div>
   <a href="https://makewon.com/" class="hdr-home-btn" rel="noopener" aria-label="MAKEWON.COM 홈으로">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5L12 4l9 7.5"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
     <span class="hdr-home-txt">MAKEWON.COM</span>
@@ -480,7 +485,71 @@ h1 em{color:var(--g);font-style:normal}
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <!-- JsBarcode (CODE128 라벨 생성) -->
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<!-- Firebase (PC 간 자동 동기화) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="wms_sync.js"></script>
 <script>
+/* ─────────────── 동기화 (Firebase Realtime DB) ─────────────── */
+var wmsSuppressNextSave = false; /* remote에서 받은 데이터로 setState 직후 saveSession 호출 시 echo 방지 */
+
+function wmsHandleSync() {
+  if (!window.WMSync || !WMSync.isReady()) {
+    alert('동기화 모듈 로딩 중 — 잠시 후 다시 시도');
+    return;
+  }
+  if (WMSync.isSignedIn()) {
+    if (!confirm('동기화 로그아웃 — 이 PC의 작업은 그대로 유지되지만 다른 PC와 더 이상 자동 동기되지 않습니다. 계속할까요?')) return;
+    WMSync.signOut();
+  } else {
+    WMSync.signIn();
+  }
+}
+
+function wmsUpdateBadge(user) {
+  var dot = document.getElementById('syncDot');
+  var label = document.getElementById('syncLabel');
+  var btn = document.getElementById('syncBtn');
+  if (!dot || !label || !btn) return;
+  if (user) {
+    dot.style.background = '#4af0a8';
+    dot.title = '동기화 ON · ' + (user.email || user.displayName || user.uid);
+    label.textContent = '동기 ON';
+    label.style.color = '#4af0a8';
+    btn.textContent = '🚪 로그아웃';
+  } else {
+    dot.style.background = '#888';
+    dot.title = '오프라인 — 이 PC에만 저장';
+    label.textContent = '오프라인';
+    label.style.color = 'rgba(255,255,255,.6)';
+    btn.textContent = '🔑 로그인';
+  }
+}
+
+/* 클라우드 → 로컬 적용 */
+function wmsApplyRemote(data) {
+  if (!data || !data.payload) return;
+  var p = data.payload;
+  /* 사용자 확인 — 현재 로컬 데이터가 있는지 */
+  var hasLocal = (typeof rows !== 'undefined' && rows && rows.length > 0);
+  if (hasLocal) {
+    var localTs = 0;
+    try { localTs = +(JSON.parse(localStorage.getItem(SESSION_KEY)||'{}').ts || 0); } catch(e){}
+    if (data.ts <= localTs) return; /* 이미 더 최신이면 무시 */
+    if (!confirm('다른 PC에서 갱신된 작업 데이터가 있습니다 ('+
+                 new Date(data.ts).toLocaleString()+').\n현재 화면 작업을 덮어쓰고 동기화할까요?')) return;
+  }
+  /* localStorage에 저장 후 restoreSession 호출 */
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(p)); } catch(e){}
+  wmsSuppressNextSave = true;
+  /* 페이지가 이미 활성화된 상태면 강제 복원 */
+  if (p.rowsLite && p.rowsLite.length) {
+    /* restoreSession이 banner를 처리하므로 직접 호출 */
+    restoreSession();
+  }
+}
+
 /* ─────────────── 전역 상태 ─────────────── */
 var workbookRaw = null;     // 원본 파일 ArrayBuffer (다운로드 시 재로드)
 var workbookFile = null;    // File 객체 (이름 등)
@@ -654,6 +723,11 @@ function saveSession() {
       lastScans: lastScans.slice(-50)
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+    /* 클라우드 동기화 — 로그인 상태면 자동 푸시 (디바운싱) */
+    if (wmsSuppressNextSave) { wmsSuppressNextSave = false; return; }
+    if (window.WMSync && WMSync.isSignedIn()) {
+      WMSync.push({ payload: data });
+    }
   } catch(e) { console.warn('세션 저장 실패:', e); }
 }
 
@@ -704,6 +778,14 @@ function clearSession() {
   document.getElementById('restoreInfo').textContent =
     timeStr+' · '+(data.fileName||'(이름 없음)')+' · '+data.rowsLite.length+'행 · 실입고 '+totalRecv+'개 · 박스 '+(data.boxes||[]).length+'개';
   banner.style.display = 'flex';
+})();
+
+/* Firebase 동기화 초기화 */
+(function initSync(){
+  if (!window.WMSync) return;
+  WMSync.init('star_coupang');
+  WMSync.onAuth(function(user){ wmsUpdateBadge(user); });
+  WMSync.onRemoteChange(function(data){ wmsApplyRemote(data); });
 })();
 
 /* ─────────────── 스캔 핸들러 ─────────────── */
