@@ -511,6 +511,8 @@ h1 em{color:var(--g);font-style:normal}
   </div>
 
   <div id="m1" class="msg" style="display:none"></div>
+  <!-- 다운로드 시 원본 xlsx 없을 때 1회 선택용 (숨김) -->
+  <input type="file" id="origReupload" accept=".xlsx,.xls" style="display:none">
 </div>
 
 </div><!-- .app -->
@@ -1881,6 +1883,35 @@ function buildModSheet() {
 
 /* 전체 다운로드 — 원본 양식 유지. 모든 행(입고된 것 + 미입고).
    같은 SKU가 박스 여러 개에 분산되면 A열에 박스ID 콤마 결합. */
+/* 원본 xlsx가 메모리·클라우드에 모두 없을 때 — 파일 선택창을 띄워 1회 받고
+   클라우드에 저장한 뒤 원래 다운로드를 이어서 진행. STEP 1로 갈 필요 없음. */
+function promptOriginalUpload(kind) {
+  var inp = document.getElementById('origReupload');
+  if (!inp) return;
+  inp.value = '';
+  inp.onchange = function(){
+    var f = inp.files && inp.files[0];
+    if (!f) { hideMsg('m1'); return; }
+    if (!/\.xlsx?$/i.test(f.name)) { setMsg('m1','er','❌ .xlsx 파일만 가능합니다'); return; }
+    setMsg('m1','inf','<span class="sp"></span> 원본 읽는 중...');
+    var reader = new FileReader();
+    reader.onload = function(e){
+      workbookRaw = e.target.result;
+      /* 다음부터 자동 — 클라우드에 1회 저장 */
+      if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+        WMSync.saveWorkbook(abToBase64(workbookRaw));
+      }
+      hideMsg('m1');
+      /* 원래 누른 다운로드 이어서 진행 */
+      if (kind === 'done') downloadDone(); else downloadAll();
+    };
+    reader.onerror = function(){ setMsg('m1','er','❌ 파일 읽기 실패'); };
+    reader.readAsArrayBuffer(f);
+  };
+  setMsg('m1','warn','📂 원본 .xlsx 파일을 선택하세요 — 한 번만 선택하면 이후 모든 PC에서 자동 적용됩니다');
+  inp.click();
+}
+
 function downloadAll() {
   if (!workbookRaw) {
     /* 클라우드에서 원본 워크북 자동 로드 후 재시도 */
@@ -1892,17 +1923,16 @@ function downloadAll() {
           hideMsg('m1');
           downloadAll();
         } else {
-          if (confirm('클라우드에도 원본 .xlsx가 없습니다.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('all');
-          else hideMsg('m1');
+          /* 클라우드에도 없음 → 원본 파일 1회 선택창 */
+          promptOriginalUpload('all');
         }
       }).catch(function(){
-        if (confirm('원본 불러오기 실패.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('all');
-        else hideMsg('m1');
+        promptOriginalUpload('all');
       });
       return;
     }
-    if (!confirm('원본 .xlsx 파일이 없습니다. 다시 업로드 후 다운로드해야 양식이 보존됩니다.\n그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
-    downloadFallback('all');
+    /* 비로그인 — 파일 선택창 */
+    promptOriginalUpload('all');
     return;
   }
   try {
@@ -1978,17 +2008,14 @@ function downloadDone() {
           hideMsg('m1');
           downloadDone();
         } else {
-          if (confirm('클라우드에도 원본 .xlsx가 없습니다.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('done');
-          else hideMsg('m1');
+          promptOriginalUpload('done');
         }
       }).catch(function(){
-        if (confirm('원본 불러오기 실패.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('done');
-        else hideMsg('m1');
+        promptOriginalUpload('done');
       });
       return;
     }
-    if (!confirm('원본 .xlsx 파일이 없습니다. 다시 업로드 후 다운로드해야 양식이 보존됩니다.\n그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
-    downloadFallback('done');
+    promptOriginalUpload('done');
     return;
   }
   try {
