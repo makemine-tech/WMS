@@ -183,10 +183,16 @@
     });
   }
 
+  /* Firebase는 undefined를 거부 — JSON 왕복으로 undefined 속성 제거(배열은 null로) */
+  function sanitize(obj) {
+    try { return JSON.parse(JSON.stringify(obj)); }
+    catch(e){ return obj; }
+  }
+
   /* 디바운싱 푸시 */
   function push(data) {
     if (!ref || !data) return;
-    pushPending = Object.assign({}, data, { ts: Date.now(), _by: currentUser ? (currentUser.email || currentUser.uid) : 'sync' });
+    pushPending = sanitize(Object.assign({}, data, { ts: Date.now(), _by: currentUser ? (currentUser.email || currentUser.uid) : 'sync' }));
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(function(){
       pushTimer = null;
@@ -199,7 +205,7 @@
 
   function pushNow(data) {
     if (!ref || !data) return;
-    var payload = Object.assign({}, data, { ts: Date.now(), _by: currentUser ? (currentUser.email || currentUser.uid) : 'sync' });
+    var payload = sanitize(Object.assign({}, data, { ts: Date.now(), _by: currentUser ? (currentUser.email || currentUser.uid) : 'sync' }));
     if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; pushPending = null; }
     lastLocalTs = payload.ts; lastRemoteTs = payload.ts;
     return ref.set(payload);

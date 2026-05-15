@@ -1006,30 +1006,35 @@ function getBarcodeKey(row) {
 }
 
 /* ─────────────── 세션 저장 ─────────────── */
-/* 현재 작업 상태를 객체로 — localStorage 저장 + 클라우드 push 양쪽에서 사용 */
+/* 현재 작업 상태를 객체로 — localStorage 저장 + 클라우드 push 양쪽에서 사용.
+   Firebase Realtime DB는 undefined 값을 거부하므로 모든 필드를 명시적으로 정규화하고
+   마지막에 JSON 왕복으로 잔여 undefined를 제거(배열은 null로). */
 function buildSessionData() {
-  return {
+  var nn = function(v){ return v === undefined ? null : v; };
+  var data = {
     v: 1,
     ts: Date.now(),
     fileName: workbookFile ? workbookFile.name : null,
-    headers: headers,
+    headers: (headers || []).map(nn),
     rowsLite: rows.map(function(r){
       return {
         r: r.r,
-        vals: r.vals,
-        qtyReceived: r.qtyReceived,
-        sizeMod: r.sizeMod,
-        originMod: r.originMod,
-        nameMod: r.nameMod,
-        colorMod: r.colorMod,
-        origSize: r.origSize,
-        origOrigin: r.origOrigin
+        vals: (r.vals || []).map(nn),
+        qtyReceived: r.qtyReceived || 0,
+        sizeMod: !!r.sizeMod,
+        originMod: !!r.originMod,
+        nameMod: !!r.nameMod,
+        colorMod: !!r.colorMod,
+        origSize: nn(r.origSize),
+        origOrigin: nn(r.origOrigin)
       };
     }),
-    boxes: boxes,
-    currentBox: currentBox,
-    lastScans: lastScans.slice(-200)
+    boxes: boxes || [],
+    currentBox: currentBox || null,
+    lastScans: (lastScans || []).slice(-200)
   };
+  /* 안전망 — boxes/lastScans 내부의 잔여 undefined까지 제거 */
+  return JSON.parse(JSON.stringify(data));
 }
 
 /* 세션 저장 — localStorage 전용. 클라우드 갱신은 절대 여기서 하지 않음.
