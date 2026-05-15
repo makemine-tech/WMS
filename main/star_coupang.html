@@ -784,7 +784,8 @@ function loadCloudFile(fileKey) {
       alert('해당 파일의 작업 데이터를 가져오지 못했습니다.');
       return;
     }
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(data.payload)); } catch(e){}
+    /* Firebase 배열→객체 변환 복원 후 저장 */
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(normalizeSession(data.payload))); } catch(e){}
     wmsSuppressNextSave = true;
     /* restoreSession이 STEP 2로 이동 + 모든 데이터 렌더 */
     restoreSession();
@@ -918,6 +919,7 @@ function handleFile(file) {
         WMSync.saveWorkbook(b64);
         /* 기존 클라우드 작업 확인 */
         WMSync.pullOnce().then(function(remote){
+          if (remote && remote.payload) remote.payload = normalizeSession(remote.payload);
           if (remote && remote.payload && remote.payload.rowsLite && remote.payload.rowsLite.length) {
             /* 같은 파일 작업이 이미 있음 → 작업 데이터 복원 (실입고/박스 유지) */
             var p = remote.payload;
@@ -1049,8 +1051,36 @@ function saveSession() {
 function loadSessionData() {
   try {
     var raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? normalizeSession(JSON.parse(raw)) : null;
   } catch(e) { return null; }
+}
+
+/* Firebase Realtime DB는 배열을 객체로 저장/반환함 ([a,b]→{0:a,1:b}, null 섞이면 희소 객체).
+   클라우드/localStorage에서 읽은 데이터의 배열을 모두 진짜 배열로 복원. */
+function objToArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === 'object') {
+    var max = -1;
+    Object.keys(v).forEach(function(k){ var n = +k; if (!isNaN(n) && n > max) max = n; });
+    var arr = [];
+    for (var i = 0; i <= max; i++) arr.push(v[i] !== undefined ? v[i] : null);
+    return arr;
+  }
+  return [];
+}
+function normalizeSession(data) {
+  if (!data || typeof data !== 'object') return data;
+  data.headers = objToArray(data.headers);
+  data.rowsLite = objToArray(data.rowsLite).map(function(r){
+    if (r && typeof r === 'object') r.vals = objToArray(r.vals);
+    return r;
+  });
+  data.boxes = objToArray(data.boxes).map(function(b){
+    if (b && typeof b === 'object') b.items = objToArray(b.items);
+    return b;
+  });
+  data.lastScans = objToArray(data.lastScans);
+  return data;
 }
 
 function restoreSession() {
@@ -2448,7 +2478,7 @@ function syncWithCloud(opts) {
   var added = 0;
   return WMSync.pullOnce().then(function(remote){
     if (remote && remote.payload) {
-      var p = remote.payload;
+      var p = normalizeSession(remote.payload);
       /* 1) boxes 합산 — 박스 ID 기준 union */
       var before = boxes.length;
       boxes = mergeBoxes(boxes, p.boxes || []);
