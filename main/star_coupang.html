@@ -901,12 +901,49 @@ function handleFile(file) {
       var data = new Uint8Array(e.target.result);
       var wb = XLSX.read(data, { type:'array', cellStyles:true, cellDates:true });
       parseWorkbook(wb);
-      saveSession();
       var msg = '✅ '+headers.filter(Boolean).length+'컬럼 · '+rows.length+'행 인식';
       var without = rows.filter(function(r){ return !getBarcodeKey(r); }).length;
       if (without) msg += ' ⚠️ '+without+'행에 바코드(D열)가 없습니다';
-      setMsg('m0','ok', msg);
-      setTimeout(function(){ goTo(1); renderAll(); }, 500);
+
+      /* 클라우드에 같은 파일명 작업이 있으면 — 작업 데이터는 클라우드 것 유지(손실 0),
+         원본 워크북만 새로 클라우드에 저장. 없으면 새 작업 + 원본 저장. */
+      var b64 = abToBase64(workbookRaw);
+      var afterCloud = function(){
+        saveSession();
+        setMsg('m0','ok', msg);
+        setTimeout(function(){ goTo(1); renderAll(); }, 500);
+      };
+      if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+        /* 원본 워크북 1회 저장 */
+        WMSync.saveWorkbook(b64);
+        /* 기존 클라우드 작업 확인 */
+        WMSync.pullOnce().then(function(remote){
+          if (remote && remote.payload && remote.payload.rowsLite && remote.payload.rowsLite.length) {
+            /* 같은 파일 작업이 이미 있음 → 작업 데이터 복원 (실입고/박스 유지) */
+            var p = remote.payload;
+            var pendingRows = p.rowsLite;
+            /* 행 수가 일치할 때만 안전하게 작업 데이터 머지 */
+            if (pendingRows.length === rows.length) {
+              rows.forEach(function(r, i){
+                var pr = pendingRows[i];
+                if (!pr) return;
+                r.qtyReceived = pr.qtyReceived || 0;
+                ['SIZE','ORIGIN','NAME','COLOR'].forEach(function(f){
+                  var mk = f.toLowerCase()+'Mod';
+                  if (pr[mk]) { r.vals[COL[f]] = pr.vals[COL[f]]; r[mk] = true; }
+                });
+              });
+              boxes = p.boxes || [];
+              lastScans = p.lastScans || [];
+              recalcRowQtys();
+              msg += ' · ☁️ 클라우드 작업 이어받음 (박스 '+boxes.length+'개)';
+            }
+          }
+          afterCloud();
+        }).catch(function(){ afterCloud(); });
+      } else {
+        afterCloud();
+      }
     } catch(err) {
       console.error(err);
       setMsg('m0','er','❌ 분석 실패: '+err.message);
@@ -1846,6 +1883,24 @@ function buildModSheet() {
    같은 SKU가 박스 여러 개에 분산되면 A열에 박스ID 콤마 결합. */
 function downloadAll() {
   if (!workbookRaw) {
+    /* 클라우드에서 원본 워크북 자동 로드 후 재시도 */
+    if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+      setMsg('m1','inf','<span class="sp"></span> 클라우드에서 원본 양식 불러오는 중...');
+      WMSync.loadWorkbook().then(function(b64){
+        if (b64) {
+          workbookRaw = base64ToAb(b64);
+          hideMsg('m1');
+          downloadAll();
+        } else {
+          if (confirm('클라우드에도 원본 .xlsx가 없습니다.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('all');
+          else hideMsg('m1');
+        }
+      }).catch(function(){
+        if (confirm('원본 불러오기 실패.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('all');
+        else hideMsg('m1');
+      });
+      return;
+    }
     if (!confirm('원본 .xlsx 파일이 없습니다. 다시 업로드 후 다운로드해야 양식이 보존됩니다.\n그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
     downloadFallback('all');
     return;
@@ -1915,6 +1970,23 @@ function downloadAll() {
    원본 양식의 헤더는 유지, 데이터는 박스마다 행 복제. */
 function downloadDone() {
   if (!workbookRaw) {
+    if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+      setMsg('m1','inf','<span class="sp"></span> 클라우드에서 원본 양식 불러오는 중...');
+      WMSync.loadWorkbook().then(function(b64){
+        if (b64) {
+          workbookRaw = base64ToAb(b64);
+          hideMsg('m1');
+          downloadDone();
+        } else {
+          if (confirm('클라우드에도 원본 .xlsx가 없습니다.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('done');
+          else hideMsg('m1');
+        }
+      }).catch(function(){
+        if (confirm('원본 불러오기 실패.\n양식 없는 단순 표로 저장할까요?')) downloadFallback('done');
+        else hideMsg('m1');
+      });
+      return;
+    }
     if (!confirm('원본 .xlsx 파일이 없습니다. 다시 업로드 후 다운로드해야 양식이 보존됩니다.\n그래도 진행할까요? (양식 없는 단순 표로 저장됨)')) return;
     downloadFallback('done');
     return;
@@ -2464,6 +2536,19 @@ function codeOrNumberToIndex(s) {
 function escH(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+/* ArrayBuffer ↔ base64 (원본 xlsx 클라우드 저장/복원용) */
+function abToBase64(buf) {
+  var bytes = new Uint8Array(buf), bin = '', CHUNK = 8192;
+  for (var i=0; i<bytes.length; i+=CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i+CHUNK));
+  }
+  return btoa(bin);
+}
+function base64ToAb(b64) {
+  var bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (var i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
 }
 function escAttr(s) {
   if (s === null || s === undefined) return '';

@@ -217,6 +217,26 @@
     return ref.remove();
   }
 
+  /* 현재 파일의 원본 워크북(base64)을 별도 경로에 저장 — payload와 분리, 1회만 */
+  function workbookPath() {
+    if (!currentGroupId || !appName || !fileKey) return null;
+    return 'wms_sync/groups/' + currentGroupId + '/' + appName + '/files/' + fileKey + '/workbook';
+  }
+  function saveWorkbook(b64) {
+    var path = workbookPath();
+    if (!db || !path || !b64) return Promise.resolve();
+    return db.ref(path).set({ b64: b64, ts: Date.now() })
+      .catch(function(err){ console.error('[WMSync] saveWorkbook 실패:', err); });
+  }
+  function loadWorkbook() {
+    var path = workbookPath();
+    if (!db || !path) return Promise.resolve(null);
+    return db.ref(path).once('value').then(function(s){
+      var v = s.val();
+      return v && v.b64 ? v.b64 : null;
+    }).catch(function(){ return null; });
+  }
+
   function getUser() { return currentUser; }
   function getGroupId() { return currentGroupId; }
   function getFileKey() { return fileKey; }
@@ -236,6 +256,8 @@
     pushNow: pushNow,
     pullOnce: pullOnce,
     clearRemote: clearRemote,
+    saveWorkbook: saveWorkbook,
+    loadWorkbook: loadWorkbook,
     getUser: getUser,
     getGroupId: getGroupId,
     getFileKey: getFileKey,
