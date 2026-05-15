@@ -794,20 +794,14 @@ function loadCloudFile(fileKey) {
 }
 
 /* 클라우드 → 로컬 적용 */
+/* 다른 PC가 클라우드를 갱신했을 때 — 자동 덮어쓰지 않음.
+   덮어쓰면 진행 중인 로컬 스캔이 사라질 수 있어 위험. 알림만 표시하고
+   실제 병합은 사용자가 '동기화' 버튼/#SYNC# 스캔으로 syncWithCloud()를 호출할 때. */
 function wmsApplyRemote(data) {
   if (!data || !data.payload) return;
-  var p = data.payload;
-  var hasLocal = (typeof rows !== 'undefined' && rows && rows.length > 0);
-  if (hasLocal) {
-    var localTs = 0;
-    try { localTs = +(JSON.parse(localStorage.getItem(SESSION_KEY)||'{}').ts || 0); } catch(e){}
-    if (data.ts <= localTs) return;
-    if (!confirm('같은 파일을 다른 PC에서 갱신했습니다 ('+
-                 new Date(data.ts).toLocaleString()+', '+(data._by||'?')+').\n현재 화면을 덮어쓰고 동기화할까요?')) return;
-  }
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(p)); } catch(e){}
-  wmsSuppressNextSave = true;
-  if (p.rowsLite && p.rowsLite.length) restoreSession();
+  /* 작업 시작 전(rows 없음)이거나 내가 막 push한 echo는 무시 */
+  if (typeof rows === 'undefined' || !rows || !rows.length) return;
+  setSyncStatus('inf', '🔔 다른 작업장에서 변경됨 ('+(data._by||'?')+') — [📥 다른 작업장 동기화] 버튼을 눌러 합치세요');
 }
 
 /* ─────────────── 전역 상태 ─────────────── */
@@ -912,6 +906,10 @@ function handleFile(file) {
       var b64 = abToBase64(workbookRaw);
       var afterCloud = function(){
         saveSession();
+        /* 클라우드에 현재 작업 1회 등록/갱신 (새 작업이면 등록, 복원이면 현 상태 반영) */
+        if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+          WMSync.pushNow({ payload: buildSessionData() });
+        }
         setMsg('m0','ok', msg);
         setTimeout(function(){ goTo(1); renderAll(); }, 500);
       };
@@ -1008,35 +1006,38 @@ function getBarcodeKey(row) {
 }
 
 /* ─────────────── 세션 저장 ─────────────── */
+/* 현재 작업 상태를 객체로 — localStorage 저장 + 클라우드 push 양쪽에서 사용 */
+function buildSessionData() {
+  return {
+    v: 1,
+    ts: Date.now(),
+    fileName: workbookFile ? workbookFile.name : null,
+    headers: headers,
+    rowsLite: rows.map(function(r){
+      return {
+        r: r.r,
+        vals: r.vals,
+        qtyReceived: r.qtyReceived,
+        sizeMod: r.sizeMod,
+        originMod: r.originMod,
+        nameMod: r.nameMod,
+        colorMod: r.colorMod,
+        origSize: r.origSize,
+        origOrigin: r.origOrigin
+      };
+    }),
+    boxes: boxes,
+    currentBox: currentBox,
+    lastScans: lastScans.slice(-200)
+  };
+}
+
+/* 세션 저장 — localStorage 전용. 클라우드 갱신은 절대 여기서 하지 않음.
+   (스캔마다 push하면 mergeBoxes를 거치지 않아 다른 PC 작업을 덮어쓰는 버그)
+   클라우드 push는 오직 syncWithCloud() 의 pull→병합→push 3단계로만. */
 function saveSession() {
   try {
-    var data = {
-      v: 1,
-      ts: Date.now(),
-      fileName: workbookFile ? workbookFile.name : null,
-      headers: headers,
-      /* rows는 원본 값을 들고있고, 작업 결과만 별도 저장 */
-      rowsLite: rows.map(function(r){
-        return {
-          r: r.r,
-          vals: r.vals,
-          qtyReceived: r.qtyReceived,
-          sizeMod: r.sizeMod,
-          originMod: r.originMod,
-          origSize: r.origSize,
-          origOrigin: r.origOrigin
-        };
-      }),
-      boxes: boxes,
-      currentBox: currentBox,
-      lastScans: lastScans.slice(-50)
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
-    /* 클라우드 동기화 — 로그인 상태면 자동 푸시 (디바운싱) */
-    if (wmsSuppressNextSave) { wmsSuppressNextSave = false; return; }
-    if (window.WMSync && WMSync.isSignedIn()) {
-      WMSync.push({ payload: data });
-    }
+    localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionData()));
   } catch(e) { console.warn('세션 저장 실패:', e); }
 }
 
@@ -2431,24 +2432,26 @@ function mergeBoxes(local, remote) {
 /* 클라우드와 수동 동기화 — 다른 작업장 진행분 합산 */
 var lastSyncTs = 0;
 var isSyncing = false;
+/* 동기화 — 항상 pull → 병합(mergeBoxes) → push 3단계.
+   클라우드 갱신은 이 함수로만 일어남. 스캔 중 saveSession은 클라우드를 건드리지 않음. */
 function syncWithCloud(opts) {
   opts = opts || {};
   if (!window.WMSync || !WMSync.hasGroup() || !WMSync.getFileKey()) return Promise.resolve();
   if (isSyncing) return Promise.resolve();
   isSyncing = true;
   setSyncStatus('inf', '⟳ 동기화 중...');
+  var added = 0;
   return WMSync.pullOnce().then(function(remote){
     if (remote && remote.payload) {
       var p = remote.payload;
-      /* 1) boxes 합산 */
-      var newBoxes = mergeBoxes(boxes, p.boxes || []);
-      var added = newBoxes.length - boxes.length;
-      boxes = newBoxes;
-      /* 2) row 인라인 수정값(품명/컬러/사이즈/원산지)은 더 최신 ts 우선 */
-      if (p.rowsLite && remote.ts > lastSyncTs) {
+      /* 1) boxes 합산 — 박스 ID 기준 union */
+      var before = boxes.length;
+      boxes = mergeBoxes(boxes, p.boxes || []);
+      added = boxes.length - before;
+      /* 2) row 인라인 수정값 병합 — 로컬에 수정 없을 때만 클라우드 것 채택 */
+      if (p.rowsLite) {
         p.rowsLite.forEach(function(rr, i){
-          if (!rows[i]) return;
-          /* 클라우드의 mod 플래그가 있으면 채택 */
+          if (!rows[i] || !rr) return;
           ['NAME','COLOR','SIZE','ORIGIN'].forEach(function(field){
             var modKey = field.toLowerCase()+'Mod';
             if (rr[modKey] && !rows[i][modKey]) {
@@ -2458,7 +2461,7 @@ function syncWithCloud(opts) {
           });
         });
       }
-      /* 3) row.qtyReceived는 boxes로부터 완전 재계산 */
+      /* 3) row.qtyReceived는 합산된 boxes로부터 완전 재계산 */
       recalcRowQtys();
       /* 4) lastScans 합산 (중복 무시) */
       var seen = {};
@@ -2469,17 +2472,18 @@ function syncWithCloud(opts) {
       });
       lastScans.sort(function(a,b){ return a.ts - b.ts; });
       if (lastScans.length > 200) lastScans = lastScans.slice(-200);
-      lastSyncTs = remote.ts;
-      /* 5) 화면 갱신 + 클라우드에 합산 결과 푸시 */
       renderTable();
       renderBoxList();
       updateStats();
       updateUndoBtn();
-      saveSession(); /* push to cloud (디바운싱 1초 후) */
-      setSyncStatus('ok', '✓ 동기 완료 · 신규 박스 '+Math.max(0,added)+'개 · ' + new Date().toLocaleTimeString());
-    } else {
-      setSyncStatus('inf', '동기화 완료 — 다른 작업장 데이터 없음');
+      saveSession(); /* localStorage 갱신 */
     }
+    /* 병합(또는 새 작업) 결과를 클라우드에 push — 항상 실행 */
+    return WMSync.pushNow({ payload: buildSessionData() });
+  }).then(function(){
+    setSyncStatus('ok', '✓ 동기 완료 · 박스 '+boxes.length+'개'+(added>0?' (신규 '+added+'개 합산)':'')+' · '+new Date().toLocaleTimeString());
+    var lbl = document.getElementById('lastSyncLabel');
+    if (lbl) lbl.textContent = '마지막 동기 ' + new Date().toLocaleTimeString();
   }).catch(function(err){
     setSyncStatus('er', '동기화 실패: '+(err && err.message || err));
   }).then(function(){
