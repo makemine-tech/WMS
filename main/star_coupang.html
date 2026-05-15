@@ -897,14 +897,31 @@ function handleFile(file) {
       workbookRaw = e.target.result;
       var data = new Uint8Array(e.target.result);
       var wb = XLSX.read(data, { type:'array', cellStyles:true, cellDates:true });
+      var b64 = abToBase64(workbookRaw);
+      /* 워크북 시트를 aoa로 — 입고결과 파일 여부 감지 */
+      var ws0 = wb.Sheets[wb.SheetNames[0]];
+      var aoa0 = XLSX.utils.sheet_to_json(ws0, { header:1, defval:null, raw:true });
+
+      /* ── 입고결과 박스별 파일 — boxes 완전 복원 (현재 작업 덮어쓰기) ── */
+      if (isResultWorkbook(aoa0)) {
+        parseResultWorkbook(aoa0);
+        var totalRecv = rows.reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
+        var rmsg = '✅ 입고결과 복원 · SKU '+rows.length+'종 · 박스 '+boxes.length+'개 · 실입고 '+totalRecv+'개';
+        saveSession();
+        if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+          WMSync.saveWorkbook(b64);
+          WMSync.pushNow({ payload: buildSessionData() }); /* 이 파일 기준으로 클라우드 덮어쓰기 */
+        }
+        setMsg('m0','ok', rmsg);
+        setTimeout(function(){ goTo(1); renderAll(); }, 500);
+        return;
+      }
+
+      /* ── 신규 입고예정 파일 — 기존 흐름 ── */
       parseWorkbook(wb);
       var msg = '✅ '+headers.filter(Boolean).length+'컬럼 · '+rows.length+'행 인식';
       var without = rows.filter(function(r){ return !getBarcodeKey(r); }).length;
       if (without) msg += ' ⚠️ '+without+'행에 바코드(D열)가 없습니다';
-
-      /* 클라우드에 같은 파일명 작업이 있으면 — 작업 데이터는 클라우드 것 유지(손실 0),
-         원본 워크북만 새로 클라우드에 저장. 없으면 새 작업 + 원본 저장. */
-      var b64 = abToBase64(workbookRaw);
       var afterCloud = function(){
         saveSession();
         /* 클라우드에 현재 작업 1회 등록/갱신 (새 작업이면 등록, 복원이면 현 상태 반영) */
@@ -990,6 +1007,83 @@ function parseWorkbook(wb) {
     if (bc !== null && bc !== undefined && String(bc) !== '') byBarcode[normBarcode(bc)] = rowIdx;
     if (ab !== null && ab !== undefined && String(ab) !== '') byBarcode[normBarcode(ab)] = rowIdx;
   }
+}
+
+/* 입고결과 박스별 파일인지 감지 — A열(박스바코드)에 값이 있는 데이터 행이 있으면 결과 파일 */
+function isResultWorkbook(aoa) {
+  for (var i=1; i<Math.min(aoa.length, 30); i++) {
+    var a = aoa[i] && aoa[i][COL.BOX_BARCODE];
+    if (a !== null && a !== undefined && String(a).trim() !== '') return true;
+  }
+  return false;
+}
+
+/* 입고결과 박스별 xlsx → rows(SKU 유니크) + boxes 완전 재구성.
+   각 행 = (A:박스ID, D:바코드, R:박스내수량). 같은 SKU가 여러 박스면 여러 행. */
+function parseResultWorkbook(aoa) {
+  if (!aoa.length) throw new Error('빈 시트');
+  headers = aoa[0].map(function(h){ return h===null||h===undefined ? '' : String(h); });
+  rows = [];
+  byBarcode = {};
+  var rowMap = {};      /* 정규화 바코드 → rowIdx */
+  var boxMap = {};      /* 박스ID → box */
+  var boxOrder = [];
+  var baseTs = Date.now();
+
+  for (var i=1; i<aoa.length; i++) {
+    var raw = aoa[i];
+    if (!raw || !raw.length) continue;
+    var bc = raw[COL.BARCODE];
+    var ab = raw[COL.ALT_BARCODE];
+    if ((bc===null||bc===undefined||String(bc)==='') &&
+        (ab===null||ab===undefined||String(ab)==='')) continue;
+    var key = (bc!==null && bc!==undefined && String(bc)!=='') ? normBarcode(bc) : normBarcode(ab);
+    if (!key) continue;
+
+    /* SKU row — 바코드 첫 등장만 등록 */
+    var rowIdx;
+    if (rowMap[key] !== undefined) {
+      rowIdx = rowMap[key];
+    } else {
+      var vals = raw.slice();
+      /* R열(박스 내 수량)은 SKU 레벨에선 의미 없음 — 비움. recalcRowQtys가 채움 */
+      vals[COL.EXISTING_QTY] = null;
+      var row = {
+        r: rows.length + 2,
+        vals: vals,
+        qtyReceived: 0,
+        sizeMod:false, originMod:false, nameMod:false, colorMod:false,
+        origSize: vals[COL.SIZE], origOrigin: vals[COL.ORIGIN],
+        origName: vals[COL.NAME], origColor: vals[COL.COLOR]
+      };
+      rowIdx = rows.length;
+      rows.push(row);
+      rowMap[key] = rowIdx;
+      if (bc!==null && bc!==undefined && String(bc)!=='') byBarcode[normBarcode(bc)] = rowIdx;
+      if (ab!==null && ab!==undefined && String(ab)!=='') byBarcode[normBarcode(ab)] = rowIdx;
+    }
+
+    /* box — A열 박스ID 기준 묶기 */
+    var boxId = raw[COL.BOX_BARCODE];
+    if (boxId === null || boxId === undefined || String(boxId).trim()==='') continue;
+    var bidStr = String(boxId).trim();
+    if (!boxMap[bidStr]) {
+      boxMap[bidStr] = { id: bidStr, ts: baseTs + boxOrder.length, items: [], closed: true };
+      boxOrder.push(bidStr);
+    }
+    var cnt = +raw[COL.EXISTING_QTY] || 0;  /* R열 = 그 박스 내 그 SKU 수량 */
+    if (cnt > 0) {
+      var box = boxMap[bidStr];
+      var ex = box.items.find(function(it){ return it.rowIdx === rowIdx; });
+      if (ex) ex.count += cnt;
+      else box.items.push({ rowIdx: rowIdx, barcode: key, count: cnt });
+    }
+  }
+
+  boxes = boxOrder.map(function(id){ return boxMap[id]; });
+  currentBox = null;
+  lastScans = [];
+  recalcRowQtys();  /* boxes로부터 row.qtyReceived 계산 */
 }
 
 function normBarcode(v) {
