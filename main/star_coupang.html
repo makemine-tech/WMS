@@ -97,10 +97,24 @@ h1 em{color:var(--g);font-style:normal}
 .scan-display.er .sd-msg{color:var(--r)}
 .scan-display.idle .sd-msg{color:var(--mu);font-size:1.2rem;font-weight:700}
 
-/* 2분할 그리드: 좌(제품 정보) | 우(수량 크게) */
-.sd-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:1.2rem;border-top:1px dashed var(--br);padding-top:.85rem;margin-top:.1rem;align-items:stretch}
+/* 3분할 그리드: 좌(제품 정보) | 가운데(이 박스 누적) | 우(수량 크게) */
+.sd-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,0.85fr) minmax(0,1fr);gap:1rem;border-top:1px dashed var(--br);padding-top:.85rem;margin-top:.1rem;align-items:stretch}
 .sd-grid.hidden{display:none}
 @media(max-width:720px){.sd-grid{grid-template-columns:1fr;gap:.8rem}}
+
+/* 가운데 — 이 박스 누적 수량 (흰 바탕 검정 폰트) */
+.sd-center{display:flex;align-items:stretch;justify-content:center}
+.box-count-box{background:#fff;color:#000;border-radius:14px;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:.7rem .5rem;gap:.1rem;box-shadow:0 2px 10px rgba(0,0,0,.3)}
+.box-count-box .bc-lbl{font-size:.74rem;font-weight:800;color:#555;letter-spacing:.04em}
+.box-count-box .bc-num{font-size:4.3rem;font-weight:900;line-height:.95;color:#000;font-family:var(--mo);letter-spacing:-.03em}
+.box-count-box .bc-sub{font-size:.82rem;font-weight:800;color:#444;font-family:var(--mo)}
+.box-count-box.empty{background:#3a3a3a}
+.box-count-box.empty .bc-num{color:#777}
+.box-count-box.empty .bc-lbl,.box-count-box.empty .bc-sub{color:#999}
+@media(max-width:720px){
+  .box-count-box{flex-direction:row;gap:.6rem;padding:.6rem .9rem}
+  .box-count-box .bc-num{font-size:2.8rem}
+}
 
 /* 왼쪽 영역 — 제품 정보 */
 .sd-left{display:grid;grid-template-columns:auto 1fr;gap:.35rem 1rem;align-items:center}
@@ -412,6 +426,14 @@ h1 em{color:var(--g);font-style:normal}
         <div class="sd-k">컬러</div><input type="text" class="sd-edit" id="sdColor" placeholder="—" onchange="updateScanField('color', this.value)" onfocus="this.select()">
         <div class="sd-k">사이즈</div><input type="text" class="sd-edit size" id="sdSize" placeholder="—" onchange="updateScanField('size', this.value)" onfocus="this.select()">
         <div class="sd-k">원산지</div><input type="text" class="sd-edit" id="sdOrigin" placeholder="—" onchange="updateScanField('origin', this.value)" onfocus="this.select()">
+      </div>
+      <!-- 가운데: 이 박스 누적 수량 (흰 바탕 검정) -->
+      <div class="sd-center">
+        <div class="box-count-box empty" id="sdBoxBox">
+          <div class="bc-lbl">이 박스</div>
+          <div class="bc-num" id="sdBoxNum">—</div>
+          <div class="bc-sub" id="sdBoxSub"></div>
+        </div>
       </div>
       <!-- 오른쪽: 수량 매우 크게 -->
       <div class="sd-right">
@@ -1319,6 +1341,29 @@ function updateScanDisplay(kind, msg, row, info) {
   /* 호환: 옛 sdQty 텍스트도 갱신 */
   var legacy = document.getElementById('sdQty');
   if (legacy) legacy.textContent = r + ' / ' + t;
+
+  /* 가운데 '이 박스' 누적 수량 갱신 */
+  updateBoxCountDisplay();
+}
+
+/* 가운데 '이 박스' 누적 수량 박스 갱신 — currentBox.items의 count 합계 */
+function updateBoxCountDisplay() {
+  var box = document.getElementById('sdBoxBox');
+  var num = document.getElementById('sdBoxNum');
+  var sub = document.getElementById('sdBoxSub');
+  if (!box || !num || !sub) return;
+  if (!currentBox) {
+    box.classList.add('empty');
+    num.textContent = '—';
+    sub.textContent = '';
+    return;
+  }
+  var items = currentBox.items || [];
+  var total = items.reduce(function(s,it){ return s + (it.count||0); }, 0);
+  var skuCnt = items.length;
+  box.classList.remove('empty');
+  num.textContent = total;
+  sub.textContent = total > 0 ? (total + '개 · ' + skuCnt + '종') : '0개';
 }
 
 /* 큰 디스플레이에서 품명/컬러/사이즈 인라인 편집 시 호출.
