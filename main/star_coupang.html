@@ -705,6 +705,13 @@ function loadCloudFiles() {
           var rowsLite = p.rowsLite || [];
           var totalRecv = rowsLite.reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
           var totalRows = rowsLite.length;
+          /* 받아야 할 총 수량 = Σ max(0, 입고예정 − 기존수량) — 진행률 분모 */
+          var totalTarget = rowsLite.reduce(function(s,r){
+            var vals = (r && r.vals) || [];
+            var exp = +vals[COL.EXPECT_QTY] || 0;
+            var existing = +vals[COL.EXISTING_QTY] || 0;
+            return s + Math.max(0, exp - existing);
+          }, 0);
           res({
             fileKey: f.fileKey,
             fileName: p.fileName || f.fileName,
@@ -712,6 +719,7 @@ function loadCloudFiles() {
             by: v._by || null,
             rows: totalRows,
             recv: totalRecv,
+            target: totalTarget,
             boxes: (p.boxes||[]).length
           });
         }).catch(function(){ res(null); });
@@ -734,7 +742,7 @@ function renderCloudFiles(files) {
     var d = new Date(f.ts);
     var timeStr = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     var byStr = f.by ? ' · '+escH(f.by) : '';
-    var progress = f.rows ? Math.round(f.recv / Math.max(1, f.rows) * 100) : 0;
+    var progress = f.target ? Math.min(100, Math.round(f.recv / f.target * 100)) : 0;
     return '<div style="display:grid;grid-template-columns:1fr auto auto;gap:.4rem;align-items:stretch">'+
       /* 카드 본문 (클릭 = 이어받기) */
       '<button onclick="loadCloudFile(\''+escAttr(f.fileKey)+'\')" style="text-align:left;background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.7rem .85rem;color:var(--tx);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:center;transition:border-color .15s,background .15s;min-width:0" onmouseover="this.style.borderColor=\'var(--g)\';this.style.background=\'rgba(74,240,168,.04)\'" onmouseout="this.style.borderColor=\'var(--br)\';this.style.background=\'var(--s1)\'">'+
