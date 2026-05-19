@@ -154,6 +154,7 @@ h1 em{color:var(--g);font-style:normal}
   <span class="btn btn-b dz-mini">📊 엑셀 일괄 입고
     <input type="file" accept=".xlsx,.xls" onchange="handleExcel(this.files[0]);this.value='';">
   </span>
+  <button class="btn btn-s" onclick="downloadTemplate()">📄 업로드 양식 다운로드</button>
   <span style="font-size:.72rem;color:var(--mu)">002 양식(.xlsx) — K열 수량대로 입고</span>
   <span style="margin-left:auto;font-size:.7rem;color:var(--mu);font-family:var(--mo)" id="syncInfo"></span>
 </div>
@@ -376,6 +377,23 @@ function cell(r, c){
   var v = r[c];
   if (v===null||v===undefined) return '';
   return (typeof v==='number') ? v : String(v).trim();
+}
+
+/* 업로드 양식(.xlsx) 다운로드 — 002 양식 헤더 + 예시 1행 */
+function downloadTemplate(){
+  try {
+    var headers = ['박스바코드','브랜드','품번','바코드','대체바코드','품명','소재','컬러','사이즈','원산지','수량'];
+    var sample  = ['ASC0515327','STAR','ST-001','4570158735506','','샘플 상품명','면 100%','BLACK','M','대한민국',10];
+    var aoa = [headers, sample];
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:16},{wch:10},{wch:12},{wch:16},{wch:16},{wch:24},{wch:14},{wch:10},{wch:8},{wch:10},{wch:8}];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '재고입고양식');
+    XLSX.writeFile(wb, 'STAR_재고입고_업로드양식.xlsx');
+    setMsg('m0','ok','✅ 업로드 양식을 다운로드했습니다 — 1행은 헤더, 2행은 예시입니다. 예시 행을 지우고 데이터를 채워 업로드하세요.');
+  } catch(err){
+    setMsg('m0','er','❌ 양식 생성 실패: '+(err&&err.message||err));
+  }
 }
 
 /* ─────────────── 재고 집계 ─────────────── */
