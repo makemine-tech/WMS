@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CJKYQB2TTY"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-CJKYQB2TTY');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>STAR 재고 관리 v1</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--s1:#161b26;--s2:#1e2333;--br:#252b3b;
+  --g:#4af0a8;--y:#f0c44a;--b:#5b9cf6;--r:#f05858;--p:#c084fc;--o:#ff8c5a;
+  --tx:#e8eaf0;--mu:#7c8399;--mo:'Courier New',monospace
+}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column}
+.app{width:min(98%,1400px);margin:0 auto;padding:1.2rem 1rem 2rem;flex:1}
+.unified-ftr{text-align:center;padding:12px 20px;background:#1f2937;color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.04em;margin-top:auto;width:100%}
+.hd{text-align:center;margin-bottom:1rem}
+.badge{font-family:var(--mo);font-size:.62rem;color:var(--g);border:1px solid rgba(74,240,168,.3);padding:.18rem .75rem;border-radius:2px;display:inline-block;margin-bottom:.5rem;letter-spacing:.1em}
+h1{font-size:1.5rem;font-weight:900;margin-bottom:.2rem}
+h1 em{color:var(--g);font-style:normal}
+.hs{color:var(--mu);font-size:.78rem}
+.msg{border-radius:7px;padding:.55rem .9rem;font-size:.8rem;margin:.5rem 0}
+.ok{background:rgba(74,240,168,.08);border:1px solid var(--g);color:var(--g)}
+.er{background:rgba(240,88,88,.1);border:1px solid var(--r);color:var(--r)}
+.inf{background:rgba(91,156,246,.08);border:1px solid var(--b);color:var(--b)}
+.warn{background:rgba(240,196,74,.08);border:1px solid var(--y);color:var(--y)}
+.btn{padding:.55rem 1.1rem;border-radius:7px;border:none;font-size:.84rem;font-weight:700;cursor:pointer;transition:all .15s}
+.btn-g{background:var(--g);color:#0f1117}.btn-g:hover:not(:disabled){background:#6affc0;transform:translateY(-1px)}
+.btn-y{background:var(--y);color:#0f1117}.btn-y:hover:not(:disabled){background:#f7d068}
+.btn-b{background:var(--b);color:#fff}.btn-b:hover:not(:disabled){background:#7bb0f8}
+.btn-r{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.5)}.btn-r:hover{background:rgba(240,88,88,.08)}
+.btn-s{background:var(--s2);color:var(--tx);border:1px solid var(--br)}.btn-s:hover{border-color:var(--mu)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+
+/* 통계 */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.9rem}
+.sc{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.62rem .85rem}
+.sc-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.16rem}
+.sc-v{font-size:1.5rem;font-weight:900}
+@media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* 액션 바 */
+.action-bar{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.9rem;padding:.7rem .85rem;background:var(--s1);border:1px solid var(--br);border-radius:9px}
+.dz-mini{position:relative;overflow:hidden;display:inline-block}
+.dz-mini input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+
+/* 스캔 패널 */
+.scan-panel{background:linear-gradient(135deg,#1a1f2c,#161b26);border:1.5px solid var(--br);border-radius:10px;padding:.9rem 1.05rem;margin-bottom:.9rem}
+.mode-row{display:flex;gap:.5rem;margin-bottom:.6rem;flex-wrap:wrap;align-items:center}
+.mode-btn{padding:.5rem 1.3rem;border-radius:8px;border:2px solid var(--br);background:var(--s2);color:var(--mu);font-size:.95rem;font-weight:800;cursor:pointer;transition:all .15s}
+.mode-btn.in.on{background:var(--g);color:#0f1117;border-color:var(--g)}
+.mode-btn.out.on{background:var(--r);color:#fff;border-color:var(--r)}
+.scan-lbl{font-size:.66rem;color:var(--mu);font-family:var(--mo);letter-spacing:.05em;margin-bottom:.25rem}
+.scan-inp{width:100%;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.7rem .85rem;font-size:1.1rem;font-family:var(--mo);outline:none;letter-spacing:.04em}
+.scan-inp:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(74,240,168,.12)}
+.scan-inp:disabled{opacity:.4}
+.scan-qtyrow{display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap}
+.qty-inp{width:90px;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.5rem;font-size:1rem;font-family:var(--mo);text-align:center;outline:none}
+.qty-inp:focus{border-color:var(--g)}
+.scan-fb{font-size:.85rem;font-family:var(--mo);padding:.55rem .85rem;border-radius:6px;background:var(--s2);border:1px solid var(--br);margin-top:.55rem;min-height:38px;display:flex;align-items:center;line-height:1.4}
+.scan-fb.ok{background:rgba(74,240,168,.08);border-color:var(--g);color:var(--g)}
+.scan-fb.er{background:rgba(240,88,88,.08);border-color:var(--r);color:var(--r)}
+.scan-fb.warn{background:rgba(240,196,74,.08);border-color:var(--y);color:var(--y)}
+
+/* 검색 */
+.search-box{background:var(--s1);border:1px solid var(--br);border-radius:9px;padding:.85rem 1rem;margin-bottom:.9rem}
+.search-grid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+@media(max-width:720px){.search-grid{grid-template-columns:1fr}}
+.search-fld label{font-size:.7rem;color:var(--mu);font-family:var(--mo);display:block;margin-bottom:.25rem}
+.search-fld textarea{width:100%;height:70px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:6px;padding:.5rem .65rem;font-size:.82rem;font-family:var(--mo);outline:none;resize:vertical}
+.search-fld textarea:focus{border-color:var(--g)}
+.search-actions{display:flex;gap:.5rem;margin-top:.6rem;align-items:center;flex-wrap:wrap}
+
+/* 테이블 */
+.tbl-wrap{border:1px solid var(--br);border-radius:8px;overflow:auto;max-height:60vh;background:var(--s1)}
+.tbl{width:100%;border-collapse:collapse;font-size:.78rem}
+.tbl thead th{position:sticky;top:0;z-index:10;background:var(--s2);color:var(--mu);font-weight:700;text-align:left;padding:.5rem .55rem;font-size:.66rem;letter-spacing:.03em;border-bottom:1.5px solid var(--br);white-space:nowrap}
+.tbl tbody td{padding:.42rem .55rem;border-bottom:1px solid rgba(37,43,59,.5);vertical-align:middle}
+.tbl tbody tr:hover{background:rgba(74,240,168,.03)}
+.tbl tbody tr.hit{animation:hit .9s ease-out}
+@keyframes hit{0%{background:rgba(74,240,168,.32)}100%{background:transparent}}
+.cell-bc{font-family:var(--mo);color:var(--y);font-size:.76rem}
+.cell-box{font-family:var(--mo);color:var(--b);font-size:.74rem}
+.cell-num{text-align:right;font-family:var(--mo);font-weight:800}
+.cell-stock{text-align:right;font-family:var(--mo);font-weight:900;font-size:1rem}
+.cell-stock.zero{color:var(--mu)}
+.cell-stock.neg{color:var(--r)}
+.cell-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sec-title{display:flex;align-items:center;gap:.5rem;font-size:.9rem;font-weight:800;margin:1rem 0 .4rem;padding:.4rem .1rem;border-bottom:1.5px solid var(--br)}
+.sec-title .cnt{font-family:var(--mo);font-size:.72rem;background:var(--s2);color:var(--mu);padding:.12rem .55rem;border-radius:10px;border:1px solid var(--br)}
+.empty-row{text-align:center;padding:1.2rem;color:var(--mu);font-size:.8rem}
+
+/* 로그 */
+.log-toggle{display:flex;align-items:center;gap:.5rem;cursor:pointer;padding:.55rem .2rem;font-size:.82rem;font-family:var(--mo);color:var(--mu);user-select:none;margin-top:1rem}
+.log-toggle:hover{color:var(--tx)}
+.log-list{display:none;max-height:50vh;overflow:auto;border:1px solid var(--br);border-radius:8px;background:var(--s1)}
+.log-list.open{display:block}
+.tag{display:inline-block;padding:.1rem .42rem;border-radius:3px;font-family:var(--mo);font-size:.66rem;font-weight:700}
+.tag-in{background:rgba(74,240,168,.16);color:var(--g)}
+.tag-out{background:rgba(240,88,88,.16);color:var(--r)}
+.tag-excel{background:rgba(91,156,246,.16);color:var(--b)}
+
+/* 헤더 */
+.hdr-home-btn{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;padding:5px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;flex-shrink:0;white-space:nowrap}
+.hdr-home-btn:hover{color:#fff;border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.08)}
+@media(max-width:380px){.hdr-home-txt{display:none}}
+</style>
+</head>
+<body>
+<div class="unified-hdr" style="background:linear-gradient(135deg,#1f2937,#374151);color:#fff;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10000;gap:10px;">
+  <div style="display:flex;align-items:center;gap:10px;min-width:0">
+    <div style="width:28px;height:28px;background:rgba(255,255,255,.12);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">📦</div>
+    <div style="min-width:0">
+      <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">STAR 재고 관리</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.45);letter-spacing:.06em;white-space:nowrap">STAR INVENTORY · STOCK</div>
+    </div>
+  </div>
+  <div id="syncBox" style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif">
+    <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#666;display:inline-block"></span>
+    <span id="syncLabel" style="font-weight:700;letter-spacing:.04em;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">확인 중...</span>
+    <button id="syncBtn" onclick="wmsHandleLogout()" style="font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;display:none">🚪 로그아웃</button>
+  </div>
+  <a href="https://makewon.com/" class="hdr-home-btn" rel="noopener">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5L12 4l9 7.5"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
+    <span class="hdr-home-txt">MAKEWON.COM</span>
+  </a>
+</div>
+
+<div class="app">
+<div class="hd">
+  <div class="badge">STAR INVENTORY · STOCK v1</div>
+  <h1>재고 <em>관리</em></h1>
+  <p class="hs">엑셀 일괄 입고 · 바코드 스캔 입출고 · 박스/바코드 다중 검색 · 입출고 로그</p>
+</div>
+
+<div id="m0" class="msg" style="display:none"></div>
+
+<!-- 통계 -->
+<div class="stats">
+  <div class="sc"><div class="sc-l">바코드 종</div><div class="sc-v" id="s0">—</div></div>
+  <div class="sc"><div class="sc-l">총 재고</div><div class="sc-v" style="color:var(--g)" id="s1">—</div></div>
+  <div class="sc"><div class="sc-l">누적 입고</div><div class="sc-v" style="color:var(--b)" id="s2">—</div></div>
+  <div class="sc"><div class="sc-l">누적 출고</div><div class="sc-v" style="color:var(--r)" id="s3">—</div></div>
+</div>
+
+<!-- 액션 바 -->
+<div class="action-bar">
+  <span class="btn btn-b dz-mini">📊 엑셀 일괄 입고
+    <input type="file" accept=".xlsx,.xls" onchange="handleExcel(this.files[0]);this.value='';">
+  </span>
+  <span style="font-size:.72rem;color:var(--mu)">002 양식(.xlsx) — K열 수량대로 입고</span>
+  <span style="margin-left:auto;font-size:.7rem;color:var(--mu);font-family:var(--mo)" id="syncInfo"></span>
+</div>
+
+<!-- 스캔 패널 -->
+<div class="scan-panel">
+  <div class="mode-row">
+    <button class="mode-btn in on" id="modeInBtn" onclick="setMode('in')">＋ 입고</button>
+    <button class="mode-btn out" id="modeOutBtn" onclick="setMode('out')">－ 출고</button>
+    <span style="font-size:.72rem;color:var(--mu);margin-left:.3rem">바코드를 스캔하면 현재 모드로 기록됩니다</span>
+  </div>
+  <div class="scan-lbl">🏷️ 바코드 스캔</div>
+  <input type="text" id="scanInp" class="scan-inp" placeholder="바코드를 스캔하세요" autocomplete="off" onkeydown="onScanKey(event)">
+  <div class="scan-qtyrow">
+    <span style="font-size:.72rem;color:var(--mu)">스캔당 수량</span>
+    <input type="number" id="scanQty" class="qty-inp" value="1" min="1">
+    <span style="font-size:.68rem;color:var(--mu)">박스/제품 미등록 바코드도 입출고 기록됩니다</span>
+  </div>
+  <div id="scanFb" class="scan-fb">대기 중 — 모드 선택 후 바코드 스캔</div>
+</div>
+
+<!-- 검색 -->
+<div class="search-box">
+  <div class="search-grid">
+    <div class="search-fld">
+      <label>📦 박스바코드 (줄바꿈으로 여러 개)</label>
+      <textarea id="qBox" placeholder="ASC0515327&#10;ASC0515326"></textarea>
+    </div>
+    <div class="search-fld">
+      <label>🏷️ 바코드 (줄바꿈으로 여러 개)</label>
+      <textarea id="qBarcode" placeholder="4570158735506&#10;4570158735476"></textarea>
+    </div>
+  </div>
+  <div class="search-actions">
+    <button class="btn btn-g" onclick="doSearch()">🔍 검색</button>
+    <button class="btn btn-s" onclick="clearSearch()">전체 보기</button>
+    <span id="searchMsg" style="font-size:.74rem;color:var(--mu);font-family:var(--mo)"></span>
+  </div>
+</div>
+
+<!-- 재고 목록 -->
+<div class="sec-title">
+  <span>📋 재고 현황</span>
+  <span class="cnt" id="stockCnt">0종</span>
+</div>
+<div class="tbl-wrap">
+  <table class="tbl">
+    <thead><tr>
+      <th>바코드</th><th>품명</th><th>브랜드</th><th>품번</th><th>컬러</th><th>사이즈</th><th>원산지</th>
+      <th>박스</th><th style="text-align:right">입고</th><th style="text-align:right">출고</th><th style="text-align:right">재고</th>
+    </tr></thead>
+    <tbody id="stockBody"></tbody>
+  </table>
+</div>
+
+<!-- 로그 -->
+<div class="log-toggle" onclick="toggleLog()">
+  <span id="logArrow">▶</span>
+  <span>입출고 로그</span>
+  <span class="cnt" id="logCnt" style="font-family:var(--mo);font-size:.72rem;background:var(--s2);color:var(--mu);padding:.12rem .55rem;border-radius:10px;border:1px solid var(--br)">0건</span>
+  <span style="font-size:.66rem;color:var(--mu);margin-left:.3rem">— 언제 몇 개 입고/출고되었는지 기록</span>
+</div>
+<div class="log-list" id="logList"></div>
+
+</div><!-- .app -->
+
+<div class="unified-ftr">
+  © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
+</div>
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="wms_sync.js"></script>
+<script>
+/* ─────────────── 전역 상태 ─────────────── */
+/* 002.xlsx 컬럼 매핑 (0-indexed) */
+var COL = { BOX:0, BRAND:1, CODE:2, BARCODE:3, ALT:4, NAME:5, MATERIAL:6, COLOR:7, SIZE:8, ORIGIN:9, QTY:10 };
+var logs = [];          /* 전체 입출고 로그 [{key, ts, type, source, box, barcode, ...meta, qty, by}] */
+var stockGroups = [];   /* 바코드별 집계 결과 (검색/렌더용) */
+var scanMode = 'in';    /* 'in' | 'out' */
+var groupId = null;
+var dbRef = null;       /* star_instock/logs ref */
+var lastFilter = null;  /* {boxes:[], barcodes:[]} 또는 null(전체) */
+
+/* ─────────────── 메시지 ─────────────── */
+function setMsg(id, kind, html){
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'msg ' + kind; el.innerHTML = html; el.style.display = '';
+}
+function hideMsg(id){ var el=document.getElementById(id); if(el) el.style.display='none'; }
+function escH(s){ if(s===null||s===undefined) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function normBarcode(v){ if(v===null||v===undefined) return ''; return String(v).trim().replace(/\s+/g,'').toUpperCase(); }
+
+/* ─────────────── 인증 (wms_login 그룹) ─────────────── */
+function wmsHandleLogout(){
+  if (!window.WMSync || !WMSync.isReady()) return;
+  if (!confirm('로그아웃하면 로그인 화면으로 이동합니다.')) return;
+  WMSync.signOut().then(function(){ window.location.replace('/wms_login.html'); });
+}
+function wmsUpdateBadge(state){
+  var dot=document.getElementById('syncDot'), label=document.getElementById('syncLabel'), btn=document.getElementById('syncBtn');
+  if (state && state.user && state.groupId) {
+    dot.style.background='#4af0a8';
+    label.textContent = state.user.email || state.user.uid;
+    label.style.color='#4af0a8';
+    btn.style.display='';
+  } else if (state && state.user) {
+    dot.style.background='#f0c44a'; label.textContent='권한 없음'; label.style.color='#f0c44a'; btn.style.display='';
+  } else {
+    dot.style.background='#888'; label.textContent='로그인 필요'; label.style.color='rgba(255,255,255,.6)'; btn.style.display='none';
+  }
+}
+function wmsHandleAuthState(state){
+  wmsUpdateBadge(state);
+  var returnUrl = '/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search);
+  if (!state.user) {
+    setTimeout(function(){ if(!WMSync.isSignedIn()) window.location.replace(returnUrl); }, 3000);
+    return;
+  }
+  if (!state.groupId) {
+    alert('이 계정은 작업 그룹에 등록되어 있지 않습니다.\n관리자에게 초대 코드를 요청하세요.');
+    window.location.replace(returnUrl);
+    return;
+  }
+  /* 인증 OK — Firebase logs ref 부착 */
+  groupId = state.groupId;
+  attachStockRef();
+}
+
+/* ─────────────── Firebase logs 실시간 연결 ─────────────── */
+function attachStockRef(){
+  if (!groupId || typeof firebase === 'undefined') return;
+  if (dbRef) { try { dbRef.off(); } catch(e){} }
+  dbRef = firebase.database().ref('wms_sync/groups/' + groupId + '/star_instock/logs');
+  setMsg('m0','inf','<span>재고 데이터 불러오는 중...</span>');
+  dbRef.on('value', function(snap){
+    var v = snap.val() || {};
+    logs = Object.keys(v).map(function(k){
+      var o = v[k] || {}; o.key = k; return o;
+    }).sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
+    hideMsg('m0');
+    rebuildAndRender();
+  }, function(err){
+    setMsg('m0','er','❌ 데이터 읽기 실패: ' + (err && err.message || err));
+  });
+}
+
+/* logs 한 건 추가 (입출고 기록) */
+function pushLog(entry){
+  if (!dbRef) { alert('로그인 후 사용하세요'); return Promise.reject(); }
+  var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : '?';
+  var rec = Object.assign({ ts: Date.now(), by: by }, entry);
+  /* undefined 제거 */
+  rec = JSON.parse(JSON.stringify(rec));
+  return dbRef.push(rec);
+}
+
+/* ─────────────── 엑셀 일괄 입고 ─────────────── */
+function handleExcel(file){
+  if (!file) return;
+  if (!/\.xlsx?$/i.test(file.name)) { setMsg('m0','er','❌ .xlsx 파일만 지원합니다'); return; }
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  setMsg('m0','inf','<span>엑셀 분석 중...</span>');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+      if (aoa.length < 2) { setMsg('m0','er','❌ 데이터 행이 없습니다'); return; }
+
+      var batchId = 'B' + Date.now();
+      var batchName = file.name;
+      var entries = [];
+      for (var i=1; i<aoa.length; i++) {
+        var r = aoa[i];
+        if (!r || !r.length) continue;
+        var bc = r[COL.BARCODE];
+        if (bc===null||bc===undefined||String(bc).trim()==='') continue;
+        var qty = +r[COL.QTY] || 0;
+        entries.push({
+          type:'in', source:'excel', batchId:batchId, batchName:batchName,
+          box: cell(r,COL.BOX), brand: cell(r,COL.BRAND), code: cell(r,COL.CODE),
+          barcode: String(bc).trim(), altBarcode: cell(r,COL.ALT),
+          name: cell(r,COL.NAME), material: cell(r,COL.MATERIAL),
+          color: cell(r,COL.COLOR), size: cell(r,COL.SIZE), origin: cell(r,COL.ORIGIN),
+          qty: qty
+        });
+      }
+      if (!entries.length) { setMsg('m0','er','❌ 바코드가 있는 행이 없습니다'); return; }
+      /* 일괄 push */
+      setMsg('m0','inf','<span>'+entries.length+'행 입고 등록 중...</span>');
+      var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : '?';
+      var chain = Promise.resolve();
+      var ts0 = Date.now();
+      entries.forEach(function(en, idx){
+        chain = chain.then(function(){
+          var rec = Object.assign({ ts: ts0 + idx, by: by }, en);
+          return dbRef.push(JSON.parse(JSON.stringify(rec)));
+        });
+      });
+      chain.then(function(){
+        var totQ = entries.reduce(function(s,e){ return s+e.qty; }, 0);
+        setMsg('m0','ok','✅ 엑셀 일괄 입고 완료 · '+entries.length+'행 · 총 '+totQ+'개 입고');
+      }).catch(function(err){
+        setMsg('m0','er','❌ 입고 등록 실패: '+(err&&err.message||err));
+      });
+    } catch(err){
+      console.error(err);
+      setMsg('m0','er','❌ 엑셀 분석 실패: '+err.message);
+    }
+  };
+  reader.onerror = function(){ setMsg('m0','er','❌ 파일 읽기 실패'); };
+  reader.readAsArrayBuffer(file);
+}
+function cell(r, c){
+  var v = r[c];
+  if (v===null||v===undefined) return '';
+  return (typeof v==='number') ? v : String(v).trim();
+}
+
+/* ─────────────── 재고 집계 ─────────────── */
+/* logs → 바코드별 그룹. {barcode, inQty, outQty, stock, meta, boxes:Set} */
+function rebuildStock(){
+  var map = {};
+  logs.forEach(function(lg){
+    var bc = normBarcode(lg.barcode);
+    if (!bc) return;
+    if (!map[bc]) {
+      map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, boxes:{}, meta:null, lastInTs:0 };
+    }
+    var g = map[bc];
+    var q = +lg.qty || 0;
+    if (lg.type === 'out') g.outQty += q;
+    else g.inQty += q;
+    if (lg.box) g.boxes[String(lg.box).trim()] = 1;
+    /* 메타는 가장 최근 입고 로그 기준 */
+    if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) {
+      g.lastInTs = lg.ts || 0;
+      g.meta = lg;
+    }
+  });
+  stockGroups = Object.keys(map).map(function(bc){
+    var g = map[bc];
+    g.stock = g.inQty - g.outQty;
+    g.boxList = Object.keys(g.boxes);
+    return g;
+  }).sort(function(a,b){
+    return String(a.barcode) < String(b.barcode) ? -1 : 1;
+  });
+}
+
+function rebuildAndRender(){
+  rebuildStock();
+  updateStats();
+  renderStock();
+  renderLog();
+}
+
+function updateStats(){
+  var totIn = 0, totOut = 0, totStock = 0;
+  stockGroups.forEach(function(g){
+    totIn += g.inQty; totOut += g.outQty; totStock += g.stock;
+  });
+  document.getElementById('s0').textContent = stockGroups.length;
+  document.getElementById('s1').textContent = totStock;
+  document.getElementById('s2').textContent = totIn;
+  document.getElementById('s3').textContent = totOut;
+}
+
+/* ─────────────── 검색 ─────────────── */
+function parseMulti(text){
+  return (text||'').split(/[\n,;]+/).map(function(s){ return s.trim(); }).filter(Boolean);
+}
+function doSearch(){
+  var boxes = parseMulti(document.getElementById('qBox').value).map(function(s){ return s.toUpperCase(); });
+  var bcs = parseMulti(document.getElementById('qBarcode').value).map(normBarcode);
+  if (!boxes.length && !bcs.length) { clearSearch(); return; }
+  lastFilter = { boxes: boxes, barcodes: bcs };
+  renderStock();
+  var n = stockGroups.filter(matchFilter).length;
+  document.getElementById('searchMsg').textContent =
+    '검색: 박스 '+boxes.length+'개 · 바코드 '+bcs.length+'개 → '+n+'종 일치';
+}
+function clearSearch(){
+  lastFilter = null;
+  document.getElementById('qBox').value = '';
+  document.getElementById('qBarcode').value = '';
+  document.getElementById('searchMsg').textContent = '';
+  renderStock();
+}
+function matchFilter(g){
+  if (!lastFilter) return true;
+  var byBc = lastFilter.barcodes.length &&
+    lastFilter.barcodes.indexOf(normBarcode(g.barcode)) !== -1;
+  var byBox = lastFilter.boxes.length &&
+    g.boxList.some(function(b){ return lastFilter.boxes.indexOf(String(b).toUpperCase()) !== -1; });
+  /* 둘 중 하나라도 입력됐으면 OR 매칭 */
+  if (lastFilter.barcodes.length && lastFilter.boxes.length) return byBc || byBox;
+  if (lastFilter.barcodes.length) return byBc;
+  if (lastFilter.boxes.length) return byBox;
+  return true;
+}
+
+/* ─────────────── 재고 렌더 ─────────────── */
+function renderStock(){
+  var tb = document.getElementById('stockBody');
+  var data = stockGroups.filter(matchFilter);
+  document.getElementById('stockCnt').textContent = data.length + '종';
+  if (!data.length) {
+    tb.innerHTML = '<tr><td colspan="11" class="empty-row">' +
+      (logs.length ? '검색 결과 없음' : '재고 없음 — 엑셀을 일괄 입고하거나 바코드를 스캔하세요') + '</td></tr>';
+    return;
+  }
+  tb.innerHTML = data.map(function(g){
+    var m = g.meta || {};
+    var stockCls = g.stock < 0 ? 'neg' : (g.stock === 0 ? 'zero' : '');
+    return '<tr id="st-'+escH(normBarcode(g.barcode))+'">'+
+      '<td class="cell-bc">'+escH(g.barcode)+'</td>'+
+      '<td class="cell-name" title="'+escH(m.name)+'">'+escH(m.name)+'</td>'+
+      '<td>'+escH(m.brand)+'</td>'+
+      '<td>'+escH(m.code)+'</td>'+
+      '<td>'+escH(m.color)+'</td>'+
+      '<td>'+escH(m.size)+'</td>'+
+      '<td>'+escH(m.origin)+'</td>'+
+      '<td class="cell-box">'+escH(g.boxList.join(', '))+'</td>'+
+      '<td class="cell-num" style="color:var(--b)">'+g.inQty+'</td>'+
+      '<td class="cell-num" style="color:var(--r)">'+g.outQty+'</td>'+
+      '<td class="cell-stock '+stockCls+'">'+g.stock+'</td>'+
+    '</tr>';
+  }).join('');
+}
+
+/* ─────────────── 입출고 스캔 ─────────────── */
+function setMode(m){
+  scanMode = m;
+  document.getElementById('modeInBtn').classList.toggle('on', m==='in');
+  document.getElementById('modeOutBtn').classList.toggle('on', m==='out');
+  var inp = document.getElementById('scanInp');
+  inp.placeholder = (m==='in'?'＋ 입고':'－ 출고') + ' — 바코드를 스캔하세요';
+  inp.focus();
+}
+function flashScan(kind, html){
+  var el = document.getElementById('scanFb');
+  el.className = 'scan-fb ' + kind;
+  el.innerHTML = html;
+}
+function onScanKey(ev){
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  var val = ev.target.value.trim();
+  ev.target.value = '';
+  if (!val) return;
+  var qty = parseInt(document.getElementById('scanQty').value, 10) || 1;
+  if (qty < 1) qty = 1;
+  var bcNorm = normBarcode(val);
+  /* 기존 재고에서 메타 찾기 (있으면 메타 동봉) */
+  var known = stockGroups.find(function(g){ return normBarcode(g.barcode) === bcNorm; });
+  var meta = known && known.meta ? known.meta : {};
+  var entry = {
+    type: scanMode, source:'scan',
+    box: meta.box || '', brand: meta.brand || '', code: meta.code || '',
+    barcode: val, altBarcode: meta.altBarcode || '',
+    name: meta.name || '', material: meta.material || '',
+    color: meta.color || '', size: meta.size || '', origin: meta.origin || '',
+    qty: qty
+  };
+  pushLog(entry).then(function(){
+    /* 갱신은 on('value')가 자동 처리 — 여기선 피드백만 */
+    var label = scanMode==='in' ? '입고' : '출고';
+    var nm = meta.name ? (' · '+meta.name) : (known ? '' : ' · (미등록 바코드)');
+    flashScan(scanMode==='in'?'ok':'warn',
+      (scanMode==='in'?'＋ ':'－ ') + label + ' ' + qty + '개 · ' + escH(val) + nm);
+    /* 잠시 후 해당 행 하이라이트 */
+    setTimeout(function(){
+      var tr = document.getElementById('st-'+bcNorm);
+      if (tr) { tr.classList.remove('hit'); void tr.offsetWidth; tr.classList.add('hit'); }
+    }, 200);
+  }).catch(function(err){
+    flashScan('er','❌ 기록 실패: '+(err&&err.message||err));
+  });
+}
+
+/* ─────────────── 로그 ─────────────── */
+function toggleLog(){
+  var l = document.getElementById('logList');
+  var a = document.getElementById('logArrow');
+  l.classList.toggle('open');
+  a.textContent = l.classList.contains('open') ? '▼' : '▶';
+  if (l.classList.contains('open')) renderLog();
+}
+function renderLog(){
+  document.getElementById('logCnt').textContent = logs.length + '건';
+  var l = document.getElementById('logList');
+  if (!l.classList.contains('open')) return;
+  if (!logs.length) { l.innerHTML = '<div class="empty-row">입출고 기록 없음</div>'; return; }
+  /* 최근이 위로 */
+  var recent = logs.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).slice(0, 500);
+  l.innerHTML =
+    '<table class="tbl"><thead><tr>'+
+      '<th>시각</th><th>구분</th><th>바코드</th><th>품명</th><th>박스</th>'+
+      '<th style="text-align:right">수량</th><th>작업자</th>'+
+    '</tr></thead><tbody>'+
+    recent.map(function(lg){
+      var d = new Date(lg.ts||0);
+      var t = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      var tag = lg.type==='out'
+        ? '<span class="tag tag-out">출고</span>'
+        : (lg.source==='excel' ? '<span class="tag tag-excel">엑셀입고</span>' : '<span class="tag tag-in">입고</span>');
+      return '<tr>'+
+        '<td style="font-family:var(--mo);font-size:.72rem;color:var(--mu)">'+t+'</td>'+
+        '<td>'+tag+'</td>'+
+        '<td class="cell-bc">'+escH(lg.barcode)+'</td>'+
+        '<td class="cell-name">'+escH(lg.name)+'</td>'+
+        '<td class="cell-box">'+escH(lg.box)+'</td>'+
+        '<td class="cell-num" style="color:'+(lg.type==='out'?'var(--r)':'var(--g)')+'">'+
+          (lg.type==='out'?'-':'+')+(+lg.qty||0)+'</td>'+
+        '<td style="font-size:.7rem;color:var(--mu)">'+escH(lg.by)+'</td>'+
+      '</tr>';
+    }).join('')+
+    '</tbody></table>';
+}
+
+/* ─────────────── 초기화 ─────────────── */
+(function init(){
+  if (!window.WMSync) {
+    setMsg('m0','er','❌ 동기화 모듈 로딩 실패 — 새로고침하세요');
+    return;
+  }
+  WMSync.init('star_instock', { requireAuth: true });
+  WMSync.onAuth(function(state){ wmsHandleAuthState(state); });
+  setMode('in');
+})();
+</script>
+</body>
+</html>
