@@ -92,8 +92,13 @@ h1 em{color:var(--g);font-style:normal}
 .cell-stock.zero{color:var(--mu)}
 .cell-stock.neg{color:var(--r)}
 .cell-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sec-title{display:flex;align-items:center;gap:.5rem;font-size:.9rem;font-weight:800;margin:1rem 0 .4rem;padding:.4rem .1rem;border-bottom:1.5px solid var(--br)}
+.sec-title{display:flex;align-items:center;gap:.5rem;font-size:.9rem;font-weight:800;margin:1rem 0 .4rem;padding:.4rem .1rem;border-bottom:1.5px solid var(--br);flex-wrap:wrap}
 .sec-title .cnt{font-family:var(--mo);font-size:.72rem;background:var(--s2);color:var(--mu);padding:.12rem .55rem;border-radius:10px;border:1px solid var(--br)}
+.vm-group{display:flex;gap:.3rem;align-items:center;margin-left:auto}
+.vm-btn{background:var(--s2);border:1px solid var(--br);color:var(--mu);font-size:.72rem;font-weight:700;padding:.35rem .75rem;border-radius:5px;cursor:pointer;transition:all .12s;white-space:nowrap}
+.vm-btn:hover{border-color:var(--mu);color:var(--tx)}
+.vm-btn.on{background:var(--g);color:#0f1117;border-color:var(--g)}
+.vm-hint{font-size:.66rem;color:var(--mu);font-family:var(--mo);margin-left:.5rem}
 .empty-row{text-align:center;padding:1.2rem;color:var(--mu);font-size:.8rem}
 
 /* 로그 */
@@ -218,7 +223,7 @@ h1 em{color:var(--g);font-style:normal}
   </div>
   <div class="search-actions">
     <button class="btn btn-g" onclick="doSearch()">🔍 검색</button>
-    <button class="btn btn-s" onclick="clearSearch()">전체 보기</button>
+    <button class="btn btn-s" onclick="clearSearch()">🔄 검색 해제</button>
     <span id="searchMsg" style="font-size:.74rem;color:var(--mu);font-family:var(--mo)"></span>
   </div>
 </div>
@@ -227,6 +232,11 @@ h1 em{color:var(--g);font-style:normal}
 <div class="sec-title">
   <span>📋 재고 현황</span>
   <span class="cnt" id="stockCnt">0종</span>
+  <span class="vm-hint" id="vmHint">이번 세션에 작업한 항목만</span>
+  <div class="vm-group">
+    <button class="vm-btn on" id="vmRecent" onclick="setView('recent')">📌 최근 작업</button>
+    <button class="vm-btn" id="vmAll" onclick="setView('all')">📂 전체 보기</button>
+  </div>
 </div>
 <div class="tbl-wrap">
   <table class="tbl">
@@ -334,7 +344,10 @@ var stockGroups = [];   /* 바코드별 집계 결과 (검색/렌더용) */
 var scanMode = 'in';    /* 'in' | 'out' */
 var groupId = null;
 var dbRef = null;       /* star_instock/logs ref */
-var lastFilter = null;  /* {boxes:[], barcodes:[]} 또는 null(전체) */
+var lastFilter = null;  /* {barcodes:[]} 또는 null */
+var viewMode = 'recent';     /* 'recent' (이번 세션 작업분) | 'all' (전체) — 검색이 있으면 무관 */
+var sessionBarcodes = {};    /* { bcNorm: ts } — 이번 세션에서 스캔/엑셀로 건드린 바코드만 */
+var RENDER_LIMIT = 1500;     /* 안전 렌더 한도 — 초과 시 안내 표시 */
 
 /* ─────────────── 메시지 ─────────────── */
 function setMsg(id, kind, html){
@@ -443,6 +456,8 @@ function handleExcel(file){
         });
       }
       if (!entries.length) { setMsg('m0','er','❌ 바코드가 있는 행이 없습니다'); return; }
+      /* 세션 표시 — 방금 업로드한 항목이 '최근 작업'에 바로 보이게 */
+      entries.forEach(function(en){ markSessionBarcode(en.barcode); });
       /* 일괄 push */
       setMsg('m0','inf','<span>'+entries.length+'행 입고 등록 중...</span>');
       var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : '?';
@@ -529,6 +544,8 @@ function handleExcelOut(file){
       msg += '\n\n진행하시겠습니까?';
       if (!confirm(msg)) { setMsg('m0','warn','⚠️ 엑셀 일괄 출고 취소'); return; }
 
+      /* 세션 표시 — 방금 출고한 항목이 '최근 작업'에 바로 보이게 */
+      entries.forEach(function(en){ markSessionBarcode(en.barcode); });
       setMsg('m0','inf','<span>'+entries.length+'행 출고 등록 중...</span>');
       var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : '?';
       var chain = Promise.resolve();
@@ -835,17 +852,72 @@ function getFilteredBcSet(){
   return s;
 }
 
+/* 보기 모드 전환 (최근 작업 / 전체) */
+function setView(mode){
+  viewMode = mode;
+  var r = document.getElementById('vmRecent'), a = document.getElementById('vmAll');
+  if (r) r.classList.toggle('on', mode==='recent');
+  if (a) a.classList.toggle('on', mode==='all');
+  var hint = document.getElementById('vmHint');
+  if (hint) hint.textContent =
+    lastFilter ? '검색 결과 표시 중' :
+    mode === 'all' ? '전체 표시 — 부하 주의' : '이번 세션에 작업한 항목만';
+  renderStock();
+}
+
+/* 세션 작업 흔적 기록 (스캔/엑셀 입출고 시 호출) */
+function markSessionBarcode(bc){
+  var n = normBarcode(bc);
+  if (n) sessionBarcodes[n] = Date.now();
+}
+
 /* ─────────────── 재고 렌더 ─────────────── */
 function renderStock(){
   var tb = document.getElementById('stockBody');
-  var data = stockGroups.filter(matchFilter);
-  document.getElementById('stockCnt').textContent = data.length + '종';
+  var data, mode;
+  if (lastFilter) {
+    data = stockGroups.filter(matchFilter);
+    mode = 'search';
+  } else if (viewMode === 'all') {
+    data = stockGroups;
+    mode = 'all';
+  } else {
+    /* 최근 작업 — 이번 세션에서 건드린 바코드만, 최근 작업 순 */
+    data = stockGroups
+      .filter(function(g){ return sessionBarcodes[normBarcode(g.barcode)]; })
+      .sort(function(a,b){
+        return (sessionBarcodes[normBarcode(b.barcode)]||0)
+             - (sessionBarcodes[normBarcode(a.barcode)]||0);
+      });
+    mode = 'recent';
+  }
+
+  var label = mode==='search' ? '검색결과' : mode==='all' ? '전체' : '최근';
+  document.getElementById('stockCnt').textContent = data.length + '종 · ' + label;
+  var hint = document.getElementById('vmHint');
+  if (hint) hint.textContent =
+    mode==='search' ? '검색 결과 표시 중' :
+    mode==='all'    ? '전체 표시 — 부하 주의' : '이번 세션에 작업한 항목만';
+
   if (!data.length) {
-    tb.innerHTML = '<tr><td colspan="11" class="empty-row">' +
-      (logs.length ? '검색 결과 없음' : '재고 없음 — 엑셀을 일괄 입고하거나 바코드를 스캔하세요') + '</td></tr>';
+    var msg;
+    if (mode === 'search') msg = '검색 결과 없음';
+    else if (mode === 'all') msg = logs.length
+      ? '집계할 데이터가 없습니다'
+      : '재고 없음 — 엑셀을 일괄 입고하거나 바코드를 스캔하세요';
+    else msg = '이번 세션에서 작업한 내역이 없습니다.<br>'+
+      '<span style="color:var(--mu);font-size:.72rem">'+
+      '바코드 스캔이나 엑셀 입고/출고를 하면 여기 자동 표시됩니다.<br>'+
+      '전체 재고를 보려면 위 <strong style="color:var(--g)">📂 전체 보기</strong>를 누르세요.</span>';
+    tb.innerHTML = '<tr><td colspan="11" class="empty-row">' + msg + '</td></tr>';
     return;
   }
-  tb.innerHTML = data.map(function(g){
+
+  /* 안전 렌더 한도 — 너무 많으면 잘라서 그림 (검색/필터로 좁히도록 유도) */
+  var truncated = data.length > RENDER_LIMIT;
+  var rendered = truncated ? data.slice(0, RENDER_LIMIT) : data;
+
+  tb.innerHTML = rendered.map(function(g){
     var m = g.meta || {};
     var stockCls = g.stock < 0 ? 'neg' : (g.stock === 0 ? 'zero' : '');
     return '<tr id="st-'+escH(normBarcode(g.barcode))+'">'+
@@ -862,6 +934,12 @@ function renderStock(){
       '<td class="cell-stock '+stockCls+'">'+g.stock+'</td>'+
     '</tr>';
   }).join('');
+
+  if (truncated) {
+    tb.innerHTML += '<tr><td colspan="11" class="empty-row" style="color:var(--y)">'+
+      '⚠️ 표시 한도 초과 — '+data.length+'종 중 '+RENDER_LIMIT+'종만 표시. '+
+      '검색이나 「최근 작업」 모드로 좁혀 보세요.</td></tr>';
+  }
 }
 
 /* ─────────────── 입출고 스캔 ─────────────── */
@@ -898,6 +976,7 @@ function onScanKey(ev){
     color: meta.color || '', size: meta.size || '', origin: meta.origin || '',
     qty: qty
   };
+  markSessionBarcode(val);
   pushLog(entry).then(function(){
     /* 갱신은 on('value')가 자동 처리 — 여기선 피드백만 */
     var label = scanMode==='in' ? '입고' : '출고';
