@@ -1438,6 +1438,7 @@ function handleNormalScan(rowIdx, key) {
   } else if (target > 0 && recv > target) {
     kind = 'warn';
     msg = '⚠️ 초과 +' + (recv - target);
+    playOverSound();
   } else if (target > 0 && recv === target) {
     kind = 'complete';
     msg = '🎉 완료! ('+recv+'/'+target+')';
@@ -1643,6 +1644,7 @@ function endBox() {
   document.getElementById('boxInp').focus();
   renderBoxList();
   saveSession();
+  playBoxDoneSound();
   /* 박스 종료 시 자동 동기화 (토글 ON일 때만) */
   if (isAutoSyncOn() && window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
     setTimeout(syncWithCloud, 1200); /* 디바운싱 push가 끝난 후 */
@@ -2437,28 +2439,52 @@ function playBeep(freq, dur, offset, vol){
   osc.type = 'sine';
   osc.frequency.value = freq;
   gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(vol || 0.35, now + 0.018);
+  /* 볼륨 상향 — 기본값 0.8 (안전 한도, 클리핑 직전) */
+  gain.gain.linearRampToValueAtTime(vol == null ? 0.8 : vol, now + 0.018);
   gain.gain.linearRampToValueAtTime(0, now + (dur || 0.16));
   osc.start(now);
   osc.stop(now + (dur || 0.16) + 0.02);
 }
-function speakKo(text){
+function speakKo(text, opts){
   if (!window.speechSynthesis) return;
+  opts = opts || {};
   try {
     window.speechSynthesis.cancel();  /* 이전 발화 취소 — 빠른 연속 스캔 시 중첩 방지 */
     var u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ko-KR';
-    u.rate = 1.05;
-    u.pitch = 1.0;
-    u.volume = 1.0;
+    u.lang   = 'ko-KR';
+    u.rate   = opts.rate   != null ? opts.rate   : 1.5;   /* 빠르게 — 기본 1.5 */
+    u.pitch  = opts.pitch  != null ? opts.pitch  : 1.0;
+    u.volume = opts.volume != null ? opts.volume : 1.0;   /* 최대 — OS 볼륨 제어 */
     window.speechSynthesis.speak(u);
   } catch(e){}
 }
 function playPhotoAlertSound(){
-  /* 비프 2회 (상승 톤) + TTS 음성 */
-  playBeep(880,  0.16, 0,    0.35);
-  playBeep(1175, 0.18, 0.20, 0.4);
-  setTimeout(function(){ speakKo('사진 촬영해 주세요'); }, 480);
+  /* 비프 2회 (상승 톤) + TTS 음성 — 신규 SKU 촬영요망 */
+  playBeep(880,  0.16, 0,    0.8);
+  playBeep(1175, 0.18, 0.20, 0.85);
+  setTimeout(function(){ speakKo('사진 촬영해 주세요'); }, 400);
+}
+function playOverSound(){
+  /* 강한 경고음 2발 + '초과' — 같은 톤 빠르게 */
+  if (!soundEnabled) return;
+  playBeep(1500, 0.10, 0,    0.85);
+  playBeep(1500, 0.10, 0.14, 0.85);
+  setTimeout(function(){ speakKo('초과', { rate: 1.7 }); }, 260);
+}
+function playBoxDoneSound(){
+  /* 상승 3음 + '박스 완료' — 완료 팡파레 */
+  if (!soundEnabled) return;
+  playBeep(700,  0.13, 0,    0.8);
+  playBeep(900,  0.13, 0.14, 0.8);
+  playBeep(1175, 0.18, 0.28, 0.85);
+  setTimeout(function(){ speakKo('박스 완료'); }, 480);
+}
+function playSyncDoneSound(){
+  /* 부드러운 2음 + '동기화 완료' */
+  if (!soundEnabled) return;
+  playBeep(900,  0.13, 0,    0.75);
+  playBeep(1300, 0.14, 0.14, 0.8);
+  setTimeout(function(){ speakKo('동기화 완료'); }, 300);
 }
 function onSoundToggle(checked){
   soundEnabled = !!checked;
@@ -2868,6 +2894,7 @@ function syncWithCloud(opts) {
     setSyncStatus('ok', '✓ 동기 완료 · 박스 '+boxes.length+'개'+(added>0?' (신규 '+added+'개 합산)':'')+' · '+new Date().toLocaleTimeString());
     var lbl = document.getElementById('lastSyncLabel');
     if (lbl) lbl.textContent = '마지막 동기 ' + new Date().toLocaleTimeString();
+    playSyncDoneSound();
   }).catch(function(err){
     setSyncStatus('er', '동기화 실패: '+(err && err.message || err));
   }).then(function(){
