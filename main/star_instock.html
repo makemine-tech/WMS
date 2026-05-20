@@ -267,6 +267,15 @@ h1 em{color:var(--g);font-style:normal}
 </div>
 <div class="log-list" id="logList"></div>
 
+<!-- 위험 영역 — 전체 초기화 -->
+<div style="margin-top:1.4rem;padding:.85rem 1rem;border:1.5px dashed rgba(240,88,88,.4);border-radius:9px;background:rgba(240,88,88,.04)">
+  <div style="font-size:.74rem;font-weight:800;color:var(--r);font-family:var(--mo);letter-spacing:.06em;margin-bottom:.55rem">⚠️ 위험 영역 · DANGER ZONE</div>
+  <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
+    <button class="btn btn-r" onclick="resetAllData()">🗑️ 입출고 로그 및 재고 초기화</button>
+    <span style="font-size:.72rem;color:var(--mu);line-height:1.5">모든 입출고 기록과 재고가 <strong style="color:var(--r)">0으로 초기화</strong>되며, 같은 그룹의 <strong style="color:var(--r)">모든 PC에서 즉시 반영</strong>됩니다. 복구할 수 없습니다.</span>
+  </div>
+</div>
+
 </div><!-- .app -->
 
 <div class="unified-ftr">
@@ -743,6 +752,51 @@ function renderLog(){
       '</tr>';
     }).join('')+
     '</tbody></table>';
+}
+
+/* ─────────────── 전체 초기화 (위험) ─────────────── */
+function resetAllData(){
+  if (!dbRef) { alert('로그인 후 사용하세요'); return; }
+  if (!logs.length) {
+    setMsg('m0','warn','⚠️ 이미 비어있어 초기화할 데이터가 없습니다');
+    return;
+  }
+  var totIn  = 0, totOut = 0;
+  logs.forEach(function(lg){
+    var q = +lg.qty||0;
+    if (lg.type==='out') totOut += q; else totIn += q;
+  });
+  var msg =
+    '⚠️ 입출고 로그 및 재고 초기화\n\n' +
+    '아래 데이터가 모두 삭제됩니다:\n' +
+    '  • 입출고 로그: ' + logs.length + '건\n' +
+    '  • 누적 입고: ' + totIn + '개\n' +
+    '  • 누적 출고: ' + totOut + '개\n' +
+    '  • 재고 종수: ' + stockGroups.length + '종\n\n' +
+    '※ 같은 그룹의 모든 PC에서 즉시 초기화되며 복구할 수 없습니다.\n\n' +
+    '정말 진행하시겠습니까?';
+  if (!confirm(msg)) {
+    setMsg('m0','warn','⚠️ 초기화 취소됨');
+    return;
+  }
+  /* 2차 확인 — 오타/잘못 누름 방지 */
+  var typed = prompt('정말 초기화하려면 아래에 「초기화」 라고 정확히 입력하세요');
+  if (typed === null) {
+    setMsg('m0','warn','⚠️ 초기화 취소됨');
+    return;
+  }
+  if (String(typed).trim() !== '초기화') {
+    setMsg('m0','er','❌ 확인 문구 불일치 — 초기화 취소됨');
+    return;
+  }
+  setMsg('m0','inf','<span>초기화 진행 중...</span>');
+  dbRef.remove().then(function(){
+    /* on('value') 가 자동으로 logs=[] 반영, 화면 재렌더 */
+    setMsg('m0','ok','✅ 모든 입출고 로그와 재고가 초기화되었습니다');
+    flashScan('warn','초기화 완료 — 모든 입출고 기록과 재고가 0이 되었습니다');
+  }).catch(function(err){
+    setMsg('m0','er','❌ 초기화 실패: '+(err&&err.message||err));
+  });
 }
 
 /* ─────────────── 초기화 ─────────────── */
