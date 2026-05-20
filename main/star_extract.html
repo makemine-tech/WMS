@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CJKYQB2TTY"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-CJKYQB2TTY');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>STAR 라벨 추출 v1</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--s1:#161b26;--s2:#1e2333;--br:#252b3b;
+  --g:#4af0a8;--y:#f0c44a;--b:#5b9cf6;--r:#f05858;--p:#c084fc;--o:#ff8c5a;
+  --tx:#e8eaf0;--mu:#7c8399;--mo:'Courier New',monospace
+}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column}
+.app{width:min(98%,1400px);margin:0 auto;padding:1.2rem 1rem 2rem;flex:1}
+.unified-ftr{text-align:center;padding:12px 20px;background:#1f2937;color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.04em;margin-top:auto;width:100%}
+.hd{text-align:center;margin-bottom:1rem}
+.badge{font-family:var(--mo);font-size:.62rem;color:var(--p);border:1px solid rgba(192,132,252,.35);padding:.18rem .75rem;border-radius:2px;display:inline-block;margin-bottom:.5rem;letter-spacing:.1em}
+h1{font-size:1.5rem;font-weight:900;margin-bottom:.2rem}
+h1 em{color:var(--p);font-style:normal}
+.hs{color:var(--mu);font-size:.78rem}
+.msg{border-radius:7px;padding:.55rem .9rem;font-size:.8rem;margin:.5rem 0}
+.ok{background:rgba(74,240,168,.08);border:1px solid var(--g);color:var(--g)}
+.er{background:rgba(240,88,88,.1);border:1px solid var(--r);color:var(--r)}
+.inf{background:rgba(91,156,246,.08);border:1px solid var(--b);color:var(--b)}
+.warn{background:rgba(240,196,74,.08);border:1px solid var(--y);color:var(--y)}
+.btn{padding:.55rem 1.1rem;border-radius:7px;border:none;font-size:.84rem;font-weight:700;cursor:pointer;transition:all .15s}
+.btn-g{background:var(--g);color:#0f1117}.btn-g:hover:not(:disabled){background:#6affc0;transform:translateY(-1px)}
+.btn-y{background:var(--y);color:#0f1117}.btn-y:hover:not(:disabled){background:#f7d068}
+.btn-b{background:var(--b);color:#fff}.btn-b:hover:not(:disabled){background:#7bb0f8}
+.btn-p{background:var(--p);color:#0f1117}.btn-p:hover:not(:disabled){background:#d3a3ff;transform:translateY(-1px)}
+.btn-r{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.5)}.btn-r:hover{background:rgba(240,88,88,.08)}
+.btn-s{background:var(--s2);color:var(--tx);border:1px solid var(--br)}.btn-s:hover{border-color:var(--mu)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+
+/* 통계 */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-bottom:.9rem}
+.sc{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.62rem .85rem}
+.sc-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.16rem}
+.sc-v{font-size:1.45rem;font-weight:900}
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* 액션 바 */
+.action-bar{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.9rem;padding:.7rem .85rem;background:var(--s1);border:1px solid var(--br);border-radius:9px}
+.dz-mini{position:relative;overflow:hidden;display:inline-block}
+.dz-mini input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+
+/* 안내 박스 */
+.info-box{background:linear-gradient(135deg,rgba(192,132,252,.06),rgba(91,156,246,.04));border:1px solid rgba(192,132,252,.25);border-radius:9px;padding:.75rem .9rem;margin-bottom:.9rem;font-size:.74rem;line-height:1.6;color:var(--tx)}
+.info-box strong{color:var(--p)}
+.info-box .ex{display:inline-block;background:#0a0d13;border:1px solid var(--br);border-radius:4px;padding:.08rem .42rem;font-family:var(--mo);font-size:.72rem;color:var(--y)}
+.info-box code{font-family:var(--mo);font-size:.72rem;color:var(--g)}
+
+/* 드롭존 */
+.dz{border:2px dashed var(--br);border-radius:10px;padding:1.5rem .9rem;text-align:center;background:var(--s1);transition:all .15s;cursor:pointer;position:relative;margin-bottom:.9rem}
+.dz:hover,.dz.over{border-color:var(--p);background:rgba(192,132,252,.04)}
+.dz-icon{font-size:2.2rem;margin-bottom:.35rem;opacity:.65}
+.dz-t{font-weight:800;color:var(--tx);font-size:.95rem;margin-bottom:.25rem}
+.dz-s{font-size:.72rem;color:var(--mu)}
+.dz input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+
+/* 사진 그리드 */
+.sec-title{display:flex;align-items:center;gap:.5rem;font-size:.9rem;font-weight:800;margin:1rem 0 .55rem;padding:.4rem .1rem;border-bottom:1.5px solid var(--br);flex-wrap:wrap}
+.sec-title .cnt{font-family:var(--mo);font-size:.72rem;background:var(--s2);color:var(--mu);padding:.12rem .55rem;border-radius:10px;border:1px solid var(--br)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.7rem}
+.card{background:var(--s1);border:1px solid var(--br);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s}
+.card:hover{border-color:var(--mu)}
+.card.success{border-color:rgba(74,240,168,.5)}
+.card.failed{border-color:rgba(240,88,88,.5)}
+.card.analyzing{border-color:var(--b)}
+.card .thumb{position:relative;width:100%;padding-top:75%;background:#0a0d13;overflow:hidden}
+.card .thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.card .thumb .st{position:absolute;top:.4rem;right:.4rem;background:rgba(0,0,0,.65);color:#fff;font-family:var(--mo);font-size:.62rem;padding:.18rem .48rem;border-radius:3px;letter-spacing:.06em}
+.card.success .thumb .st{background:rgba(74,240,168,.85);color:#0f1117}
+.card.failed .thumb .st{background:rgba(240,88,88,.85)}
+.card.analyzing .thumb .st{background:rgba(91,156,246,.85)}
+.card .fn{font-family:var(--mo);font-size:.66rem;color:var(--mu);padding:.4rem .55rem .15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid var(--br)}
+.card .frow{display:grid;grid-template-columns:1fr;gap:.32rem;padding:.45rem .55rem}
+.card .frow .ff{display:grid;grid-template-columns:60px 1fr;gap:.4rem;align-items:center}
+.card .frow .ff label{font-size:.62rem;color:var(--mu);font-family:var(--mo)}
+.card .frow .ff input{background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:4px;padding:.25rem .42rem;font-size:.74rem;font-family:var(--mo);outline:none;width:100%}
+.card .frow .ff input:focus{border-color:var(--p)}
+.card .conf{font-family:var(--mo);font-size:.6rem;color:var(--mu);padding:0 .55rem;margin-bottom:.35rem}
+.card .conf.high{color:var(--g)}
+.card .conf.mid{color:var(--y)}
+.card .conf.low{color:var(--r)}
+.card .bt{display:flex;gap:.32rem;padding:.4rem .55rem .55rem;border-top:1px solid var(--br)}
+.card .bt button{flex:1;font-size:.7rem;padding:.32rem .4rem}
+
+/* 헤더 */
+.hdr-home-btn{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;padding:5px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;flex-shrink:0;white-space:nowrap}
+.hdr-home-btn:hover{color:#fff;border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.08)}
+@media(max-width:380px){.hdr-home-txt{display:none}}
+
+.empty-row{text-align:center;padding:1.4rem 1rem;color:var(--mu);font-size:.82rem;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="unified-hdr" style="background:linear-gradient(135deg,#1f2937,#374151);color:#fff;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10000;gap:10px;">
+  <div style="display:flex;align-items:center;gap:10px;min-width:0">
+    <div style="width:28px;height:28px;background:rgba(255,255,255,.12);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">📸</div>
+    <div style="min-width:0">
+      <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">STAR 라벨 추출</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.45);letter-spacing:.06em;white-space:nowrap">STAR EXTRACT · LABEL → DATA</div>
+    </div>
+  </div>
+  <div id="syncBox" style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif">
+    <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#666;display:inline-block"></span>
+    <span id="syncLabel" style="font-weight:700;letter-spacing:.04em;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">확인 중...</span>
+    <button id="syncBtn" onclick="wmsHandleLogout()" style="font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;display:none">🚪 로그아웃</button>
+  </div>
+  <a href="https://makewon.com/" class="hdr-home-btn" rel="noopener">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5L12 4l9 7.5"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
+    <span class="hdr-home-txt">MAKEWON.COM</span>
+  </a>
+</div>
+
+<div class="app">
+<div class="hd">
+  <div class="badge">STAR EXTRACT · LABEL OCR v1 (skeleton)</div>
+  <h1>라벨 <em>추출</em></h1>
+  <p class="hs">사진 일괄 업로드 → 바코드·Style Code·사이즈 추출 → 파일명 일괄 정리 → manifest.csv + ZIP 다운로드</p>
+</div>
+
+<div id="m0" class="msg" style="display:none"></div>
+
+<!-- 안내 박스 -->
+<div class="info-box">
+  📌 <strong>작업 순서</strong> &nbsp;
+  ① 신발 상품택/박스 라벨 사진 업로드(다중 가능)
+  ② <strong>⚡ 분석 시작</strong> — Claude Vision이 바코드·Style Code·사이즈 추출 <span style="color:var(--y);font-size:.7rem">[다음 단계 연결 예정]</span>
+  ③ 카드의 수동 입력칸에서 결과 확인/수정
+  ④ <strong>💾 manifest.csv</strong> + <strong>🗜️ 이름변경 ZIP</strong> 다운로드<br>
+  🏷️ <strong>파일명 규칙</strong> &nbsp;<span class="ex">{바코드}_{StyleCode}_{사이즈}.{확장자}</span> &nbsp;예: <code>8809874xxxxxx_DH9522-103_270.jpg</code><br>
+  ⚠️ 중복 바코드는 자동으로 <code>_01</code>, <code>_02</code> 시퀀스 부여 — 덮어쓰기 없음
+</div>
+
+<!-- 통계 -->
+<div class="stats">
+  <div class="sc"><div class="sc-l">총 사진</div><div class="sc-v" id="s0">—</div></div>
+  <div class="sc"><div class="sc-l">분석 성공</div><div class="sc-v" style="color:var(--g)" id="s1">—</div></div>
+  <div class="sc"><div class="sc-l">분석 실패</div><div class="sc-v" style="color:var(--r)" id="s2">—</div></div>
+  <div class="sc"><div class="sc-l">대기/미분석</div><div class="sc-v" style="color:var(--mu)" id="s3">—</div></div>
+  <div class="sc"><div class="sc-l">중복 바코드</div><div class="sc-v" style="color:var(--y)" id="s4">—</div></div>
+</div>
+
+<!-- 액션 바 -->
+<div class="action-bar">
+  <span class="btn btn-b dz-mini">📸 사진 추가
+    <input type="file" accept="image/*" multiple onchange="addFiles(this.files);this.value='';">
+  </span>
+  <button class="btn btn-p" onclick="startAnalyze()" id="btnAnalyze" disabled>⚡ 분석 시작</button>
+  <button class="btn btn-g" onclick="downloadManifest()" id="btnManifest" disabled>💾 manifest.csv</button>
+  <button class="btn btn-y" onclick="downloadZip()" id="btnZip" disabled>🗜️ 이름변경 ZIP</button>
+  <button class="btn btn-r" onclick="resetAll()" style="margin-left:auto" id="btnReset" disabled>🗑️ 전체 초기화</button>
+</div>
+
+<!-- 드롭존 -->
+<label class="dz" id="dz">
+  <div class="dz-icon">📂</div>
+  <div class="dz-t">사진을 여기로 드래그하거나 클릭해서 추가하세요</div>
+  <div class="dz-s">JPG / PNG / HEIC / WEBP — 여러 장 한 번에 가능</div>
+  <input type="file" accept="image/*" multiple onchange="addFiles(this.files);this.value='';">
+</label>
+
+<!-- 카드 그리드 -->
+<div class="sec-title">
+  <span>📋 사진 목록</span>
+  <span class="cnt" id="gridCnt">0장</span>
+  <span style="font-size:.66rem;color:var(--mu);font-family:var(--mo);margin-left:.5rem" id="gridHint">사진을 추가하면 여기에 표시됩니다</span>
+</div>
+<div id="photoGrid"></div>
+
+</div><!-- .app -->
+
+<div class="unified-ftr">
+  © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
+</div>
+
+<!-- ZIP 라이브러리 (이름 변경된 사진 묶음 생성용) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- Firebase + 그룹 인증 -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="wms_sync.js"></script>
+<script>
+/* ─────────────── 전역 상태 ─────────────── */
+var photos = [];   /* [{id, file, blobUrl, name, ext, status, barcode, styleCode, sizeKr, confidence, error}] */
+var nextId = 1;
+
+/* status: 'pending' | 'analyzing' | 'success' | 'failed' */
+
+/* ─────────────── 공용 ─────────────── */
+function setMsg(id, kind, html){
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'msg ' + kind; el.innerHTML = html; el.style.display = '';
+}
+function hideMsg(id){ var el=document.getElementById(id); if(el) el.style.display='none'; }
+function escH(s){ if(s===null||s===undefined) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s){ return escH(s).replace(/"/g,'&quot;'); }
+function getExt(name){
+  var m = String(name||'').match(/\.([a-zA-Z0-9]+)$/);
+  return m ? m[1].toLowerCase() : 'jpg';
+}
+function sanitizeForFile(s){
+  return String(s||'').trim().replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,'_');
+}
+
+/* ─────────────── 인증 (그룹 — star_coupang/star_instock 동일) ─────────────── */
+function wmsHandleLogout(){
+  if (!window.WMSync || !WMSync.isReady()) return;
+  if (!confirm('로그아웃하면 로그인 화면으로 이동합니다.')) return;
+  WMSync.signOut().then(function(){ window.location.replace('/wms_login.html'); });
+}
+function wmsUpdateBadge(state){
+  var dot=document.getElementById('syncDot'), label=document.getElementById('syncLabel'), btn=document.getElementById('syncBtn');
+  if (state && state.user && state.groupId) {
+    dot.style.background='#c084fc';
+    label.textContent = state.user.email || state.user.uid;
+    label.style.color='#c084fc';
+    btn.style.display='';
+  } else if (state && state.user) {
+    dot.style.background='#f0c44a'; label.textContent='권한 없음'; label.style.color='#f0c44a'; btn.style.display='';
+  } else {
+    dot.style.background='#888'; label.textContent='로그인 필요'; label.style.color='rgba(255,255,255,.6)'; btn.style.display='none';
+  }
+}
+function wmsHandleAuthState(state){
+  wmsUpdateBadge(state);
+  var returnUrl = '/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search);
+  if (!state.user) {
+    setTimeout(function(){ if(!WMSync.isSignedIn()) window.location.replace(returnUrl); }, 3000);
+    return;
+  }
+  if (!state.groupId) {
+    alert('이 계정은 작업 그룹에 등록되어 있지 않습니다.\n관리자에게 초대 코드를 요청하세요.');
+    window.location.replace(returnUrl);
+    return;
+  }
+  /* 인증 OK — 이 페이지는 로컬 처리 위주, Firebase 별도 쓰기 없음 (현재는) */
+}
+
+/* ─────────────── 사진 추가/제거 ─────────────── */
+function addFiles(fileList){
+  if (!fileList || !fileList.length) return;
+  var added = 0, skipped = 0;
+  for (var i=0; i<fileList.length; i++) {
+    var f = fileList[i];
+    if (!/^image\//i.test(f.type)) { skipped++; continue; }
+    var blobUrl;
+    try { blobUrl = URL.createObjectURL(f); } catch(e){ continue; }
+    photos.push({
+      id: 'p' + (nextId++),
+      file: f,
+      blobUrl: blobUrl,
+      name: f.name,
+      ext: getExt(f.name),
+      status: 'pending',
+      barcode: '',
+      styleCode: '',
+      sizeKr: '',
+      confidence: 0,
+      error: ''
+    });
+    added++;
+  }
+  if (added) setMsg('m0','ok','✅ '+added+'장 추가됨'+(skipped?' · 이미지 아님 '+skipped+'장 건너뜀':''));
+  else if (skipped) setMsg('m0','er','❌ 이미지 파일이 아닙니다 ('+skipped+'장)');
+  rebuildAndRender();
+}
+function removePhoto(id){
+  var idx = photos.findIndex(function(p){ return p.id===id; });
+  if (idx<0) return;
+  var p = photos[idx];
+  if (p.blobUrl) try { URL.revokeObjectURL(p.blobUrl); } catch(e){}
+  photos.splice(idx,1);
+  rebuildAndRender();
+}
+function resetAll(){
+  if (!photos.length) { setMsg('m0','warn','⚠️ 비어있어 초기화할 항목이 없습니다'); return; }
+  if (!confirm('업로드된 사진 '+photos.length+'장을 모두 제거합니다.\n(서버에는 영향 없음. 분석 결과도 함께 사라집니다.)\n진행할까요?')) return;
+  photos.forEach(function(p){ if (p.blobUrl) try { URL.revokeObjectURL(p.blobUrl); } catch(e){} });
+  photos = [];
+  rebuildAndRender();
+  setMsg('m0','ok','✅ 전체 초기화 완료');
+}
+
+/* ─────────────── 분석 — Vision API 자리 (TODO) ─────────────── */
+/* 다음 단계에서 이 함수가 visionProxy 호출로 채워질 예정.
+   현재는 카드의 수동 입력칸으로 결과를 직접 채울 수 있음. */
+function startAnalyze(){
+  setMsg('m0','warn',
+    '⚠️ Vision API 미연결 — 다음 단계에서 Claude Vision 연동 예정. '+
+    '지금은 각 카드의 입력칸에 바코드·Style Code·사이즈를 직접 입력해 manifest/ZIP 생성을 테스트해 보세요.');
+}
+
+/* 카드 입력 → 사진 객체 갱신 */
+function onFieldEdit(id, field, value){
+  var p = photos.find(function(x){ return x.id===id; });
+  if (!p) return;
+  p[field] = String(value||'').trim();
+  /* 3개 다 채워졌으면 success 로 마크 (수동 입력 케이스) */
+  if (p.barcode && p.styleCode && p.sizeKr) {
+    if (p.status !== 'success') { p.status = 'success'; refreshCardStatus(id); }
+  } else {
+    if (p.status === 'success') { p.status = 'pending'; refreshCardStatus(id); }
+  }
+  updateStats();
+}
+
+function refreshCardStatus(id){
+  var el = document.querySelector('[data-pid="'+id+'"]');
+  if (!el) return;
+  var p = photos.find(function(x){ return x.id===id; });
+  if (!p) return;
+  el.className = 'card ' + p.status;
+  var stEl = el.querySelector('.st');
+  if (stEl) stEl.textContent = labelForStatus(p.status);
+}
+function labelForStatus(s){
+  return s==='success' ? 'OK' : s==='failed' ? 'FAIL' : s==='analyzing' ? '분석중' : '대기';
+}
+
+/* ─────────────── 통계/렌더 ─────────────── */
+function rebuildAndRender(){
+  updateStats();
+  renderGrid();
+  refreshButtons();
+}
+function updateStats(){
+  var ok=0, fail=0, pend=0;
+  photos.forEach(function(p){
+    if (p.status==='success') ok++;
+    else if (p.status==='failed') fail++;
+    else pend++;
+  });
+  /* 중복 바코드 카운트 — 비어있지 않은 바코드만 */
+  var bcMap = {};
+  photos.forEach(function(p){ if (p.barcode) bcMap[p.barcode] = (bcMap[p.barcode]||0)+1; });
+  var dup = 0;
+  Object.keys(bcMap).forEach(function(k){ if (bcMap[k]>1) dup += bcMap[k]; });
+
+  document.getElementById('s0').textContent = photos.length;
+  document.getElementById('s1').textContent = ok;
+  document.getElementById('s2').textContent = fail;
+  document.getElementById('s3').textContent = pend;
+  document.getElementById('s4').textContent = dup;
+}
+function refreshButtons(){
+  var any = photos.length > 0;
+  var anyDone = photos.some(function(p){ return p.status==='success'; });
+  document.getElementById('btnAnalyze').disabled = !any;
+  document.getElementById('btnManifest').disabled = !anyDone;
+  document.getElementById('btnZip').disabled = !anyDone;
+  document.getElementById('btnReset').disabled = !any;
+}
+function renderGrid(){
+  var g = document.getElementById('photoGrid');
+  document.getElementById('gridCnt').textContent = photos.length + '장';
+  var hint = document.getElementById('gridHint');
+  if (hint) hint.textContent = photos.length
+    ? '카드의 입력칸에 바코드 / Style Code / 사이즈를 채우면 자동으로 OK 상태가 됩니다'
+    : '사진을 추가하면 여기에 표시됩니다';
+
+  if (!photos.length) {
+    g.innerHTML = '<div class="empty-row">📁 사진 없음 — 위 <strong style="color:var(--p)">📸 사진 추가</strong> 또는 드롭존을 사용하세요</div>';
+    g.className = '';
+    return;
+  }
+  g.className = 'grid';
+  g.innerHTML = photos.map(function(p){
+    var conf = +p.confidence || 0;
+    var confCls = conf >= 0.85 ? 'high' : conf >= 0.6 ? 'mid' : 'low';
+    return '<div class="card '+p.status+'" data-pid="'+p.id+'">'+
+      '<div class="thumb"><img src="'+escAttr(p.blobUrl)+'" alt=""><span class="st">'+labelForStatus(p.status)+'</span></div>'+
+      '<div class="fn" title="'+escAttr(p.name)+'">'+escH(p.name)+'</div>'+
+      '<div class="frow">'+
+        '<div class="ff"><label>바코드</label><input type="text" value="'+escAttr(p.barcode)+'" placeholder="8809..." oninput="onFieldEdit(\''+p.id+'\',\'barcode\',this.value)"></div>'+
+        '<div class="ff"><label>Style</label><input type="text" value="'+escAttr(p.styleCode)+'" placeholder="DH9522-103" oninput="onFieldEdit(\''+p.id+'\',\'styleCode\',this.value)"></div>'+
+        '<div class="ff"><label>사이즈</label><input type="text" value="'+escAttr(p.sizeKr)+'" placeholder="270" oninput="onFieldEdit(\''+p.id+'\',\'sizeKr\',this.value)"></div>'+
+      '</div>'+
+      (conf ? '<div class="conf '+confCls+'">신뢰도 '+(conf*100).toFixed(0)+'%</div>' : '')+
+      (p.error ? '<div class="conf low" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+escAttr(p.error)+'">⚠ '+escH(p.error)+'</div>' : '')+
+      '<div class="bt">'+
+        '<button class="btn btn-s" onclick="removePhoto(\''+p.id+'\')">🗑 삭제</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+/* ─────────────── 파일명 생성 (중복 시퀀스 부여) ─────────────── */
+function buildRenameMap(){
+  /* 같은 바코드가 N장이면 _01, _02 ... 부여 */
+  var groups = {};
+  photos.forEach(function(p){
+    if (p.status !== 'success') return;
+    var key = p.barcode || '__nobc__';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+  var map = {};
+  Object.keys(groups).forEach(function(key){
+    var arr = groups[key];
+    arr.sort(function(a,b){ return a.id < b.id ? -1 : 1; });
+    arr.forEach(function(p, idx){
+      var bc = sanitizeForFile(p.barcode) || 'NOBC';
+      var sc = sanitizeForFile(p.styleCode) || 'NOSC';
+      var sz = sanitizeForFile(p.sizeKr) || 'NOSZ';
+      var ext = p.ext || 'jpg';
+      var name = bc + '_' + sc + '_' + sz;
+      if (arr.length > 1) name += '_' + String(idx+1).padStart(2,'0');
+      name += '.' + ext;
+      map[p.id] = name;
+    });
+  });
+  return map;
+}
+
+/* ─────────────── manifest.csv 다운로드 ─────────────── */
+function csvEscape(v){
+  if (v===null||v===undefined) return '';
+  var s = String(v);
+  if (/[,"\n\r]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+function downloadManifest(){
+  var done = photos.filter(function(p){ return p.status==='success'; });
+  if (!done.length) { setMsg('m0','warn','⚠️ 분석 완료(OK) 상태의 사진이 없습니다'); return; }
+  var renameMap = buildRenameMap();
+  var rows = [['filename_new','filename_original','barcode','style_code','size','confidence','status','note']];
+  done.forEach(function(p){
+    rows.push([
+      renameMap[p.id]||'', p.name||'',
+      p.barcode||'', p.styleCode||'', p.sizeKr||'',
+      (p.confidence ? (+p.confidence).toFixed(2) : ''),
+      p.status, p.error||''
+    ]);
+  });
+  /* 실패 행도 같이 — 따로 표시 */
+  var failed = photos.filter(function(p){ return p.status==='failed'; });
+  failed.forEach(function(p){
+    rows.push([
+      '', p.name||'',
+      p.barcode||'', p.styleCode||'', p.sizeKr||'',
+      (p.confidence ? (+p.confidence).toFixed(2) : ''),
+      'failed', p.error||''
+    ]);
+  });
+  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\r\n');
+  /* Excel 한글 호환 위해 UTF-8 BOM */
+  var blob = new Blob(['﻿' + csv], { type:'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'star_extract_manifest_' + ymd(Date.now()) + '.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 500);
+  setMsg('m0','ok','✅ manifest.csv 다운로드 — OK '+done.length+'행'+(failed.length?' + 실패 '+failed.length+'행':''));
+}
+
+/* ─────────────── 이름변경 ZIP 다운로드 (JSZip) ─────────────── */
+function downloadZip(){
+  if (typeof JSZip === 'undefined') { setMsg('m0','er','❌ JSZip 라이브러리 로딩 실패 — 새로고침 후 재시도'); return; }
+  var done = photos.filter(function(p){ return p.status==='success'; });
+  if (!done.length) { setMsg('m0','warn','⚠️ 분석 완료(OK) 상태의 사진이 없습니다'); return; }
+  var renameMap = buildRenameMap();
+  setMsg('m0','inf','<span>ZIP 압축 중... '+done.length+'장</span>');
+
+  var zip = new JSZip();
+  var renamed = zip.folder('renamed');
+  var rawBackup = zip.folder('raw_backup');
+  var failedDir = zip.folder('failed');
+
+  /* 원본 백업 — 모든 사진 (success/failed 무관) */
+  var promises = photos.map(function(p){
+    return p.file.arrayBuffer().then(function(buf){
+      rawBackup.file(p.name, buf);
+      if (p.status === 'success') {
+        var newName = renameMap[p.id] || p.name;
+        renamed.file(newName, buf);
+      } else if (p.status === 'failed') {
+        failedDir.file(p.name, buf);
+      }
+    });
+  });
+
+  /* manifest 도 ZIP 안에 포함 */
+  var rows = [['filename_new','filename_original','barcode','style_code','size','confidence','status','note']];
+  photos.forEach(function(p){
+    rows.push([
+      p.status==='success' ? (renameMap[p.id]||'') : '',
+      p.name||'',
+      p.barcode||'', p.styleCode||'', p.sizeKr||'',
+      (p.confidence ? (+p.confidence).toFixed(2) : ''),
+      p.status, p.error||''
+    ]);
+  });
+  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\r\n');
+  zip.file('manifest.csv', '﻿' + csv);
+
+  /* README — ZIP 사용 안내 */
+  zip.file('README.txt',
+    'STAR 라벨 추출 결과\n' +
+    '생성: ' + new Date().toLocaleString('ko-KR') + '\n\n' +
+    'renamed/    이름변경된 사진 ({바코드}_{StyleCode}_{사이즈}.확장자)\n' +
+    'raw_backup/ 원본 사진 백업\n' +
+    'failed/     분석 실패 사진 (수동 확인 필요)\n' +
+    'manifest.csv 전체 결과 매핑\n');
+
+  Promise.all(promises).then(function(){
+    return zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } });
+  }).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'star_extract_' + ymd(Date.now()) + '.zip';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 500);
+    setMsg('m0','ok','✅ ZIP 다운로드 완료 — '+done.length+'장 이름변경 + 원본 백업 + manifest 포함');
+  }).catch(function(err){
+    setMsg('m0','er','❌ ZIP 생성 실패: '+(err&&err.message||err));
+  });
+}
+
+function pad2(n){ n=String(n); return n.length<2?'0'+n:n; }
+function ymd(ts){ var d=new Date(ts); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+
+/* ─────────────── 드래그앤드롭 ─────────────── */
+(function setupDnD(){
+  var dz = document.getElementById('dz');
+  if (!dz) return;
+  ['dragenter','dragover'].forEach(function(ev){
+    dz.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); dz.classList.add('over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    dz.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); dz.classList.remove('over'); });
+  });
+  dz.addEventListener('drop', function(e){
+    var dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length) addFiles(dt.files);
+  });
+  /* 전체 페이지에 드롭하면 실수로 브라우저가 파일을 여는 것 방지 */
+  ['dragover','drop'].forEach(function(ev){
+    window.addEventListener(ev, function(e){
+      if (e.target === dz || dz.contains(e.target)) return;
+      e.preventDefault();
+    });
+  });
+})();
+
+/* ─────────────── 초기화 ─────────────── */
+(function init(){
+  if (!window.WMSync) {
+    setMsg('m0','er','❌ 인증 모듈 로딩 실패 — 새로고침하세요');
+    return;
+  }
+  WMSync.init('star_extract', { requireAuth: true });
+  WMSync.onAuth(function(state){ wmsHandleAuthState(state); });
+  rebuildAndRender();
+})();
+</script>
+</body>
+</html>
