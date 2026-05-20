@@ -428,6 +428,10 @@ h1 em{color:var(--g);font-style:normal}
         <input type="checkbox" id="photoReqChk" onchange="onPhotoReqToggle(this.checked)">
         <span>📸 신규 SKU 촬영요망</span>
       </label>
+      <label class="opt-chk" title="신규 SKU 첫 스캔 시 비프음 + '사진 촬영해 주세요' 음성 출력 (한국어 TTS). 기본값 꺼짐.">
+        <input type="checkbox" id="soundChk" onchange="onSoundToggle(this.checked)">
+        <span>🔊 소리 알림</span>
+      </label>
       <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
     </div>
   </div>
@@ -852,6 +856,8 @@ var pendingUnknownBarcode = null; // 미등록 바코드 키 (정규화)
 var pendingUnknownRaw = null;     // 미등록 바코드 원본 값
 var startedEmpty = false;          // 자료 없이 시작 모드 (모든 바코드 자동 신규 추가)
 var photoReqEnabled = false;       // 신규 SKU 첫 스캔 시 사진촬영 요망 알림 (체크박스)
+var soundEnabled = false;          // 신규 SKU 첫 스캔 시 비프 + TTS 음성 출력
+var _audioCtx = null;              // Web Audio Context 재사용
 /* 포커스 이동 특수 바코드 — 작업장에 인쇄해 두고 스캔하면 input 포커스 이동 */
 var FOCUS_BOX_CODE  = '#BOX#';
 var FOCUS_PROD_CODE = '#PROD#';
@@ -1403,9 +1409,11 @@ function ignoreUnknownBarcode() {
 function handleNormalScan(rowIdx, key) {
   var row = rows[rowIdx];
   row.qtyReceived = (row.qtyReceived || 0) + 1;
-  /* 신규 SKU 의 첫 스캔 → 사진촬영 요망 알림 (체크박스 ON 일 때만) */
-  if (photoReqEnabled && row.isNew && row.qtyReceived === 1) {
-    showPhotoReqAlert();
+  /* 신규 SKU 의 첫 스캔 → 시각 알림(체크박스)·사운드(체크박스) 각각 트리거 */
+  var firstScanOfNewSku = row.isNew && row.qtyReceived === 1;
+  if (firstScanOfNewSku) {
+    if (photoReqEnabled) showPhotoReqAlert();
+    if (soundEnabled)    playPhotoAlertSound();
   } else {
     hidePhotoReqAlert();
   }
@@ -2404,6 +2412,68 @@ function hidePhotoReqAlert(){
     setTimeout(function(){
       var chk = document.getElementById('photoReqChk');
       if (chk) chk.checked = photoReqEnabled;
+    }, 100);
+  } catch(e){}
+})();
+
+/* ─────────────── 소리/음성 알림 (Web Audio + TTS) ─────────────── */
+function getAudioCtx(){
+  if (!_audioCtx) {
+    try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+  }
+  if (_audioCtx && _audioCtx.state === 'suspended') {
+    try { _audioCtx.resume(); } catch(e){}
+  }
+  return _audioCtx;
+}
+function playBeep(freq, dur, offset, vol){
+  var ctx = getAudioCtx();
+  if (!ctx) return;
+  var now = ctx.currentTime + (offset || 0);
+  var osc = ctx.createOscillator();
+  var gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(vol || 0.35, now + 0.018);
+  gain.gain.linearRampToValueAtTime(0, now + (dur || 0.16));
+  osc.start(now);
+  osc.stop(now + (dur || 0.16) + 0.02);
+}
+function speakKo(text){
+  if (!window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();  /* 이전 발화 취소 — 빠른 연속 스캔 시 중첩 방지 */
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR';
+    u.rate = 1.05;
+    u.pitch = 1.0;
+    u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  } catch(e){}
+}
+function playPhotoAlertSound(){
+  /* 비프 2회 (상승 톤) + TTS 음성 */
+  playBeep(880,  0.16, 0,    0.35);
+  playBeep(1175, 0.18, 0.20, 0.4);
+  setTimeout(function(){ speakKo('사진 촬영해 주세요'); }, 480);
+}
+function onSoundToggle(checked){
+  soundEnabled = !!checked;
+  try { localStorage.setItem('star_coupang_sound', checked ? '1' : '0'); } catch(e){}
+  /* 켤 때 즉시 테스트 — 사용자 제스처와 같은 이벤트라 오디오 권한 확보됨 */
+  if (checked) playPhotoAlertSound();
+}
+/* 페이지 로드 시 저장된 소리 체크박스 상태 복원 */
+(function initSoundState(){
+  try {
+    var saved = localStorage.getItem('star_coupang_sound');
+    soundEnabled = (saved === '1');
+    setTimeout(function(){
+      var chk = document.getElementById('soundChk');
+      if (chk) chk.checked = soundEnabled;
     }, 100);
   } catch(e){}
 })();
