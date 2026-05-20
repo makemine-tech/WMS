@@ -101,6 +101,17 @@ h1 em{color:var(--p);font-style:normal}
 .card .warns{padding:.18rem .55rem .4rem;display:flex;flex-wrap:wrap;gap:.2rem}
 .card .warns .w{background:rgba(240,196,74,.14);color:var(--y);font-family:var(--mo);font-size:.6rem;padding:.08rem .35rem;border-radius:3px;border:1px solid rgba(240,196,74,.3)}
 
+/* ZXing 결과 표시 줄 */
+.card .zx-row{padding:.4rem .55rem;font-size:.72rem;font-family:var(--mo);border-top:1px solid var(--br);display:flex;align-items:center;gap:.4rem;line-height:1.3}
+.card .zx-row .zx-ico{font-size:.85rem}
+.card .zx-row .zx-fmt{font-size:.6rem;padding:.05rem .35rem;border-radius:3px;border:1px solid currentColor;opacity:.7}
+.card .zx-row.zx-ok{color:var(--g);background:rgba(74,240,168,.06)}
+.card .zx-row.zx-fail{color:var(--r);background:rgba(240,88,88,.06)}
+.card .zx-row.zx-scan{color:var(--b);background:rgba(91,156,246,.06)}
+.card .zx-row.zx-mismatch{color:var(--y);background:rgba(240,196,74,.08)}
+.card .zx-row .zx-act{margin-left:auto;background:transparent;border:none;color:inherit;cursor:pointer;font-size:.7rem;opacity:.7;padding:0}
+.card .zx-row .zx-act:hover{opacity:1;text-decoration:underline}
+
 /* Claude 붙여넣기 모달 */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:2rem 1rem;overflow-y:auto}
 .modal-overlay.open{display:flex}
@@ -172,15 +183,16 @@ h1 em{color:var(--p);font-style:normal}
 <!-- 안내 박스 -->
 <div class="info-box">
   📌 <strong>작업 순서</strong> &nbsp;
-  ① <strong>📁 폴더 선택</strong> → 사진들 들어있는 폴더 1번 선택하면 전부 자동 등록 (개별 드래그 불필요)
-  ② <strong>📋 Claude로 분석하기</strong> → 모달에서 프롬프트 복사 → <a href="https://claude.ai/new" target="_blank" rel="noopener" style="color:var(--p);font-weight:700">claude.ai</a> 채팅에 사진 함께 첨부 → JSON 응답 받기
-  ③ 응답 JSON을 모달의 텍스트영역에 붙여넣고 <strong>적용</strong>
-  ④ 카드 확인/수정 (검수 우선 = 노란 테두리)
+  ① <strong>📁 폴더 선택</strong> → 사진들 들어있는 폴더 1번 선택하면 전부 자동 등록
+  ② 업로드 즉시 <strong>🔍 바코드 자동 스캔</strong> (ZXing — 수학적 디코딩, 100% 정확)
+  ③ <strong>📋 Claude로 분석하기</strong> → claude.ai에서 텍스트 필드(Style Code/모델/사이즈) 추출
+  ④ 응답 JSON 붙여넣고 <strong>적용</strong> → 바코드는 ZXing 값 우선
   ⑤ <strong>💾 manifest.csv</strong> + <strong>🗜️ ZIP</strong> 다운로드<br>
+  🔍 <strong>바코드 정책</strong> &nbsp;ZXing(수학 디코딩) 결과 = 권위. Claude OCR 결과는 cross-check 용. 불일치 시 <code>barcode_mismatch</code> 경고.<br>
   🏷️ <strong>파일명 규칙</strong> &nbsp;<span class="ex">{바코드}_{StyleCode}_{사이즈}.{확장자}</span> &nbsp;예: <code>887224608515_881224-100_235.jpg</code><br>
-  🎯 <strong>신뢰도 정책</strong> &nbsp;≥0.85 자동 OK · 0.6~0.85 검수 우선(노랑) · &lt;0.6 실패 — ZIP에서 폴더로 자동 분리<br>
-  💳 <strong>비용</strong> &nbsp;claude.ai 구독으로 처리 — 별도 API 결제 없음. 한 채팅에 5~10장씩 분할 권장.<br>
-  ⚠️ 중복 바코드는 <code>_01</code>, <code>_02</code> 시퀀스 자동 부여. HEIC 미지원(JPG/PNG/WEBP).
+  🎯 <strong>신뢰도</strong> &nbsp;≥0.85 OK · 0.6~0.85 검수(노랑) · &lt;0.6 실패<br>
+  💳 <strong>비용</strong> &nbsp;ZXing은 무료(로컬 처리) · Claude 텍스트 추출은 claude.ai 구독 안에서<br>
+  ⚠️ 중복 바코드는 <code>_01</code>, <code>_02</code> 자동 부여. HEIC 미지원.
 </div>
 
 <!-- 통계 -->
@@ -200,6 +212,7 @@ h1 em{color:var(--p);font-style:normal}
   <span class="btn btn-s dz-mini">📸 개별 사진
     <input type="file" accept="image/*" multiple onchange="addFiles(this.files);this.value='';">
   </span>
+  <button class="btn btn-y" onclick="scanAllPhotos(true)" id="btnScan" disabled>🔍 바코드 재스캔</button>
   <button class="btn btn-p" onclick="openPasteModal()" id="btnAnalyze" disabled>📋 Claude로 분석하기</button>
   <button class="btn btn-g" onclick="downloadManifest()" id="btnManifest" disabled>💾 manifest.csv</button>
   <button class="btn btn-y" onclick="downloadZip()" id="btnZip" disabled>🗜️ 이름변경 ZIP</button>
@@ -298,6 +311,9 @@ h1 em{color:var(--p);font-style:normal}
 
 <!-- ZIP 라이브러리 (이름 변경된 사진 묶음 생성용) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- ZXing 바코드 디코더 (수학적 디코딩 — OCR 환각 없음) -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
 <!-- Firebase + 그룹 인증 -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
@@ -533,7 +549,12 @@ function addFiles(fileList){
       styleCode: '',
       sizeKr: '',
       confidence: 0,
-      error: ''
+      error: '',
+      /* ZXing 상태 — pending(scan 안 됨) / scanning / success / failed */
+      zxStatus: '',
+      zxBarcode: '',
+      zxFormat: '',
+      zxError: ''
     });
     added++;
   }
@@ -544,6 +565,8 @@ function addFiles(fileList){
   if (heicSkipped) parts.push('HEIC '+heicSkipped+'장 건너뜀 (변환 필요)');
   setMsg('m0', added?'ok':'warn', parts.join(' · ') || '⚠️ 추가된 항목 없음');
   rebuildAndRender();
+  /* 추가된 사진들에 대해 자동으로 바코드 스캔 시작 */
+  if (added > 0) setTimeout(function(){ scanAllPhotos(false); }, 100);
 }
 function removePhoto(id){
   var idx = photos.findIndex(function(p){ return p.id===id; });
@@ -562,6 +585,94 @@ function resetAll(){
   setMsg('m0','ok','✅ 전체 초기화 완료');
 }
 
+/* ─────────────── ZXing 바코드 자동 디코딩 ─────────────── */
+/* 수학적 디코딩이라 OCR 환각 없음. 성공 시 100% 정확, 실패 시 깨끗하게 null. */
+var zxReader = null;
+function ensureZxReader(){
+  if (zxReader) return zxReader;
+  if (typeof ZXingBrowser === 'undefined' || !ZXingBrowser.BrowserMultiFormatReader) {
+    console.warn('[ZXing] 라이브러리 미로드');
+    return null;
+  }
+  try { zxReader = new ZXingBrowser.BrowserMultiFormatReader(); return zxReader; }
+  catch(e){ console.error('[ZXing] init 실패:', e); return null; }
+}
+
+/* 한 장의 사진에서 바코드 디코드 — Promise<barcodeText|null> */
+function scanBarcodeForPhoto(photo){
+  return new Promise(function(resolve){
+    var reader = ensureZxReader();
+    if (!reader) {
+      photo.zxStatus = 'failed';
+      photo.zxError = 'ZXing 라이브러리 로딩 실패';
+      return resolve(null);
+    }
+    photo.zxStatus = 'scanning';
+    refreshCardStatus(photo.id);
+    /* decodeFromImageUrl: blob URL 입력 → Result 또는 throw */
+    reader.decodeFromImageUrl(photo.blobUrl).then(function(result){
+      var text = result.getText ? result.getText() : (result.text || '');
+      var fmt  = result.getBarcodeFormat ? String(result.getBarcodeFormat()) : (result.format || '');
+      /* BarcodeFormat 은 number enum — 사람 읽을 수 있는 이름으로 변환 */
+      var fmtName = zxFormatName(fmt);
+      photo.zxBarcode = text;
+      photo.zxFormat  = fmtName;
+      photo.zxStatus  = 'success';
+      photo.zxError   = '';
+      /* 바코드 칸 자동 채움 (수동 입력값이 있으면 덮어쓰지 않음) */
+      if (!photo.barcode || photo.barcode === photo._prevAutoBc) {
+        photo.barcode = text;
+        photo._prevAutoBc = text;
+      }
+      resolve(text);
+    }).catch(function(err){
+      photo.zxStatus = 'failed';
+      photo.zxError  = (err && err.name === 'NotFoundException') ? '바코드 인식 불가' : String(err && err.message || err).slice(0,120);
+      resolve(null);
+    });
+  });
+}
+
+/* ZXing 의 format 값을 사람 읽기 좋은 이름으로 */
+function zxFormatName(f){
+  if (!f) return '';
+  /* 문자열로 들어오면 그대로 사용 (라이브러리 버전에 따라 다름) */
+  if (isNaN(+f)) return String(f);
+  var map = {0:'AZTEC',1:'CODABAR',2:'CODE_39',3:'CODE_93',4:'CODE_128',5:'DATA_MATRIX',6:'EAN_8',7:'EAN_13',8:'ITF',9:'MAXICODE',10:'PDF_417',11:'QR_CODE',12:'RSS_14',13:'RSS_EXPANDED',14:'UPC_A',15:'UPC_E',16:'UPC_EAN_EXTENSION'};
+  return map[+f] || ('FMT_'+f);
+}
+
+/* 모든 (또는 미처리) 사진 일괄 스캔 */
+function scanAllPhotos(forceRescan){
+  if (typeof ZXingBrowser === 'undefined') {
+    setMsg('m0','er','❌ ZXing 라이브러리 로드 실패 — 새로고침 후 다시 시도하세요');
+    return;
+  }
+  var todo = photos.filter(function(p){
+    if (forceRescan) return true;
+    return !p.zxStatus || p.zxStatus === 'failed' || p.zxStatus === 'scanning';
+  });
+  if (!todo.length) { setMsg('m0','warn','⚠️ 스캔할 사진이 없습니다'); return; }
+
+  document.getElementById('btnScan').disabled = true;
+  var ok=0, fail=0;
+  function next(i){
+    if (i >= todo.length) {
+      document.getElementById('btnScan').disabled = false;
+      rebuildAndRender();
+      setMsg('m0','ok','✅ 바코드 자동 스캔 완료 — 성공 '+ok+' · 실패 '+fail+(fail?' (실패는 재촬영 권장)':''));
+      return;
+    }
+    setMsg('m0','inf','<span>🔍 바코드 스캔 중... '+(i+1)+' / '+todo.length+' &mdash; '+escH(todo[i].name)+'</span>');
+    scanBarcodeForPhoto(todo[i]).then(function(r){
+      if (r) ok++; else fail++;
+      renderGrid();
+      next(i+1);
+    });
+  }
+  next(0);
+}
+
 /* ─────────────── Claude.ai 붙여넣기 워크플로우 ─────────────── */
 /* claude.ai 채팅에 붙여넣을 프롬프트. 단일 객체 대신 JSON 배열을 요구. */
 var PASTE_PROMPT_FOR_CLAUDE =
@@ -573,8 +684,8 @@ var PASTE_PROMPT_FOR_CLAUDE =
 '- 값을 모르거나 보이지 않는 필드는 빈 문자열 "". 추측 금지.\n\n'+
 '**각 객체 필드**\n'+
 '- index, filename\n'+
-'- barcode (UPC-A 12자리 또는 EAN-13 13자리 숫자)\n'+
-'- barcodeAddOn (보조 바코드 숫자)\n'+
+'- barcode (UPC-A 12자리 또는 EAN-13 13자리 숫자). **인쇄된 숫자가 또렷이 보일 때만 정확히 옮겨 쓰고, 흐리거나 자신 없으면 반드시 빈 문자열 "". 절대 추측·환각 금지.** (이 페이지는 별도 바코드 디코더로 검증하므로 추측보다 공백이 안전합니다.)\n'+
+'- barcodeAddOn (보조 바코드 숫자, 자신 없으면 "")\n'+
 '- styleCode (반드시 "XXXXXX-XXX" 형태로 정규화. 예: "AA2146-010", "881224-100", "CZ0170-001". 라벨에 공백("AA2146 010")으로 있어도 하이픈으로 변환)\n'+
 '- styleVariant (Style Code 뒤 색상 접미사 예: "TWC", "K")\n'+
 '- modelName (NIKE/WMNS 접두사 포함, 약어 그대로)\n'+
@@ -667,6 +778,8 @@ function applyPastedJson(){
     if (!p && idx < pending.length) p = pending[idx];
     if (!p) { missed++; return; }
 
+    /* ZXing 결과 백업 (Claude 응답에 덮어쓰이지 않도록) */
+    var zxBc = p.zxBarcode;
     Object.assign(p, {
       barcode:      data.barcode || '',
       barcodeAddOn: data.barcodeAddOn || '',
@@ -685,8 +798,15 @@ function applyPastedJson(){
       origin:       data.origin || '',
       confidence:   +data.confidence || 0,
       labelType:    data.labelType || 'unknown',
-      warnings:     Array.isArray(data.warnings) ? data.warnings : []
+      warnings:     Array.isArray(data.warnings) ? data.warnings.slice() : []
     });
+    /* 바코드 정책 — ZXing 우선 (수학적 디코딩, OCR 환각 없음) */
+    if (zxBc) {
+      if (data.barcode && data.barcode !== zxBc) {
+        if (p.warnings.indexOf('barcode_mismatch') < 0) p.warnings.push('barcode_mismatch');
+      }
+      p.barcode = zxBc;  /* ZXing 값을 권위 있는 값으로 */
+    }
     p.status = statusFromConfidence(p.confidence);
     p.error = (p.status === 'failed')
       ? '신뢰도 낮음 ' + Math.round(p.confidence*100) + '%'
@@ -847,6 +967,8 @@ function refreshButtons(){
   document.getElementById('btnManifest').disabled = !anyDone;
   document.getElementById('btnZip').disabled = !anyDone;
   document.getElementById('btnReset').disabled = !any;
+  var sb = document.getElementById('btnScan');
+  if (sb) sb.disabled = !any;
 }
 function renderGrid(){
   var g = document.getElementById('photoGrid');
@@ -879,9 +1001,30 @@ function renderGrid(){
     var warns = (p.warnings && p.warnings.length)
       ? '<div class="warns">'+p.warnings.map(function(w){ return '<span class="w">'+escH(w)+'</span>'; }).join('')+'</div>'
       : '';
+    /* ZXing 상태 줄 */
+    var zxHtml = '';
+    if (p.zxStatus === 'scanning') {
+      zxHtml = '<div class="zx-row zx-scan"><span class="zx-ico">🔍</span><span>바코드 스캔 중...</span></div>';
+    } else if (p.zxStatus === 'success') {
+      /* Claude 응답과 비교 — 불일치 시 노란색 */
+      var mismatch = p.warnings && p.warnings.indexOf('barcode_mismatch') >= 0;
+      zxHtml = '<div class="zx-row '+(mismatch?'zx-mismatch':'zx-ok')+'">'+
+        '<span class="zx-ico">'+(mismatch?'⚠️':'✓')+'</span>'+
+        '<span><strong>'+escH(p.zxBarcode)+'</strong>'+(mismatch?' (Claude 결과와 불일치)':'')+'</span>'+
+        (p.zxFormat ? '<span class="zx-fmt">'+escH(p.zxFormat)+'</span>' : '')+
+        '<button class="zx-act" onclick="rescanOne(\''+p.id+'\')" title="다시 스캔">↻</button>'+
+      '</div>';
+    } else if (p.zxStatus === 'failed') {
+      zxHtml = '<div class="zx-row zx-fail">'+
+        '<span class="zx-ico">✗</span>'+
+        '<span>바코드 인식 실패 — 재촬영 또는 수동 입력</span>'+
+        '<button class="zx-act" onclick="rescanOne(\''+p.id+'\')" title="다시 스캔">↻ 재스캔</button>'+
+      '</div>';
+    }
     return '<div class="card '+p.status+'" data-pid="'+p.id+'">'+
       '<div class="thumb"><img src="'+escAttr(p.blobUrl)+'" alt="" loading="lazy" decoding="async"><span class="st">'+labelForStatus(p.status)+'</span></div>'+
       '<div class="fn" title="'+escAttr(p.relPath || p.name)+'">'+escH(p.name)+'</div>'+
+      zxHtml +
       '<div class="frow">'+
         '<div class="ff"><label>바코드</label><input type="text" value="'+escAttr(p.barcode)+'" placeholder="887224..." oninput="onFieldEdit(\''+p.id+'\',\'barcode\',this.value)"></div>'+
         '<div class="ff"><label>Style</label><input type="text" value="'+escAttr(p.styleCode)+'" placeholder="AA2146-010" oninput="onFieldEdit(\''+p.id+'\',\'styleCode\',this.value)"></div>'+
@@ -906,6 +1049,18 @@ function retryAnalyze(id){
   p.error = '';
   rebuildAndRender();
   openPasteModal();
+}
+/* 단일 사진 바코드 재스캔 — 더 큰 이미지나 다른 각도로 재시도 */
+function rescanOne(id){
+  var p = photos.find(function(x){ return x.id===id; });
+  if (!p) return;
+  scanBarcodeForPhoto(p).then(function(){
+    renderGrid();
+    setMsg('m0', p.zxStatus==='success'?'ok':'warn',
+      p.zxStatus==='success'
+        ? '✅ 재스캔 성공 — '+p.zxBarcode
+        : '⚠️ 재스캔 실패 — '+(p.zxError||'바코드 인식 불가'));
+  });
 }
 
 /* ─────────────── 파일명 생성 (중복 시퀀스 부여) ─────────────── */
