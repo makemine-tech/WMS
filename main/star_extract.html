@@ -112,6 +112,37 @@ h1 em{color:var(--p);font-style:normal}
 .card .zx-row .zx-act{margin-left:auto;background:transparent;border:none;color:inherit;cursor:pointer;font-size:.7rem;opacity:.7;padding:0}
 .card .zx-row .zx-act:hover{opacity:1;text-decoration:underline}
 
+/* 라이트박스 — 원본 이미지 보고 7필드 수동 입력 + 완료 확정 */
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.94);display:none;z-index:10001;flex-direction:column}
+.lightbox.open{display:flex}
+.lb-hdr{padding:.7rem 1rem;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:space-between;color:#fff;font-size:.85rem;border-bottom:1px solid rgba(255,255,255,.08);gap:.5rem;flex-wrap:wrap}
+.lb-hdr h3{font-size:.9rem;font-weight:800;color:#fff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-hdr .x{background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;font-size:1rem;cursor:pointer;padding:.2rem .55rem;line-height:1;border-radius:5px}
+.lb-hdr .x:hover{background:rgba(255,255,255,.1)}
+.lb-bd{flex:1;display:grid;grid-template-columns:1fr 400px;gap:1rem;overflow:hidden;padding:1rem;min-height:0}
+@media(max-width:900px){.lb-bd{grid-template-columns:1fr;grid-template-rows:1fr auto;overflow:auto}}
+.lb-img-wrap{display:flex;align-items:center;justify-content:center;background:#0a0d13;border-radius:8px;overflow:auto;min-height:0;position:relative}
+.lb-img-wrap img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform .12s}
+.lb-img-wrap.zoomed{align-items:flex-start;justify-content:flex-start}
+.lb-img-wrap.zoomed img{max-width:none;max-height:none;cursor:zoom-out}
+.lb-fields{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.95rem 1rem;overflow-y:auto;display:flex;flex-direction:column;gap:.6rem}
+.lb-field{display:flex;flex-direction:column;gap:.2rem}
+.lb-field label{font-size:.72rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;font-weight:700}
+.lb-field input{background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.55rem .7rem;font-size:.95rem;outline:none;font-family:sans-serif;letter-spacing:.01em}
+.lb-field input:focus{border-color:var(--p);box-shadow:0 0 0 3px rgba(192,132,252,.12)}
+.lb-field.zx-locked input{background:rgba(74,240,168,.06);border-color:rgba(74,240,168,.45)}
+.lb-zx-note{font-size:.62rem;color:var(--g);font-family:var(--mo);margin-top:.05rem}
+.lb-ftr{padding:.7rem 1rem;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);flex-wrap:wrap;gap:.5rem}
+.lb-nav,.lb-act{display:flex;gap:.4rem}
+.lb-keyhint{font-size:.66rem;color:rgba(255,255,255,.4);font-family:var(--mo);flex-basis:100%;text-align:center;margin-top:.2rem}
+@media(min-width:600px){.lb-keyhint{flex-basis:auto;margin:0;text-align:left}}
+
+/* 확정된 카드 표식 */
+.card.confirmed{border-color:rgba(74,240,168,.85)!important;box-shadow:0 0 0 1px rgba(74,240,168,.35)}
+.card.confirmed .thumb::after{content:'✓ 확정';position:absolute;top:.4rem;left:.4rem;background:rgba(74,240,168,.92);color:#0f1117;font-family:var(--mo);font-size:.62rem;padding:.18rem .48rem;border-radius:3px;letter-spacing:.06em;font-weight:800;pointer-events:none}
+.card .thumb{cursor:pointer}
+.card .thumb:hover{filter:brightness(1.1)}
+
 /* Claude 붙여넣기 모달 */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:2rem 1rem;overflow-y:auto}
 .modal-overlay.open{display:flex}
@@ -183,10 +214,10 @@ h1 em{color:var(--p);font-style:normal}
 <!-- 안내 박스 -->
 <div class="info-box">
   📌 <strong>작업 순서</strong> &nbsp;
-  ① <strong>📁 폴더 선택</strong> → 사진들 들어있는 폴더 1번 선택하면 전부 자동 등록
-  ② 업로드 즉시 <strong>🔍 바코드 자동 스캔</strong> (ZXing — 수학적 디코딩, 100% 정확)
-  ③ <strong>📋 Claude로 분석하기</strong> → claude.ai에서 텍스트 필드(Style Code/모델/사이즈) 추출
-  ④ 응답 JSON 붙여넣고 <strong>적용</strong> → 바코드는 ZXing 값 우선
+  ① <strong>📁 폴더 선택</strong> → 사진 전부 자동 등록 + ZXing 바코드 자동 스캔
+  ② (선택) <strong>📋 Claude로 분석하기</strong> → 텍스트 필드 자동 채움
+  ③ <strong>카드 이미지 클릭</strong> → 원본 확대 + 7필드(바코드/품명/품번/사이즈/색상/재질/제조국) 수동 입력/수정
+  ④ <strong>✓ 완료 확정</strong> → 다음 사진으로 자동 이동 (← / → 키로도 이동 가능)
   ⑤ <strong>💾 manifest.csv</strong> + <strong>🗜️ ZIP</strong> 다운로드<br>
   🔍 <strong>바코드 정책</strong> &nbsp;ZXing(수학 디코딩) 결과 = 권위. Claude OCR 결과는 cross-check 용. 불일치 시 <code>barcode_mismatch</code> 경고.<br>
   🏷️ <strong>파일명 규칙</strong> &nbsp;<span class="ex">{바코드}_{StyleCode}_{사이즈}.{확장자}</span> &nbsp;예: <code>887224608515_881224-100_235.jpg</code><br>
@@ -198,10 +229,10 @@ h1 em{color:var(--p);font-style:normal}
 <!-- 통계 -->
 <div class="stats">
   <div class="sc"><div class="sc-l">총 사진</div><div class="sc-v" id="s0">—</div></div>
-  <div class="sc"><div class="sc-l">성공 (≥0.85)</div><div class="sc-v" style="color:var(--g)" id="s1">—</div></div>
-  <div class="sc"><div class="sc-l">검수 우선 (0.6~0.85)</div><div class="sc-v" style="color:var(--y)" id="s_review">—</div></div>
-  <div class="sc"><div class="sc-l">실패 (<0.6)</div><div class="sc-v" style="color:var(--r)" id="s2">—</div></div>
-  <div class="sc"><div class="sc-l">대기 · 중복</div><div class="sc-v"><span id="s3" style="color:var(--mu)">—</span> <span style="color:var(--mu);font-size:.7rem">/</span> <span id="s4" style="color:var(--y)">—</span></div></div>
+  <div class="sc"><div class="sc-l">✓ 확정됨</div><div class="sc-v" style="color:var(--g)" id="s_conf">—</div></div>
+  <div class="sc"><div class="sc-l">바코드 OK</div><div class="sc-v" style="color:var(--g)" id="s_zx">—</div></div>
+  <div class="sc"><div class="sc-l">바코드 실패</div><div class="sc-v" style="color:var(--r)" id="s_zxf">—</div></div>
+  <div class="sc"><div class="sc-l">중복 바코드</div><div class="sc-v" style="color:var(--y)" id="s4">—</div></div>
 </div>
 
 <!-- 액션 바 -->
@@ -257,6 +288,31 @@ h1 em{color:var(--p);font-style:normal}
 <div id="photoGrid"></div>
 
 </div><!-- .app -->
+
+<!-- 라이트박스 — 이미지 클릭 시 원본 + 7필드 수동 입력 -->
+<div class="lightbox" id="lightbox">
+  <div class="lb-hdr">
+    <h3 id="lbTitle">사진 상세</h3>
+    <button class="x" onclick="closeLightbox()">✕ 닫기</button>
+  </div>
+  <div class="lb-bd">
+    <div class="lb-img-wrap" id="lbImgWrap" onclick="toggleLbZoom()">
+      <img id="lbImg" alt="">
+    </div>
+    <div class="lb-fields" id="lbFields"></div>
+  </div>
+  <div class="lb-ftr">
+    <div class="lb-nav">
+      <button class="btn btn-s" id="lbPrev" onclick="lightboxPrev()">← 이전</button>
+      <button class="btn btn-s" id="lbNext" onclick="lightboxNext()">다음 →</button>
+    </div>
+    <div class="lb-keyhint">키보드: ← / → 이동 · Esc 닫기 · 이미지 클릭 시 확대/축소</div>
+    <div class="lb-act">
+      <button class="btn btn-s" onclick="closeLightbox()">닫기</button>
+      <button class="btn btn-g" id="lbConfirm" onclick="toggleConfirmLightbox()">✓ 완료 확정</button>
+    </div>
+  </div>
+</div>
 
 <!-- Claude.ai 붙여넣기 모달 -->
 <div class="modal-overlay" id="pasteModal" onclick="if(event.target===this)closePasteModal()">
@@ -545,9 +601,14 @@ function addFiles(fileList){
       relPath: f.webkitRelativePath || '',
       ext: getExt(f.name),
       status: 'pending',
+      confirmed: false,
       barcode: '',
       styleCode: '',
       sizeKr: '',
+      modelName: '',
+      colorway: '',
+      material: '',
+      origin: '',
       confidence: 0,
       error: '',
       /* ZXing 상태 — pending(scan 안 됨) / scanning / success / failed */
@@ -583,6 +644,105 @@ function resetAll(){
   photos = [];
   rebuildAndRender();
   setMsg('m0','ok','✅ 전체 초기화 완료');
+}
+
+/* ─────────────── 라이트박스 (원본 이미지 + 7필드 수동 입력) ─────────────── */
+var lightboxIndex = -1;
+var LB_FIELDS = [
+  { key:'barcode',   label:'바코드',   ph:'887224608515', isZx:true },
+  { key:'modelName', label:'품명',     ph:'NIKE AIR MAX ZERO ESSENTIAL GS' },
+  { key:'styleCode', label:'품번',     ph:'881224-100' },
+  { key:'sizeKr',    label:'사이즈',   ph:'235 (mm 표기) 또는 XXL' },
+  { key:'colorway',  label:'색상',     ph:'WHITE/WHITE-WOLF GREY' },
+  { key:'material',  label:'재질',     ph:'천연가죽 / Mesh / Synthetic 등' },
+  { key:'origin',    label:'제조국',   ph:'VIETNAM / INDONESIA / CAMBODIA' }
+];
+
+function openLightbox(id){
+  var idx = photos.findIndex(function(p){ return p.id === id; });
+  if (idx < 0) return;
+  lightboxIndex = idx;
+  renderLightbox();
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', handleLightboxKey);
+}
+function closeLightbox(){
+  document.getElementById('lightbox').classList.remove('open');
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', handleLightboxKey);
+  /* 줌 상태 초기화 */
+  var w = document.getElementById('lbImgWrap'); if (w) w.classList.remove('zoomed');
+  lightboxIndex = -1;
+  rebuildAndRender();
+}
+function handleLightboxKey(e){
+  if (e.key === 'Escape') { closeLightbox(); e.preventDefault(); return; }
+  /* 텍스트 입력 중엔 좌우 화살표를 양보 */
+  var t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  if (e.key === 'ArrowLeft')  { lightboxPrev(); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { lightboxNext(); e.preventDefault(); }
+}
+function lightboxNext(){ if (lightboxIndex < photos.length - 1) { lightboxIndex++; renderLightbox(); } }
+function lightboxPrev(){ if (lightboxIndex > 0)                 { lightboxIndex--; renderLightbox(); } }
+function toggleLbZoom(){
+  var w = document.getElementById('lbImgWrap');
+  if (w) w.classList.toggle('zoomed');
+}
+function renderLightbox(){
+  var p = photos[lightboxIndex];
+  if (!p) return;
+  document.getElementById('lbTitle').textContent =
+    p.name + '   ·   ' + (lightboxIndex+1) + ' / ' + photos.length +
+    (p.confirmed ? '   ·   ✓ 확정됨' : '');
+  document.getElementById('lbImg').src = p.blobUrl;
+  /* 줌 리셋 */
+  document.getElementById('lbImgWrap').classList.remove('zoomed');
+
+  document.getElementById('lbFields').innerHTML = LB_FIELDS.map(function(f){
+    var locked = f.isZx && !!p.zxBarcode;
+    var note   = locked ? '🔍 ZXing 자동 디코딩됨 — 잘못된 경우 직접 수정 가능' : '';
+    return '<div class="lb-field'+(locked?' zx-locked':'')+'">'+
+      '<label>'+escH(f.label)+'</label>'+
+      '<input type="text" value="'+escAttr(p[f.key]||'')+'" placeholder="'+escAttr(f.ph||'')+'" '+
+        'oninput="onLightboxFieldEdit(\''+f.key+'\',this.value)">'+
+      (note ? '<div class="lb-zx-note">'+escH(note)+'</div>' : '')+
+    '</div>';
+  }).join('');
+
+  var conf = document.getElementById('lbConfirm');
+  conf.textContent = p.confirmed ? '✓ 확정 취소' : '✓ 완료 확정';
+  conf.className = 'btn ' + (p.confirmed ? 'btn-s' : 'btn-g');
+  document.getElementById('lbPrev').disabled = lightboxIndex <= 0;
+  document.getElementById('lbNext').disabled = lightboxIndex >= photos.length - 1;
+}
+function onLightboxFieldEdit(field, value){
+  var p = photos[lightboxIndex];
+  if (!p) return;
+  p[field] = String(value || '').trim();
+  /* 핵심 3필드 차면 status success 로 승격 (확정과는 별개) */
+  if (p.barcode && p.styleCode && p.sizeKr) {
+    if (p.status === 'pending' || p.status === 'failed') p.status = 'success';
+  }
+}
+function toggleConfirmLightbox(){
+  var p = photos[lightboxIndex];
+  if (!p) return;
+  p.confirmed = !p.confirmed;
+  if (p.confirmed) {
+    if (p.status === 'pending' || p.status === 'failed') p.status = 'success';
+    /* 다음 미확정 사진으로 자동 이동 — 작업 흐름 매끄럽게 */
+    var nextIdx = -1;
+    for (var i=lightboxIndex+1; i<photos.length; i++) {
+      if (!photos[i].confirmed) { nextIdx = i; break; }
+    }
+    if (nextIdx >= 0) { lightboxIndex = nextIdx; renderLightbox(); }
+    else { /* 끝까지 확정 — 닫기 */ closeLightbox(); setMsg('m0','ok','🎉 모든 사진 확정 완료'); return; }
+  } else {
+    renderLightbox();
+  }
+  updateStats(); refreshButtons();
 }
 
 /* ─────────────── ZXing 바코드 자동 디코딩 ─────────────── */
@@ -690,6 +850,7 @@ var PASTE_PROMPT_FOR_CLAUDE =
 '- styleVariant (Style Code 뒤 색상 접미사 예: "TWC", "K")\n'+
 '- modelName (NIKE/WMNS 접두사 포함, 약어 그대로)\n'+
 '- colorway (영문)\n'+
+'- material (재질 — 영문 원문. 신발 박스 옆 라벨엔 보통 없음, 의류 행택이나 신발 텅 라벨에는 있을 수 있음. 안 보이면 "")\n'+
 '- category ("shoe" | "apparel" | "unknown" — cm/EUR/UK 있으면 shoe, S/M/L/XL/XXL이면 apparel)\n'+
 '- gender ("men" | "women" | "unisex" | "youth" | "unknown" — WMNS=women, GS=youth, 듀얼사이즈=unisex)\n'+
 '- sizeKr (신발=mm 정수 문자열. cm 27→"270", cm 23.5→"235". 의류=알파벳. 듀얼사이즈는 첫째줄 MENS 값)\n'+
@@ -778,6 +939,8 @@ function applyPastedJson(){
     if (!p && idx < pending.length) p = pending[idx];
     if (!p) { missed++; return; }
 
+    /* 사용자가 이미 '완료 확정'한 카드는 덮어쓰지 않음 (수동 입력 보호) */
+    if (p.confirmed) { matched++; return; }
     /* ZXing 결과 백업 (Claude 응답에 덮어쓰이지 않도록) */
     var zxBc = p.zxBarcode;
     Object.assign(p, {
@@ -787,6 +950,7 @@ function applyPastedJson(){
       styleVariant: data.styleVariant || '',
       modelName:    data.modelName || '',
       colorway:     data.colorway || '',
+      material:     data.material  || '',
       category:     data.category || 'unknown',
       gender:       data.gender || 'unknown',
       sizeKr:       data.sizeKr || '',
@@ -940,24 +1104,23 @@ function rebuildAndRender(){
   refreshButtons();
 }
 function updateStats(){
-  var ok=0, rev=0, fail=0, pend=0;
+  var confirmed=0, zxOk=0, zxFail=0;
   photos.forEach(function(p){
-    if (p.status==='success') ok++;
-    else if (p.status==='review') rev++;
-    else if (p.status==='failed') fail++;
-    else pend++;
+    if (p.confirmed) confirmed++;
+    if (p.zxStatus === 'success') zxOk++;
+    else if (p.zxStatus === 'failed') zxFail++;
   });
   var bcMap = {};
   photos.forEach(function(p){ if (p.barcode) bcMap[p.barcode] = (bcMap[p.barcode]||0)+1; });
   var dup = 0;
   Object.keys(bcMap).forEach(function(k){ if (bcMap[k]>1) dup += bcMap[k]; });
 
-  document.getElementById('s0').textContent = photos.length;
-  document.getElementById('s1').textContent = ok;
-  var rv = document.getElementById('s_review'); if (rv) rv.textContent = rev;
-  document.getElementById('s2').textContent = fail;
-  document.getElementById('s3').textContent = pend;
-  document.getElementById('s4').textContent = dup;
+  var set = function(id, v){ var e=document.getElementById(id); if (e) e.textContent = v; };
+  set('s0', photos.length);
+  set('s_conf', confirmed);
+  set('s_zx',   zxOk);
+  set('s_zxf',  zxFail);
+  set('s4',     dup);
 }
 function refreshButtons(){
   var any = photos.length > 0;
@@ -988,12 +1151,14 @@ function renderGrid(){
     var conf = +p.confidence || 0;
     var confCls = conf >= 0.85 ? 'high' : conf >= 0.6 ? 'mid' : 'low';
     var extras = '';
-    if (p.modelName || p.colorway || (p.category && p.category!=='unknown')) {
+    if (p.modelName || p.colorway || p.material || p.origin || (p.category && p.category!=='unknown')) {
       extras = '<div class="extras">'+
-        (p.modelName ? '<div class="er"><b>모델</b><span>'+escH(p.modelName)+'</span></div>' : '')+
-        (p.colorway  ? '<div class="er"><b>컬러</b><span>'+escH(p.colorway)+'</span></div>' : '')+
+        (p.modelName ? '<div class="er"><b>품명</b><span>'+escH(p.modelName)+'</span></div>' : '')+
+        (p.colorway  ? '<div class="er"><b>색상</b><span>'+escH(p.colorway)+'</span></div>' : '')+
+        (p.material  ? '<div class="er"><b>재질</b><span>'+escH(p.material)+'</span></div>' : '')+
+        (p.origin    ? '<div class="er"><b>제조국</b><span>'+escH(p.origin)+'</span></div>' : '')+
         ((p.category && p.category!=='unknown') || (p.gender && p.gender!=='unknown') ?
-          '<div class="er"><b>구분</b><span>'+escH([p.category||'?', p.gender||'?'].join(' · '))+(p.origin?' · '+escH(p.origin):'')+'</span></div>' : '')+
+          '<div class="er"><b>구분</b><span>'+escH([p.category||'?', p.gender||'?'].filter(function(x){return x&&x!=='?';}).join(' · '))+'</span></div>' : '')+
         (p.sizeUs || p.sizeCm || p.sizeKrAlt ?
           '<div class="er"><b>사이즈</b><span>'+escH([p.sizeUs?'US '+p.sizeUs:'', p.sizeCm?'cm '+p.sizeCm:'', p.sizeKrAlt?'(W) '+p.sizeKrAlt:''].filter(Boolean).join(' · '))+'</span></div>' : '')+
       '</div>';
@@ -1021,8 +1186,8 @@ function renderGrid(){
         '<button class="zx-act" onclick="rescanOne(\''+p.id+'\')" title="다시 스캔">↻ 재스캔</button>'+
       '</div>';
     }
-    return '<div class="card '+p.status+'" data-pid="'+p.id+'">'+
-      '<div class="thumb"><img src="'+escAttr(p.blobUrl)+'" alt="" loading="lazy" decoding="async"><span class="st">'+labelForStatus(p.status)+'</span></div>'+
+    return '<div class="card '+p.status+(p.confirmed?' confirmed':'')+'" data-pid="'+p.id+'">'+
+      '<div class="thumb" onclick="openLightbox(\''+p.id+'\')" title="클릭하여 원본 보기 + 상세 입력"><img src="'+escAttr(p.blobUrl)+'" alt="" loading="lazy" decoding="async"><span class="st">'+labelForStatus(p.status)+'</span></div>'+
       '<div class="fn" title="'+escAttr(p.relPath || p.name)+'">'+escH(p.name)+'</div>'+
       zxHtml +
       '<div class="frow">'+
@@ -1104,22 +1269,24 @@ function manifestRowFor(p, renameMap){
     p.name||'',
     p.barcode||'', p.barcodeAddOn||'',
     p.styleCode||'', p.styleVariant||'',
-    p.modelName||'', p.colorway||'',
+    p.modelName||'', p.colorway||'', p.material||'',
     p.category||'', p.gender||'',
     p.sizeKr||'', p.sizeKrAlt||'', p.sizeUs||'', p.sizeCm||'', p.sizeUk||'', p.sizeEur||'',
     p.origin||'',
     (p.confidence ? (+p.confidence).toFixed(2) : ''),
     p.labelType||'',
     p.status,
+    p.confirmed ? 'Y' : '',
+    p.zxBarcode || '',
     (p.warnings && p.warnings.length ? p.warnings.join('|') : ''),
     p.error||''
   ];
 }
 var MANIFEST_HEADERS = ['filename_new','filename_original',
   'barcode','barcode_addon','style_code','style_variant',
-  'model_name','colorway','category','gender',
+  'model_name','colorway','material','category','gender',
   'size_kr','size_kr_alt','size_us','size_cm','size_uk','size_eur',
-  'origin','confidence','label_type','status','warnings','note'];
+  'origin','confidence','label_type','status','confirmed','zxing_barcode','warnings','note'];
 
 function downloadManifest(){
   var done = photos.filter(function(p){ return p.status==='success' || p.status==='review'; });
