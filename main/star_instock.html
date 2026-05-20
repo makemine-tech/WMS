@@ -119,15 +119,14 @@ h1 em{color:var(--g);font-style:normal}
 .dl-head .dl-h-title{font-weight:800;font-size:.95rem;color:var(--tx)}
 .dl-head .dl-h-desc{font-size:.7rem;color:var(--mu)}
 .dl-controls{display:flex;gap:.42rem;align-items:center;flex-wrap:wrap;flex:1;min-height:40px}
-.dl-date,.dl-sel{background:#0a0d13;border:1px solid var(--br);border-radius:7px;color:var(--tx);font-family:var(--mo);outline:none;height:40px;font-size:.78rem;transition:border-color .15s,background .15s}
-.dl-sel{padding:0 .65rem;cursor:pointer;min-width:80px}
+.dl-sel{background:#0a0d13;border:1px solid var(--br);border-radius:7px;color:var(--tx);font-family:var(--mo);outline:none;height:40px;font-size:.78rem;transition:border-color .15s,background .15s;padding:0 .65rem;cursor:pointer;min-width:80px}
 .dl-sel:hover,.dl-sel:focus{border-color:var(--g)}
-.dl-date{padding:0;width:46px;cursor:pointer;font-size:0;position:relative}
-.dl-date::-webkit-datetime-edit{display:none}
-.dl-date::-webkit-inner-spin-button,.dl-date::-webkit-clear-button{display:none}
-.dl-date::-webkit-calendar-picker-indicator{width:100%;height:100%;padding:0;margin:0;cursor:pointer;filter:invert(.85);opacity:.85}
-.dl-date:hover,.dl-date:focus{border-color:var(--g)}
-.dl-date.has-value{border-color:var(--g);background:rgba(74,240,168,.1)}
+/* 달력 버튼 — 라벨로 감싼 date 입력. 텍스트 없이 아이콘만, 선택 시 날짜 표시. */
+.dl-cal{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:.3rem;height:40px;min-width:46px;background:#0a0d13;border:1px solid var(--br);border-radius:7px;cursor:pointer;padding:0 .55rem;color:var(--mu);font-size:1.05rem;line-height:1;transition:all .15s;user-select:none}
+.dl-cal:hover{border-color:var(--g);background:#0d111a}
+.dl-cal.has-value{border-color:var(--g);background:rgba(74,240,168,.1);color:var(--g)}
+.dl-cal input[type="date"]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:none;background:transparent;padding:0;margin:0;font-size:1rem;color:transparent}
+.dl-cal-disp{font-family:var(--mo);font-size:.72rem;font-weight:700;color:var(--g);letter-spacing:.02em}
 .dl-tilde{color:var(--mu);font-size:.9rem;padding:0 .1rem}
 .dl-btn{width:100%;height:42px;display:flex;align-items:center;justify-content:center;gap:.45rem;font-size:.86rem;font-weight:800;border:none;border-radius:8px;cursor:pointer;transition:all .15s;letter-spacing:.02em}
 .dl-btn.btn-g{background:var(--g);color:#0f1117}
@@ -258,11 +257,17 @@ h1 em{color:var(--g);font-style:normal}
         <div class="dl-h-desc">기간 · 입고/출고 구분</div>
       </div>
       <div class="dl-controls">
-        <input type="date" id="dlLogStart" class="dl-date" data-label="시작일"
-               oninput="this.classList.toggle('has-value',!!this.value);this.title=this.value||this.dataset.label" title="시작일">
+        <label class="dl-cal" title="시작일 선택">
+          <span class="dl-cal-ico">📅</span>
+          <span class="dl-cal-disp" id="dlLogStartDisp"></span>
+          <input type="date" id="dlLogStart" oninput="updateCalLabel(this)">
+        </label>
         <span class="dl-tilde">~</span>
-        <input type="date" id="dlLogEnd" class="dl-date" data-label="종료일"
-               oninput="this.classList.toggle('has-value',!!this.value);this.title=this.value||this.dataset.label" title="종료일">
+        <label class="dl-cal" title="종료일 선택">
+          <span class="dl-cal-ico">📅</span>
+          <span class="dl-cal-disp" id="dlLogEndDisp"></span>
+          <input type="date" id="dlLogEnd" oninput="updateCalLabel(this)">
+        </label>
         <select id="dlLogType" class="dl-sel">
           <option value="all">전체</option>
           <option value="in">입고</option>
@@ -278,8 +283,11 @@ h1 em{color:var(--g);font-style:normal}
         <div class="dl-h-desc">선택일 종료 시점의 재고 스냅샷</div>
       </div>
       <div class="dl-controls">
-        <input type="date" id="dlClosingDate" class="dl-date" data-label="마감일자"
-               oninput="this.classList.toggle('has-value',!!this.value);this.title=this.value||this.dataset.label" title="마감일자">
+        <label class="dl-cal" title="마감일자 선택">
+          <span class="dl-cal-ico">📅</span>
+          <span class="dl-cal-disp" id="dlClosingDateDisp"></span>
+          <input type="date" id="dlClosingDate" oninput="updateCalLabel(this)">
+        </label>
       </div>
       <button class="dl-btn btn-y" onclick="dlStockAtDate()">📅 마감재고 다운로드</button>
     </div>
@@ -558,6 +566,21 @@ function downloadOutTemplate(){
     setMsg('m0','ok','✅ 출고 양식을 다운로드했습니다 — 박스바코드·바코드·수량 3열. 박스바코드는 비워도 됩니다(미지정).');
   } catch(err){
     setMsg('m0','er','❌ 양식 생성 실패: '+(err&&err.message||err));
+  }
+}
+
+/* 달력 버튼 라벨 갱신 — 날짜 선택 시 has-value/표시 텍스트 토글 */
+function updateCalLabel(inp){
+  var lbl = inp.parentElement;
+  if (!lbl) return;
+  var disp = lbl.querySelector('.dl-cal-disp');
+  if (inp.value) {
+    lbl.classList.add('has-value');
+    if (disp) disp.textContent = inp.value;
+    lbl.title = inp.value;
+  } else {
+    lbl.classList.remove('has-value');
+    if (disp) disp.textContent = '';
   }
 }
 
