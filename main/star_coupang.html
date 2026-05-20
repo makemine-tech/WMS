@@ -351,6 +351,7 @@ h1 em{color:var(--g);font-style:normal}
 
   <div class="brow">
     <button class="btn btn-s" onclick="loadSampleNotice()" style="font-size:.74rem;padding:.4rem .9rem">📋 양식 안내</button>
+    <button class="btn btn-g" onclick="downloadCoupangTemplate()" style="font-size:.74rem;padding:.4rem .9rem">📥 기본 양식 다운로드</button>
   </div>
 </div>
 
@@ -2283,6 +2284,56 @@ function downloadFallback(kind) {
 
 function loadSampleNotice() {
   setMsg('m0','inf','💡 D열 바코드 또는 E열 대비바코드로 매칭됩니다. 사이즈(L)·원산지(N)는 작업 중 인라인 수정 가능. 다운로드 시 R(직영수량) = R + 실입고로 갱신, 수정된 사이즈/원산지 반영.');
+}
+
+/* 기본 양식(.xlsx) 다운로드 — 쿠팡 입고 양식 헤더 + 예시 1행
+   COL: BOX_BARCODE:0, BRAND:1, CODE:2, BARCODE:3, ALT_BARCODE:4, NAME:5,
+        GENDER:6, MATERIAL:7, WEIGHT:8, PKGSIZE:9, COLOR:10,
+        SIZE:11, SIZE_US:12, REAL_SIZE:13, ORIGIN:14, (15:예비),
+        EXPECT_QTY:16, EXISTING_QTY:17 */
+function downloadCoupangTemplate() {
+  try {
+    var headers = [
+      '박스바코드','브랜드','품번','바코드','대비바코드','상품명',
+      '성별','소재','중량(g)','패키지사이즈','컬러',
+      '검수사이즈','사이즈(US)','실측사이즈','원산지','(예비)',
+      '입고수량','직영수량'
+    ];
+    var sample = [
+      '',           /* A 박스바코드 — 작업 중 자동 채움 */
+      'STAR',       /* B 브랜드 */
+      'ST-001',     /* C 품번 */
+      '4570158735506', /* D 바코드 ★필수 */
+      '4570158735513', /* E 대비바코드 */
+      '샘플 신발',   /* F 상품명 */
+      '남성',       /* G 성별 */
+      '천연가죽',   /* H 소재 */
+      350,          /* I 중량 */
+      '30x20x12',   /* J 패키지사이즈 */
+      'BLACK',      /* K 컬러 */
+      '270',        /* L 검수사이즈 (작업자 수정 가능) */
+      '9',          /* M 사이즈(US) */
+      '270',        /* N 실측사이즈 */
+      '대한민국',   /* O 원산지 (작업자 수정 가능) */
+      '',           /* P 예비 */
+      10,           /* Q 입고수량 (예정수량) ★ */
+      0             /* R 직영수량 (실입고 — 보통 0으로 시작) */
+    ];
+    var aoa = [headers, sample];
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [
+      {wch:14},{wch:10},{wch:12},{wch:16},{wch:16},{wch:24},
+      {wch:8},{wch:12},{wch:8},{wch:14},{wch:10},
+      {wch:12},{wch:10},{wch:12},{wch:10},{wch:8},
+      {wch:10},{wch:10}
+    ];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '쿠팡입고양식');
+    XLSX.writeFile(wb, 'STAR_쿠팡입고_업로드양식.xlsx');
+    setMsg('m0','ok','✅ 양식을 다운로드했습니다 — 1행 헤더, 2행 예시. 박스바코드(A) 비워두고 D(바코드)·Q(입고수량)만 채우면 됩니다. 작업 중 박스ID·실입고는 자동 갱신.');
+  } catch(err){
+    setMsg('m0','er','❌ 양식 생성 실패: '+(err && err.message || err));
+  }
 }
 
 /* ─────────────── 박스바코드 생성/인쇄 ─────────────── */
