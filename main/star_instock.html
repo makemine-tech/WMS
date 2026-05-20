@@ -106,6 +106,20 @@ h1 em{color:var(--g);font-style:normal}
 .tag-out{background:rgba(240,88,88,.16);color:var(--r)}
 .tag-excel{background:rgba(91,156,246,.16);color:var(--b)}
 
+/* 다운로드 패널 */
+.dl-panel{background:linear-gradient(135deg,#161b26,#1a1f2c);border:1px solid var(--br);border-radius:9px;padding:.7rem .9rem .85rem;margin-bottom:.9rem}
+.dl-title{font-size:.74rem;font-weight:800;color:var(--g);margin-bottom:.55rem;letter-spacing:.05em;font-family:var(--mo);display:flex;align-items:center;gap:.4rem}
+.dl-row{display:grid;grid-template-columns:repeat(3,1fr);gap:.55rem}
+@media(max-width:900px){.dl-row{grid-template-columns:1fr}}
+.dl-cell{background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.55rem .7rem;display:flex;flex-direction:column;gap:.4rem}
+.dl-l{font-size:.66rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em}
+.dl-l strong{color:var(--tx);font-weight:700;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:.84rem;letter-spacing:0;display:block;margin-bottom:.18rem}
+.dl-inputs{display:flex;gap:.32rem;align-items:center;flex-wrap:wrap}
+.dl-inp{background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.32rem .42rem;font-size:.78rem;font-family:var(--mo);outline:none}
+.dl-inp:focus{border-color:var(--g)}
+.dl-inp.short{width:130px}
+.dl-tilde{color:var(--mu);font-size:.78rem}
+
 /* 헤더 */
 .hdr-home-btn{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;padding:5px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;flex-shrink:0;white-space:nowrap}
 .hdr-home-btn:hover{color:#fff;border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.08)}
@@ -174,6 +188,40 @@ h1 em{color:var(--g);font-style:normal}
     <span style="font-size:.68rem;color:var(--mu)">박스/제품 미등록 바코드도 입출고 기록됩니다</span>
   </div>
   <div id="scanFb" class="scan-fb">대기 중 — 모드 선택 후 바코드 스캔</div>
+</div>
+
+<!-- 엑셀 다운로드 패널 -->
+<div class="dl-panel">
+  <div class="dl-title">📥 엑셀 다운로드</div>
+  <div class="dl-row">
+    <div class="dl-cell">
+      <div class="dl-l"><strong>① 현재고 수량</strong>지금 시점의 실재고 잔량</div>
+      <div class="dl-inputs">
+        <button class="btn btn-g" onclick="dlStockCurrent()">📦 현재고 다운로드</button>
+      </div>
+    </div>
+    <div class="dl-cell">
+      <div class="dl-l"><strong>② 입출고 내역</strong>기간 / 입고·출고 구분</div>
+      <div class="dl-inputs">
+        <input type="date" id="dlLogStart" class="dl-inp short" title="시작일">
+        <span class="dl-tilde">~</span>
+        <input type="date" id="dlLogEnd" class="dl-inp short" title="종료일">
+        <select id="dlLogType" class="dl-inp">
+          <option value="all">전체</option>
+          <option value="in">입고만</option>
+          <option value="out">출고만</option>
+        </select>
+        <button class="btn btn-b" onclick="dlLogHistory()">📜 내역 다운로드</button>
+      </div>
+    </div>
+    <div class="dl-cell">
+      <div class="dl-l"><strong>③ 마감일자 기준 재고</strong>선택한 날짜 종료 시점의 재고</div>
+      <div class="dl-inputs">
+        <input type="date" id="dlClosingDate" class="dl-inp short" title="마감일자">
+        <button class="btn btn-y" onclick="dlStockAtDate()">📅 마감재고 다운로드</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 검색 -->
@@ -377,6 +425,105 @@ function cell(r, c){
   var v = r[c];
   if (v===null||v===undefined) return '';
   return (typeof v==='number') ? v : String(v).trim();
+}
+
+/* ─────────────── 엑셀 다운로드 (현재고/내역/마감재고) ─────────────── */
+function pad2(n){ n=String(n); return n.length<2 ? '0'+n : n; }
+function ymd(ts){ var d=new Date(ts); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function fmtDt(ts){ if(!ts) return ''; var d=new Date(ts); return ymd(ts)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
+function startOfDayTs(dStr){ return dStr ? new Date(dStr+'T00:00:00').getTime() : null; }
+function endOfDayTs(dStr){ return dStr ? new Date(dStr+'T23:59:59.999').getTime() : null; }
+function saveXlsx(rows, baseName, sheetName, cols){
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  if (cols) ws['!cols'] = cols;
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Sheet1');
+  XLSX.writeFile(wb, baseName + '.xlsx');
+}
+
+/* 임의 시점(asOfTs)의 재고 스냅샷 — asOfTs=null 이면 전체(현재고) */
+function aggregateStock(asOfTs){
+  var map = {};
+  logs.forEach(function(lg){
+    if (asOfTs != null && (lg.ts||0) > asOfTs) return;
+    var bc = normBarcode(lg.barcode);
+    if (!bc) return;
+    if (!map[bc]) map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, boxes:{}, meta:null, lastInTs:0 };
+    var g = map[bc];
+    var q = +lg.qty || 0;
+    if (lg.type === 'out') g.outQty += q; else g.inQty += q;
+    if (lg.box) g.boxes[String(lg.box).trim()] = 1;
+    if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) { g.lastInTs = lg.ts||0; g.meta = lg; }
+  });
+  return Object.keys(map).map(function(bc){
+    var g = map[bc]; g.stock = g.inQty - g.outQty; g.boxList = Object.keys(g.boxes); return g;
+  }).sort(function(a,b){ return String(a.barcode)<String(b.barcode)?-1:1; });
+}
+
+/* ① 현재고수량 다운로드 */
+function dlStockCurrent(){
+  if (!logs.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'); return; }
+  var snap = aggregateStock(null);
+  var rows = [['바코드','품명','브랜드','품번','컬러','사이즈','원산지','박스','누적입고','누적출고','현재고']];
+  snap.forEach(function(g){
+    var m = g.meta || {};
+    rows.push([g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
+               g.boxList.join(', '), g.inQty, g.outQty, g.stock]);
+  });
+  var cols = [{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:18},{wch:10},{wch:10},{wch:10}];
+  saveXlsx(rows, '현재고수량_'+ymd(Date.now()), '현재고', cols);
+  setMsg('m0','ok','✅ 현재고 다운로드 완료 — '+snap.length+'종, 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
+}
+
+/* ② 입출고 내역 다운로드 (기간 + 입고/출고/전체) */
+function dlLogHistory(){
+  var startStr = document.getElementById('dlLogStart').value;
+  var endStr   = document.getElementById('dlLogEnd').value;
+  var typeF    = document.getElementById('dlLogType').value;
+  var startTs  = startOfDayTs(startStr);
+  var endTs    = endOfDayTs(endStr);
+  var filtered = logs.filter(function(lg){
+    if (typeF === 'in'  && lg.type === 'out') return false;
+    if (typeF === 'out' && lg.type !== 'out') return false;
+    if (startTs != null && (lg.ts||0) < startTs) return false;
+    if (endTs   != null && (lg.ts||0) > endTs)   return false;
+    return true;
+  }).slice().sort(function(a,b){ return (a.ts||0)-(b.ts||0); });
+  if (!filtered.length) { setMsg('m0','warn','⚠️ 해당 조건에 일치하는 입출고 내역이 없습니다'); return; }
+  var rows = [['일시','구분','입력원','박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','수량','작업자']];
+  var totIn=0, totOut=0;
+  filtered.forEach(function(lg){
+    var q = +lg.qty||0;
+    if (lg.type==='out') totOut+=q; else totIn+=q;
+    rows.push([
+      fmtDt(lg.ts), lg.type==='out'?'출고':'입고', lg.source==='excel'?'엑셀':'스캔',
+      lg.box||'', lg.barcode||'', lg.name||'', lg.brand||'', lg.code||'',
+      lg.color||'', lg.size||'', lg.origin||'', q, lg.by||''
+    ]);
+  });
+  var cols=[{wch:20},{wch:6},{wch:6},{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:8},{wch:24}];
+  var label = (typeF==='in'?'입고':typeF==='out'?'출고':'입출고');
+  var fname = label+'내역_'+(startStr||'전체')+'_'+(endStr||'전체');
+  saveXlsx(rows, fname, label+'내역', cols);
+  setMsg('m0','ok','✅ '+label+' 내역 다운로드 완료 — '+filtered.length+'행 (입고 '+totIn+'개 / 출고 '+totOut+'개)');
+}
+
+/* ③ 마감일자 기준 재고 다운로드 */
+function dlStockAtDate(){
+  var dStr = document.getElementById('dlClosingDate').value;
+  if (!dStr) { setMsg('m0','warn','⚠️ 마감일자를 선택하세요'); return; }
+  var endTs = endOfDayTs(dStr);
+  var snap = aggregateStock(endTs);
+  if (!snap.length) { setMsg('m0','warn','⚠️ 해당 일자 이전 입출고 기록이 없습니다'); return; }
+  var rows = [['바코드','품명','브랜드','품번','컬러','사이즈','원산지','박스','누적입고('+dStr+'까지)','누적출고('+dStr+'까지)','마감재고('+dStr+')']];
+  snap.forEach(function(g){
+    var m = g.meta || {};
+    rows.push([g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
+               g.boxList.join(', '), g.inQty, g.outQty, g.stock]);
+  });
+  var cols=[{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:18},{wch:14},{wch:14},{wch:14}];
+  saveXlsx(rows, '마감재고_'+dStr, '마감재고_'+dStr, cols);
+  setMsg('m0','ok','✅ '+dStr+' 마감재고 다운로드 완료 — '+snap.length+'종, 마감재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
 }
 
 /* 업로드 양식(.xlsx) 다운로드 — 002 양식 헤더 + 예시 1행 */
