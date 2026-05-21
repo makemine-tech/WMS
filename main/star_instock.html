@@ -324,6 +324,26 @@ h1 em{color:var(--g);font-style:normal}
 </div>
 <div class="log-list" id="logList"></div>
 
+<!-- 마감 처리 (관리자만) — 위험 영역 위 -->
+<div id="closingBox" style="display:none;margin-top:1.4rem;padding:.85rem 1rem;border:1.5px dashed rgba(91,156,246,.5);border-radius:9px;background:rgba(91,156,246,.04)">
+  <div style="font-size:.74rem;font-weight:800;color:var(--b);font-family:var(--mo);letter-spacing:.06em;margin-bottom:.55rem">📅 마감 처리 · CLOSING (관리자 전용)</div>
+  <div style="display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-bottom:.55rem">
+    <span style="font-size:.74rem;color:var(--mu)">마감일자</span>
+    <span class="cal-wrap">
+      <button type="button" class="ico-cal" id="closingDateBtn" onclick="pickDate('closingDate')" title="마감일자 선택">📅</button>
+      <span class="cal-show" id="closingDateShow"></span>
+      <input type="date" id="closingDate" class="off-screen-date" oninput="onDateChange(this);previewClosing()">
+    </span>
+    <button class="btn btn-s" onclick="previewClosing()" style="padding:.42rem .85rem;font-size:.76rem">👁️ 미리보기</button>
+    <button class="btn btn-b" onclick="executeClosing()" style="padding:.42rem .85rem;font-size:.76rem">📅 마감 실행</button>
+  </div>
+  <div id="closingPreview" style="font-size:.72rem;color:var(--mu);line-height:1.6">마감일자를 선택하면 응축될 내용을 보여줍니다.</div>
+  <div style="font-size:.7rem;color:var(--mu);margin-top:.55rem;line-height:1.5">
+    마감일자 <strong style="color:var(--tx)">이전+당일</strong>의 모든 입출고 로그가 삭제되고, 그 시점 재고가 <strong style="color:var(--g)">단일 이월 입고 로그</strong>로 응축됩니다.
+    재고 숫자는 보존되지만 상세 내역은 영구 사라지므로, 마감 전 <strong style="color:var(--y)">입출고 내역을 엑셀로 다운로드</strong>해 보관하세요.
+  </div>
+</div>
+
 <!-- 위험 영역 — 전체 초기화 -->
 <div style="margin-top:1.4rem;padding:.85rem 1rem;border:1.5px dashed rgba(240,88,88,.4);border-radius:9px;background:rgba(240,88,88,.04)">
   <div style="font-size:.74rem;font-weight:800;color:var(--r);font-family:var(--mo);letter-spacing:.06em;margin-bottom:.55rem">⚠️ 위험 영역 · DANGER ZONE</div>
@@ -352,6 +372,7 @@ var logs = [];          /* 전체 입출고 로그 [{key, ts, type, source, box,
 var stockGroups = [];   /* 바코드별 집계 결과 (검색/렌더용) */
 var scanMode = 'in';    /* 'in' | 'out' */
 var groupId = null;
+var isAdmin = false;    /* superadmin 만 — 로그 삭제 / 마감 처리 권한 */
 var dbRef = null;       /* star_instock/logs ref */
 var lastFilter = null;  /* {barcodes:[]} 또는 null */
 var viewMode = 'recent';     /* 'recent' (이번 세션 작업분) | 'all' (전체) — 검색이 있으면 무관 */
@@ -401,6 +422,10 @@ function wmsHandleAuthState(state){
   }
   /* 인증 OK — Firebase logs ref 부착 */
   groupId = state.groupId;
+  isAdmin = !!state.isAdmin;
+  /* admin 만 마감 처리 패널 표시 */
+  var dz = document.getElementById('closingBox');
+  if (dz) dz.style.display = isAdmin ? '' : 'none';
   attachStockRef();
 }
 
@@ -1039,14 +1064,41 @@ function renderLog(){
     '<table class="tbl"><thead><tr>'+
       '<th>시각</th><th>구분</th><th>바코드</th><th>품명</th><th>박스</th>'+
       '<th style="text-align:right">수량</th><th>비고</th><th>작업자</th>'+
+      (isAdmin ? '<th style="width:34px"></th>' : '')+
     '</tr></thead><tbody>'+
     recent.map(function(lg){
       var d = new Date(lg.ts||0);
       var t = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-      var tag = lg.type==='out'
-        ? '<span class="tag tag-out">출고</span>'
-        : (lg.source==='excel' ? '<span class="tag tag-excel">엑셀입고</span>' : '<span class="tag tag-in">입고</span>');
+      var tag;
+      if (lg.type === 'out') {
+        if (lg.source === 'outorder') {
+          var oid = lg.orderId || '';
+          tag = '<span class="tag tag-out">출고</span> <span class="tag" style="background:rgba(192,132,252,.16);color:var(--p);margin-left:.18rem" title="출고지시서로 실행됨 — 취소는 지시서에서">📋 '+escH(oid)+'</span>';
+        } else if (lg.source === 'closing') {
+          tag = '<span class="tag" style="background:rgba(91,156,246,.16);color:var(--b)">마감응축</span>';
+        } else {
+          tag = '<span class="tag tag-out">출고</span>';
+        }
+      } else {
+        if (lg.source === 'closing') {
+          tag = '<span class="tag" style="background:rgba(91,156,246,.16);color:var(--b)">마감응축</span>';
+        } else if (lg.source === 'excel') {
+          tag = '<span class="tag tag-excel">엑셀입고</span>';
+        } else {
+          tag = '<span class="tag tag-in">입고</span>';
+        }
+      }
       var note = lg.note || '';
+      var cancelCell = '';
+      if (isAdmin) {
+        if (lg.source === 'outorder') {
+          cancelCell = '<td style="text-align:center"><span style="font-size:.62rem;color:var(--mu)" title="지시서에서 일괄 취소하세요">지시서</span></td>';
+        } else if (lg.source === 'closing') {
+          cancelCell = '<td style="text-align:center"><span style="font-size:.62rem;color:var(--mu)" title="마감응축 로그는 개별 취소 불가">마감</span></td>';
+        } else {
+          cancelCell = '<td style="text-align:center"><button onclick="cancelLogEntry(\''+escH(lg.key)+'\')" title="이 로그 취소 — 재고 자동 원복" style="background:transparent;border:1px solid rgba(240,88,88,.4);color:var(--r);font-size:.74rem;padding:.18rem .42rem;border-radius:4px;cursor:pointer">✕</button></td>';
+        }
+      }
       return '<tr>'+
         '<td style="font-family:var(--mo);font-size:.72rem;color:var(--mu)">'+t+'</td>'+
         '<td>'+tag+'</td>'+
@@ -1057,9 +1109,124 @@ function renderLog(){
           (lg.type==='out'?'-':'+')+(+lg.qty||0)+'</td>'+
         '<td class="cell-note" title="'+escH(note)+'">'+escH(note)+'</td>'+
         '<td style="font-size:.7rem;color:var(--mu)">'+escH(lg.by)+'</td>'+
+        cancelCell+
       '</tr>';
     }).join('')+
     '</tbody></table>';
+}
+
+/* ─────────────── 개별 로그 취소 (admin) ─────────────── */
+function cancelLogEntry(key){
+  if (!isAdmin) { setMsg('m0','er','❌ 관리자만 취소할 수 있습니다'); return; }
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  var lg = logs.find(function(x){ return x.key === key; });
+  if (!lg) { setMsg('m0','er','❌ 로그를 찾을 수 없습니다'); return; }
+  if (lg.source === 'outorder') {
+    alert('출고지시서로 실행된 로그입니다.\n취소하려면 출고지시서 페이지에서 해당 지시서를 열고 "실행 취소"를 누르세요.\n\n지시서 번호: ' + (lg.orderId||'?'));
+    return;
+  }
+  if (lg.source === 'closing') {
+    alert('마감응축 로그는 개별 취소할 수 없습니다.\n마감 처리를 되돌리려면 백업 엑셀을 다시 일괄 입고하세요.');
+    return;
+  }
+  var sign = lg.type === 'out' ? '-' : '+';
+  var label = lg.type === 'out' ? '출고' : '입고';
+  var msg = '🗑️ 입출고 로그 1건 삭제\n\n' +
+            '  • 구분: ' + label + ' (' + (lg.source||'') + ')\n' +
+            '  • 바코드: ' + (lg.barcode||'') + '\n' +
+            '  • 품명: ' + (lg.name||'') + '\n' +
+            '  • 수량: ' + sign + (+lg.qty||0) + '개\n' +
+            '  • 시각: ' + (lg.ts ? fmtDt(lg.ts) : '?') + '\n' +
+            '  • 작업자: ' + (lg.by||'?') + '\n\n' +
+            '재고가 자동으로 원복됩니다. 계속할까요?';
+  if (!confirm(msg)) return;
+  dbRef.child(key).remove().then(function(){
+    setMsg('m0','ok','✅ 로그 삭제됨 — 재고 자동 원복: ' + label + ' ' + sign + (+lg.qty||0) + '개 · ' + (lg.barcode||''));
+  }).catch(function(err){
+    setMsg('m0','er','❌ 삭제 실패: '+(err&&err.message||err));
+  });
+}
+
+/* ─────────────── 마감 처리 (admin) ───────────────
+   마감일자 이전 logs 모두 삭제 + 마감재고를 (박스,바코드)별 단일 type='in' source='closing'
+   단일 entry 로 치환. atomic update 로 일관성 보장. */
+function previewClosing(){
+  if (!isAdmin) { setMsg('m0','er','❌ 관리자만 사용 가능합니다'); return; }
+  var dStr = document.getElementById('closingDate').value;
+  var box = document.getElementById('closingPreview');
+  if (!dStr) { box.innerHTML = '<span style="color:var(--y)">⚠️ 마감일자를 선택하세요</span>'; return; }
+  var endTs = endOfDayTs(dStr);
+  var oldCnt = logs.filter(function(lg){ return (lg.ts||0) <= endTs; }).length;
+  var snap = aggregateStockByBox(endTs).filter(function(g){ return g.stock > 0; });
+  var negCnt = aggregateStockByBox(endTs).filter(function(g){ return g.stock < 0; }).length;
+  var totQty = snap.reduce(function(s,g){return s+g.stock;}, 0);
+  box.innerHTML =
+    '<div style="font-size:.78rem;line-height:1.7">'+
+      '<div style="color:var(--y);font-weight:700">📅 마감 미리보기 — ' + dStr + ' (해당일 23:59:59 기준)</div>'+
+      '<div>• 삭제될 로그: <b style="color:var(--tx)">' + oldCnt + '건</b> (' + dStr + ' 이전 + 당일 포함)</div>'+
+      '<div>• 응축될 항목 (재고 > 0): <b style="color:var(--g)">' + snap.length + '종 (박스·바코드)</b> / 총 <b style="color:var(--g)">' + totQty + '개</b> 보존</div>'+
+      (negCnt ? '<div style="color:var(--r)">• ⚠️ 마이너스 재고 항목 ' + negCnt + '종 — 응축에서 제외됩니다. 마감 전 정정하세요.</div>' : '')+
+      '<div style="color:var(--mu);font-size:.72rem;margin-top:.45rem">※ 디테일은 사라지지만 재고 숫자는 보존됩니다. 마감 직후 입출고 내역 다운로드로 보관하세요.</div>'+
+    '</div>';
+}
+function executeClosing(){
+  if (!isAdmin) { setMsg('m0','er','❌ 관리자만 사용 가능합니다'); return; }
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  var dStr = document.getElementById('closingDate').value;
+  if (!dStr) { setMsg('m0','er','❌ 마감일자를 선택하세요'); return; }
+  var endTs = endOfDayTs(dStr);
+  var oldLogs = logs.filter(function(lg){ return (lg.ts||0) <= endTs; });
+  var snap = aggregateStockByBox(endTs).filter(function(g){ return g.stock > 0; });
+  if (!oldLogs.length) { setMsg('m0','warn','⚠️ 이 날짜 이전 로그가 없습니다'); return; }
+  var totQty = snap.reduce(function(s,g){return s+g.stock;}, 0);
+  var msg = '⚠️ 마감 처리 실행\n\n' +
+            '  • 마감일자: ' + dStr + ' (당일 23:59:59 까지)\n' +
+            '  • 삭제될 로그: ' + oldLogs.length + '건\n' +
+            '  • 응축될 항목: ' + snap.length + '종 / 총 ' + totQty + '개 보존\n\n' +
+            '※ 옛 디테일은 영구 삭제됩니다. 마감 전 백업(입출고 내역 다운로드)을 받으셨나요?\n\n' +
+            '계속하시겠습니까?';
+  if (!confirm(msg)) { setMsg('m0','warn','⚠️ 마감 취소'); return; }
+  var typed = prompt('정말 진행하려면 「마감」 이라고 정확히 입력하세요');
+  if (typed === null) { setMsg('m0','warn','⚠️ 마감 취소'); return; }
+  if (String(typed).trim() !== '마감') { setMsg('m0','er','❌ 확인 문구 불일치 — 마감 취소'); return; }
+
+  setMsg('m0','inf','<span>마감 처리 중... ('+oldLogs.length+'건 삭제 + '+snap.length+'건 신규)</span>');
+  var basePath = 'wms_sync/groups/' + groupId + '/star_instock/logs/';
+  var updates = {};
+  /* 1) 옛 로그 삭제 */
+  oldLogs.forEach(function(lg){ updates[basePath + lg.key] = null; });
+  /* 2) 마감재고 단일 입고 로그 신규 push key 생성 + 값 채움 */
+  var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : 'closing';
+  var baseTs = endTs;
+  var rootRef = firebase.database().ref();
+  snap.forEach(function(g, idx){
+    var newKey = dbRef.push().key;
+    var m = g.meta || {};
+    var rec = {
+      ts: baseTs + idx + 1, /* 마감 이후 시점으로 — 그래야 새 입출고 다음 작업에 자연스럽게 이어짐 */
+      by: by,
+      type: 'in',
+      source: 'closing',
+      box: g.box === '(미지정)' ? '' : g.box,
+      barcode: g.barcode || '',
+      altBarcode: m.altBarcode || '',
+      name: m.name || '',
+      brand: m.brand || '',
+      code: m.code || '',
+      color: m.color || '',
+      size: m.size || '',
+      origin: m.origin || '',
+      material: m.material || '',
+      qty: g.stock,
+      note: '[마감 ' + dStr + '] 이월 재고'
+    };
+    updates[basePath + newKey] = JSON.parse(JSON.stringify(rec));
+  });
+  rootRef.update(updates).then(function(){
+    setMsg('m0','ok','✅ 마감 완료 — 옛 로그 '+oldLogs.length+'건 삭제, 이월 재고 '+snap.length+'건 입고 처리, 총 '+totQty+'개 보존');
+  }).catch(function(err){
+    setMsg('m0','er','❌ 마감 실패: '+(err&&err.message||err));
+  });
 }
 
 /* ─────────────── 전체 초기화 (위험) ─────────────── */

@@ -291,13 +291,14 @@ h1 em{color:var(--g);font-style:normal}
       <div class="tc"><div class="tc-l">총 박스수</div><div class="tc-v" style="color:var(--b)" id="tot3">0</div></div>
     </div>
 
-    <div class="action-bar">
+    <div class="action-bar" id="orderActionBar">
       <button class="btn btn-g" onclick="saveDraft()">💾 저장 (임시 저장)</button>
       <button class="btn btn-b" onclick="printOrder()">🖨️ A4 인쇄</button>
       <button class="btn btn-y" onclick="togglePreview()" id="prevBtn">👁️ 미리보기 펼치기</button>
-      <span style="margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-        <span style="font-size:.7rem;color:var(--mu)">출고 실행은 지시서 인쇄 후 작업 완료된 다음 누르세요</span>
-        <button class="btn" style="background:var(--r);color:#fff" onclick="executeOrder()">📤 이 지시서로 출고 실행</button>
+      <span style="margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap" id="orderRightBtns">
+        <span style="font-size:.7rem;color:var(--mu)" id="orderHint">출고 실행은 지시서 인쇄 후 작업 완료된 다음 누르세요</span>
+        <button class="btn" style="background:var(--r);color:#fff" onclick="executeOrder()" id="execBtn">📤 이 지시서로 출고 실행</button>
+        <button class="btn" style="background:#7c8399;color:#0f1117;display:none" onclick="cancelExecution()" id="cancelExecBtn">🔁 실행 취소</button>
       </span>
     </div>
 
@@ -347,6 +348,7 @@ h1 em{color:var(--g);font-style:normal}
 <script>
 /* ─────────────── 전역 상태 ─────────────── */
 var groupId = null;
+var isAdmin = false;      /* superadmin — 실행 취소 / 강제 삭제 */
 var ordersRef = null;     /* star_outorder/orders */
 var logsRef = null;       /* star_instock/logs — 메타 조회 + 출고 실행 시 push */
 var allOrders = [];       /* 저장된 지시서 전체 */
@@ -426,7 +428,10 @@ function wmsHandleAuthState(state){
     return;
   }
   groupId = state.groupId;
+  isAdmin = !!state.isAdmin;
   attachRefs();
+  /* admin 여부에 따라 작성 화면 액션바 갱신 */
+  refreshActionBar();
 }
 
 /* ─────────────── Firebase 연결 ─────────────── */
@@ -571,6 +576,7 @@ function resetOrder(){
   curOrder = newOrder();
   curOrderSaved = false;
   syncOrderToForm();
+  refreshActionBar();
   hideMsg('m0');
   setMsg('m0','inf','📄 새 지시서 시작 — 번호 ' + curOrder.orderId);
 }
@@ -699,6 +705,69 @@ function handleExcelAdd(file){
   };
   reader.onerror = function(){ setMsg('m0','er','❌ 파일 읽기 실패'); };
   reader.readAsArrayBuffer(file);
+}
+
+/* ─────────────── 액션바 상태 반영 ─────────────── */
+function refreshActionBar(){
+  var execBtn = document.getElementById('execBtn');
+  var cancelBtn = document.getElementById('cancelExecBtn');
+  var hint = document.getElementById('orderHint');
+  if (!execBtn || !cancelBtn || !hint) return;
+  var st = curOrder.status || 'draft';
+  if (st === 'executed') {
+    execBtn.style.display = 'none';
+    /* admin 만 실행 취소 노출 */
+    cancelBtn.style.display = isAdmin ? '' : 'none';
+    hint.textContent = isAdmin
+      ? '✅ 이미 출고 실행됨 — 잘못 실행했다면 「🔁 실행 취소」'
+      : '✅ 이미 출고 실행됨 — 취소는 관리자에게 요청하세요';
+    hint.style.color = 'var(--g)';
+  } else if (st === 'cancelled') {
+    execBtn.style.display = 'none';
+    cancelBtn.style.display = 'none';
+    hint.textContent = '⛔ 취소된 지시서 — 새 지시서를 작성하세요';
+    hint.style.color = 'var(--r)';
+  } else {
+    execBtn.style.display = '';
+    cancelBtn.style.display = 'none';
+    hint.textContent = '출고 실행은 지시서 인쇄 후 작업 완료된 다음 누르세요';
+    hint.style.color = 'var(--mu)';
+  }
+}
+
+/* ─────────────── 출고 실행 취소 (admin) ─────────────── */
+function cancelExecution(){
+  if (!isAdmin) { setMsg('m0','er','❌ 관리자만 실행 취소가 가능합니다'); return; }
+  if (curOrder.status !== 'executed') { setMsg('m0','warn','⚠️ 실행된 지시서만 취소할 수 있습니다'); return; }
+  if (!ordersRef || !logsRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  var keys = curOrder.executedLogKeys || [];
+  var totQ = (curOrder.items||[]).reduce(function(s,it){return s+(+it.qty||0);},0);
+  var msg = '🔁 출고 실행 취소\n\n' +
+            '  • 지시서: ' + curOrder.orderId + '\n' +
+            '  • 거래처: ' + (curOrder.customer||'') + '\n' +
+            '  • 삭제될 출고 로그: ' + keys.length + '건 (총 ' + totQ + '개)\n\n' +
+            '재고에 ' + totQ + '개가 다시 더해지며, 지시서 상태는 「취소됨」 으로 변경됩니다.\n' +
+            (keys.length ? '' : '\n※ 로그 키 정보가 없어 재고 원복은 불가능하고 지시서 상태만 변경됩니다.\n   (이 지시서가 옛 버전이라 키 기록이 없을 수 있음)\n') +
+            '\n계속하시겠습니까?';
+  if (!confirm(msg)) return;
+
+  var basePath = 'wms_sync/groups/' + groupId + '/star_instock/logs/';
+  var updates = {};
+  keys.forEach(function(k){ updates[basePath + k] = null; });
+  var rootRef = firebase.database().ref();
+  var p = keys.length ? rootRef.update(updates) : Promise.resolve();
+  p.then(function(){
+    curOrder.status = 'cancelled';
+    curOrder.cancelledAt = Date.now();
+    curOrder.cancelledBy = getUserId();
+    return ordersRef.child(curOrder.orderId).set(JSON.parse(JSON.stringify(curOrder)));
+  }).then(function(){
+    refreshActionBar();
+    renderItems();
+    setMsg('m0','ok','✅ 실행 취소 완료 — 로그 '+keys.length+'건 삭제, 재고 ' + (keys.length?totQ+'개 복원':'무변동'));
+  }).catch(function(err){
+    setMsg('m0','er','❌ 실행 취소 실패: '+(err&&err.message||err));
+  });
 }
 
 /* ─────────────── Firebase 저장 ─────────────── */
@@ -847,6 +916,7 @@ function executeOrder(){
   var ts0 = Date.now();
   var customer = curOrder.customer || '';
   var orderId = curOrder.orderId;
+  var pushedKeys = [];
   var chain = Promise.resolve();
   curOrder.items.forEach(function(it, idx){
     chain = chain.then(function(){
@@ -870,16 +940,20 @@ function executeOrder(){
         qty: +it.qty || 0,
         note: (it.note ? (it.note + ' · ') : '') + '지시서 ' + orderId + ' (' + customer + ')'
       };
-      return logsRef.push(JSON.parse(JSON.stringify(rec)));
+      var newRef = logsRef.push();
+      pushedKeys.push(newRef.key);
+      return newRef.set(JSON.parse(JSON.stringify(rec)));
     });
   });
   chain.then(function(){
     curOrder.status = 'executed';
     curOrder.executedAt = Date.now();
     curOrder.executedBy = by;
+    curOrder.executedLogKeys = pushedKeys;
     return ordersRef.child(curOrder.orderId).set(JSON.parse(JSON.stringify(curOrder)));
   }).then(function(){
     curOrderSaved = true;
+    renderItems(); /* 실행 후 상태 표시 위해 다시 그림 */
     setMsg('m0','ok','✅ 출고 완료 · 지시서 ' + curOrder.orderId + ' · '+curOrder.items.length+'행 / '+totQ+'개 차감됨');
   }).catch(function(err){
     setMsg('m0','er','❌ 출고 등록 실패: '+(err&&err.message||err));
@@ -922,6 +996,7 @@ function renderList(){
       '<td style="font-size:.72rem;color:var(--mu)">'+fmtDt(o.createdAt||0)+'<br>'+escH(o.createdBy||'')+'</td>'+
       '<td style="white-space:nowrap;display:flex;gap:.3rem;flex-wrap:wrap">'+
         '<button class="btn btn-s" style="padding:.32rem .65rem;font-size:.72rem" onclick="loadOrder(\''+escH(o.orderId)+'\')">📂 열기</button>'+
+        ((o.status==='executed' && isAdmin) ? '<button class="btn" style="padding:.32rem .65rem;font-size:.72rem;background:#7c8399;color:#0f1117" onclick="loadAndCancelExec(\''+escH(o.orderId)+'\')" title="이 지시서 실행 취소 — 재고 원복">🔁 실행취소</button>' : '') +
         (o.status==='executed' ? '' : '<button class="btn btn-r" style="padding:.32rem .65rem;font-size:.72rem" onclick="deleteOrder(\''+escH(o.orderId)+'\')">✕ 삭제</button>') +
       '</td>'+
     '</tr>';
@@ -936,6 +1011,7 @@ function loadOrder(orderId){
   curOrderSaved = true;
   setTab('new');
   syncOrderToForm();
+  refreshActionBar();
   setMsg('m0','inf','📂 지시서 로드: '+orderId+' · 상태 '+(curOrder.status||'draft'));
 }
 function deleteOrder(orderId){
@@ -946,6 +1022,16 @@ function deleteOrder(orderId){
   }).catch(function(err){
     setMsg('m0','er','❌ 삭제 실패: '+(err&&err.message||err));
   });
+}
+/* 목록에서 바로 실행 취소 — 해당 지시서를 로드 후 cancelExecution 호출 */
+function loadAndCancelExec(orderId){
+  var o = allOrders.find(function(x){ return x.orderId === orderId; });
+  if (!o) { setMsg('m0','er','❌ 지시서를 찾을 수 없습니다'); return; }
+  curOrder = JSON.parse(JSON.stringify(o));
+  delete curOrder._key;
+  if (!Array.isArray(curOrder.items)) curOrder.items = [];
+  curOrderSaved = true;
+  cancelExecution();
 }
 
 /* ─────────────── 초기화 ─────────────── */
