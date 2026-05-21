@@ -46,6 +46,12 @@ h1 em{color:var(--p);font-style:normal}
 .sum .mu{color:var(--y)}
 .sum .er{color:var(--r);background:transparent;border:none;padding:0;display:inline}
 
+.sync-mini{font-size:.7rem;padding:.32rem .55rem;border-radius:5px;font-family:var(--mo);font-weight:700;letter-spacing:.02em;border:1px solid var(--br);background:var(--s2);color:var(--mu)}
+.sync-mini.ok{background:rgba(74,240,168,.08);border-color:rgba(74,240,168,.35);color:var(--g)}
+.sync-mini.sync{background:rgba(91,156,246,.08);border-color:rgba(91,156,246,.35);color:var(--b)}
+.sync-mini.er{background:rgba(240,88,88,.08);border-color:rgba(240,88,88,.35);color:var(--r)}
+.sync-mini.off{background:rgba(124,131,153,.08);color:var(--mu)}
+
 /* 카드 — 큰 이미지 + 6 핵심 필드 + 작은 메타 */
 .grid{display:grid;grid-template-columns:1fr;gap:.85rem}
 .card{display:grid;grid-template-columns:380px 1fr;gap:1.1rem;background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:.9rem 1rem;align-items:start;position:relative}
@@ -148,7 +154,7 @@ h1 em{color:var(--p);font-style:normal}
 <h1>📑 사진 + 정보 → <em>PDF · 엑셀</em></h1>
 <p class="hint">
 사진 폴더 + 정보 파일(엑셀/CSV) 업로드 → 자동 매칭 → 우측 6필드 직접 입력/수정 → 📊 엑셀 또는 📑 PDF 저장.<br>
-이미지 클릭 시 원본 크기로 확대돼 라벨 글씨 확인 가능. 작성한 내용은 자동으로 브라우저에 저장(<code>파일명</code> 기준)되어 재방문 시 그대로 복원됩니다.
+이미지 클릭 시 원본 크기로 확대돼 라벨 글씨 확인 가능. 작성 내용은 <strong>그룹 클라우드에 자동 동기</strong>(<code>파일명</code> 기준) — 다른 PC에서도 같은 폴더 업로드 시 그대로 이어 작업 가능. <span style="color:var(--mu)">사진 자체는 동기되지 않으니 각 PC에서 폴더 재선택.</span>
 </p>
 
 <div id="m0" class="msg" style="display:none"></div>
@@ -164,6 +170,7 @@ h1 em{color:var(--p);font-style:normal}
   <button class="btn btn-g" id="btnXlsx" onclick="downloadExcel()" disabled>📊 엑셀 저장</button>
   <button class="btn btn-y" id="btnPdf" onclick="downloadPdf()" disabled>📑 PDF 저장</button>
   <button class="btn btn-r" id="btnReset" onclick="resetAll()" disabled>🗑 초기화</button>
+  <span class="sync-mini off" id="syncMini" title="그룹 클라우드 동기화 상태">⚫ 동기 OFF</span>
   <span class="sum" id="sumLine">사진 0 · 정보 0 · 작성 0/0</span>
 </div>
 
@@ -230,8 +237,15 @@ var infoCols = [];   // 정보 파일의 원본 헤더
 var keyColMap = {};  // {barcode: '바코드', styleCode: '품번', ...} — 정보 파일 → 핵심 필드
 var matchCol = null; // 매칭 키 컬럼 (파일명/바코드 등)
 var items = [];      // 매칭 결과 [{ photo, row, key, fields, meta, status, confirmed }]
-var editsStore = {}; // localStorage 영속 — { [matchKey]: {fields, confirmed} }
+var editsStore = {}; // localStorage 영속 — { [matchKey]: {fields, confirmed, ts} }
 var lbIndex = -1;
+
+/* Firebase 그룹 동기화 */
+var groupId = null;
+var itemsRef = null;       // firebase ref: wms_sync/groups/{gid}/star_extract/items
+var syncEnabled = false;
+var pendingSyncKeys = {};  // {key: true} — push 대기 중
+var syncDebounceT = null;
 
 /* ─────────────── 공용 ─────────────── */
 function setMsg(id, kind, html){ var el=document.getElementById(id); if(!el)return; el.className='msg '+kind; el.innerHTML=html; el.style.display=''; }
@@ -239,7 +253,8 @@ function hideMsg(id){ var el=document.getElementById(id); if(el) el.style.displa
 function escH(s){ if(s===null||s===undefined)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s){ return escH(s).replace(/"/g,'&quot;'); }
 function stripExt(name){ return String(name||'').replace(/\.[^.]+$/,''); }
-function normKey(s){ return String(s==null?'':s).trim().toUpperCase(); }
+/* 정규화 — 로컬 비교 + Firebase 경로 양쪽 호환. 소문자 + fb 금지문자 제거 */
+function normKey(s){ var t=String(s==null?'':s).trim().toLowerCase().replace(/[.#$/\[\]\s]+/g,'_').replace(/__+/g,'_'); return t || '_'; }
 function pad2(n){ n=String(n); return n.length<2?'0'+n:n; }
 function fmtTs(ts){ if(!ts)return''; var d=new Date(ts); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
 function fileTs(){ var d=new Date(); return d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate())+'_'+pad2(d.getHours())+pad2(d.getMinutes()); }
@@ -265,6 +280,110 @@ function wmsHandleAuth(state){
   var returnUrl = '/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search);
   if (!state.user) { setTimeout(function(){ if(!WMSync.isSignedIn()) window.location.replace(returnUrl); }, 3000); return; }
   if (!state.groupId) { alert('이 계정은 작업 그룹에 등록되어 있지 않습니다.\n관리자에게 초대 코드를 요청하세요.'); window.location.replace(returnUrl); return; }
+  /* 인증 OK — 그룹 동기 시작 */
+  groupId = state.groupId;
+  setupCloudSync();
+}
+
+/* ─────────────── Firebase 그룹 동기 ─────────────── */
+function showSyncStatus(kind, text){
+  var el = document.getElementById('syncMini');
+  if (!el) return;
+  el.className = 'sync-mini ' + kind;
+  var icon = kind === 'ok' ? '🟢' : kind === 'sync' ? '🔄' : kind === 'er' ? '⚠️' : '⚫';
+  el.textContent = icon + ' ' + text;
+}
+/* Firebase 키 — normKey 와 동일 (둘이 호환되어야 함) */
+function fbKey(s){ return normKey(s); }
+function setupCloudSync(){
+  if (syncEnabled) return;
+  if (!groupId || typeof firebase === 'undefined') { showSyncStatus('off','동기 OFF'); return; }
+  showSyncStatus('sync','연결 중...');
+  try {
+    var db = firebase.database();
+    itemsRef = db.ref('wms_sync/groups/' + groupId + '/star_extract/items');
+    itemsRef.on('value', function(snap){
+      var data = snap.val() || {};
+      applyRemoteItems(data);
+      var n = Object.keys(data).length;
+      showSyncStatus('ok','동기 완료 · '+n+'건');
+    }, function(err){
+      console.error('[sync] read 실패:', err);
+      showSyncStatus('er','동기 실패');
+    });
+    syncEnabled = true;
+  } catch(e){
+    console.error('[sync] setup 실패:', e);
+    showSyncStatus('er','동기 OFF');
+  }
+}
+/* 클라우드 → 로컬 병합 (per-item ts 비교) */
+function applyRemoteItems(remote){
+  var changed = false;
+  Object.keys(remote).forEach(function(rawKey){
+    var r = remote[rawKey];
+    if (!r || !r.fields) return;
+    /* fb 경로용으로 sanitize 된 키를 다시 원본으로 — 우리는 fbKey 결과를 그대로 키로 사용 */
+    var key = rawKey;
+    var local = editsStore[key];
+    var rts = +r.ts || 0;
+    var lts = (local && +local.ts) || 0;
+    if (rts > lts) {
+      editsStore[key] = {
+        fields: Object.assign({ barcode:'', styleCode:'', name:'', color:'', material:'', origin:'' }, r.fields),
+        confirmed: !!r.confirmed,
+        ts: rts
+      };
+      changed = true;
+    }
+  });
+  if (!changed) return;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(editsStore)); } catch(e){}
+  /* 현재 화면의 items 도 갱신 */
+  items.forEach(function(it){
+    var saved = editsStore[fbKey(it.key)] || editsStore[it.key];
+    if (!saved) return;
+    if (saved.fields) {
+      Object.keys(saved.fields).forEach(function(k){
+        if (saved.fields[k] !== undefined) it.fields[k] = saved.fields[k];
+      });
+    }
+    it.confirmed = !!saved.confirmed;
+  });
+  renderGrid(); updateSum();
+  /* 라이트박스 열려 있으면 그것도 갱신 */
+  if (lbIndex >= 0) renderLightbox();
+}
+/* 단일 항목 푸시 — Firebase per-item write */
+function pushOneToCloud(key){
+  if (!syncEnabled || !itemsRef) return;
+  var entry = editsStore[key];
+  if (!entry) return;
+  var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : '';
+  var path = fbKey(key);
+  try {
+    itemsRef.child(path).set({
+      fields: JSON.parse(JSON.stringify(entry.fields || {})),
+      confirmed: !!entry.confirmed,
+      ts: entry.ts || Date.now(),
+      by: by
+    }).catch(function(err){
+      console.error('[sync] push 실패:', err);
+      showSyncStatus('er','푸시 실패');
+    });
+  } catch(e){ console.error('[sync] push error:', e); }
+}
+/* 디바운싱 푸시 (편집 폭주 방지) */
+function syncSchedule(key){
+  if (!syncEnabled) return;
+  pendingSyncKeys[key] = true;
+  showSyncStatus('sync','동기 중...');
+  if (syncDebounceT) clearTimeout(syncDebounceT);
+  syncDebounceT = setTimeout(function(){
+    Object.keys(pendingSyncKeys).forEach(pushOneToCloud);
+    pendingSyncKeys = {};
+    /* on('value') 콜백이 곧 다시 fire 되며 status 를 'ok'로 갱신 */
+  }, 900);
 }
 
 /* ─────────────── localStorage 영속 ─────────────── */
@@ -272,20 +391,20 @@ function loadEditsStore(){
   try { var raw = localStorage.getItem(STORAGE_KEY); editsStore = raw ? JSON.parse(raw) : {}; }
   catch(e) { editsStore = {}; }
 }
-function saveEditsStore(){
-  var d = {};
-  items.forEach(function(it){
-    if (it.key) {
-      var hasContent = it.confirmed;
-      KEY_FIELDS.forEach(function(f){ if ((it.fields[f.key]||'').trim()) hasContent = true; });
-      if (hasContent) {
-        d[it.key] = { fields: it.fields, confirmed: !!it.confirmed };
-      }
-    }
-  });
-  /* 기존 store 와 병합 — 현재 items 에 없는 항목도 보존 (다른 폴더 작업물) */
-  Object.keys(d).forEach(function(k){ editsStore[k] = d[k]; });
+/* 단일 항목 변경분만 저장 (ts 갱신) — 클라우드 sync 와 보조를 맞춤 */
+function saveOneEdit(item){
+  if (!item || !item.key) return;
+  var hasContent = item.confirmed;
+  KEY_FIELDS.forEach(function(f){ if ((item.fields[f.key]||'').trim()) hasContent = true; });
+  if (!hasContent) return;  /* 완전 비어있으면 저장 X */
+  var key = item.key;
+  editsStore[key] = {
+    fields: Object.assign({}, item.fields),
+    confirmed: !!item.confirmed,
+    ts: Date.now()
+  };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(editsStore)); } catch(e){}
+  syncSchedule(key);
 }
 
 /* ─────────────── 사진 폴더 ─────────────── */
@@ -425,7 +544,7 @@ function buildItem(photo, row, key){
     });
   }
   /* 2) 저장된 수정값이 있으면 덮어씀 (사용자 변경분이 우선) */
-  var saved = editsStore[key];
+  var saved = editsStore[key] || editsStore[fbKey(key)];
   if (saved && saved.fields) {
     Object.keys(saved.fields).forEach(function(k){
       if (saved.fields[k]) fields[k] = saved.fields[k];
@@ -524,10 +643,8 @@ function editField(idx, key, val){
   var it = items[idx];
   if (!it) return;
   it.fields[key] = String(val||'').trim();
-  /* 핵심 필드 입력 즉시 localStorage 저장 + 통계 갱신 */
-  saveEditsStore();
+  saveOneEdit(it);
   updateSum();
-  /* 빈 클래스 토글 — 즉시 시각 갱신은 비용 비싸니 다음 렌더 때 처리 */
 }
 
 /* ─────────────── 라이트박스 ─────────────── */
@@ -598,13 +715,13 @@ function renderLightbox(){
 function editFieldLb(key, val){
   var it = items[lbIndex]; if (!it) return;
   it.fields[key] = String(val||'').trim();
-  saveEditsStore();
+  saveOneEdit(it);
   updateSum();
 }
 function toggleConfirm(){
   var it = items[lbIndex]; if (!it) return;
   it.confirmed = !it.confirmed;
-  saveEditsStore();
+  saveOneEdit(it);
   if (it.confirmed) {
     /* 다음 미완료 항목으로 자동 이동 */
     var nextIdx = -1;
