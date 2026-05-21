@@ -1451,15 +1451,17 @@ function ignoreUnknownBarcode() {
 function handleNormalScan(rowIdx, key) {
   var row = rows[rowIdx];
   row.qtyReceived = (row.qtyReceived || 0) + 1;
-  /* 신규 SKU 의 첫 스캔 → 시각 알림·사운드 + 촬영 로그 기록 (각 체크박스 독립) */
+  /* 신규 SKU 의 첫 스캔 → 시각 알림 + 음성 + 촬영 로그.
+     '사진 촬영해 주세요' 음성은 photoReqEnabled 가 ON 일 때만 (그게 촬영 워크플로우의 일부니까).
+     초과/박스완료/동기화완료 같은 일반 사운드는 soundEnabled 만으로 독립 동작. */
   var firstScanOfNewSku = row.isNew && row.qtyReceived === 1;
   if (firstScanOfNewSku) {
     if (photoReqEnabled) {
       showPhotoReqAlert();
       /* 알림이 뜬 순간 = 사용자가 촬영을 시작하는 순간 → 시간 기록 */
       recordPhotoEvent(key, row);
+      if (soundEnabled) playPhotoAlertSound();
     }
-    if (soundEnabled) playPhotoAlertSound();
   } else {
     hidePhotoReqAlert();
   }
@@ -2534,11 +2536,17 @@ function playSyncDoneSound(){
   playBeep(1300, 0.14, 0.14, 0.8);
   setTimeout(function(){ speakKo('동기화 완료'); }, 300);
 }
+/* 토글 켤 때 확인용 테스트 — '사진 촬영해 주세요'와 무관하게 단순 비프 + 짧은 음성 */
+function playSoundTest(){
+  playBeep(880,  0.12, 0,    0.75);
+  playBeep(1175, 0.13, 0.13, 0.8);
+  setTimeout(function(){ speakKo('소리 알림 켜짐'); }, 280);
+}
 function onSoundToggle(checked){
   soundEnabled = !!checked;
   try { localStorage.setItem('star_coupang_sound', checked ? '1' : '0'); } catch(e){}
   /* 켤 때 즉시 테스트 — 사용자 제스처와 같은 이벤트라 오디오 권한 확보됨 */
-  if (checked) playPhotoAlertSound();
+  if (checked) playSoundTest();
 }
 /* 페이지 로드 시 저장된 소리 체크박스 상태 복원 */
 (function initSoundState(){
