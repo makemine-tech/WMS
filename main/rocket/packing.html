@@ -1418,6 +1418,24 @@ async function analyzePdf(file, category) {
     }
   }
 
+  // QR-only 등 센터 텍스트 미검출 페이지 — 같은 파일 내 직전 페이지의 센터를 상속.
+  // 이렇게 하면 정렬이 그 센터 그룹으로 따라가고, centerInherited 표식으로
+  // 인쇄 시 우측 하단에 센터명 스탬프를 그려 식별 가능하게 만듦.
+  let lastCenter = '', lastCenterNorm = '';
+  for (const p of pages) {
+    if (p.center) {
+      lastCenter = p.center;
+      lastCenterNorm = p.centerNorm;
+      p.centerInherited = false;
+    } else if (lastCenter) {
+      p.center = lastCenter;
+      p.centerNorm = lastCenterNorm;
+      p.centerInherited = true;
+    } else {
+      p.centerInherited = false;
+    }
+  }
+
   return { file, name: file.name, doc, category, pages, allText, numPages: doc.numPages };
 }
 
@@ -1575,13 +1593,13 @@ function collectInvoiceTasks() {
   for (const it of pdfStore.booking) {
     for (const i of pickPagesForCategory(it)) {
       const pg = it.pages[i-1];
-      tasks.push({ item: it, pageIdx: i, center: pg.center, centerNorm: pg.centerNorm, kind: 'booking' });
+      tasks.push({ item: it, pageIdx: i, center: pg.center, centerNorm: pg.centerNorm, centerInherited: !!pg.centerInherited, kind: 'booking' });
     }
   }
   for (const it of pdfStore.supplier) {
     for (const i of pickPagesForCategory(it)) {
       const pg = it.pages[i-1];
-      tasks.push({ item: it, pageIdx: i, center: pg.center, centerNorm: pg.centerNorm, kind: 'supplier' });
+      tasks.push({ item: it, pageIdx: i, center: pg.center, centerNorm: pg.centerNorm, centerInherited: !!pg.centerInherited, kind: 'supplier' });
     }
   }
   // 센터별 정렬 (한국어 가나다, 빈 센터는 뒤로)
@@ -1596,7 +1614,59 @@ function collectInvoiceTasks() {
   return tasks;
 }
 
-/* 병합된 PDF Blob URL 생성 (벡터 보존) */
+/* 센터명 스탬프 PNG 생성 — 캔버스로 한글 직접 렌더 (pdf-lib 폰트 임베드 불필요)
+   같은 센터명은 캐싱해 중복 생성 방지 */
+async function makeCenterStampPng(centerName) {
+  const SCALE = 2;
+  const W = 200, H = 54;
+  const canvas = document.createElement('canvas');
+  canvas.width = W * SCALE; canvas.height = H * SCALE;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(SCALE, SCALE);
+
+  // 둥근 사각형 배경
+  const r = 8;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(W - r, 0);
+  ctx.quadraticCurveTo(W, 0, W, r);
+  ctx.lineTo(W, H - r);
+  ctx.quadraticCurveTo(W, H, W - r, H);
+  ctx.lineTo(r, H);
+  ctx.quadraticCurveTo(0, H, 0, H - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 라벨
+  ctx.fillStyle = '#666';
+  ctx.font = '600 11px "Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillText('📍 해당 센터', 10, 6);
+
+  // 센터명 (큰 글씨)
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 22px "Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillText(centerName, W/2, H/2 + 8);
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (!blob) { reject(new Error('canvas.toBlob 실패')); return; }
+      blob.arrayBuffer().then(resolve).catch(reject);
+    }, 'image/png');
+  });
+}
+
+/* 병합된 PDF Blob URL 생성 (벡터 보존). 센터 텍스트 없는 페이지(QR 등)는
+   우측 하단에 센터명 스탬프를 PNG 오버레이로 추가. */
 async function buildInvoicePdfBlobUrl() {
   if (!window.PDFLib) {
     throw new Error('pdf-lib 라이브러리 로드 실패 — 인터넷 연결 확인 필요');
@@ -1608,6 +1678,22 @@ async function buildInvoicePdfBlobUrl() {
 
   // 같은 파일에서 여러 페이지를 가져올 때 PDFDocument 캐시
   const docCache = new Map();
+  // 같은 센터명의 스탬프 이미지 캐시 (PDFImage 객체)
+  const stampCache = new Map();
+  async function getStampImage(centerName) {
+    if (stampCache.has(centerName)) return stampCache.get(centerName);
+    try {
+      const bytes = await makeCenterStampPng(centerName);
+      const img = await merged.embedPng(bytes);
+      stampCache.set(centerName, img);
+      return img;
+    } catch (e) {
+      console.warn('[stamp]', centerName, '생성 실패:', e);
+      stampCache.set(centerName, null);
+      return null;
+    }
+  }
+
   for (const t of tasks) {
     if (!docCache.has(t.item.name)) {
       const bytes = await t.item.file.arrayBuffer();
@@ -1616,6 +1702,22 @@ async function buildInvoicePdfBlobUrl() {
     const src = docCache.get(t.item.name);
     const [page] = await merged.copyPages(src, [t.pageIdx - 1]);
     merged.addPage(page);
+
+    // 센터명 상속된 페이지(QR 등)에 한해 우측 하단 스탬프
+    if (t.centerInherited && t.center) {
+      const stamp = await getStampImage(t.center);
+      if (stamp) {
+        const { width, height } = page.getSize();
+        const stampW = 110;  // PDF 포인트 단위 (1pt ≈ 0.353mm)
+        const stampH = stampW * (stamp.height / stamp.width);
+        page.drawImage(stamp, {
+          x: width - stampW - 14,
+          y: 14,
+          width: stampW,
+          height: stampH,
+        });
+      }
+    }
   }
 
   const bytes = await merged.save();
