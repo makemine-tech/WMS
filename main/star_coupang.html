@@ -432,6 +432,7 @@ h1 em{color:var(--g);font-style:normal}
         <input type="checkbox" id="soundChk" onchange="onSoundToggle(this.checked)">
         <span>🔊 소리 알림</span>
       </label>
+      <span id="photoLogCnt" style="font-size:.7rem;color:var(--p);font-family:var(--mo);font-weight:700;padding:.3rem .55rem;background:rgba(192,132,252,.08);border:1px solid rgba(192,132,252,.3);border-radius:5px">📷 촬영 로그 0건</span>
       <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
     </div>
   </div>
@@ -531,6 +532,7 @@ h1 em{color:var(--g);font-style:normal}
   <div class="brow" style="margin-top:1rem">
     <button class="btn btn-g" onclick="downloadAll()" id="downloadAllBtn" title="모든 행 포함 (입고된 것 + 미입고) · 원본 양식 유지 + A열 박스ID + 수정 셀 표시">📥 전체 엑셀 다운로드</button>
     <button class="btn btn-y" onclick="downloadDone()" id="downloadDoneBtn" title="박스 × SKU 단위로 펼침 — 같은 SKU가 박스 2개에 분산되면 2행으로">📥 완료건 엑셀 다운로드</button>
+    <button class="btn" id="btnPhotoSort" onclick="openPhotoSortModal()" style="display:none;background:var(--p);color:#0f1117;font-weight:800" title="휴대폰으로 찍은 신규 SKU 사진들을 촬영 시간순으로 정렬 → 로그와 매칭 → 바코드명으로 일괄 변경 ZIP 다운로드">📷 신규 사진 일괄 정리</button>
     <button class="btn btn-s" onclick="goTo(0)">← 새 파일 업로드</button>
     <button class="btn btn-r" onclick="finishWorkAndClear()" id="finishBtn" title="모든 작업이 끝났을 때 — 로컬과 클라우드의 세션을 모두 정리. 다음 작업이 깨끗하게 시작됩니다." style="margin-left:auto">🏁 작업 종료 + 세션 정리</button>
     <button class="btn btn-r" onclick="clearSession()">🗑 세션 삭제</button>
@@ -605,12 +607,44 @@ h1 em{color:var(--g);font-style:normal}
   </div>
 </div>
 
+<!-- 신규 SKU 촬영 사진 일괄 정리 모달 -->
+<div class="modal-bg" id="photoSortModal" onclick="if(event.target===this)closePhotoSortModal()">
+  <div class="modal" style="max-width:780px">
+    <div class="modal-h">📷 신규 SKU 촬영 사진 일괄 정리</div>
+    <div class="modal-b">
+      <div style="font-size:.82rem;color:var(--mu);line-height:1.65;margin-bottom:.85rem;padding:.6rem .8rem;background:rgba(192,132,252,.06);border:1px solid rgba(192,132,252,.25);border-radius:6px">
+        💡 <strong style="color:var(--p)">원리</strong> &mdash; 촬영 알림이 뜬 <strong>시간 순서</strong>가 휴대폰 촬영 순서와 일치합니다.
+        업로드한 사진들을 <strong>촬영 시간순(파일 mtime)</strong>으로 정렬한 뒤, 촬영 로그의 N번째 바코드와 N번째 사진을 짝지어 파일명을 변경합니다.
+        <strong style="color:var(--g)">스캐너로 들어온 바코드는 100% 정확</strong>하므로 OCR 환각이 원천 차단됩니다.
+      </div>
+      <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.85rem;flex-wrap:wrap">
+        <span style="font-size:.78rem;color:var(--g);font-weight:700">📊 촬영 로그: <span id="psLogCnt" style="font-family:var(--mo)">0</span>건</span>
+        <button class="btn btn-s" onclick="downloadPhotoLogCsv()" style="font-size:.72rem;padding:.32rem .65rem">💾 로그 CSV (백업)</button>
+      </div>
+      <div style="margin-bottom:.85rem">
+        <span class="btn btn-b" style="position:relative;overflow:hidden;display:inline-block;cursor:pointer;font-size:.78rem;padding:.42rem .85rem">
+          📁 사진 폴더/파일 선택
+          <input type="file" accept="image/*" multiple onchange="onPhotoSortFiles(this.files)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
+        </span>
+        <span id="psFileMsg" style="font-size:.74rem;color:var(--mu);margin-left:.55rem;font-family:var(--mo)"></span>
+      </div>
+      <div id="psPreview"></div>
+      <div style="margin-top:1rem;display:flex;gap:.4rem;flex-wrap:wrap">
+        <button class="btn btn-g" id="psZipBtn" onclick="generatePhotoSortZip()" disabled>📦 이름변경 ZIP 다운로드</button>
+        <button class="btn btn-s" onclick="closePhotoSortModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="unified-ftr">
   © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
 </div>
 
 <!-- SheetJS -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- 신규 SKU 사진 일괄 정리(zip) 용 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!-- JsBarcode (CODE128 라벨 생성) -->
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <!-- Firebase (PC 간 자동 동기화) -->
@@ -858,6 +892,11 @@ var startedEmpty = false;          // 자료 없이 시작 모드 (모든 바코
 var photoReqEnabled = false;       // 신규 SKU 첫 스캔 시 사진촬영 요망 알림 (체크박스)
 var soundEnabled = false;          // 신규 SKU 첫 스캔 시 비프 + TTS 음성 출력
 var _audioCtx = null;              // Web Audio Context 재사용
+/* 촬영 로그 — 신규 SKU 알림이 뜬 순간의 타임스탬프 + 바코드.
+   휴대폰 촬영은 알림 직후에 일어나고, 이 순서가 사진 정렬 순서와 일치하므로
+   나중에 사진을 시간순 정렬 → 인덱스로 짝지어 바코드 파일명으로 일괄 변경 가능. */
+var photoLog = [];                 // [{ts, barcode, scanNo, box, styleCode, name}]
+var psPhotos = [];                 // 일괄 정리 모달의 업로드된 사진 (시간순 정렬)
 /* 포커스 이동 특수 바코드 — 작업장에 인쇄해 두고 스캔하면 input 포커스 이동 */
 var FOCUS_BOX_CODE  = '#BOX#';
 var FOCUS_PROD_CODE = '#PROD#';
@@ -1167,7 +1206,8 @@ function buildSessionData() {
     }),
     boxes: boxes || [],
     currentBox: currentBox || null,
-    lastScans: (lastScans || []).slice(-200)
+    lastScans: (lastScans || []).slice(-200),
+    photoLog: photoLog || []
   };
   /* 안전망 — boxes/lastScans 내부의 잔여 undefined까지 제거 */
   return JSON.parse(JSON.stringify(data));
@@ -1232,6 +1272,8 @@ function restoreSession() {
   boxes = data.boxes || [];
   currentBox = data.currentBox || null;
   lastScans = data.lastScans || [];
+  photoLog = objToArray(data.photoLog) || [];
+  updatePhotoLogUI();
   /* boxes를 source of truth로 row.qtyReceived 재계산 — 다른 작업장 데이터 합산 후에도 정합성 보장 */
   recalcRowQtys();
   document.getElementById('restoreBanner').style.display = 'none';
@@ -1409,11 +1451,15 @@ function ignoreUnknownBarcode() {
 function handleNormalScan(rowIdx, key) {
   var row = rows[rowIdx];
   row.qtyReceived = (row.qtyReceived || 0) + 1;
-  /* 신규 SKU 의 첫 스캔 → 시각 알림(체크박스)·사운드(체크박스) 각각 트리거 */
+  /* 신규 SKU 의 첫 스캔 → 시각 알림·사운드 + 촬영 로그 기록 (각 체크박스 독립) */
   var firstScanOfNewSku = row.isNew && row.qtyReceived === 1;
   if (firstScanOfNewSku) {
-    if (photoReqEnabled) showPhotoReqAlert();
-    if (soundEnabled)    playPhotoAlertSound();
+    if (photoReqEnabled) {
+      showPhotoReqAlert();
+      /* 알림이 뜬 순간 = 사용자가 촬영을 시작하는 순간 → 시간 기록 */
+      recordPhotoEvent(key, row);
+    }
+    if (soundEnabled) playPhotoAlertSound();
   } else {
     hidePhotoReqAlert();
   }
@@ -2345,6 +2391,8 @@ function startEmptySession(){
   lastScans = [];
   pendingUnknownBarcode = null;
   pendingUnknownRaw = null;
+  photoLog = [];
+  updatePhotoLogUI();
   startedEmpty = true;
 
   /* 기본 헤더 — downloadFallback 가 사용 */
@@ -2503,6 +2551,240 @@ function onSoundToggle(checked){
     }, 100);
   } catch(e){}
 })();
+
+/* ─────────────── 신규 SKU 촬영 로그 + 사진 일괄 정리 ─────────────── */
+/* 알림이 뜬 순간 기록. 휴대폰 촬영은 순차적으로 일어나므로, 나중에 사진을
+   촬영시간(mtime/EXIF) 으로 정렬 → photoLog 인덱스로 짝 → 바코드 파일명으로 변경. */
+function recordPhotoEvent(barcode, row){
+  var entry = {
+    ts: Date.now(),
+    barcode: String(barcode == null ? '' : barcode),
+    scanNo: photoLog.length + 1,
+    box: currentBox ? (currentBox.id || '') : '',
+    styleCode: (row && row.vals && row.vals[COL.CODE]) ? String(row.vals[COL.CODE]) : '',
+    name: (row && row.vals && row.vals[COL.NAME]) ? String(row.vals[COL.NAME]) : ''
+  };
+  photoLog.push(entry);
+  updatePhotoLogUI();
+  saveSession();
+}
+function updatePhotoLogUI(){
+  var cnt = document.getElementById('photoLogCnt');
+  if (cnt) cnt.textContent = '📷 촬영 로그 ' + photoLog.length + '건';
+  var btn = document.getElementById('btnPhotoSort');
+  if (btn) btn.style.display = photoLog.length > 0 ? '' : 'none';
+}
+
+/* 모달 열기/닫기 */
+function openPhotoSortModal(){
+  if (!photoLog.length) {
+    setMsg('m1','warn','⚠️ 촬영 로그가 없습니다. 「📸 신규 SKU 촬영요망」 ON 상태에서 작업해야 자동 기록됩니다.');
+    return;
+  }
+  document.getElementById('photoSortModal').classList.add('open');
+  var lc = document.getElementById('psLogCnt'); if (lc) lc.textContent = photoLog.length;
+  renderPhotoSortPreview();
+}
+function closePhotoSortModal(){
+  document.getElementById('photoSortModal').classList.remove('open');
+}
+
+/* 사진 파일 선택 → 촬영 시간순 정렬 */
+function onPhotoSortFiles(fileList){
+  psPhotos = [];
+  if (!fileList || !fileList.length) { renderPhotoSortPreview(); return; }
+  for (var i=0; i<fileList.length; i++) {
+    var f = fileList[i];
+    var isImg = /^image\//i.test(f.type) || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(f.name);
+    if (!isImg) continue;
+    var m = f.name.match(/\.([^.]+)$/);
+    psPhotos.push({
+      file: f,
+      name: f.name,
+      ext: m ? m[1].toLowerCase() : 'jpg',
+      mtime: f.lastModified || 0
+    });
+  }
+  /* mtime 오름차순 — 촬영 시간순. EXIF DateTimeOriginal 이 더 정확하지만
+     라이브러리 의존 없이 mtime 만으로도 대부분 정확함 (휴대폰 → PC 전송 시 보존). */
+  psPhotos.sort(function(a,b){ return a.mtime - b.mtime; });
+  var msg = document.getElementById('psFileMsg');
+  if (msg) msg.textContent = psPhotos.length + '장 (촬영 시간순 정렬됨)';
+  var btn = document.getElementById('psZipBtn');
+  if (btn) btn.disabled = psPhotos.length === 0;
+  renderPhotoSortPreview();
+}
+
+/* 매칭 미리보기 테이블 */
+function renderPhotoSortPreview(){
+  var el = document.getElementById('psPreview');
+  if (!el) return;
+  if (!psPhotos.length && !photoLog.length) { el.innerHTML = ''; return; }
+  var n = Math.max(psPhotos.length, photoLog.length);
+  var fmtTs = function(ts){
+    var d = new Date(ts);
+    return d.getMonth()+1 + '/' + d.getDate() + ' ' +
+      String(d.getHours()).padStart(2,'0') + ':' +
+      String(d.getMinutes()).padStart(2,'0') + ':' +
+      String(d.getSeconds()).padStart(2,'0');
+  };
+  var rows = '';
+  for (var i=0; i<n; i++) {
+    var ph = psPhotos[i];
+    var lg = photoLog[i];
+    var ext = ph ? ph.ext : 'jpg';
+    var newName = lg ? buildPhotoSortName(lg, ext) : '—';
+    rows += '<tr style="border-bottom:1px solid var(--br)">'+
+      '<td style="padding:.3rem .4rem;color:var(--mu);font-family:var(--mo)">'+(i+1)+'</td>'+
+      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem">'+
+        (ph ? fmtTs(ph.mtime) : '<span style="color:var(--r)">사진 없음</span>')+'</td>'+
+      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem;color:var(--mu);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(ph?escH(ph.name):'')+'">'+
+        (ph ? escH(ph.name) : '—')+'</td>'+
+      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem">'+
+        (lg ? fmtTs(lg.ts) : '<span style="color:var(--r)">로그 없음</span>')+'</td>'+
+      '<td style="padding:.3rem .4rem;font-family:var(--mo);color:var(--y);font-weight:700">'+
+        (lg ? escH(lg.barcode) : '—')+'</td>'+
+      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem;color:var(--g)">'+
+        (ph && lg ? escH(newName) : '—')+'</td>'+
+    '</tr>';
+  }
+  var mismatch = psPhotos.length !== photoLog.length;
+  el.innerHTML =
+    (mismatch ? '<div style="background:rgba(240,196,74,.1);border:1px solid var(--y);color:var(--y);padding:.42rem .7rem;border-radius:5px;font-size:.74rem;margin-bottom:.55rem">⚠️ 사진 '+psPhotos.length+'장 ≠ 로그 '+photoLog.length+'건 — 갯수 불일치. 짝 못 찾은 항목은 unmatched 폴더로 분리됩니다.</div>' : '')+
+    '<div style="max-height:340px;overflow:auto;border:1px solid var(--br);border-radius:6px">'+
+    '<table style="width:100%;font-size:.74rem;border-collapse:collapse">'+
+    '<thead style="position:sticky;top:0;background:var(--s2);z-index:1"><tr>'+
+    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">#</th>'+
+    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">사진 시간</th>'+
+    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">원본 파일명</th>'+
+    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">로그 시간</th>'+
+    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">바코드</th>'+
+    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">새 파일명</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function buildPhotoSortName(lg, ext){
+  var bc = String(lg.barcode || 'NOBC').replace(/[^A-Za-z0-9_\-]/g,'');
+  return bc + '.' + (ext || 'jpg');
+}
+
+/* ZIP 생성 */
+function generatePhotoSortZip(){
+  if (typeof JSZip === 'undefined') { setMsg('m1','er','❌ JSZip 라이브러리 미로드 — 새로고침 후 재시도'); return; }
+  if (!psPhotos.length) { setMsg('m1','warn','⚠️ 사진을 먼저 선택하세요'); return; }
+  var btn = document.getElementById('psZipBtn');
+  btn.disabled = true;
+  var prev = btn.textContent;
+  btn.textContent = '⏳ 압축 중...';
+
+  var zip = new JSZip();
+  var renamed = zip.folder('renamed');
+  var unmatched = zip.folder('unmatched');
+  var nameCount = {};
+  var manifestRows = [['seq','photo_time','photo_orig','log_time','barcode','box','style_code','new_name','status']];
+
+  var promises = [];
+  for (var i=0; i<psPhotos.length; i++) {
+    (function(idx){
+      var ph = psPhotos[idx];
+      var lg = photoLog[idx];
+      var status, newName, target;
+      if (lg) {
+        var bc = String(lg.barcode || 'NOBC').replace(/[^A-Za-z0-9_\-]/g,'');
+        newName = bc + '.' + ph.ext;
+        /* 같은 바코드가 여러 번 등장 시 _01, _02 ... 부여 */
+        var c = (nameCount[bc] = (nameCount[bc]||0) + 1);
+        if (c > 1) newName = bc + '_' + String(c).padStart(2,'0') + '.' + ph.ext;
+        target = renamed; status = 'matched';
+      } else {
+        newName = ph.name;
+        target = unmatched; status = 'unmatched_photo';
+      }
+      promises.push(ph.file.arrayBuffer().then(function(buf){
+        target.file(newName, buf);
+      }));
+      manifestRows.push([
+        idx+1,
+        new Date(ph.mtime).toLocaleString('ko-KR'),
+        ph.name,
+        lg ? new Date(lg.ts).toLocaleString('ko-KR') : '',
+        lg ? lg.barcode : '',
+        lg ? (lg.box||'') : '',
+        lg ? (lg.styleCode||'') : '',
+        newName,
+        status
+      ]);
+    })(i);
+  }
+  /* 로그가 더 많은 경우 — 매칭 안 된 로그 행 표시 */
+  for (var j=psPhotos.length; j<photoLog.length; j++) {
+    var lg = photoLog[j];
+    manifestRows.push([
+      j+1, '', '', new Date(lg.ts).toLocaleString('ko-KR'),
+      lg.barcode, lg.box||'', lg.styleCode||'', '', 'unmatched_log'
+    ]);
+  }
+
+  var csv = manifestRows.map(function(r){
+    return r.map(function(v){
+      var s = String(v == null ? '' : v);
+      return /[,"\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+    }).join(',');
+  }).join('\r\n');
+  zip.file('manifest.csv', '﻿' + csv);
+
+  zip.file('README.txt',
+    '신규 SKU 촬영 사진 일괄 정리 결과\n' +
+    '생성: ' + new Date().toLocaleString('ko-KR') + '\n\n' +
+    'renamed/    바코드명으로 변경된 사진 (시간순 매칭)\n' +
+    'unmatched/  로그와 짝을 못 찾은 여분 사진\n' +
+    'manifest.csv 전체 매칭 결과 (UTF-8 BOM)\n\n' +
+    '원리 — 촬영 알림이 뜬 시간 순서 = 휴대폰 촬영 순서.\n' +
+    '         사진을 mtime(촬영시간) 오름차순으로 정렬하면 로그와 1:1 매칭.\n');
+
+  Promise.all(promises).then(function(){
+    return zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } });
+  }).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    var d = new Date();
+    var ts = d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'_'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0');
+    a.href = url;
+    a.download = '신규SKU사진_'+ts+'.zip';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 500);
+    btn.disabled = false;
+    btn.textContent = prev;
+    setMsg('m1','ok','✅ ZIP 다운로드 완료 — renamed '+Math.min(psPhotos.length, photoLog.length)+'장 · 사진/로그 짝 없는 '+
+      (Math.abs(psPhotos.length - photoLog.length))+'건');
+  }).catch(function(err){
+    btn.disabled = false; btn.textContent = prev;
+    setMsg('m1','er','❌ ZIP 생성 실패: '+(err && err.message || err));
+  });
+}
+
+/* 로그 자체를 CSV로 다운로드 (백업/검토용) */
+function downloadPhotoLogCsv(){
+  if (!photoLog.length) { setMsg('m1','warn','⚠️ 촬영 로그가 비어있습니다'); return; }
+  var rows = [['seq','시간','바코드','박스','품번','품명']];
+  photoLog.forEach(function(e, i){
+    rows.push([i+1, new Date(e.ts).toLocaleString('ko-KR'), e.barcode, e.box||'', e.styleCode||'', e.name||'']);
+  });
+  var csv = rows.map(function(r){
+    return r.map(function(v){
+      var s = String(v == null ? '' : v);
+      return /[,"\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+    }).join(',');
+  }).join('\r\n');
+  var blob = new Blob(['﻿' + csv], {type:'text/csv;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  var d = new Date();
+  var ts = d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'_'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0');
+  a.href = url; a.download = '촬영로그_'+ts+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 500);
+}
 
 function loadSampleNotice() {
   setMsg('m0','inf','💡 D열 바코드 또는 E열 대비바코드로 매칭됩니다. 사이즈(L)·원산지(N)는 작업 중 인라인 수정 가능. 다운로드 시 R(직영수량) = R + 실입고로 갱신, 수정된 사이즈/원산지 반영.');
