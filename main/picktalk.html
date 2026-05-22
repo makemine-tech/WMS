@@ -466,6 +466,7 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
   <div class="sheet-h" style="margin-top:.4rem">상태 변경</div>
   <div class="sheet-chips" id="actionCompletes"></div>
   <div class="sheet-divider"></div>
+  <button class="sheet-btn" id="actionEdit" onclick="actionEditLog()" style="display:none;color:var(--b)">✏️ 내용 편집</button>
   <button class="sheet-btn" id="actionRestore" onclick="actionRestoreLog()" style="display:none;color:var(--g)">↩️ 보관 해제 (목록 복구)</button>
   <button class="sheet-btn danger" id="actionDelete" onclick="actionDeleteLog()" style="display:none">✕ 항목 삭제 (복구 불가)</button>
   <button class="sheet-btn" onclick="closeActions()">취소</button>
@@ -911,7 +912,10 @@ function renderFeedCard(lg){
   var meta=[];
   if (lg.dateInt) meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+'</span>');
   if (lg.time) meta.push('<span class="m-pill m-time">🕐 '+escH(lg.time)+'</span>');
-  if (lg.vendorName) meta.push('<span class="m-pill m-vendor">🏢 '+escH(lg.vendorName)+'</span>');
+  var vendorTxt = '';
+  if (Array.isArray(lg.vendorNames) && lg.vendorNames.length) vendorTxt = lg.vendorNames.join(', ');
+  else if (lg.vendorName) vendorTxt = lg.vendorName;
+  if (vendorTxt) meta.push('<span class="m-pill m-vendor">🏢 '+escH(vendorTxt)+'</span>');
   if (lg.statusName){
     var sc=Object.values(settings.statuses||{}).find(function(s){return s.name===lg.statusName;});
     var stColor=(sc&&sc.color)||'#c084fc';
@@ -1084,12 +1088,21 @@ function openActions(logKey){
   var me=getUserId();
   var canDelete=(lg.by===me)||isAdmin;
   document.getElementById('actionDelete').style.display=canDelete?'':'none';
+  /* 편집 — 본인 또는 admin (보관된 항목 제외) */
+  var editBtn=document.getElementById('actionEdit');
+  if (editBtn) editBtn.style.display = (!lg.archived && (lg.by===me || isAdmin)) ? '' : 'none';
   /* 보관 해제 (복구) — 보관된 항목일 때만, 본인 또는 admin */
   var restoreBtn=document.getElementById('actionRestore');
   if (restoreBtn) restoreBtn.style.display = (lg.archived && (lg.by===me || isAdmin)) ? '' : 'none';
   /* 열기 */
   document.getElementById('actionBackdrop').classList.add('open');
   document.getElementById('actionSheet').classList.add('open');
+}
+function actionEditLog(){
+  if (!actionTargetKey) return;
+  var key = actionTargetKey;
+  closeActions();
+  openEditLog(key);
 }
 function actionRestoreLog(){
   if (!actionTargetKey || !logsRef) return;
@@ -1251,22 +1264,82 @@ function openRegister(){
   renderRegStep();
 }
 function closeRegister(){
-  if (regState && (regState.catId || Object.keys(regState.form||{}).length || regPhotos.length)){
+  if (regState && !regState.editKey && (regState.catId || Object.keys(regState.form||{}).length || regPhotos.length)){
     if (!confirm('작성 중인 내용이 사라집니다. 닫을까요?')) return;
   }
   document.getElementById('regModal').classList.remove('open');
   regState=null;
   regPhotos=[];
 }
+
+/* 편집 모드 — 등록 모달 재사용, 카테고리 잠금 */
+function openEditLog(logKey){
+  var lg=allLogs.find(function(x){ return x._key===logKey; });
+  if (!lg){ toast('항목을 찾을 수 없습니다','er'); return; }
+  if (!settings.categories[lg.categoryId]){
+    toast('카테고리가 삭제됨 — 편집 불가','warn');
+    return;
+  }
+  regState={ step:2, catId:lg.categoryId, editKey:logKey, form:{} };
+  regPhotos = Array.isArray(lg.photos) ? lg.photos.slice() : [];
+  document.getElementById('regModal').classList.add('open');
+  document.getElementById('regTitle').textContent='✏️ 작업 편집';
+  renderRegStep();
+  /* 폼 DOM 그려진 후 값 채움 */
+  setTimeout(function(){ fillEditForm(lg); }, 30);
+}
+function fillEditForm(lg){
+  var el;
+  if ((el=document.getElementById('fldTitle'))) el.value = lg.title || '';
+  if ((el=document.getElementById('fldDate')) && lg.dateInt) el.value = ymdIntToDateStr(lg.dateInt);
+  if ((el=document.getElementById('fldTime')) && lg.time) el.value = lg.time;
+  if ((el=document.getElementById('fldNote'))) el.value = lg.note || '';
+  /* 업체 (다중) */
+  var vp=document.getElementById('fldVendor');
+  if (vp){
+    var cur = Array.isArray(lg.vendorNames) ? lg.vendorNames : (lg.vendorName ? [lg.vendorName] : []);
+    vp.querySelectorAll('.fld-chip').forEach(function(b){ b.classList.remove('on'); });
+    if (cur.length){
+      cur.forEach(function(vn){
+        var sel = '[data-vname="'+(vn+'').replace(/"/g,'\\"')+'"]';
+        var btn = vp.querySelector(sel);
+        if (btn) btn.classList.add('on');
+      });
+    } else {
+      var noneBtn = vp.querySelector('.fld-chip.none');
+      if (noneBtn) noneBtn.classList.add('on');
+    }
+  }
+  /* 상태 (단일) */
+  var sp=document.getElementById('fldStatus');
+  if (sp && lg.statusName){
+    sp.querySelectorAll('.fld-chip').forEach(function(b){ b.classList.remove('on'); });
+    var sel='[data-sname="'+(lg.statusName+'').replace(/"/g,'\\"')+'"]';
+    var btn=sp.querySelector(sel);
+    if (btn) btn.classList.add('on'); else { var none=sp.querySelector('.fld-chip.none'); if(none) none.classList.add('on'); }
+  }
+  /* 작업완료 (단일) */
+  var cp=document.getElementById('fldComplete');
+  if (cp && lg.completeName){
+    cp.querySelectorAll('.fld-chip').forEach(function(b){ b.classList.remove('on'); });
+    var sel2='[data-cname="'+(lg.completeName+'').replace(/"/g,'\\"')+'"]';
+    var btn2=cp.querySelector(sel2);
+    if (btn2) btn2.classList.add('on'); else { var none2=cp.querySelector('.fld-chip.none'); if(none2) none2.classList.add('on'); }
+  }
+  /* 사진 */
+  renderPhotoRow();
+  regOnChange();
+}
 function renderRegStep(){
   var s=regState.step;
-  document.getElementById('regS1').style.display=s===1?'':'none';
+  var isEdit = !!regState.editKey;
+  document.getElementById('regS1').style.display=(s===1 && !isEdit)?'':'none';
   document.getElementById('regS2').style.display=s===2?'':'none';
-  document.getElementById('regStepBadge').textContent=s+'/2';
-  document.getElementById('regBack').style.display=s>1?'':'none';
-  document.getElementById('regNext').style.display=s<2?'':'none';
+  document.getElementById('regStepBadge').textContent = isEdit ? '편집' : (s+'/2');
+  document.getElementById('regBack').style.display=(s>1 && !isEdit)?'':'none';
+  document.getElementById('regNext').style.display=(s<2 && !isEdit)?'':'none';
   document.getElementById('regSubmit').style.display=s===2?'':'none';
-  if (s===1){
+  if (s===1 && !isEdit){
     renderCatGrid();
     document.getElementById('regNext').disabled=!regState.catId;
   } else {
@@ -1323,10 +1396,10 @@ function renderRegForm(){
   if (f.hasVendor){
     var vendors=mapToArr(settings.vendors,'name');
     if (vendors.length){
-      html+='<div class="fld"><div class="fld-l">업체 / 거래처</div>'+
+      html+='<div class="fld"><div class="fld-l">업체 / 거래처 <span style="color:var(--mu);font-weight:400">(여러 개 가능)</span></div>'+
         '<div class="fld-chips" id="fldVendor">'+
-          '<button type="button" class="fld-chip none on" data-vid="">(선택 안 함)</button>'+
-          vendors.map(function(v){ return '<button type="button" class="fld-chip" data-vid="'+v._id+'" data-vname="'+escAttr(v.name)+'" onclick="pickChip(this,\'vendor\')">'+escH(v.name)+'</button>'; }).join('')+
+          '<button type="button" class="fld-chip none on" data-vid="" onclick="clearVendors()">(선택 안 함)</button>'+
+          vendors.map(function(v){ return '<button type="button" class="fld-chip" data-vid="'+v._id+'" data-vname="'+escAttr(v.name)+'" onclick="toggleVendorChip(this)">'+escH(v.name)+'</button>'; }).join('')+
         '</div>'+
       '</div>';
     } else {
@@ -1381,6 +1454,21 @@ function pickChip(btn, kind){
   var parent=btn.parentElement;
   Array.from(parent.querySelectorAll('.fld-chip')).forEach(function(b){ b.classList.remove('on'); });
   btn.classList.add('on');
+}
+/* 업체 칩 — 다중 선택 토글 */
+function toggleVendorChip(btn){
+  var parent=btn.parentElement;
+  btn.classList.toggle('on');
+  var anySelected = parent.querySelectorAll('.fld-chip:not(.none).on').length > 0;
+  var noneBtn = parent.querySelector('.fld-chip.none');
+  if (noneBtn) noneBtn.classList.toggle('on', !anySelected);
+}
+function clearVendors(){
+  var parent=document.getElementById('fldVendor');
+  if (!parent) return;
+  parent.querySelectorAll('.fld-chip').forEach(function(b){ b.classList.remove('on'); });
+  var noneBtn=parent.querySelector('.fld-chip.none');
+  if (noneBtn) noneBtn.classList.add('on');
 }
 function regOnChange(){
   var t=(document.getElementById('fldTitle')||{}).value||'';
@@ -1498,7 +1586,9 @@ function submitLog(){
   var title=(document.getElementById('fldTitle')||{}).value||'';
   title=title.trim();
   if (!title){ toast('네이밍은 필수입니다','warn'); return; }
+  var isEdit = !!regState.editKey;
   var rec={
+    /* edit 모드는 ts/by/byName 유지하므로 여기선 임시값 — 아래에서 분기 */
     ts: Date.now(),
     by: getUserId(),
     byName: getUserDisplay(),
@@ -1516,10 +1606,15 @@ function submitLog(){
     if (t) rec.time=t;
   }
   if (f.hasVendor){
-    var vEl=document.querySelector('#fldVendor .fld-chip.on');
-    if (vEl && vEl.dataset.vid){
-      rec.vendorId=vEl.dataset.vid;
-      rec.vendorName=vEl.dataset.vname||'';
+    var vEls=document.querySelectorAll('#fldVendor .fld-chip:not(.none).on');
+    var vNames=[], vIds=[];
+    vEls.forEach(function(el){
+      if (el.dataset.vname) vNames.push(el.dataset.vname);
+      if (el.dataset.vid) vIds.push(el.dataset.vid);
+    });
+    if (vNames.length){
+      rec.vendorNames=vNames;
+      if (vIds.length) rec.vendorIds=vIds;
     }
   }
   if (f.hasStatus){
@@ -1538,19 +1633,52 @@ function submitLog(){
   if (f.hasPhoto && regPhotos.length){
     rec.photos=regPhotos.slice();
   }
-  var clean=JSON.parse(JSON.stringify(rec));
   var btn=document.getElementById('regSubmit');
   btn.disabled=true; btn.textContent='저장 중...';
-  logsRef.push(clean).then(function(){
+
+  var done = function(label){
     document.getElementById('regModal').classList.remove('open');
     regState=null;
     regPhotos=[];
-    toast('✓ 등록 완료','ok');
+    toast(label,'ok');
     showTab('list');
     var feed=document.getElementById('tabList'); if(feed) feed.scrollTop=0;
-  }).catch(function(err){
-    toast('저장 실패: '+(err&&err.message||err),'er');
-  }).finally(function(){ btn.disabled=false; btn.textContent='✓ 완료'; });
+  };
+  var fail = function(err){ toast('저장 실패: '+(err&&err.message||err),'er'); };
+  var done2 = function(){ btn.disabled=false; btn.textContent='✓ 완료'; };
+
+  if (isEdit){
+    /* 편집 — 기존 ts/by/byName/createdAt 등은 유지. update */
+    var updates = {
+      categoryId: rec.categoryId,
+      categoryName: rec.categoryName,
+      categoryIcon: rec.categoryIcon,
+      title: rec.title,
+      /* 선택 필드 — 없으면 명시적으로 null 로 지움 */
+      dateInt: rec.dateInt || null,
+      time: rec.time || null,
+      vendorNames: rec.vendorNames || null,
+      vendorIds: rec.vendorIds || null,
+      vendorName: null, /* 옛 단수 필드 정리 */
+      vendorId: null,
+      statusName: rec.statusName || null,
+      completeName: rec.completeName || null,
+      note: rec.note || null,
+      photos: rec.photos || null,
+      editedAt: Date.now(),
+      editedBy: getUserId()
+    };
+    /* JSON.stringify 는 null 유지, undefined 제거. Firebase update 에서 null = 해당 키 삭제. */
+    var clean = JSON.parse(JSON.stringify(updates));
+    logsRef.child(regState.editKey).update(clean)
+      .then(function(){ done('✓ 편집 저장됨'); })
+      .catch(fail).finally(done2);
+  } else {
+    var cleanNew=JSON.parse(JSON.stringify(rec));
+    logsRef.push(cleanNew)
+      .then(function(){ done('✓ 등록 완료'); })
+      .catch(fail).finally(done2);
+  }
 }
 
 /* ───────── 정보(설정) 탭 ───────── */
