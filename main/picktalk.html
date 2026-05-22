@@ -463,6 +463,7 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
   <div class="sheet-h" style="margin-top:.4rem">상태 변경</div>
   <div class="sheet-chips" id="actionCompletes"></div>
   <div class="sheet-divider"></div>
+  <button class="sheet-btn" id="actionRestore" onclick="actionRestoreLog()" style="display:none;color:var(--g)">↩️ 보관 해제 (목록 복구)</button>
   <button class="sheet-btn danger" id="actionDelete" onclick="actionDeleteLog()" style="display:none">✕ 항목 삭제 (복구 불가)</button>
   <button class="sheet-btn" onclick="closeActions()">취소</button>
 </div>
@@ -836,12 +837,12 @@ function setCompleteFilter(k){ curCompleteFilter=k; renderStatusStrip(); renderL
 function renderSummary(){
   /* 사용 안 함 — renderStatusStrip 가 대체 */
 }
-/* 카테고리 필터 (mine/cat) 만 적용한 1차 집합 — 상태 카운트와 목록 둘 다 이걸 기반.
-   보관된(archived) 항목은 모든 곳에서 숨김 (데이터는 유지). */
-function applyCategoryFilter(){
+/* 카테고리 필터 (mine/cat) 만 적용한 1차 집합.
+   includeArchived=true 면 보관 항목 포함 (보관함 뷰·보관함 카운트용). */
+function applyCategoryFilter(includeArchived){
   var me=getUserId();
   return allLogs.filter(function(lg){
-    if (lg.archived) return false; /* 보관 항목 제외 */
+    if (!includeArchived && lg.archived) return false;
     if (curFilter==='all') return true;
     if (curFilter==='mine') return lg.by===me;
     return lg.categoryId===curFilter;
@@ -867,6 +868,11 @@ function renderStatusStrip(){
   completes.forEach(function(c){
     chips.push({ key:c.name, label:c.name, count:counts[c.name]||0, color:c.color });
   });
+  /* 📦 보관함 — 보관된 항목 있을 때만 (또는 현재 보관함 필터 활성 시) */
+  var archivedCnt = applyCategoryFilter(true).filter(function(lg){ return lg.archived; }).length;
+  if (archivedCnt > 0 || curCompleteFilter === '__archived__') {
+    chips.push({ key:'__archived__', label:'📦 보관함', count:archivedCnt, color:'#7c8399' });
+  }
   row.innerHTML=chips.map(function(c){
     var on=curCompleteFilter===c.key?'cur':'';
     var sty='';
@@ -923,12 +929,19 @@ function renderFeedCard(lg){
 function renderList(){
   var list=document.getElementById('feedList');
   if (!list) return;
-  var data=applyCategoryFilter().filter(function(lg){
-    if (curCompleteFilter==='all') return true;
-    if (curCompleteFilter==='__none__') return !lg.completeName;
-    return lg.completeName===curCompleteFilter;
-  });
-  /* 일괄 액션 바 — "완료" 필터일 때만 노출 (이름이 정확히 "완료") */
+  var isArchivedView = (curCompleteFilter === '__archived__');
+  var data;
+  if (isArchivedView) {
+    /* 보관함 — archived=true 만 (다른 완료여부와 무관) */
+    data = applyCategoryFilter(true).filter(function(lg){ return lg.archived; });
+  } else {
+    data = applyCategoryFilter().filter(function(lg){
+      if (curCompleteFilter==='all') return true;
+      if (curCompleteFilter==='__none__') return !lg.completeName;
+      return lg.completeName===curCompleteFilter;
+    });
+  }
+  /* 일괄 액션 바 — "완료" 필터일 때만 노출 (보관함 뷰엔 X) */
   var bulkBar=document.getElementById('bulkBar');
   if (bulkBar){
     var showBulk = (curCompleteFilter === '완료') && data.length > 0;
@@ -940,7 +953,9 @@ function renderList(){
   }
   if (!data.length){
     var msg;
-    if (curCompleteFilter!=='all'){
+    if (isArchivedView){
+      msg='보관된 항목이 없습니다';
+    } else if (curCompleteFilter!=='all'){
       msg='이 상태에 해당하는 작업이 없습니다';
     } else if (curFilter==='mine'){
       msg='내가 올린 작업이 없습니다';
@@ -949,7 +964,10 @@ function renderList(){
     } else {
       msg='아직 등록된 작업이 없습니다';
     }
-    list.innerHTML='<div class="empty-state"><div class="empty-ico">📭</div><div class="empty-msg">'+msg+'</div><div class="empty-sub">아래 ➕ 버튼을 눌러 작업을 등록하세요</div></div>';
+    var sub = isArchivedView
+      ? '완료 필터에서 "📦 모두 보관" 누르면 여기로 옵니다'
+      : '아래 ➕ 버튼을 눌러 작업을 등록하세요';
+    list.innerHTML='<div class="empty-state"><div class="empty-ico">📭</div><div class="empty-msg">'+msg+'</div><div class="empty-sub">'+sub+'</div></div>';
     return;
   }
   list.innerHTML=data.slice(0,200).map(renderFeedCard).join('');
@@ -1047,9 +1065,24 @@ function openActions(logKey){
   var me=getUserId();
   var canDelete=(lg.by===me)||isAdmin;
   document.getElementById('actionDelete').style.display=canDelete?'':'none';
+  /* 보관 해제 (복구) — 보관된 항목일 때만, 본인 또는 admin */
+  var restoreBtn=document.getElementById('actionRestore');
+  if (restoreBtn) restoreBtn.style.display = (lg.archived && (lg.by===me || isAdmin)) ? '' : 'none';
   /* 열기 */
   document.getElementById('actionBackdrop').classList.add('open');
   document.getElementById('actionSheet').classList.add('open');
+}
+function actionRestoreLog(){
+  if (!actionTargetKey || !logsRef) return;
+  var lg=allLogs.find(function(x){ return x._key===actionTargetKey; });
+  if (!lg){ closeActions(); return; }
+  var update={ archived: null, archivedAt: null, archivedBy: null };
+  logsRef.child(actionTargetKey).update(update).then(function(){
+    toast('↩️ 보관 해제됨 — 목록에 다시 표시','ok');
+    closeActions();
+  }).catch(function(err){
+    toast('복구 실패: '+(err&&err.message||err),'er');
+  });
 }
 function closeActions(){
   document.getElementById('actionBackdrop').classList.remove('open');
