@@ -601,6 +601,7 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js"></script>
 <script src="wms_sync.js"></script>
 <script>
 /* ───────── 상수 ───────── */
@@ -701,6 +702,10 @@ function wmsHandleAuthState(state){
   document.getElementById('infoGroup').textContent='그룹: '+state.groupId;
   refreshSetGate();
   attachRefs();
+  /* 이미 알림 허용 + SW 등록된 상태면 FCM 토큰 즉시 갱신 */
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted'){
+    setupFCM();
+  }
 }
 function refreshSetGate(){
   var gate=document.getElementById('setGate');
@@ -1858,6 +1863,8 @@ function requestNotif(){
       try { new Notification('픽앤톡', { body:'알림이 허용되었습니다 🎉', icon:'/icon.svg' }); }
       catch(e){}
       toast('✓ 알림 허용됨','ok');
+      /* FCM 토큰 발급 + DB 저장 (백그라운드 푸시 활성) */
+      setupFCM();
     } else if (perm === 'denied'){
       toast('알림 거부됨','warn');
     } else {
@@ -1867,14 +1874,89 @@ function requestNotif(){
 }
 
 /* ───────── Service Worker 등록 ───────── */
+var swRegistration = null;
+
 function registerSW(){
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('/sw.js').then(function(reg){
-    /* 등록 성공 — 별도 UI 없음 (튜토리얼에서 상태 표시) */
+    swRegistration = reg;
+    /* 권한이 이미 허용 + 로그인 OK 면 토큰 즉시 받기 */
+    if (Notification.permission === 'granted' && groupId) {
+      setupFCM();
+    }
   }).catch(function(err){
     console.warn('[sw] 등록 실패', err);
   });
   navigator.serviceWorker.addEventListener('controllerchange', refreshTutorialState);
+}
+
+/* ───────── FCM 푸시 토큰 등록 ───────── */
+/* Firebase Console > Cloud Messaging > Web Push certificates 에서 발급한 공개 키.
+   비어 있으면 토큰 발급 시도 안 함 (UI/권한 흐름만 동작). */
+var VAPID_KEY = '__VAPID_KEY_PLACEHOLDER__';
+
+function isVapidConfigured(){
+  return VAPID_KEY && VAPID_KEY.length > 20 && VAPID_KEY.indexOf('PLACEHOLDER') === -1;
+}
+
+function setupFCM(){
+  if (!isVapidConfigured()) {
+    console.info('[fcm] VAPID 미설정 — 토큰 발급 생략');
+    return Promise.resolve(null);
+  }
+  if (!groupId) return Promise.resolve(null);
+  if (typeof firebase === 'undefined' || !firebase.messaging) {
+    console.warn('[fcm] messaging SDK 미로드');
+    return Promise.resolve(null);
+  }
+  if (!firebase.messaging.isSupported || !firebase.messaging.isSupported()) {
+    console.info('[fcm] 이 브라우저는 FCM 미지원');
+    return Promise.resolve(null);
+  }
+  if (Notification.permission !== 'granted') {
+    return Promise.resolve(null);
+  }
+
+  return (swRegistration ? Promise.resolve(swRegistration) : navigator.serviceWorker.ready)
+    .then(function(reg){
+      var messaging = firebase.messaging();
+      return messaging.getToken({
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: reg
+      }).then(function(token){
+        if (!token) {
+          console.warn('[fcm] 토큰 발급 실패 (null)');
+          return null;
+        }
+        /* DB 에 토큰 저장 — 키는 토큰 자체 (sanitize 필요).
+           Firebase RTDB 키는 '.' '#' '$' '/' '[' ']' 금지 */
+        var safeKey = String(token).replace(/[.#$/\[\]]/g, '_');
+        var u = (window.WMSync && WMSync.getUser()) ? WMSync.getUser() : null;
+        var meta = {
+          uid: u ? u.uid : '',
+          by: getUserId(),
+          ts: Date.now(),
+          platform: detectPlatform(),
+          standalone: isStandalone(),
+          ua: (navigator.userAgent || '').slice(0, 120)
+        };
+        firebase.database().ref('wms_sync/groups/' + groupId + '/picktalk/fcmTokens/' + safeKey).set(meta);
+        console.info('[fcm] 토큰 저장 완료', safeKey.slice(0,12) + '...');
+
+        /* 포그라운드 메시지 — 페이지가 열려 있을 때 (자동 알림 X, 토스트로 표시) */
+        try {
+          messaging.onMessage(function(payload){
+            var n = (payload && payload.notification) || {};
+            toast('🔔 ' + (n.title || '새 작업') + (n.body ? ' · ' + n.body : ''), 'ok');
+          });
+        } catch(e){}
+
+        return token;
+      });
+    }).catch(function(err){
+      console.warn('[fcm] getToken 실패', err);
+      return null;
+    });
 }
 
 /* ───────── 초기화 ───────── */
