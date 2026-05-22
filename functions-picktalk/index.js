@@ -4,7 +4,7 @@
    → 그룹의 fcmTokens 모두에게 FCM 푸시 발송 (등록자 본인 제외)
    → 무효 토큰 자동 삭제
 =========================================================== */
-const { onValueCreated } = require('firebase-functions/v2/database');
+const { onValueCreated, onValueUpdated } = require('firebase-functions/v2/database');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
@@ -197,6 +197,105 @@ exports.notifyPicktalkLog = onValueCreated(
         logger.info(`만료 토큰 ${Object.keys(cleanup).length}개 정리`);
       } catch (e) {
         logger.warn('토큰 정리 실패', e);
+      }
+    }
+  }
+);
+
+/* ─── 편집 알림 ───
+   editedAt 이 새로 갱신된 경우만 발송. 다른 update (상태 변경·보관 등) 는 무시. */
+exports.notifyPicktalkEdit = onValueUpdated(
+  {
+    ref: '/wms_sync/groups/{gid}/picktalk/logs/{logId}',
+    instance: RTDB_INSTANCE,
+    region: FUNC_REGION,
+    memory: '256MiB',
+    timeoutSeconds: 60,
+  },
+  async (event) => {
+    const gid = event.params.gid;
+    const logId = event.params.logId;
+    const before = event.data && event.data.before && event.data.before.val();
+    const after = event.data && event.data.after && event.data.after.val();
+    if (!after) return; /* 삭제 이벤트는 무시 */
+
+    /* editedAt 변경 시만 — 사용자가 명시적으로 편집한 경우 */
+    const beforeEdit = (before && before.editedAt) || 0;
+    const afterEdit = (after && after.editedAt) || 0;
+    if (afterEdit <= beforeEdit) return;
+
+    /* 토큰 가져오기 */
+    const tokensSnap = await admin.database().ref(`/wms_sync/groups/${gid}/picktalk/fcmTokens`).once('value');
+    const tokenMap = tokensSnap.val() || {};
+    const targets = Object.keys(tokenMap);
+    if (!targets.length) {
+      logger.info('편집 알림 — 토큰 없음', { gid, logId });
+      return;
+    }
+
+    /* 알림 본문 — 제목에 ✏️ 수정됨 prefix */
+    const title = `✏️ 수정 · ${after.categoryIcon || '📋'} ${after.categoryName || '작업'}`;
+    const bodyParts = [];
+    if (after.title) bodyParts.push(after.title);
+    if (after.editedBy) bodyParts.push(`수정: ${after.editedBy}`);
+    const body = bodyParts.join(' · ') || '작업이 수정되었습니다';
+
+    const message = {
+      notification: { title, body },
+      data: {
+        url: '/picktalk.html',
+        logId: String(logId),
+        gid: String(gid),
+        categoryId: String(after.categoryId || ''),
+        kind: 'edit',
+      },
+      webpush: {
+        notification: {
+          icon: '/icon.svg',
+          badge: '/icon.svg',
+          tag: `picktalk-edit-${gid}-${logId}`,
+          requireInteraction: false,
+        },
+        fcmOptions: {
+          link: 'https://makewon.com/picktalk.html',
+        },
+      },
+      tokens: targets,
+    };
+
+    let response;
+    try {
+      response = await admin.messaging().sendEachForMulticast(message);
+    } catch (err) {
+      logger.error('편집 알림 발송 실패', err);
+      return;
+    }
+    logger.info('편집 알림 발송 결과', {
+      gid,
+      logId,
+      total: targets.length,
+      success: response.successCount,
+      fail: response.failureCount,
+    });
+
+    /* 무효 토큰 정리 */
+    const cleanup = {};
+    response.responses.forEach((r, i) => {
+      if (!r.success && r.error) {
+        const code = r.error.code || '';
+        if (
+          code === 'messaging/invalid-registration-token' ||
+          code === 'messaging/registration-token-not-registered'
+        ) {
+          cleanup[`/wms_sync/groups/${gid}/picktalk/fcmTokens/${targets[i]}`] = null;
+        }
+      }
+    });
+    if (Object.keys(cleanup).length) {
+      try {
+        await admin.database().ref().update(cleanup);
+      } catch (e) {
+        logger.warn('편집 알림 토큰 정리 실패', e);
       }
     }
   }

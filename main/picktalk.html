@@ -40,7 +40,10 @@ input,textarea,select{user-select:text;-webkit-user-select:text;font-family:inhe
 .user-name{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .user-dot{width:6px;height:6px;border-radius:50%;background:#666;flex-shrink:0}
 .user-dot.on{background:#4af0a8}
-.topbar-r{display:flex;align-items:center;gap:.4rem}
+.topbar-r{display:flex;align-items:center;gap:.32rem}
+.topbar-icon{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:.92rem;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0}
+.topbar-icon:active{transform:scale(.94)}
+.topbar-icon.on{background:var(--g);color:#0f1117;border-color:var(--g)}
 .notif-btn{display:flex;align-items:center;gap:.3rem;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:.7rem;font-weight:700;padding:.34rem .55rem;border-radius:999px;cursor:pointer;letter-spacing:-.005em;position:relative}
 .notif-btn:active{transform:scale(.96)}
 .notif-btn .nb-ico{font-size:.85rem;line-height:1}
@@ -142,9 +145,15 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .cal-day .dcnt{font-size:.6rem;font-weight:900;background:var(--b);color:#fff;border-radius:8px;padding:.04rem .35rem;margin-top:.18rem;min-width:18px}
 .cal-day.sel .dcnt{background:#0f1117;color:#fff}
 .cal-day.empty .dcnt{display:none}
-.cal-day .dspan{position:absolute;left:0;right:0;bottom:4px;height:3px;background:linear-gradient(to right,var(--b),var(--p));border-radius:2px;opacity:.7}
-.cal-day.has-span{background:rgba(91,156,246,.05)}
-.cal-day.sel .dspan{background:#fff;opacity:.7}
+/* 컬러 라인 띠 — 카테고리 색, 시작/중간/끝 표시 */
+.cal-day{padding-bottom:14px}
+.cal-day .dlines{position:absolute;left:0;right:0;bottom:3px;display:flex;flex-direction:column;gap:1.5px;pointer-events:none}
+.cal-day .dline{height:3.5px;width:100%}
+.cal-day .dline.is-start{margin-left:30%;width:70%;border-radius:2px 0 0 2px}
+.cal-day .dline.is-end{margin-right:30%;width:70%;border-radius:0 2px 2px 0}
+.cal-day .dline.is-single{margin:0 28%;width:44%;border-radius:2px}
+.cal-day .dline.is-mid{border-radius:0}
+.cal-day .dline-more{font-family:var(--mo);font-size:.5rem;color:var(--mu);text-align:center;line-height:1;margin-top:1px}
 .cal-day-list{padding:.7rem .8rem 0}
 .cal-day-list-h{font-size:.76rem;font-family:var(--mo);color:var(--mu);letter-spacing:.05em;margin-bottom:.45rem}
 
@@ -330,9 +339,9 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
       </div>
     </div>
     <div class="topbar-r">
+      <button class="topbar-icon" id="topSetBtn" onclick="showTab('set')" aria-label="정보·설정" title="정보·설정">⚙️</button>
       <button class="notif-btn" onclick="openTutorial()" aria-label="알림설정">
         <span class="nb-ico">🔔</span>
-        <span class="nb-lbl">알림설정</span>
         <span class="nb-dot" id="notifDot"></span>
       </button>
       <div class="user-pill" onclick="doLogout()">
@@ -431,20 +440,17 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
     </section>
   </main>
 
-  <!-- ───── 하단 탭바 (4개) ───── -->
+  <!-- ───── 하단 탭바 — [캘린더 / 등록 / 목록] ───── -->
   <nav class="tabbar">
     <button class="tab-btn" id="navCal" onclick="showTab('cal')">
       <span class="ti">📅</span><span>캘린더</span>
-    </button>
-    <button class="tab-btn on" id="navList" onclick="showTab('list')">
-      <span class="ti">📋</span><span>목록</span>
     </button>
     <button class="tab-btn fab" onclick="openRegister()" aria-label="새 작업 등록">
       <div class="fab-circle">＋</div>
       <span class="fab-lbl">등록</span>
     </button>
-    <button class="tab-btn" id="navSet" onclick="showTab('set')">
-      <span class="ti">⚙️</span><span>정보</span>
+    <button class="tab-btn on" id="navList" onclick="showTab('list')">
+      <span class="ti">📋</span><span>목록</span>
     </button>
   </nav>
 </div>
@@ -820,10 +826,15 @@ function showTab(t){
   curTab=t;
   ['cal','list','set'].forEach(function(x){
     var s=document.getElementById('tab'+x.charAt(0).toUpperCase()+x.slice(1));
-    var n=document.getElementById('nav'+x.charAt(0).toUpperCase()+x.slice(1));
     if (s) s.classList.toggle('on', x===t);
-    if (n) n.classList.toggle('on', x===t);
   });
+  /* 하단 탭바 — set 은 하단에 없음 (상단 아이콘으로 이동) */
+  var navCal=document.getElementById('navCal'), navList=document.getElementById('navList');
+  if (navCal) navCal.classList.toggle('on', t==='cal');
+  if (navList) navList.classList.toggle('on', t==='list');
+  /* 상단 ⚙️ 정보 버튼 active */
+  var topSetBtn=document.getElementById('topSetBtn');
+  if (topSetBtn) topSetBtn.classList.toggle('on', t==='set');
   if (t==='cal') renderCalendar();
   else if (t==='list') renderList();
   else if (t==='set') renderSettings();
@@ -1161,9 +1172,9 @@ function renderCalendar(){
   if (!grid || !month) return;
   var y=calCursor.getFullYear(), m=calCursor.getMonth();
   month.textContent=y+'년 '+(m+1)+'월';
-  /* 카운트 — 해당 월 일자별, 기간 일정은 시작~끝 모든 일자에 +1 (보관 항목 제외) */
+  /* 일자별 라인 정보 — 기간 일정의 시작/중간/끝 + 카테고리 색 */
+  var dayLines={}; /* day(d) → [{color, pos, sortTs}] */
   var counts={};
-  var spans={}; /* day → true : 해당 일자가 어떤 로그의 "기간 중간"인지 — 띠 표시용 */
   var daysIn=new Date(y,m+1,0).getDate();
   var monthFirst = y*10000 + (m+1)*100 + 1;
   var monthLast  = y*10000 + (m+1)*100 + daysIn;
@@ -1171,16 +1182,24 @@ function renderCalendar(){
     if (lg.archived) return;
     var range=getLogDateRange(lg);
     if (range.end < monthFirst || range.start > monthLast) return;
-    /* 범위 안 일자 모두 +1 */
+    var c=settings.categories[lg.categoryId]||{};
+    var color=c.color||'#7c8399';
+    var sortTs=lg.ts||0;
     var d=Math.max(range.start, monthFirst);
     while (d <= Math.min(range.end, monthLast)){
       var dd = d % 100;
       counts[dd] = (counts[dd]||0) + 1;
-      if (range.start !== range.end && d !== range.start && d !== range.end){
-        spans[dd] = true;
-      }
+      var pos = (range.start === range.end) ? 'single' :
+                (d === range.start) ? 'start' :
+                (d === range.end) ? 'end' : 'mid';
+      if (!dayLines[dd]) dayLines[dd]=[];
+      dayLines[dd].push({ color:color, pos:pos, sortTs:sortTs });
       d = ymdIntAddDay(d);
     }
+  });
+  /* 라인 정렬 — 등록 시각 오름차순 (다른 일자 간 라인이 같은 행에 오게 시도) */
+  Object.keys(dayLines).forEach(function(k){
+    dayLines[k].sort(function(a,b){ return a.sortTs - b.sortTs; });
   });
   var firstDow=new Date(y,m,1).getDay();
   var prevDays=new Date(y,m,0).getDate();
@@ -1192,16 +1211,33 @@ function renderCalendar(){
     var pd=prevDays-firstDow+i+1;
     html+='<div class="cal-day mute"><div class="dnum">'+pd+'</div></div>';
   }
-  /* 이번 달 — spans 표시 (기간 중간 일자에 작은 띠) */
+  /* 이번 달 — 컬러 라인으로 기간 일정 표시 */
+  var MAX_LINES = 4;
   for (var d=1; d<=daysIn; d++){
     var di=y*10000+(m+1)*100+d;
     var sel=(calSelectedDate===di)?'sel':'';
     var todayCls=(di===todayInt)?'today':'';
-    var spanCls=spans[d]?'has-span':'';
     var cnt=counts[d]||0;
     var cntHtml=cnt>0?'<div class="dcnt">'+cnt+'</div>':'';
-    var spanBar=spans[d]?'<div class="dspan"></div>':'';
-    html+='<div class="cal-day '+sel+' '+todayCls+' '+spanCls+'" onclick="selectCalDay('+di+')"><div class="dnum">'+d+'</div>'+spanBar+cntHtml+'</div>';
+    /* 컬러 라인들 */
+    var lns = dayLines[d] || [];
+    var shown = lns.slice(0, MAX_LINES);
+    var extra = lns.length - shown.length;
+    var linesHtml = '';
+    if (shown.length){
+      linesHtml = '<div class="dlines">' +
+        shown.map(function(l){
+          var posCls = 'is-'+l.pos;
+          return '<div class="dline '+posCls+'" style="background:'+l.color+'"></div>';
+        }).join('') +
+        (extra > 0 ? '<div class="dline-more">+'+extra+'</div>' : '') +
+      '</div>';
+    }
+    html+='<div class="cal-day '+sel+' '+todayCls+'" onclick="selectCalDay('+di+')">'+
+      '<div class="dnum">'+d+'</div>'+
+      cntHtml +
+      linesHtml +
+    '</div>';
   }
   /* 마지막 행 채움 */
   var total=firstDow+daysIn;
