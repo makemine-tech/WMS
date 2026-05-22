@@ -158,13 +158,37 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .btn-flex{flex:1}
 .btn-r{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.5)}
 
-/* 카테고리 그리드 (등록 1단계) */
-.cat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.55rem}
-.cat-tile{aspect-ratio:1.3/1;background:var(--s1);border:2px solid var(--br);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;cursor:pointer;transition:all .15s;position:relative;overflow:hidden;padding:.4rem}
-.cat-tile:active{transform:scale(.97)}
-.cat-tile.on{border-width:3px;background:rgba(255,255,255,.04)}
-.cat-ic{font-size:2.1rem;line-height:1}
-.cat-name{font-size:1rem;font-weight:900;letter-spacing:-.01em;text-align:center}
+/* 카테고리 그리드 (등록 1단계) — 한 화면 안에 다 보이게 */
+.cat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem}
+.cat-tile{aspect-ratio:1/1;background:var(--s1);border:2px solid var(--br);border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.22rem;cursor:pointer;transition:all .12s;position:relative;overflow:hidden;padding:.28rem .22rem}
+.cat-tile:active{transform:scale(.96)}
+.cat-tile.on{border-width:2.5px;background:rgba(255,255,255,.04)}
+.cat-ic{font-size:1.55rem;line-height:1}
+.cat-name{font-size:.74rem;font-weight:800;letter-spacing:-.01em;text-align:center;line-height:1.15;word-break:keep-all;overflow:hidden}
+/* 카테고리 많을 때(>9) 4열로 더 작게 */
+.cat-grid.dense{grid-template-columns:repeat(4,1fr);gap:.32rem}
+.cat-grid.dense .cat-tile{aspect-ratio:1/1;padding:.22rem .18rem;border-radius:9px}
+.cat-grid.dense .cat-ic{font-size:1.25rem}
+.cat-grid.dense .cat-name{font-size:.66rem}
+
+/* 사진 등록 (등록 폼) */
+.photo-row{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.2rem}
+.photo-add,.photo-thumb{width:72px;height:72px;border-radius:9px;flex-shrink:0;position:relative;overflow:hidden}
+.photo-add{background:var(--s2);border:1.5px dashed var(--br);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.18rem;cursor:pointer;color:var(--mu);font-size:.62rem;font-weight:700}
+.photo-add:active{transform:scale(.96)}
+.photo-add.full{opacity:.4;pointer-events:none}
+.photo-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-x{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.65);border:none;color:#fff;width:20px;height:20px;border-radius:50%;font-size:.66rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+
+/* 카드의 사진 썸네일 */
+.fc-photos{display:flex;flex-wrap:wrap;gap:.32rem;margin-top:.1rem}
+.fc-photo{width:62px;height:62px;border-radius:7px;object-fit:cover;cursor:pointer;border:1px solid var(--br);display:block}
+
+/* 라이트박스 (사진 풀스크린 뷰) */
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:400;display:none;align-items:center;justify-content:center;padding:1rem;cursor:zoom-out}
+.lightbox.open{display:flex}
+.lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.lightbox .lb-x{position:absolute;top:calc(.7rem + var(--safe-top));right:.85rem;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.25);color:#fff;width:38px;height:38px;border-radius:50%;font-size:1.1rem;cursor:pointer}
 
 /* 동적 등록 폼 필드 */
 .fld{display:flex;flex-direction:column;gap:.32rem;margin-bottom:1rem}
@@ -326,6 +350,15 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 <!-- 토스트 -->
 <div class="toast-wrap" id="toastWrap"></div>
 
+<!-- 라이트박스 (사진 풀스크린) -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lb-x" onclick="closeLightbox();event.stopPropagation()" aria-label="닫기">✕</button>
+  <img id="lightboxImg" alt="">
+</div>
+
+<!-- 사진 input (숨김) — capture=environment 로 뒷카메라 우선 -->
+<input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none" onchange="onPhotoSelected(this)">
+
 <!-- ───────── 등록 모달 ───────── -->
 <div class="modal" id="regModal">
   <div class="m-hdr">
@@ -375,12 +408,12 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 var ICON_PICKS = ['📥','📤','🚚','🏍️','🛒','📌','📦','🏷️','🔧','🛠️','🧰','✅','❌','⚠️','📝','📞','📧','💰','🔥','💡','🎯','🏁','📊','🗂️','🧾','🚀','⏰','📅','🚨','🧹','🧊','🌡️','🍱','💼','🚪','🔑','🪜'];
 var DEFAULT_COLORS = ['#4af0a8','#f0c44a','#5b9cf6','#c084fc','#ff8c5a','#f05858','#7c8399','#34d399'];
 var SEED_CATEGORIES = [
-  { name:'입고', icon:'📥', color:'#4af0a8', fields:{ hasDate:true, hasTime:false, hasVendor:true, hasStatus:true, hasComplete:true, hasNote:true } },
-  { name:'출고', icon:'📤', color:'#f05858', fields:{ hasDate:true, hasTime:false, hasVendor:true, hasStatus:true, hasComplete:true, hasNote:true } },
-  { name:'화물', icon:'🚚', color:'#5b9cf6', fields:{ hasDate:true, hasTime:true,  hasVendor:true, hasStatus:false,hasComplete:true, hasNote:true } },
-  { name:'퀵',   icon:'🏍️', color:'#c084fc', fields:{ hasDate:true, hasTime:true,  hasVendor:true, hasStatus:false,hasComplete:true, hasNote:true } },
-  { name:'구매', icon:'🛒', color:'#ff8c5a', fields:{ hasDate:true, hasTime:false, hasVendor:true, hasStatus:false,hasComplete:true, hasNote:true } },
-  { name:'기타', icon:'📌', color:'#7c8399', fields:{ hasDate:false,hasTime:false, hasVendor:false,hasStatus:false,hasComplete:false,hasNote:true } }
+  { name:'입고', icon:'📥', color:'#4af0a8', fields:{ hasDate:true, hasTime:false, hasVendor:true, hasStatus:true, hasComplete:true, hasNote:true, hasPhoto:true } },
+  { name:'출고', icon:'📤', color:'#f05858', fields:{ hasDate:true, hasTime:false, hasVendor:true, hasStatus:true, hasComplete:true, hasNote:true, hasPhoto:true } },
+  { name:'화물', icon:'🚚', color:'#5b9cf6', fields:{ hasDate:true, hasTime:true,  hasVendor:true, hasStatus:false,hasComplete:true, hasNote:true, hasPhoto:true } },
+  { name:'퀵',   icon:'🏍️', color:'#c084fc', fields:{ hasDate:true, hasTime:true,  hasVendor:true, hasStatus:false,hasComplete:true, hasNote:true, hasPhoto:false } },
+  { name:'구매', icon:'🛒', color:'#ff8c5a', fields:{ hasDate:true, hasTime:false, hasVendor:true, hasStatus:false,hasComplete:true, hasNote:true, hasPhoto:true } },
+  { name:'기타', icon:'📌', color:'#7c8399', fields:{ hasDate:false,hasTime:false, hasVendor:false,hasStatus:false,hasComplete:false,hasNote:true, hasPhoto:false } }
 ];
 var SEED_COMPLETES = [
   { name:'미완료', color:'#7c8399' },
@@ -399,7 +432,9 @@ var settings = { categories:{}, vendors:{}, statuses:{}, completes:{}, seeded:fa
 var curFilter = 'all'; /* all | mine | <categoryId> */
 var curTab = 'list';
 var regState = null; /* { step, catId, form } */
+var regPhotos = []; /* base64 dataURL 배열 — 등록 모달 동안만 유지 */
 var editState = null; /* { kind, id (or null for new), data } */
+var MAX_PHOTOS = 3;
 var calCursor = new Date(); calCursor.setDate(1);
 var calSelectedDate = null; /* YYYYMMDD */
 
@@ -596,6 +631,13 @@ function renderFeedCard(lg){
     meta.push('<span class="m-pill m-complete" style="background:'+cmColor+'22;color:'+cmColor+'">'+escH(lg.completeName)+'</span>');
   }
   var noteHtml=lg.note?'<div class="fc-note">'+escH(lg.note)+'</div>':'';
+  var photosHtml='';
+  if (Array.isArray(lg.photos) && lg.photos.length){
+    var keyEsc=escAttr(lg._key);
+    photosHtml='<div class="fc-photos">'+lg.photos.map(function(p, i){
+      return '<img class="fc-photo" src="'+p+'" onclick="showPhoto(\''+keyEsc+'\','+i+')" alt="">';
+    }).join('')+'</div>';
+  }
   var delBtn=(isMe||isAdmin)?'<button class="fc-del" onclick="deleteLog(\''+escH(lg._key)+'\')">✕</button>':'';
   return '<div class="feed-card" style="border-left-color:'+color+'">'+
     delBtn +
@@ -606,6 +648,7 @@ function renderFeedCard(lg){
     (lg.title?'<div class="fc-title">'+escH(lg.title)+'</div>':'')+
     (meta.length?'<div class="fc-meta">'+meta.join('')+'</div>':'')+
     noteHtml+
+    photosHtml+
     '<div class="fc-by">올린이 · <span class="fc-by-name">'+escH(lg.byName||lg.by||'?')+'</span></div>'+
   '</div>';
 }
@@ -728,16 +771,18 @@ function openRegister(){
     return;
   }
   regState={ step:1, catId:null, form:{} };
+  regPhotos=[];
   document.getElementById('regModal').classList.add('open');
   document.getElementById('regTitle').textContent='새 작업 등록';
   renderRegStep();
 }
 function closeRegister(){
-  if (regState && (regState.catId || Object.keys(regState.form||{}).length)){
+  if (regState && (regState.catId || Object.keys(regState.form||{}).length || regPhotos.length)){
     if (!confirm('작성 중인 내용이 사라집니다. 닫을까요?')) return;
   }
   document.getElementById('regModal').classList.remove('open');
   regState=null;
+  regPhotos=[];
 }
 function renderRegStep(){
   var s=regState.step;
@@ -760,6 +805,7 @@ function renderCatGrid(){
   var cats=mapToArr(settings.categories,'order');
   if (!cats.length){ grid.innerHTML=''; empty.style.display=''; return; }
   empty.style.display='none';
+  grid.classList.toggle('dense', cats.length > 9);
   grid.innerHTML=cats.map(function(c){
     var on=regState.catId===c._id?'on':'';
     var border=on?'border-color:'+(c.color||'#fff'):'';
@@ -844,7 +890,15 @@ function renderRegForm(){
       '<textarea class="fld-inp fld-area" id="fldNote" placeholder="예: 파레트 3장, 1.2톤, A동 5번 라인" maxlength="500"></textarea>'+
       '</div>';
   }
+  if (f.hasPhoto){
+    html+='<div class="fld"><div class="fld-l">📷 사진 (최대 '+MAX_PHOTOS+'장, 자동 압축·시각 워터마크)</div>'+
+      '<div class="photo-row" id="photoRow"></div>'+
+      '<div class="fld-hint">탭하면 카메라가 열립니다 (또는 갤러리 선택)</div>'+
+      '</div>';
+  }
   s2.innerHTML=html;
+  /* 사진 행 초기 렌더 */
+  if (f.hasPhoto) renderPhotoRow();
   var inp=document.getElementById('fldTitle');
   if (inp) inp.addEventListener('input', regOnChange);
   regOnChange();
@@ -865,6 +919,104 @@ function regNext(){
   if (regState.step===1 && !regState.catId) return;
   if (regState.step<2){ regState.step++; renderRegStep(); }
 }
+/* ───────── 사진 캡처·압축·라이트박스 ───────── */
+function openCamera(){
+  if (regPhotos.length >= MAX_PHOTOS){ toast('최대 '+MAX_PHOTOS+'장까지','warn'); return; }
+  var inp=document.getElementById('photoInput');
+  if (inp){ inp.value=''; inp.click(); }
+}
+function onPhotoSelected(input){
+  var file=input.files && input.files[0];
+  if (!file) return;
+  input.value='';
+  toast('사진 처리 중...','warn');
+  compressImage(file).then(function(b64){
+    regPhotos.push(b64);
+    renderPhotoRow();
+    toast('사진 추가됨 ('+regPhotos.length+'/'+MAX_PHOTOS+')','ok');
+  }).catch(function(err){
+    toast('사진 처리 실패: '+(err&&err.message||err),'er');
+  });
+}
+function compressImage(file){
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onload=function(e){
+      var img=new Image();
+      img.onload=function(){
+        var canvas=document.createElement('canvas');
+        var maxDim=1024;
+        var scale=Math.min(1, maxDim/Math.max(img.width,img.height));
+        canvas.width=Math.round(img.width*scale);
+        canvas.height=Math.round(img.height*scale);
+        var ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        /* 워터마크 — 우측 하단에 촬영 시각 (책임 소재 증빙) */
+        var stamp=new Date().toLocaleString('ko-KR',{year:'2-digit',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+        var fontSize=Math.max(14, Math.round(canvas.width*0.024));
+        ctx.font='bold '+fontSize+'px -apple-system,"Apple SD Gothic Neo",sans-serif';
+        ctx.textAlign='right';
+        ctx.textBaseline='bottom';
+        ctx.lineWidth=Math.max(2,fontSize*0.22);
+        ctx.strokeStyle='rgba(0,0,0,0.78)';
+        ctx.fillStyle='rgba(255,255,255,0.95)';
+        var pad=Math.round(fontSize*0.7);
+        ctx.strokeText(stamp, canvas.width-pad, canvas.height-pad);
+        ctx.fillText(stamp,   canvas.width-pad, canvas.height-pad);
+        /* JPEG 0.65 — 대략 30~80KB */
+        try {
+          var b64=canvas.toDataURL('image/jpeg', 0.65);
+          resolve(b64);
+        } catch(e2){ reject(e2); }
+      };
+      img.onerror=function(){ reject(new Error('이미지 디코딩 실패')); };
+      img.src=e.target.result;
+    };
+    reader.onerror=function(){ reject(new Error('파일 읽기 실패')); };
+    reader.readAsDataURL(file);
+  });
+}
+function renderPhotoRow(){
+  var row=document.getElementById('photoRow');
+  if (!row) return;
+  var full=regPhotos.length>=MAX_PHOTOS;
+  var addHtml=
+    '<button type="button" class="photo-add '+(full?'full':'')+'" onclick="openCamera()">'+
+      '<span style="font-size:1.4rem;line-height:1">📷</span>'+
+      '<span>사진 추가</span>'+
+      '<span style="font-family:var(--mo);opacity:.7">'+regPhotos.length+'/'+MAX_PHOTOS+'</span>'+
+    '</button>';
+  var thumbs=regPhotos.map(function(p, idx){
+    return '<div class="photo-thumb">'+
+      '<img src="'+p+'" onclick="openLightboxDataIdx('+idx+')">'+
+      '<button class="photo-x" onclick="removeRegPhoto('+idx+')" aria-label="삭제">✕</button>'+
+    '</div>';
+  }).join('');
+  row.innerHTML=addHtml+thumbs;
+}
+function removeRegPhoto(idx){
+  regPhotos.splice(idx,1);
+  renderPhotoRow();
+}
+function openLightbox(src){
+  var lb=document.getElementById('lightbox'), im=document.getElementById('lightboxImg');
+  if (!lb || !im || !src) return;
+  im.src=src;
+  lb.classList.add('open');
+}
+function closeLightbox(){
+  var lb=document.getElementById('lightbox'); if (lb) lb.classList.remove('open');
+}
+function openLightboxDataIdx(idx){
+  /* 등록 모달 내부에서 사용 */
+  if (regPhotos[idx]) openLightbox(regPhotos[idx]);
+}
+function showPhoto(logKey, idx){
+  var lg=allLogs.find(function(x){ return x._key===logKey; });
+  if (!lg || !lg.photos || !lg.photos[idx]) return;
+  openLightbox(lg.photos[idx]);
+}
+
 function submitLog(){
   if (!regState || !logsRef) { toast('로그인 후 사용하세요','er'); return; }
   var c=settings.categories[regState.catId]||{};
@@ -909,12 +1061,16 @@ function submitLog(){
     n=n.trim();
     if (n) rec.note=n;
   }
+  if (f.hasPhoto && regPhotos.length){
+    rec.photos=regPhotos.slice();
+  }
   var clean=JSON.parse(JSON.stringify(rec));
   var btn=document.getElementById('regSubmit');
   btn.disabled=true; btn.textContent='저장 중...';
   logsRef.push(clean).then(function(){
     document.getElementById('regModal').classList.remove('open');
     regState=null;
+    regPhotos=[];
     toast('✓ 등록 완료','ok');
     showTab('list');
     var feed=document.getElementById('tabList'); if(feed) feed.scrollTop=0;
@@ -945,6 +1101,7 @@ function renderSetCats(){
     if (f.hasStatus) fields.push('상태');
     if (f.hasComplete) fields.push('완료여부');
     if (f.hasNote) fields.push('비고');
+    if (f.hasPhoto) fields.push('📷사진');
     return '<div class="set-item">'+
       '<div class="set-item-ic">'+escH(c.icon||'📌')+'</div>'+
       '<div class="set-item-color" style="background:'+(c.color||'#7c8399')+'"></div>'+
@@ -1008,7 +1165,7 @@ function renderSetCompletes(){
 /* ───────── 편집 모달 ───────── */
 function openCatEditor(id){
   if (!isAdmin) return;
-  var c = id ? Object.assign({}, settings.categories[id]||{}) : { name:'', icon:'📌', color:'#4af0a8', fields:{hasDate:true,hasTime:false,hasVendor:true,hasStatus:true,hasComplete:true,hasNote:true} };
+  var c = id ? Object.assign({}, settings.categories[id]||{}) : { name:'', icon:'📌', color:'#4af0a8', fields:{hasDate:true,hasTime:false,hasVendor:true,hasStatus:true,hasComplete:true,hasNote:true,hasPhoto:false} };
   editState={ kind:'category', id:id||null, data:c };
   document.getElementById('editTitle').textContent=id?'카테고리 편집':'새 카테고리';
   var f=c.fields||{};
@@ -1040,6 +1197,7 @@ function openCatEditor(id){
         '<div class="toggle-row" style="margin-top:.32rem"><input type="checkbox" id="fHasStatus" '+(f.hasStatus?'checked':'')+'>⚙️ 상태 선택</div>'+
         '<div class="toggle-row" style="margin-top:.32rem"><input type="checkbox" id="fHasComplete" '+(f.hasComplete?'checked':'')+'>✅ 작업완료여부</div>'+
         '<div class="toggle-row" style="margin-top:.32rem"><input type="checkbox" id="fHasNote" '+(f.hasNote?'checked':'')+'>📝 비고 (자유 입력)</div>'+
+        '<div class="toggle-row" style="margin-top:.32rem"><input type="checkbox" id="fHasPhoto" '+(f.hasPhoto?'checked':'')+'>📷 사진 등록 (최대 3장 · 자동 압축·워터마크)</div>'+
       '</div>'+
     '</div>';
   document.getElementById('editModal').classList.add('open');
@@ -1107,7 +1265,8 @@ function saveEditor(){
         hasVendor: document.getElementById('fHasVendor').checked,
         hasStatus: document.getElementById('fHasStatus').checked,
         hasComplete: document.getElementById('fHasComplete').checked,
-        hasNote: document.getElementById('fHasNote').checked
+        hasNote: document.getElementById('fHasNote').checked,
+        hasPhoto: document.getElementById('fHasPhoto').checked
       }
     };
     if (editState.id){
