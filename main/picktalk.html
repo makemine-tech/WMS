@@ -142,6 +142,9 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .cal-day .dcnt{font-size:.6rem;font-weight:900;background:var(--b);color:#fff;border-radius:8px;padding:.04rem .35rem;margin-top:.18rem;min-width:18px}
 .cal-day.sel .dcnt{background:#0f1117;color:#fff}
 .cal-day.empty .dcnt{display:none}
+.cal-day .dspan{position:absolute;left:0;right:0;bottom:4px;height:3px;background:linear-gradient(to right,var(--b),var(--p));border-radius:2px;opacity:.7}
+.cal-day.has-span{background:rgba(91,156,246,.05)}
+.cal-day.sel .dspan{background:#fff;opacity:.7}
 .cal-day-list{padding:.7rem .8rem 0}
 .cal-day-list-h{font-size:.76rem;font-family:var(--mo);color:var(--mu);letter-spacing:.05em;margin-bottom:.45rem}
 
@@ -678,6 +681,22 @@ function ymdInt(ts){ var d=new Date(ts); return d.getFullYear()*10000 + (d.getMo
 function dateToYmdInt(dStr){ if(!dStr) return 0; var p=dStr.split('-'); return (+p[0])*10000+(+p[1])*100+(+p[2]); }
 function ymdIntToDateStr(yi){ if(!yi) return ''; var y=Math.floor(yi/10000), m=Math.floor((yi%10000)/100), d=yi%100; return y+'-'+pad2(m)+'-'+pad2(d); }
 function ymdIntToShort(yi){ if(!yi) return ''; var y=Math.floor(yi/10000)%100, m=Math.floor((yi%10000)/100), d=yi%100; return pad2(y)+'.'+pad2(m)+'.'+pad2(d); }
+/* 한 로그의 캘린더 표시 일자 범위.
+   사용자가 지정한 dateInt 와 자동 등록 ts 일자 사이 모든 일자에 표시. */
+function getLogDateRange(lg){
+  var tsInt = ymdInt(lg.ts || Date.now());
+  var dInt = lg.dateInt;
+  if (!dInt) return { start: tsInt, end: tsInt };
+  if (dInt === tsInt) return { start: dInt, end: dInt };
+  if (dInt < tsInt) return { start: dInt, end: tsInt }; /* 과거 일자 지정 */
+  return { start: tsInt, end: dInt }; /* 미래 일자 (예정) */
+}
+/* 인접한 ymd int 일자를 1일씩 더해주는 헬퍼 */
+function ymdIntAddDay(yi){
+  var y=Math.floor(yi/10000), m=Math.floor((yi%10000)/100), d=yi%100;
+  var dt=new Date(y, m-1, d); dt.setDate(dt.getDate()+1);
+  return dt.getFullYear()*10000 + (dt.getMonth()+1)*100 + dt.getDate();
+}
 function fmtTimeAgo(ts){
   if(!ts) return '';
   var diff=Date.now()-ts;
@@ -1129,19 +1148,28 @@ function renderCalendar(){
   if (!grid || !month) return;
   var y=calCursor.getFullYear(), m=calCursor.getMonth();
   month.textContent=y+'년 '+(m+1)+'월';
-  /* 카운트 — 해당 월 일자별 (보관 항목 제외) */
+  /* 카운트 — 해당 월 일자별, 기간 일정은 시작~끝 모든 일자에 +1 (보관 항목 제외) */
   var counts={};
+  var spans={}; /* day → true : 해당 일자가 어떤 로그의 "기간 중간"인지 — 띠 표시용 */
+  var daysIn=new Date(y,m+1,0).getDate();
+  var monthFirst = y*10000 + (m+1)*100 + 1;
+  var monthLast  = y*10000 + (m+1)*100 + daysIn;
   allLogs.forEach(function(lg){
     if (lg.archived) return;
-    var ts=lg.ts||0;
-    var d=new Date(ts);
-    if (d.getFullYear()===y && d.getMonth()===m){
-      var k=d.getDate();
-      counts[k]=(counts[k]||0)+1;
+    var range=getLogDateRange(lg);
+    if (range.end < monthFirst || range.start > monthLast) return;
+    /* 범위 안 일자 모두 +1 */
+    var d=Math.max(range.start, monthFirst);
+    while (d <= Math.min(range.end, monthLast)){
+      var dd = d % 100;
+      counts[dd] = (counts[dd]||0) + 1;
+      if (range.start !== range.end && d !== range.start && d !== range.end){
+        spans[dd] = true;
+      }
+      d = ymdIntAddDay(d);
     }
   });
   var firstDow=new Date(y,m,1).getDay();
-  var daysIn=new Date(y,m+1,0).getDate();
   var prevDays=new Date(y,m,0).getDate();
   var todayInt=ymdInt(Date.now());
   var dows=['일','월','화','수','목','금','토'];
@@ -1151,14 +1179,16 @@ function renderCalendar(){
     var pd=prevDays-firstDow+i+1;
     html+='<div class="cal-day mute"><div class="dnum">'+pd+'</div></div>';
   }
-  /* 이번 달 */
+  /* 이번 달 — spans 표시 (기간 중간 일자에 작은 띠) */
   for (var d=1; d<=daysIn; d++){
     var di=y*10000+(m+1)*100+d;
     var sel=(calSelectedDate===di)?'sel':'';
     var todayCls=(di===todayInt)?'today':'';
+    var spanCls=spans[d]?'has-span':'';
     var cnt=counts[d]||0;
     var cntHtml=cnt>0?'<div class="dcnt">'+cnt+'</div>':'';
-    html+='<div class="cal-day '+sel+' '+todayCls+'" onclick="selectCalDay('+di+')"><div class="dnum">'+d+'</div>'+cntHtml+'</div>';
+    var spanBar=spans[d]?'<div class="dspan"></div>':'';
+    html+='<div class="cal-day '+sel+' '+todayCls+' '+spanCls+'" onclick="selectCalDay('+di+')"><div class="dnum">'+d+'</div>'+spanBar+cntHtml+'</div>';
   }
   /* 마지막 행 채움 */
   var total=firstDow+daysIn;
@@ -1191,15 +1221,12 @@ function renderCalDayList(){
     list.innerHTML='';
     return;
   }
-  /* 선택 일자 = 그 날의 ts 또는 dateInt 일치하는 로그들 */
+  /* 선택 일자 — 그 일자가 (dateInt..ts 범위) 안에 들어가는 모든 로그 */
   var day=calSelectedDate;
-  var dayStart=new Date(Math.floor(day/10000), Math.floor((day%10000)/100)-1, day%100).setHours(0,0,0,0);
-  var dayEnd=dayStart+86400000;
   var data=allLogs.filter(function(lg){
     if (lg.archived) return false;
-    if (lg.dateInt===day) return true;
-    if (lg.ts>=dayStart && lg.ts<dayEnd) return true;
-    return false;
+    var range=getLogDateRange(lg);
+    return day >= range.start && day <= range.end;
   }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
   head.textContent=ymdIntToShort(day)+' · '+data.length+'건';
   if (!data.length){
