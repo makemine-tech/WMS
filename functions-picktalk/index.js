@@ -5,6 +5,7 @@
    → 무효 토큰 자동 삭제
 =========================================================== */
 const { onValueCreated } = require('firebase-functions/v2/database');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 
@@ -13,6 +14,89 @@ admin.initializeApp();
 /* asia-southeast1 RTDB 인스턴스 (firebase.json 의 databaseURL 과 일치) */
 const RTDB_INSTANCE = 'makechango-wms-default-rtdb';
 const FUNC_REGION = 'asia-southeast1'; /* RTDB 와 동일 리전이 가장 빠름 */
+
+/* ─── 본인에게 테스트 푸시 (디버깅용) ───
+   클라이언트가 직접 호출 → 호출자(본인)의 토큰 전부에게 발송.
+   알림 시스템 자체가 동작하는지 검증하기 위한 도구. */
+exports.sendTestNotif = onCall(
+  {
+    region: FUNC_REGION,
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', '로그인 필요');
+    }
+    /* 호출자가 속한 그룹 조회 */
+    const groupSnap = await admin.database().ref('userGroup/' + uid).once('value');
+    let gid = groupSnap.val();
+    if (!gid) {
+      /* superadmin 도 그룹 없을 수 있음 — adminGroupId 사용 가능하지만 단순화 위해 패스 */
+      throw new HttpsError('failed-precondition', '그룹 미등록 — 관리자에게 초대 코드 요청');
+    }
+    /* 본인 uid 의 토큰만 모음 */
+    const tokensSnap = await admin.database().ref(`/wms_sync/groups/${gid}/picktalk/fcmTokens`).once('value');
+    const tokenMap = tokensSnap.val() || {};
+    const myTokens = Object.keys(tokenMap).filter((tok) => {
+      const m = tokenMap[tok] || {};
+      return m.uid === uid;
+    });
+    if (!myTokens.length) {
+      return { ok: false, reason: 'no_self_tokens', totalGroupTokens: Object.keys(tokenMap).length };
+    }
+    const message = {
+      notification: {
+        title: '🧪 픽앤톡 테스트',
+        body: '알림 시스템이 정상 동작합니다 ✓',
+      },
+      data: {
+        url: '/picktalk.html',
+        kind: 'test',
+      },
+      webpush: {
+        notification: {
+          icon: '/icon.svg',
+          badge: '/icon.svg',
+          tag: 'picktalk-test-' + Date.now(),
+        },
+        fcmOptions: {
+          link: 'https://makewon.com/picktalk.html',
+        },
+      },
+      tokens: myTokens,
+    };
+    let response;
+    try {
+      response = await admin.messaging().sendEachForMulticast(message);
+    } catch (err) {
+      logger.error('테스트 발송 실패', err);
+      throw new HttpsError('internal', '발송 실패: ' + (err && err.message || err));
+    }
+    logger.info('테스트 발송 결과', {
+      uid,
+      gid,
+      total: myTokens.length,
+      success: response.successCount,
+      fail: response.failureCount,
+    });
+    /* 실패 토큰 디테일 */
+    const errors = [];
+    response.responses.forEach((r, i) => {
+      if (!r.success && r.error) {
+        errors.push({ token: myTokens[i].slice(0, 16) + '...', code: r.error.code, msg: r.error.message });
+      }
+    });
+    return {
+      ok: true,
+      totalTokens: myTokens.length,
+      success: response.successCount,
+      fail: response.failureCount,
+      errors: errors.slice(0, 5),
+    };
+  }
+);
 
 exports.notifyPicktalkLog = onValueCreated(
   {
