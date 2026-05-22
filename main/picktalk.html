@@ -519,6 +519,14 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
         <span class="tsr-l">📲 현재 환경</span>
         <span class="tsr-v" id="tutPlatStat">확인 중...</span>
       </div>
+      <div class="tut-stat-row">
+        <span class="tsr-l">🔑 FCM 토큰</span>
+        <span class="tsr-v" id="tutFcmStat">확인 중...</span>
+      </div>
+    </div>
+    <div id="tutFcmErr" class="tut-warn" style="display:none;margin:0 0 1rem"></div>
+    <div style="margin-bottom:1rem">
+      <button class="btn btn-s" onclick="forceSetupFCM()" style="width:100%;padding:.6rem;font-size:.82rem">🔄 푸시 토큰 다시 등록 시도</button>
     </div>
 
     <div class="tut-sec">
@@ -1729,6 +1737,23 @@ function refreshTutorialState(){
   var iosWarn = document.getElementById('tutIosVerWarn');
   if (iosWarn) iosWarn.style.display = iosTooOld ? '' : 'none';
 
+  /* FCM 토큰 상태 */
+  var fcmEl = document.getElementById('tutFcmStat');
+  if (fcmEl){
+    if (fcmInProgress){ fcmEl.textContent = '⏳ 발급 중...'; fcmEl.className = 'tsr-v bad'; }
+    else if (fcmLastToken){ fcmEl.textContent = '✓ ' + fcmLastToken.slice(0,18) + '...'; fcmEl.className = 'tsr-v ok'; }
+    else { fcmEl.textContent = '✗ 미발급'; fcmEl.className = 'tsr-v ' + (fcmLastError ? 'err' : 'bad'); }
+  }
+  var errEl = document.getElementById('tutFcmErr');
+  if (errEl){
+    if (fcmLastError){
+      errEl.innerHTML = '⚠️ <b>FCM 에러</b>: ' + escH(fcmLastError);
+      errEl.style.display = '';
+    } else {
+      errEl.style.display = 'none';
+    }
+  }
+
   /* 알림 메시지 박스 */
   var warn = document.getElementById('tutNotifWarn');
   var okBox = document.getElementById('tutNotifOk');
@@ -1873,6 +1898,23 @@ function requestNotif(){
   });
 }
 
+/* 사용자가 직접 다시 시도 버튼 누를 때 */
+function forceSetupFCM(){
+  if (Notification.permission !== 'granted'){
+    toast('먼저 알림 허용이 필요합니다','warn');
+    return;
+  }
+  if (!groupId){
+    toast('로그인 대기 중 — 잠시 후 다시 시도하세요','warn');
+    return;
+  }
+  fcmLastError = null;
+  fcmLastToken = null;
+  refreshTutorialState();
+  toast('토큰 재발급 시도 중...','warn');
+  setupFCM();
+}
+
 /* ───────── Service Worker 등록 ───────── */
 var swRegistration = null;
 
@@ -1880,56 +1922,73 @@ function registerSW(){
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('/sw.js').then(function(reg){
     swRegistration = reg;
+    console.info('[sw] 등록 완료', reg.scope);
+    /* 옛 캐시 회피 — 새 sw.js 가 있는지 즉시 확인 */
+    try { reg.update(); } catch(e){}
     /* 권한이 이미 허용 + 로그인 OK 면 토큰 즉시 받기 */
     if (Notification.permission === 'granted' && groupId) {
       setupFCM();
     }
   }).catch(function(err){
+    fcmLastError = 'SW 등록 실패: ' + (err && err.message || err);
     console.warn('[sw] 등록 실패', err);
+    refreshTutorialState();
   });
-  navigator.serviceWorker.addEventListener('controllerchange', refreshTutorialState);
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    console.info('[sw] controller 변경 — 새 SW 활성');
+    refreshTutorialState();
+  });
 }
 
 /* ───────── FCM 푸시 토큰 등록 ───────── */
-/* Firebase Console > Cloud Messaging > Web Push certificates 에서 발급한 공개 키.
-   비어 있으면 토큰 발급 시도 안 함 (UI/권한 흐름만 동작). */
 var VAPID_KEY = 'BPfG9mxT4GFcxW6pezlPJbPm53Nv84975mpDrn2T_chND-IgfpcCO3cJs-WPMPy1ugDKVenFixcnrhw5lBaLja8';
+var fcmLastToken = null;     /* 마지막으로 발급받은 토큰 — 튜토리얼 표시용 */
+var fcmLastError = null;     /* 마지막 에러 메시지 — 튜토리얼 표시용 */
+var fcmInProgress = false;   /* 중복 호출 방지 */
 
 function isVapidConfigured(){
   return VAPID_KEY && VAPID_KEY.length > 20 && VAPID_KEY.indexOf('PLACEHOLDER') === -1;
 }
 
 function setupFCM(){
-  if (!isVapidConfigured()) {
-    console.info('[fcm] VAPID 미설정 — 토큰 발급 생략');
+  if (fcmInProgress) {
+    console.info('[fcm] 이미 진행 중');
     return Promise.resolve(null);
   }
-  if (!groupId) return Promise.resolve(null);
-  if (typeof firebase === 'undefined' || !firebase.messaging) {
-    console.warn('[fcm] messaging SDK 미로드');
-    return Promise.resolve(null);
-  }
-  if (!firebase.messaging.isSupported || !firebase.messaging.isSupported()) {
-    console.info('[fcm] 이 브라우저는 FCM 미지원');
-    return Promise.resolve(null);
-  }
-  if (Notification.permission !== 'granted') {
-    return Promise.resolve(null);
-  }
+  fcmInProgress = true;
+  fcmLastError = null;
+  console.info('[fcm] setupFCM 시작', { vapidOk: isVapidConfigured(), groupId: groupId, perm: Notification.permission, sdkLoaded: !!(window.firebase && firebase.messaging) });
+
+  if (!isVapidConfigured()) { fcmLastError = 'VAPID 키 미설정'; fcmInProgress = false; refreshTutorialState(); return Promise.resolve(null); }
+  if (!groupId) { fcmLastError = '그룹 ID 없음 (로그인 대기)'; fcmInProgress = false; refreshTutorialState(); return Promise.resolve(null); }
+  if (typeof firebase === 'undefined' || !firebase.messaging) { fcmLastError = 'Firebase messaging SDK 미로드'; fcmInProgress = false; refreshTutorialState(); return Promise.resolve(null); }
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') { fcmLastError = '알림 권한 미허용'; fcmInProgress = false; refreshTutorialState(); return Promise.resolve(null); }
+  /* isSupported 체크는 iOS PWA 에서 false 반환하는 알려진 케이스 — 우회 후 try 안에서 직접 시도 */
 
   return (swRegistration ? Promise.resolve(swRegistration) : navigator.serviceWorker.ready)
     .then(function(reg){
-      var messaging = firebase.messaging();
+      console.info('[fcm] SW 준비 완료', reg && reg.scope);
+      var messaging;
+      try {
+        messaging = firebase.messaging();
+      } catch(e) {
+        fcmLastError = 'messaging() 인스턴스 실패: ' + (e && e.message || e);
+        console.error('[fcm]', fcmLastError, e);
+        throw e;
+      }
       return messaging.getToken({
         vapidKey: VAPID_KEY,
         serviceWorkerRegistration: reg
       }).then(function(token){
         if (!token) {
-          console.warn('[fcm] 토큰 발급 실패 (null)');
+          fcmLastError = '토큰이 null 반환됨 (권한·등록 재확인 필요)';
+          console.warn('[fcm]', fcmLastError);
+          fcmInProgress = false;
+          refreshTutorialState();
           return null;
         }
-        /* DB 에 토큰 저장 — 키는 토큰 자체 (sanitize 필요).
-           Firebase RTDB 키는 '.' '#' '$' '/' '[' ']' 금지 */
+        fcmLastToken = token;
+        console.info('[fcm] 토큰 발급 성공', token.slice(0,16) + '...');
         var safeKey = String(token).replace(/[.#$/\[\]]/g, '_');
         var u = (window.WMSync && WMSync.getUser()) ? WMSync.getUser() : null;
         var meta = {
@@ -1938,23 +1997,38 @@ function setupFCM(){
           ts: Date.now(),
           platform: detectPlatform(),
           standalone: isStandalone(),
-          ua: (navigator.userAgent || '').slice(0, 120)
+          ua: (navigator.userAgent || '').slice(0, 160)
         };
-        firebase.database().ref('wms_sync/groups/' + groupId + '/picktalk/fcmTokens/' + safeKey).set(meta);
-        console.info('[fcm] 토큰 저장 완료', safeKey.slice(0,12) + '...');
-
-        /* 포그라운드 메시지 — 페이지가 열려 있을 때 (자동 알림 X, 토스트로 표시) */
-        try {
-          messaging.onMessage(function(payload){
-            var n = (payload && payload.notification) || {};
-            toast('🔔 ' + (n.title || '새 작업') + (n.body ? ' · ' + n.body : ''), 'ok');
+        return firebase.database().ref('wms_sync/groups/' + groupId + '/picktalk/fcmTokens/' + safeKey)
+          .set(meta)
+          .then(function(){
+            console.info('[fcm] DB 저장 완료', safeKey.slice(0,16) + '...');
+            toast('✓ 푸시 알림 등록 완료', 'ok');
+            try {
+              messaging.onMessage(function(payload){
+                var n = (payload && payload.notification) || {};
+                toast('🔔 ' + (n.title || '새 작업') + (n.body ? ' · ' + n.body : ''), 'ok');
+              });
+            } catch(e){}
+            fcmInProgress = false;
+            refreshTutorialState();
+            return token;
+          })
+          .catch(function(dbErr){
+            fcmLastError = 'DB 쓰기 실패: ' + (dbErr && dbErr.message || dbErr);
+            console.error('[fcm]', fcmLastError, dbErr);
+            toast(fcmLastError, 'er');
+            fcmInProgress = false;
+            refreshTutorialState();
+            return null;
           });
-        } catch(e){}
-
-        return token;
       });
     }).catch(function(err){
-      console.warn('[fcm] getToken 실패', err);
+      fcmLastError = 'getToken 실패: ' + (err && err.message || err);
+      console.error('[fcm]', fcmLastError, err);
+      toast(fcmLastError, 'er');
+      fcmInProgress = false;
+      refreshTutorialState();
       return null;
     });
 }
