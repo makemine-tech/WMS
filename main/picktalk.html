@@ -251,6 +251,17 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .set-form .ic-pick.on{background:rgba(74,240,168,.14);border-color:var(--g)}
 
 /* 튜토리얼 (알림설정) */
+/* 다음 할 일 카드 (가장 눈에 띔) */
+.tut-next{background:linear-gradient(135deg,rgba(74,240,168,.16),rgba(91,156,246,.12));border:2px solid var(--g);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;cursor:pointer;transition:all .15s}
+.tut-next:active{transform:scale(.98)}
+.tut-next.done{background:rgba(74,240,168,.08);border-color:rgba(74,240,168,.4);cursor:default}
+.tut-next.warn{background:linear-gradient(135deg,rgba(240,196,74,.16),rgba(255,140,90,.12));border-color:var(--y)}
+.tut-next.err{background:linear-gradient(135deg,rgba(240,88,88,.16),rgba(240,88,88,.08));border-color:var(--r)}
+.tut-next-l{font-family:var(--mo);font-size:.66rem;letter-spacing:.05em;color:var(--mu);margin-bottom:.32rem;font-weight:800}
+.tut-next-t{font-size:1.05rem;font-weight:900;color:var(--tx);margin-bottom:.32rem;line-height:1.35}
+.tut-next-d{font-size:.78rem;color:var(--mu);line-height:1.55}
+.tut-next-arrow{display:inline-block;margin-left:.3rem;font-size:.85rem}
+
 .tut-stat{display:flex;flex-direction:column;gap:.4rem;background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem}
 .tut-stat-row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.82rem}
 .tut-stat-row .tsr-l{color:var(--mu);font-size:.74rem}
@@ -275,6 +286,16 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .tut-ok-box{background:rgba(74,240,168,.08);border:1px solid rgba(74,240,168,.4);border-radius:8px;padding:.55rem .75rem;margin-top:.7rem;font-size:.76rem;color:var(--g);line-height:1.55}
 .tut-action{display:flex;gap:.5rem;margin-top:.85rem;flex-wrap:wrap}
 .tut-action .btn{flex:1;min-width:120px}
+/* 큰 강조 버튼 */
+.tut-big-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;padding:1rem 1.2rem;font-size:1.05rem;font-weight:900;border:none;border-radius:12px;cursor:pointer;background:var(--g);color:#0f1117;box-shadow:0 6px 18px rgba(74,240,168,.3);transition:all .15s;letter-spacing:-.005em}
+.tut-big-btn:active{transform:scale(.97)}
+.tut-big-btn.pulse{animation:tutPulse 1.6s ease-in-out infinite}
+.tut-big-btn.granted{background:rgba(74,240,168,.16);color:var(--g);border:2px solid var(--g);box-shadow:none}
+.tut-big-btn.denied{background:rgba(240,88,88,.16);color:var(--r);border:2px solid var(--r);box-shadow:none;cursor:not-allowed}
+@keyframes tutPulse{
+  0%,100%{box-shadow:0 6px 18px rgba(74,240,168,.3);transform:scale(1)}
+  50%{box-shadow:0 8px 28px rgba(74,240,168,.65);transform:scale(1.02)}
+}
 
 @media(min-width:600px){
   .app{max-width:480px;margin:0 auto;border-left:1px solid var(--br);border-right:1px solid var(--br)}
@@ -469,6 +490,18 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
   </div>
   <div class="m-body">
 
+    <!-- 다음 할 일 (동적, 가장 위) -->
+    <div class="tut-next" id="tutNext" onclick="tutNextAction()">
+      <div class="tut-next-l">📍 다음 할 일</div>
+      <div class="tut-next-t" id="tutNextTitle">상태 확인 중...</div>
+      <div class="tut-next-d" id="tutNextDesc">잠시만 기다려주세요</div>
+    </div>
+
+    <!-- iOS 버전 경고 (필요 시 표시) -->
+    <div class="tut-warn" id="tutIosVerWarn" style="display:none;margin:0 0 1rem">
+      ⚠️ <b>iOS 16.4 미만</b> 에서는 PWA 알림이 지원되지 않습니다. 휴대폰 설정 → 일반 → 정보 → 소프트웨어 버전 확인 후 가능하면 업데이트해주세요.
+    </div>
+
     <div class="tut-stat">
       <div class="tut-stat-row">
         <span class="tsr-l">📱 휴대폰 설치 (홈화면 추가)</span>
@@ -498,17 +531,22 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
       <div id="tutInstallContent"></div>
     </div>
 
-    <div class="tut-sec">
+    <div class="tut-sec" id="tutSecNotif">
       <h4><span class="num">2</span> 알림 허용</h4>
-      <p style="color:var(--mu);margin-bottom:.5rem">아래 버튼을 누르면 브라우저가 알림 권한을 묻습니다. <b style="color:var(--g)">허용</b>을 누르세요.</p>
-      <div class="tut-action">
-        <button class="btn btn-g" onclick="requestNotif()">🔔 알림 켜기 (테스트 알림 발송)</button>
-      </div>
+      <p style="color:var(--mu);margin-bottom:.7rem;font-size:.82rem;line-height:1.55">
+        아래 큰 버튼을 누르면 iOS/안드로이드가 <b style="color:var(--g)">알림 허용 팝업</b>을 띄웁니다.<br>
+        팝업이 뜨면 <b style="color:var(--g)">"허용"</b> 을 선택하세요.
+      </p>
+      <button class="tut-big-btn" id="tutBigNotifBtn" onclick="requestNotif()">
+        🔔 알림 켜기
+      </button>
       <div class="tut-warn" id="tutNotifWarn" style="display:none">
-        ⚠️ 알림이 차단된 상태입니다. <b>브라우저 설정 → 사이트 권한 → 알림</b> 에서 makewon.com 을 허용으로 바꿔주세요.
+        ⚠️ 알림이 <b>차단됨</b> 상태입니다.<br>
+        <b>iOS:</b> 설정 앱 → 알림 → 픽앤톡 → "알림 허용" 켜기<br>
+        <b>Android:</b> 브라우저 설정 → 사이트 권한 → 알림 → makewon.com 허용
       </div>
       <div class="tut-ok-box" id="tutNotifOk" style="display:none">
-        ✓ 알림이 켜져 있습니다. 새 작업이 등록되면 휴대폰에 알림이 옵니다.
+        ✓ 알림이 켜져 있습니다. 위 버튼을 다시 눌러 테스트 알림을 받을 수 있습니다.
       </div>
     </div>
 
@@ -1593,8 +1631,18 @@ function isStandalone(){
       || window.matchMedia('(display-mode: fullscreen)').matches
       || window.navigator.standalone === true;
 }
+function getIOSVersion(){
+  /* iOS UA: "OS 16_4 like Mac OS X". iPad on iOS 13+ 은 'Macintosh' 로 보이는 경우도 있음 (touch 지원으로 식별) */
+  var ua = navigator.userAgent;
+  var m = ua.match(/OS (\d+)[._](\d+)(?:[._](\d+))?/);
+  if (m) return parseFloat(m[1] + '.' + m[2]);
+  return null;
+}
 function platformLabel(p){
-  return p==='ios'?'🍎 iOS (iPhone/iPad)':p==='android'?'🤖 Android':'💻 데스크탑';
+  var ver = (p==='ios') ? getIOSVersion() : null;
+  if (p==='ios') return '🍎 iOS' + (ver ? ' ' + ver : '');
+  if (p==='android') return '🤖 Android';
+  return '💻 데스크탑';
 }
 
 function openTutorial(){
@@ -1641,6 +1689,8 @@ function refreshTutorialState(){
   var perm = ('Notification' in window) ? Notification.permission : 'unsupported';
   var hasSW = 'serviceWorker' in navigator;
   var p = detectPlatform();
+  var iosVer = (p==='ios') ? getIOSVersion() : null;
+  var iosTooOld = (p==='ios' && iosVer !== null && iosVer < 16.4);
 
   /* 설치 상태 */
   var instEl = document.getElementById('tutInstallStat');
@@ -1670,15 +1720,121 @@ function refreshTutorialState(){
   var pEl = document.getElementById('tutPlatStat');
   if (pEl){ pEl.textContent = platformLabel(p); pEl.className = 'tsr-v'; }
 
+  /* iOS 버전 경고 */
+  var iosWarn = document.getElementById('tutIosVerWarn');
+  if (iosWarn) iosWarn.style.display = iosTooOld ? '' : 'none';
+
   /* 알림 메시지 박스 */
   var warn = document.getElementById('tutNotifWarn');
   var okBox = document.getElementById('tutNotifOk');
   if (warn) warn.style.display = perm==='denied' ? '' : 'none';
   if (okBox) okBox.style.display = perm==='granted' ? '' : 'none';
 
+  /* 큰 알림 버튼 상태 + pulsing */
+  var bigBtn = document.getElementById('tutBigNotifBtn');
+  if (bigBtn){
+    bigBtn.classList.remove('pulse','granted','denied');
+    if (perm === 'granted'){
+      bigBtn.classList.add('granted');
+      bigBtn.innerHTML = '✓ 알림 허용됨 (탭하면 테스트 알림)';
+    } else if (perm === 'denied'){
+      bigBtn.classList.add('denied');
+      bigBtn.innerHTML = '✗ 차단됨 — 휴대폰 설정에서 허용';
+    } else if (perm === 'unsupported'){
+      bigBtn.classList.add('denied');
+      bigBtn.innerHTML = '✗ 이 브라우저는 알림 미지원';
+    } else {
+      /* default — 미허용, 깜빡이며 시선 끌기 */
+      bigBtn.classList.add('pulse');
+      bigBtn.innerHTML = '🔔 여기를 눌러 알림 켜기';
+    }
+  }
+
   /* 상단 알림 버튼 빨간 dot — granted 가 아니면 표시 */
   var dot = document.getElementById('notifDot');
   if (dot) dot.classList.toggle('hide', perm === 'granted');
+
+  /* "다음 할 일" 카드 */
+  refreshTutNext(standalone, perm, hasSW, p, iosTooOld);
+}
+
+/* 다음 할 일 동적 생성 */
+function refreshTutNext(standalone, perm, hasSW, plat, iosTooOld){
+  var card = document.getElementById('tutNext');
+  var t = document.getElementById('tutNextTitle');
+  var d = document.getElementById('tutNextDesc');
+  if (!card || !t || !d) return;
+  card.classList.remove('done','warn','err');
+
+  /* 우선순위: iOS 버전 < 설치 < SW < 권한 < 완료 */
+  if (iosTooOld){
+    card.classList.add('err');
+    t.textContent = '⚠️ iOS 업데이트 필요';
+    d.innerHTML = '현재 iOS 버전은 PWA 알림 미지원 — <b>iOS 16.4 이상</b> 으로 업데이트 후 다시 진행해주세요.';
+    card.dataset.next = 'iosver';
+    return;
+  }
+  if (!standalone){
+    card.classList.add('warn');
+    if (plat==='ios'){
+      t.textContent = '① 홈 화면에 추가하세요';
+      d.innerHTML = 'Safari 하단 <b>공유 ⬆️</b> → <b>"홈 화면에 추가"</b> → 추가 → 홈 아이콘으로 열기. <span class="tut-next-arrow">↓ 자세한 단계 보기</span>';
+    } else if (plat==='android'){
+      t.textContent = '① 홈 화면에 추가하세요';
+      d.innerHTML = 'Chrome <b>⋮ 메뉴 → "홈 화면에 추가"</b> 또는 화면 하단 설치 배너. <span class="tut-next-arrow">↓ 자세한 단계 보기</span>';
+    } else {
+      t.textContent = '📱 휴대폰에서 접속하세요';
+      d.innerHTML = '알림은 휴대폰 기능 — Safari(iOS) 또는 Chrome(안드로이드) 로 makewon.com/picktalk.html 접속 후 홈화면 추가';
+    }
+    card.dataset.next = 'install';
+    return;
+  }
+  if (perm === 'denied'){
+    card.classList.add('err');
+    t.textContent = '⚠️ 알림이 차단된 상태';
+    d.innerHTML = '<b>iOS:</b> 설정 → 픽앤톡 → 알림 → 켜기<br><b>Android:</b> 브라우저 설정 → 사이트 권한 → 알림';
+    card.dataset.next = 'denied';
+    return;
+  }
+  if (perm === 'default'){
+    card.classList.remove('warn','err','done');
+    t.textContent = '② 알림 허용 버튼을 누르세요';
+    d.innerHTML = '아래 <b>🔔 여기를 눌러 알림 켜기</b> (초록 큰 버튼) 을 탭하면 iOS 가 권한 팝업을 띄웁니다. <b style="color:var(--g)">"허용"</b> 선택. <span class="tut-next-arrow">↓ 큰 버튼으로</span>';
+    card.dataset.next = 'perm';
+    return;
+  }
+  if (perm === 'granted'){
+    card.classList.add('done');
+    t.textContent = '✓ 모든 준비 완료';
+    d.innerHTML = '설치 + 알림 허용 + 서비스 워커 모두 OK. 새 작업이 등록되면 휴대폰 알림이 옵니다.<br><span style="color:var(--mu);font-size:.74rem">※ 실제 푸시 발송 기능은 단계적으로 활성화됩니다.</span>';
+    card.dataset.next = 'done';
+    return;
+  }
+  card.classList.add('err');
+  t.textContent = '알림 미지원';
+  d.textContent = '이 브라우저는 알림을 지원하지 않습니다. Safari(iOS) 또는 Chrome(Android) 로 다시 시도하세요.';
+  card.dataset.next = 'unsupported';
+}
+
+/* "다음 할 일" 카드 탭 → 해당 섹션으로 스크롤 */
+function tutNextAction(){
+  var card = document.getElementById('tutNext');
+  if (!card) return;
+  var next = card.dataset.next;
+  if (next === 'install'){
+    var sec = document.querySelector('.tut-sec'); /* 첫 섹션 = 설치 */
+    if (sec) sec.scrollIntoView({behavior:'smooth', block:'start'});
+  } else if (next === 'perm' || next === 'denied'){
+    var sec2 = document.getElementById('tutSecNotif');
+    if (sec2) sec2.scrollIntoView({behavior:'smooth', block:'center'});
+    /* 큰 버튼 잠깐 강조 */
+    var bigBtn = document.getElementById('tutBigNotifBtn');
+    if (bigBtn && next === 'perm'){
+      bigBtn.classList.remove('pulse');
+      void bigBtn.offsetWidth;
+      bigBtn.classList.add('pulse');
+    }
+  }
 }
 
 function requestNotif(){
