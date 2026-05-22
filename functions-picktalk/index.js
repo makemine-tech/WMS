@@ -126,20 +126,11 @@ exports.notifyPicktalkLog = onValueCreated(
       return;
     }
 
-    /* 등록자 자신 제외 (uid 또는 by 매칭) */
-    const senderUid = log.byUid || null;
-    const senderBy = log.by || null;
-    const targets = allTokens.filter((tok) => {
-      const m = tokenMap[tok] || {};
-      if (senderUid && m.uid === senderUid) return false;
-      if (senderBy && m.by === senderBy) return false;
-      return true;
-    });
-
-    if (!targets.length) {
-      logger.info('등록자 본인만 토큰 보유 — 발송 안 함', { gid, logId });
-      return;
-    }
+    /* 그룹 멤버 전원에게 발송 — 등록자 본인 포함.
+       이유: 등록한 본인도 "발송 잘 됐는지" 확인 가능, 다중 디바이스 사용자는
+       다른 디바이스에서도 알림 받음, 운영 가시성 향상.
+       페이지가 열려 있는 디바이스는 messaging.onMessage 가 토스트만 표시. */
+    const targets = allTokens.slice();
 
     /* 알림 본문 작성 */
     const title = `${log.categoryIcon || '📋'} ${log.categoryName || '새 작업'}`;
