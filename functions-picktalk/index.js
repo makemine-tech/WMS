@@ -132,11 +132,21 @@ exports.notifyPicktalkLog = onValueCreated(
        페이지가 열려 있는 디바이스는 messaging.onMessage 가 토스트만 표시. */
     const targets = allTokens.slice();
 
+    /* 작성자 이름 — members 매핑 우선, log.byName fallback */
+    let writerName = log.byName || '';
+    if (log.byUid) {
+      try {
+        const mSnap = await admin.database().ref(`/wms_sync/groups/${gid}/picktalk/members/${log.byUid}/name`).once('value');
+        const mappedName = mSnap.val();
+        if (mappedName && typeof mappedName === 'string') writerName = mappedName;
+      } catch (e) { /* fallback to log.byName */ }
+    }
+
     /* 알림 본문 작성 */
     const title = `${log.categoryIcon || '📋'} ${log.categoryName || '새 작업'}`;
     const bodyParts = [];
     if (log.title) bodyParts.push(log.title);
-    if (log.byName) bodyParts.push(`작성: ${log.byName}`);
+    if (writerName) bodyParts.push(`작성: ${writerName}`);
     const body = bodyParts.join(' · ') || '새 작업이 등록되었습니다';
 
     /* 다중 발송 (sendEachForMulticast — 최대 500개/호출) */
@@ -233,11 +243,23 @@ exports.notifyPicktalkEdit = onValueUpdated(
       return;
     }
 
+    /* 수정자 이름 — members 매핑 우선 (editedByUid 없으면 editedBy fallback) */
+    let editorName = after.editedBy || '';
+    /* editedByUid 가 저장돼 있으면 매핑 */
+    const editorUid = after.editedByUid || after.byUid || null;
+    if (editorUid) {
+      try {
+        const mSnap = await admin.database().ref(`/wms_sync/groups/${gid}/picktalk/members/${editorUid}/name`).once('value');
+        const mappedName = mSnap.val();
+        if (mappedName && typeof mappedName === 'string') editorName = mappedName;
+      } catch (e) {}
+    }
+
     /* 알림 본문 — 제목에 ✏️ 수정됨 prefix */
     const title = `✏️ 수정 · ${after.categoryIcon || '📋'} ${after.categoryName || '작업'}`;
     const bodyParts = [];
     if (after.title) bodyParts.push(after.title);
-    if (after.editedBy) bodyParts.push(`수정: ${after.editedBy}`);
+    if (editorName) bodyParts.push(`수정: ${editorName}`);
     const body = bodyParts.join(' · ') || '작업이 수정되었습니다';
 
     const message = {

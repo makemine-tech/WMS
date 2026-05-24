@@ -394,6 +394,23 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 
     <!-- ───────────── 정보(관리자 설정) 탭 ───────────── -->
     <section id="tabSet" class="tab-screen">
+      <!-- 누구나 보이는 영역: 내 이름 설정 -->
+      <div class="set-body" style="padding-bottom:0">
+        <div class="set-sec">
+          <div class="set-h">
+            <div class="set-h-l" style="color:var(--g)">👤 내 이름</div>
+          </div>
+          <div style="font-size:.74rem;color:var(--mu);margin-bottom:.55rem;line-height:1.5">
+            알림과 목록에 "작성: <b style="color:var(--tx)">○○○</b>" 으로 표시됩니다.<br>
+            예: <span style="color:var(--g)">홍길동</span>, <span style="color:var(--g)">박부장</span>
+          </div>
+          <div style="display:flex;gap:.4rem">
+            <input type="text" id="myNameInput" placeholder="이름 입력" maxlength="20" autocomplete="off"
+              style="flex:1;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:7px;padding:.6rem .8rem;font-size:.94rem;outline:none">
+            <button class="btn btn-g" onclick="saveMyName()" style="padding:.55rem 1.1rem;font-size:.86rem">💾 저장</button>
+          </div>
+        </div>
+      </div>
       <div id="setGate" class="set-readonly" style="display:none">
         ⛔ 관리 영역은 관리자만 사용할 수 있습니다.<br>변경이 필요하면 관리자에게 요청하세요.
       </div>
@@ -668,10 +685,11 @@ var SEED_COMPLETES = [
 /* ───────── 전역 상태 ───────── */
 var groupId = null;
 var isAdmin = false;
-var logsRef = null, setRef = null, tokensRef = null;
+var logsRef = null, setRef = null, tokensRef = null, membersRef = null;
 var allLogs = [];
 var fcmTokensCache = {};   /* {tokenKey: {uid, by, ts, ...}} 실시간 구독 */
 var groupMemberCount = 0;  /* fcmTokens 의 distinct uid 수 (구독 시 갱신) */
+var membersCache = {};     /* {uid: {name, ts}} 그룹 멤버 이름 매핑 */
 var settings = { categories:{}, vendors:{}, statuses:{}, completes:{}, seeded:false };
 var curFilter = 'all'; /* 카테고리: all | mine | <categoryId> */
 var curCompleteFilter = 'all'; /* 작업완료여부: all | __none__ | <name> */
@@ -690,7 +708,38 @@ function escAttr(s){ return escH(s).replace(/"/g,'&quot;'); }
 function pad2(n){ n=String(n); return n.length<2 ? '0'+n : n; }
 function getUserId(){ var u=window.WMSync&&WMSync.getUser(); return u?(u.email||u.uid):''; }
 function getUserUid(){ var u=window.WMSync&&WMSync.getUser(); return u?u.uid:''; }
-function getUserDisplay(){ var u=window.WMSync&&WMSync.getUser(); if(!u) return ''; if(u.displayName) return u.displayName; if(u.email) return u.email.split('@')[0]; return u.uid.slice(0,6); }
+/* 우선순위: members 에 저장한 본인 이름 > Firebase Auth displayName > 이메일 ID > uid */
+function getUserDisplay(){
+  var u=window.WMSync&&WMSync.getUser(); if(!u) return '';
+  var m=membersCache[u.uid];
+  if (m && m.name) return m.name;
+  if (u.displayName) return u.displayName;
+  if (u.email) return u.email.split('@')[0];
+  return u.uid.slice(0,6);
+}
+/* 다른 사람 이름 조회 (uid → 이름) */
+function nameFromUid(uid){
+  if (!uid) return '';
+  var m=membersCache[uid];
+  if (m && m.name) return m.name;
+  return '';
+}
+/* 본인 이름 저장 (정보 탭에서 호출) */
+function saveMyName(){
+  if (!membersRef) { toast('로그인 후 사용','warn'); return; }
+  var inp=document.getElementById('myNameInput');
+  if (!inp) return;
+  var name=(inp.value||'').trim();
+  if (!name){ toast('이름을 입력하세요','warn'); inp.focus(); return; }
+  if (name.length > 20){ toast('20자 이내','warn'); return; }
+  var me=getUserUid();
+  if (!me){ toast('인증 정보 없음','er'); return; }
+  membersRef.child(me).set({ name:name, ts:Date.now() }).then(function(){
+    toast('✓ 이름 저장됨 — 이후 알림에 반영','ok');
+  }).catch(function(err){
+    toast('저장 실패: '+(err&&err.message||err),'er');
+  });
+}
 /* 카드 unread = 그룹 멤버 수 - readBy 키 수 (등록자 자동 포함).
    본인 글이라도 다른 사람이 안 읽었으면 그 수 반환 → "읽음 N" 표시용. */
 function logUnreadCount(lg){
@@ -854,6 +903,20 @@ function attachRefs(){
     }
     renderAll();
   }, function(err){ console.warn('settings read', err); });
+  /* members — 그룹 멤버의 displayName 매핑 */
+  if (membersRef) { try{ membersRef.off(); }catch(e){} }
+  membersRef=db.ref('wms_sync/groups/'+groupId+'/picktalk/members');
+  membersRef.on('value', function(snap){
+    membersCache=snap.val()||{};
+    /* 본인 이름 입력란에 현재 값 반영 */
+    var inp=document.getElementById('myNameInput');
+    if (inp){
+      var me=getUserUid();
+      var m=membersCache[me];
+      if (m && m.name && !inp.value) inp.value=m.name;
+    }
+    renderList();
+  }, function(){});
   /* fcmTokens — 그룹의 distinct uid 수 계산용 (unread 카운트 분모) */
   if (tokensRef) { try{ tokensRef.off(); }catch(e){} }
   tokensRef=db.ref('wms_sync/groups/'+groupId+'/picktalk/fcmTokens');
@@ -1056,7 +1119,7 @@ function renderFeedCard(lg){
     (meta.length?'<div class="fc-meta">'+meta.join('')+'</div>':'')+
     noteHtml+
     photosHtml+
-    '<div class="fc-by"><span class="fc-by-name">'+escH(lg.byName||lg.by||'?')+'</span><span class="fc-by-time">'+fmtTimeAgo(lg.ts)+'</span></div>'+
+    '<div class="fc-by"><span class="fc-by-name">'+escH(nameFromUid(lg.byUid)||lg.byName||lg.by||'?')+'</span><span class="fc-by-time">'+fmtTimeAgo(lg.ts)+'</span></div>'+
   '</div>';
 }
 function renderList(){
@@ -1849,7 +1912,8 @@ function submitLog(){
       note: rec.note || null,
       photos: rec.photos || null,
       editedAt: Date.now(),
-      editedBy: getUserId()
+      editedBy: getUserId(),
+      editedByUid: getUserUid()
     };
     /* JSON.stringify 는 null 유지, undefined 제거. Firebase update 에서 null = 해당 키 삭제. */
     var clean = JSON.parse(JSON.stringify(updates));
