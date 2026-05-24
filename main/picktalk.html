@@ -83,6 +83,7 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .fc-cat .ic{font-size:1rem}
 .fc-cat .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fc-state{flex-shrink:0;font-size:.68rem;font-weight:800;padding:.18rem .55rem;border-radius:5px;border:1px solid;letter-spacing:-.005em;white-space:nowrap}
+.fc-unread{display:inline-flex;align-items:center;justify-content:center;background:var(--r);color:#fff;border-radius:999px;min-width:18px;height:18px;padding:0 6px;font-size:.66rem;font-weight:900;font-family:var(--mo);line-height:1;flex-shrink:0;box-shadow:0 0 0 2px var(--s1)}
 .fc-title{font-size:.95rem;font-weight:800;color:var(--tx);line-height:1.4;letter-spacing:-.01em;word-break:break-all}
 .fc-meta{display:flex;flex-wrap:wrap;gap:.32rem;font-size:.7rem}
 .fc-meta .m-pill{padding:.16rem .55rem;border-radius:5px;font-weight:700;letter-spacing:-.005em}
@@ -663,8 +664,10 @@ var SEED_COMPLETES = [
 /* ───────── 전역 상태 ───────── */
 var groupId = null;
 var isAdmin = false;
-var logsRef = null, setRef = null;
+var logsRef = null, setRef = null, tokensRef = null;
 var allLogs = [];
+var fcmTokensCache = {};   /* {tokenKey: {uid, by, ts, ...}} 실시간 구독 */
+var groupMemberCount = 0;  /* fcmTokens 의 distinct uid 수 (구독 시 갱신) */
 var settings = { categories:{}, vendors:{}, statuses:{}, completes:{}, seeded:false };
 var curFilter = 'all'; /* 카테고리: all | mine | <categoryId> */
 var curCompleteFilter = 'all'; /* 작업완료여부: all | __none__ | <name> */
@@ -682,7 +685,52 @@ function escH(s){ if(s===null||s===undefined) return ''; return String(s).replac
 function escAttr(s){ return escH(s).replace(/"/g,'&quot;'); }
 function pad2(n){ n=String(n); return n.length<2 ? '0'+n : n; }
 function getUserId(){ var u=window.WMSync&&WMSync.getUser(); return u?(u.email||u.uid):''; }
+function getUserUid(){ var u=window.WMSync&&WMSync.getUser(); return u?u.uid:''; }
 function getUserDisplay(){ var u=window.WMSync&&WMSync.getUser(); if(!u) return ''; if(u.displayName) return u.displayName; if(u.email) return u.email.split('@')[0]; return u.uid.slice(0,6); }
+/* 카드 unread = 그룹 멤버 수 - readBy 키 수 (등록자 자동 포함). 본인 글이면 0. */
+function logUnreadCount(lg){
+  var N=groupMemberCount||0;
+  if (N<=1) return 0;
+  var me=getUserUid();
+  if (lg.byUid && lg.byUid===me) return 0;
+  var readKeys = lg.readBy ? Object.keys(lg.readBy) : [];
+  var ownerNotInRead = lg.byUid && readKeys.indexOf(lg.byUid)===-1;
+  var R = readKeys.length + (ownerNotInRead ? 1 : 0);
+  return Math.max(0, N - R);
+}
+/* 본인이 안 읽은 글 수 — 앱 배지용 */
+function myUnreadCount(){
+  var me=getUserUid();
+  if (!me) return 0;
+  var n=0;
+  allLogs.forEach(function(lg){
+    if (lg.archived) return;
+    if (lg.byUid===me) return;
+    if (!(lg.readBy && lg.readBy[me])) n++;
+  });
+  return n;
+}
+/* 앱 아이콘 배지 동기화 — iOS PWA 16.4+ / Android Chrome PWA */
+function syncAppBadge(){
+  if (typeof navigator==='undefined' || !('setAppBadge' in navigator)) return;
+  var n=myUnreadCount();
+  try {
+    if (n>0) navigator.setAppBadge(n);
+    else navigator.clearAppBadge();
+  } catch(e){}
+}
+
+/* 카드를 본 것으로 표시 */
+function markRead(logKey){
+  if (!logsRef) return;
+  var me=getUserUid();
+  if (!me) return;
+  var lg=allLogs.find(function(x){return x._key===logKey;});
+  if (!lg) return;
+  if (lg.byUid===me) return; /* 본인 글은 마킹 불필요 */
+  if (lg.readBy && lg.readBy[me]) return; /* 이미 읽음 */
+  logsRef.child(logKey).child('readBy').child(me).set(Date.now());
+}
 function ymd(ts){ var d=new Date(ts); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function ymdInt(ts){ var d=new Date(ts); return d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate(); }
 function dateToYmdInt(dStr){ if(!dStr) return 0; var p=dStr.split('-'); return (+p[0])*10000+(+p[1])*100+(+p[2]); }
@@ -790,6 +838,20 @@ function attachRefs(){
     }
     renderAll();
   }, function(err){ console.warn('settings read', err); });
+  /* fcmTokens — 그룹의 distinct uid 수 계산용 (unread 카운트 분모) */
+  if (tokensRef) { try{ tokensRef.off(); }catch(e){} }
+  tokensRef=db.ref('wms_sync/groups/'+groupId+'/picktalk/fcmTokens');
+  tokensRef.on('value', function(snap){
+    fcmTokensCache=snap.val()||{};
+    var uids={};
+    Object.keys(fcmTokensCache).forEach(function(t){
+      var m=fcmTokensCache[t]; if (m && m.uid) uids[m.uid]=true;
+    });
+    groupMemberCount=Object.keys(uids).length;
+    /* 멤버 수 바뀌면 unread 다시 그림 */
+    renderList(); renderStatusStrip();
+    syncAppBadge();
+  }, function(){});
   /* logs */
   if (logsRef) { try{ logsRef.off(); }catch(e){} }
   logsRef=db.ref('wms_sync/groups/'+groupId+'/picktalk/logs');
@@ -799,6 +861,7 @@ function attachRefs(){
     renderStatusStrip();
     renderList();
     renderCalendar();
+    syncAppBadge();
   }, function(err){ toast('데이터 읽기 실패: '+(err&&err.message||err),'er'); });
 }
 function seedDefaults(){
@@ -939,6 +1002,9 @@ function renderFeedCard(lg){
     var cmColor=(cc&&cc.color)||'#4af0a8';
     stateBadge='<span class="fc-state" style="background:'+cmColor+'22;color:'+cmColor+';border-color:'+cmColor+'88">'+escH(lg.completeName)+'</span>';
   }
+  /* 카톡식 안 읽은 사람 수 배지 — 본인 글 또는 모두 읽음이면 안 보임 */
+  var unread=logUnreadCount(lg);
+  var unreadBadge=unread>0 ? '<span class="fc-unread" title="안 읽은 사람 '+unread+'명">'+unread+'</span>' : '';
   var noteHtml=lg.note?'<div class="fc-note">'+escH(lg.note)+'</div>':'';
   var photosHtml='';
   if (Array.isArray(lg.photos) && lg.photos.length){
@@ -951,7 +1017,7 @@ function renderFeedCard(lg){
   return '<div class="feed-card" style="border-left-color:'+color+'" onclick="openActions(\''+escAttr(lg._key)+'\')">'+
     '<div class="fc-row1">'+
       '<div class="fc-cat"><span class="ic">'+icon+'</span><span class="name">'+escH(name)+'</span></div>'+
-      stateBadge+
+      '<div style="display:flex;align-items:center;gap:.32rem;flex-shrink:0">'+ unreadBadge + stateBadge +'</div>'+
     '</div>'+
     (lg.title?'<div class="fc-title">'+escH(lg.title)+'</div>':'')+
     (meta.length?'<div class="fc-meta">'+meta.join('')+'</div>':'')+
@@ -1067,6 +1133,8 @@ function openActions(logKey){
   var lg=allLogs.find(function(x){ return x._key===logKey; });
   if (!lg) return;
   actionTargetKey=logKey;
+  /* 카드 탭 = 읽음 처리 (카톡식) */
+  markRead(logKey);
   var c=settings.categories[lg.categoryId]||{};
   var f=c.fields||{};
   /* 시트 제목: 작업 미리보기 */
@@ -1623,11 +1691,13 @@ function submitLog(){
   title=title.trim();
   if (!title){ toast('네이밍은 필수입니다','warn'); return; }
   var isEdit = !!regState.editKey;
+  var myUid = (window.WMSync && WMSync.getUser() && WMSync.getUser().uid) || '';
   var rec={
     /* edit 모드는 ts/by/byName 유지하므로 여기선 임시값 — 아래에서 분기 */
     ts: Date.now(),
     by: getUserId(),
     byName: getUserDisplay(),
+    byUid: myUid,
     categoryId: regState.catId,
     categoryName: c.name||'',
     categoryIcon: c.icon||'',
@@ -1710,6 +1780,11 @@ function submitLog(){
       .then(function(){ done('✓ 편집 저장됨'); })
       .catch(fail).finally(done2);
   } else {
+    /* 새 등록 — 등록자 본인은 자동 '읽음' */
+    if (myUid) {
+      rec.readBy = {};
+      rec.readBy[myUid] = Date.now();
+    }
     var cleanNew=JSON.parse(JSON.stringify(rec));
     logsRef.push(cleanNew)
       .then(function(){ done('✓ 등록 완료'); })
@@ -2413,6 +2488,10 @@ function setupFCM(){
   registerSW();
   /* 상단 알림 dot 초기 상태 */
   refreshTutorialState();
+  /* 페이지 복귀 시 앱 배지 재동기화 */
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible') syncAppBadge();
+  });
 })();
 </script>
 </body>

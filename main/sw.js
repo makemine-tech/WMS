@@ -39,11 +39,23 @@ if (typeof firebase !== 'undefined' && firebase.initializeApp) {
             tag: data.tag || 'picktalk',
             data: { url: data.url || '/picktalk.html', logId: data.logId || null, gid: data.gid || null }
           };
-          self.registration.showNotification(title, opts);
+          self.registration.showNotification(title, opts).then(updateAppBadge);
         } catch(e) { /* swallow */ }
       });
     }
   } catch (e) { /* init 실패 → fallback push 핸들러만 동작 */ }
+}
+
+/* 활성 알림 수로 앱 배지 갱신 — iOS PWA 16.4+ / Android Chrome */
+function updateAppBadge(){
+  try {
+    if (!('setAppBadge' in self.navigator)) return;
+    self.registration.getNotifications().then(function(ns){
+      var n = ns.length;
+      if (n > 0) self.navigator.setAppBadge(n).catch(function(){});
+      else self.navigator.clearAppBadge && self.navigator.clearAppBadge().catch(function(){});
+    });
+  } catch(e){}
 }
 
 self.addEventListener('install', function(e){
