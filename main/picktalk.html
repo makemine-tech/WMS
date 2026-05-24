@@ -83,7 +83,9 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .fc-cat .ic{font-size:1rem}
 .fc-cat .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fc-state{flex-shrink:0;font-size:.68rem;font-weight:800;padding:.18rem .55rem;border-radius:5px;border:1px solid;letter-spacing:-.005em;white-space:nowrap}
-.fc-unread{display:inline-flex;align-items:center;justify-content:center;background:var(--r);color:#fff;border-radius:999px;min-width:18px;height:18px;padding:0 6px;font-size:.66rem;font-weight:900;font-family:var(--mo);line-height:1;flex-shrink:0;box-shadow:0 0 0 2px var(--s1)}
+.fc-unread{display:inline-flex;align-items:center;justify-content:center;color:#fff;border-radius:999px;height:18px;padding:0 8px;font-size:.62rem;font-weight:800;line-height:1;flex-shrink:0;letter-spacing:.02em;gap:.18rem;cursor:default}
+.fc-unread.is-unread{background:var(--r);cursor:pointer}
+.fc-unread.is-read{background:var(--mu);opacity:.85}
 .fc-title{font-size:.95rem;font-weight:800;color:var(--tx);line-height:1.4;letter-spacing:-.01em;word-break:break-all}
 .fc-meta{display:flex;flex-wrap:wrap;gap:.32rem;font-size:.7rem}
 .fc-meta .m-pill{padding:.16rem .55rem;border-radius:5px;font-weight:700;letter-spacing:-.005em}
@@ -689,12 +691,11 @@ function pad2(n){ n=String(n); return n.length<2 ? '0'+n : n; }
 function getUserId(){ var u=window.WMSync&&WMSync.getUser(); return u?(u.email||u.uid):''; }
 function getUserUid(){ var u=window.WMSync&&WMSync.getUser(); return u?u.uid:''; }
 function getUserDisplay(){ var u=window.WMSync&&WMSync.getUser(); if(!u) return ''; if(u.displayName) return u.displayName; if(u.email) return u.email.split('@')[0]; return u.uid.slice(0,6); }
-/* 카드 unread = 그룹 멤버 수 - readBy 키 수 (등록자 자동 포함). 본인 글이면 0. */
+/* 카드 unread = 그룹 멤버 수 - readBy 키 수 (등록자 자동 포함).
+   본인 글이라도 다른 사람이 안 읽었으면 그 수 반환 → "읽음 N" 표시용. */
 function logUnreadCount(lg){
   var N=groupMemberCount||0;
   if (N<=1) return 0;
-  var me=getUserUid();
-  if (lg.byUid && lg.byUid===me) return 0;
   var readKeys = lg.readBy ? Object.keys(lg.readBy) : [];
   var ownerNotInRead = lg.byUid && readKeys.indexOf(lg.byUid)===-1;
   var R = readKeys.length + (ownerNotInRead ? 1 : 0);
@@ -1017,13 +1018,25 @@ function renderFeedCard(lg){
     var cmColor=(cc&&cc.color)||'#4af0a8';
     stateBadge='<span class="fc-state" style="background:'+cmColor+'22;color:'+cmColor+';border-color:'+cmColor+'88">'+escH(lg.completeName)+'</span>';
   }
-  /* 카톡식 안 읽은 사람 수 배지 — 본인 글 또는 모두 읽음이면 안 보임.
-     배지 자체를 탭하면 본인 읽음 처리 (event 전파 막음). */
+  /* 읽음 배지 — 안 읽은 사람 수와 본인 상태를 같이 표시.
+     · 본인이 안 읽음 → 빨간 "안읽음 N" (클릭하면 본인 읽음 처리)
+     · 본인이 읽음 또는 본인 글 → 회색 "읽음 N" (클릭 비활성, 다른 사람 확인 대기)
+     · 모두 읽으면(N=0) 안 보임 */
   var unread=logUnreadCount(lg);
+  var myUid=getUserUid();
+  var iAmOwner=(lg.byUid===myUid);
+  var iRead=!!(lg.readBy && lg.readBy[myUid]);
   var unreadBadge='';
   if (unread>0){
     var keyEsc=escAttr(lg._key);
-    unreadBadge='<span class="fc-unread" title="안 읽은 사람 '+unread+'명 — 누르면 본인 확인 처리" onclick="event.stopPropagation();tapUnreadBadge(\''+keyEsc+'\')">'+unread+'</span>';
+    var iDone = iAmOwner || iRead;
+    var label = iDone ? '읽음' : '안읽음';
+    var badgeCls = iDone ? 'fc-unread is-read' : 'fc-unread is-unread';
+    var clickAttr = iDone ? '' : ' onclick="event.stopPropagation();tapUnreadBadge(\''+keyEsc+'\')"';
+    var titleAttr = iAmOwner ? '본인 등록 · 안 읽은 사람 '+unread+'명' :
+                    iRead ? '본인 확인 완료 · 안 읽은 사람 '+unread+'명' :
+                    '누르면 본인 확인 처리 (전체 안 읽은 '+unread+'명)';
+    unreadBadge='<span class="'+badgeCls+'" title="'+titleAttr+'"'+clickAttr+'>'+label+' '+unread+'</span>';
   }
   var noteHtml=lg.note?'<div class="fc-note">'+escH(lg.note)+'</div>':'';
   var photosHtml='';
