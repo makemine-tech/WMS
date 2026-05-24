@@ -51,8 +51,8 @@ input,textarea,select{user-select:text;-webkit-user-select:text;font-family:inhe
 .notif-btn .nb-dot.hide{display:none}
 
 main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative}
-.tab-screen{flex:1;display:none;overflow-y:auto;padding-bottom:calc(72px + var(--safe-bot));-webkit-overflow-scrolling:touch}
-.tab-screen.on{display:flex;flex-direction:column}
+.tab-screen{flex:1;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;min-height:0;padding-bottom:calc(72px + var(--safe-bot))}
+.tab-screen.on{display:block}
 
 /* ─── 상단 필터 칩 (줄바꿈 — 1~2줄 자동) ─── */
 .filter-strip{flex-shrink:0;background:var(--bg);border-bottom:1px solid var(--br);padding:.42rem .55rem}
@@ -504,6 +504,8 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
   </div>
   <div class="m-foot">
     <button class="btn btn-s" id="regBack" onclick="regBack()" style="display:none">← 이전</button>
+    <button class="btn btn-r" id="regDelete" onclick="modalDeleteLog()" style="display:none;padding:.85rem .9rem;font-size:.95rem" title="삭제">✕</button>
+    <button class="btn" id="regRestore" onclick="modalRestoreLog()" style="display:none;padding:.85rem .9rem;font-size:.95rem;background:rgba(74,240,168,.16);color:var(--g);border:1.5px solid var(--g)" title="보관 해제">↩️</button>
     <button class="btn btn-g btn-flex" id="regNext" onclick="regNext()" disabled>다음 →</button>
     <button class="btn btn-g btn-flex" id="regSubmit" onclick="submitLog()" style="display:none">✓ 완료</button>
   </div>
@@ -730,6 +732,19 @@ function markRead(logKey){
   if (lg.byUid===me) return; /* 본인 글은 마킹 불필요 */
   if (lg.readBy && lg.readBy[me]) return; /* 이미 읽음 */
   logsRef.child(logKey).child('readBy').child(me).set(Date.now());
+}
+/* 배지 탭 = 본인 읽음 처리 (이미 읽었으면 무시) */
+function tapUnreadBadge(logKey){
+  if (!logsRef) return;
+  var me=getUserUid();
+  if (!me){ toast('로그인 후 사용','warn'); return; }
+  var lg=allLogs.find(function(x){return x._key===logKey;});
+  if (!lg) return;
+  if (lg.byUid===me){ toast('본인 글에는 사용 불가','warn'); return; }
+  if (lg.readBy && lg.readBy[me]){ toast('이미 확인됨','warn'); return; }
+  logsRef.child(logKey).child('readBy').child(me).set(Date.now()).then(function(){
+    toast('✓ 확인 처리됨','ok');
+  });
 }
 function ymd(ts){ var d=new Date(ts); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function ymdInt(ts){ var d=new Date(ts); return d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate(); }
@@ -1002,9 +1017,14 @@ function renderFeedCard(lg){
     var cmColor=(cc&&cc.color)||'#4af0a8';
     stateBadge='<span class="fc-state" style="background:'+cmColor+'22;color:'+cmColor+';border-color:'+cmColor+'88">'+escH(lg.completeName)+'</span>';
   }
-  /* 카톡식 안 읽은 사람 수 배지 — 본인 글 또는 모두 읽음이면 안 보임 */
+  /* 카톡식 안 읽은 사람 수 배지 — 본인 글 또는 모두 읽음이면 안 보임.
+     배지 자체를 탭하면 본인 읽음 처리 (event 전파 막음). */
   var unread=logUnreadCount(lg);
-  var unreadBadge=unread>0 ? '<span class="fc-unread" title="안 읽은 사람 '+unread+'명">'+unread+'</span>' : '';
+  var unreadBadge='';
+  if (unread>0){
+    var keyEsc=escAttr(lg._key);
+    unreadBadge='<span class="fc-unread" title="안 읽은 사람 '+unread+'명 — 누르면 본인 확인 처리" onclick="event.stopPropagation();tapUnreadBadge(\''+keyEsc+'\')">'+unread+'</span>';
+  }
   var noteHtml=lg.note?'<div class="fc-note">'+escH(lg.note)+'</div>':'';
   var photosHtml='';
   if (Array.isArray(lg.photos) && lg.photos.length){
@@ -1014,7 +1034,7 @@ function renderFeedCard(lg){
       return '<img class="fc-photo" src="'+p+'" onclick="event.stopPropagation();showPhoto(\''+keyEsc+'\','+i+')" alt="">';
     }).join('')+'</div>';
   }
-  return '<div class="feed-card" style="border-left-color:'+color+'" onclick="openActions(\''+escAttr(lg._key)+'\')">'+
+  return '<div class="feed-card" style="border-left-color:'+color+'" onclick="openEditLog(\''+escAttr(lg._key)+'\')">'+
     '<div class="fc-row1">'+
       '<div class="fc-cat"><span class="ic">'+icon+'</span><span class="name">'+escH(name)+'</span></div>'+
       '<div style="display:flex;align-items:center;gap:.32rem;flex-shrink:0">'+ unreadBadge + stateBadge +'</div>'+
@@ -1130,10 +1150,10 @@ function bulkDelete(){
 
 /* ───── 카드 액션 시트 (상태 변경 + 삭제) ───── */
 function openActions(logKey){
+  /* 액션 시트 — 현재 카드 클릭은 편집 모달로 가지만, 필요 시 직접 호출 가능 (legacy 진입로) */
   var lg=allLogs.find(function(x){ return x._key===logKey; });
   if (!lg) return;
   actionTargetKey=logKey;
-  /* 카드 탭 = 읽음 처리 (카톡식) */
   markRead(logKey);
   var c=settings.categories[lg.categoryId]||{};
   var f=c.fields||{};
@@ -1384,13 +1404,52 @@ function openEditLog(logKey){
     toast('카테고리가 삭제됨 — 편집 불가','warn');
     return;
   }
+  /* 카드 열림 = 읽음 처리 (본인 글이거나 이미 읽음이면 무시) */
+  markRead(logKey);
   regState={ step:2, catId:lg.categoryId, editKey:logKey, form:{} };
   regPhotos = Array.isArray(lg.photos) ? lg.photos.slice() : [];
   document.getElementById('regModal').classList.add('open');
-  document.getElementById('regTitle').textContent='✏️ 작업 편집';
+  document.getElementById('regTitle').textContent = lg.archived ? '📦 보관된 항목' : '✏️ 작업 편집';
   renderRegStep();
+  /* 편집 모달 푸터의 삭제/복구 버튼 토글 */
+  var me=getUserUid();
+  var canDelete=(lg.byUid===me) || (lg.by===getUserId()) || isAdmin;
+  var delBtn=document.getElementById('regDelete');
+  if (delBtn) delBtn.style.display = canDelete ? '' : 'none';
+  var resBtn=document.getElementById('regRestore');
+  if (resBtn) resBtn.style.display = (lg.archived && canDelete) ? '' : 'none';
   /* 폼 DOM 그려진 후 값 채움 */
   setTimeout(function(){ fillEditForm(lg); }, 30);
+}
+function modalDeleteLog(){
+  if (!regState || !regState.editKey || !logsRef) return;
+  var key=regState.editKey;
+  var lg=allLogs.find(function(x){return x._key===key;});
+  if (!lg){ return; }
+  var me=getUserId();
+  if (lg.by!==me && lg.byUid!==getUserUid() && !isAdmin){ toast('본인 글만 삭제 가능','er'); return; }
+  if (!confirm('이 글을 완전히 삭제하시겠습니까?\n복구할 수 없습니다.\n\n  ' + (lg.title||lg.categoryName||''))) return;
+  logsRef.child(key).remove().then(function(){
+    document.getElementById('regModal').classList.remove('open');
+    regState=null; regPhotos=[];
+    toast('삭제됨','ok');
+  }).catch(function(err){
+    toast('삭제 실패: '+(err&&err.message||err),'er');
+  });
+}
+function modalRestoreLog(){
+  if (!regState || !regState.editKey || !logsRef) return;
+  var key=regState.editKey;
+  var lg=allLogs.find(function(x){return x._key===key;});
+  if (!lg){ return; }
+  var update={ archived: null, archivedAt: null, archivedBy: null };
+  logsRef.child(key).update(update).then(function(){
+    document.getElementById('regModal').classList.remove('open');
+    regState=null; regPhotos=[];
+    toast('↩️ 보관 해제됨 — 목록에 다시 표시','ok');
+  }).catch(function(err){
+    toast('복구 실패: '+(err&&err.message||err),'er');
+  });
 }
 function fillEditForm(lg){
   var el;
@@ -1443,6 +1502,11 @@ function renderRegStep(){
   document.getElementById('regBack').style.display=(s>1 && !isEdit)?'':'none';
   document.getElementById('regNext').style.display=(s<2 && !isEdit)?'':'none';
   document.getElementById('regSubmit').style.display=s===2?'':'none';
+  /* 새 등록 모드면 삭제/복구 버튼 숨김 (openEditLog 에서만 노출 결정) */
+  if (!isEdit){
+    var d=document.getElementById('regDelete'); if (d) d.style.display='none';
+    var r=document.getElementById('regRestore'); if (r) r.style.display='none';
+  }
   if (s===1 && !isEdit){
     renderCatGrid();
     document.getElementById('regNext').disabled=!regState.catId;
