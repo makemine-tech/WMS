@@ -533,14 +533,22 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 
 /* ─── 출고적재리스트 (packing.html 양식 차용, .ship- prefix 로 격리) ─── */
 .ship-list-area{display:none}
+/* .ship-page 는 height 고정 X (min-height 만) — 컨텐츠 많으면 자연스럽게 다음 페이지로 흘러감.
+ * @page margin 10mm 으로 인쇄 시 상하좌우 1cm 여백 확보. */
 .ship-list-area .ship-page{
-  width:210mm;min-height:297mm;background:#fff;color:#111;
-  padding:16mm 14mm 14mm;box-sizing:border-box;
+  width:210mm;min-height:277mm;background:#fff;color:#111;
+  padding:6mm 4mm 4mm;box-sizing:border-box;
   font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;
   font-size:10pt;display:flex;flex-direction:column;
   page-break-after:always;
+  overflow:visible;
 }
 .ship-list-area .ship-page:last-child{page-break-after:auto}
+/* 박스 단위 (tbody) 가 페이지 사이에서 잘리지 않게.
+ * 박스가 너무 크면 어쩔 수 없이 잘리지만 가능한 보존. */
+.ship-sku-table tbody{page-break-inside:avoid;break-inside:avoid}
+.ship-sku-table tr{page-break-inside:avoid;break-inside:avoid}
+.ship-sku-table thead{display:table-header-group}  /* 페이지 넘어가면 헤더 재인쇄 */
 .ship-doc-header{text-align:center;margin-bottom:8mm}
 .ship-doc-header h1{font-size:18pt;font-weight:800;letter-spacing:-.3px;margin-bottom:2mm}
 .ship-doc-header .subnote{font-size:9pt;color:#555;font-weight:600;letter-spacing:.5px}
@@ -3213,11 +3221,11 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
   var vendorCode = (workSession && workSession.vendorCode) || '';
   var posStr = (g.pos||[]).filter(Boolean).join(', ') || '-';
   /* 박스 단위 행 — 컬럼 순서: # / SKU ID / 상품명·바코드 / 박스번호(rowspan) / 박스수(rowspan) / 수량 / 비고
-   * 박스 안 첫 SKU 에 박스번호+박스수 셀이 rowspan 으로 들어감. */
+   * 박스마다 별도 <tbody> 로 묶어 page-break-inside:avoid 적용 → 박스가 페이지 경계에서 잘리지 않음 */
   var rowCounter = 0;
-  var skuRows = (g.boxes||[]).map(function(box){
+  var skuTbodies = (g.boxes||[]).map(function(box){
     var span = box.items.length || 1;
-    return box.items.map(function(it, j){
+    var rows = box.items.map(function(it, j){
       rowCounter++;
       var nameCell = '<div style="font-weight:700">'+escH(it.skuName||'')+'</div>'+
         '<div style="font-size:8.5pt;color:#475569;margin-top:1mm">'+
@@ -3228,7 +3236,6 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
         ? '<td rowspan="'+span+'" style="font-family:monospace;font-weight:800;vertical-align:middle">'+escH(box.boxNo)+'</td>'+
           '<td class="num-emph" rowspan="'+span+'" style="vertical-align:middle">1</td>'
         : '';
-      /* 비고: 기존 status (발주현황) 가 있으면, 없으면 빈값 — 소비기한 통합됨 */
       var remarkText = it.status || it.expiry || '';
       return '<tr>'+
         '<td>'+rowCounter+'</td>'+
@@ -3239,6 +3246,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
         '<td>'+escH(remarkText)+'</td>'+
       '</tr>';
     }).join('');
+    return '<tbody>' + rows + '</tbody>';
   }).join('');
 
   return '<section class="ship-page">'+
@@ -3289,7 +3297,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
         '<th>수량</th>'+
         '<th>비고</th>'+
       '</tr></thead>'+
-      '<tbody>'+ skuRows +'</tbody>'+
+      skuTbodies +
     '</table>'+
 
     '<div class="ship-foot">'+
@@ -3334,12 +3342,12 @@ function cpPrintShipList(){
   if (!area) { cpFlash('er','적재리스트 영역 없음'); return; }
   area.innerHTML = groups.map(function(g, i){ return cpBuildShipPageHtml(g, groups.length, i); }).join('');
 
-  /* @page A4 세로 */
+  /* @page A4 세로 — 상하좌우 10mm 마진 (인쇄 시 잘림 방지 + 깔끔한 여백) */
   var oldStyle = document.getElementById('ship-list-pagestyle');
   if (oldStyle) oldStyle.remove();
   var st = document.createElement('style');
   st.id = 'ship-list-pagestyle';
-  st.textContent = '@media print { @page { size: A4 portrait; margin: 0; } }';
+  st.textContent = '@media print { @page { size: A4 portrait; margin: 10mm; } }';
   document.head.appendChild(st);
 
   /* 폰트 자동 축소 — 오프스크린 렌더 후 측정 */
