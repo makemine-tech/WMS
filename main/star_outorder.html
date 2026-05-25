@@ -437,6 +437,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <th>SKU ID</th>
             <th>상품명</th>
             <th>바코드</th>
+            <th title="우리 재고의 박스바코드 (입고 시 등록)">📦 박스바코드</th>
             <th style="text-align:right">발주수량</th>
             <th style="text-align:right">현재고</th>
             <th style="text-align:right">출고가능</th>
@@ -445,7 +446,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <th style="text-align:right">파렛트</th>
           </tr></thead>
           <tbody id="cpRowsBody">
-            <tr><td colspan="13" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>
+            <tr><td colspan="14" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>
           </tbody>
         </table>
       </div>
@@ -506,6 +507,7 @@ var logsRef = null;       /* star_instock/logs — 메타 조회 + 출고 실행
 var allOrders = [];       /* 저장된 지시서 전체 */
 var stockMeta = {};       /* 바코드(normalized) → 가장 최근 in-log 메타 */
 var stockQty = {};        /* 바코드(normalized) → 현재고 (입고합 - 출고합) */
+var stockBoxes = {};      /* 바코드(normalized) → 이 바코드가 들어있는 박스ID 배열 (입고 기준, 중복 제거) */
 var stockByAlt = {};      /* 정규화된 altBarcode → 원본 barcode (입고 로그 + altMap 병합) */
 var altMap = {};          /* Firebase 저장 영구 매핑 {normalizedAlt: {src, by, ts, source}} */
 var altMapRef = null;
@@ -604,13 +606,14 @@ function attachRefs(){
     renderList();
   }, function(err){ setMsg('m0','er','❌ 지시서 읽기 실패: ' + (err && err.message || err)); });
 
-  /* 2) star_instock/logs — 재고 메타 + 현재고 집계 + altBarcode reverse 인덱스 */
+  /* 2) star_instock/logs — 재고 메타 + 현재고 집계 + altBarcode + 박스ID 인덱스 */
   logsRef = db.ref('wms_sync/groups/' + groupId + '/star_instock/logs');
   logsRef.on('value', function(snap){
     var v = snap.val() || {};
     var byBc = {};      /* stockMeta */
     var qty = {};       /* stockQty */
     var byAlt = {};     /* altBarcode → 원본 barcode (입고 로그 기준) */
+    var boxes = {};     /* barcode → Set 처럼 사용할 객체 {boxId: true} */
     Object.keys(v).forEach(function(k){
       var lg = v[k] || {};
       var bc = normBarcode(lg.barcode);
@@ -623,10 +626,20 @@ function attachRefs(){
         if (!byBc[bc] || (lg.ts||0) > (byBc[bc].ts||0)) byBc[bc] = lg;
         var alt = normBarcode(lg.altBarcode);
         if (alt && alt !== bc) byAlt[alt] = bc;
+        /* 박스ID — 비어있지 않을 때만 집계 (중복 제거) */
+        var boxId = String(lg.box||'').trim();
+        if (boxId) {
+          if (!boxes[bc]) boxes[bc] = {};
+          boxes[bc][boxId] = true;
+        }
       }
     });
+    /* boxes 를 배열 형태로 변환 — UI 사용 편하게 */
+    var boxList = {};
+    Object.keys(boxes).forEach(function(bc){ boxList[bc] = Object.keys(boxes[bc]); });
     stockMeta = byBc;
     stockQty = qty;
+    stockBoxes = boxList;
     stockByAlt = mergeAltIndex(byAlt, altMap);
     if (document.getElementById('tabCoupang') && document.getElementById('tabCoupang').style.display !== 'none') {
       cpRender();
@@ -802,9 +815,12 @@ function cpClassify(row){
   if (have <= 0) status = 'zero';
   else if (have < need) status = 'short';
   else status = 'fit';
+  /* 박스ID — 원본 바코드(matchedBc) 기준 */
+  var boxes = (matchedBc && stockBoxes[matchedBc]) ? stockBoxes[matchedBc] : [];
   return {
     have: have, canShip: canShip, short: Math.max(0, need-have), status: status,
-    matchedVia: matchedVia, matchedBc: matchedBc
+    matchedVia: matchedVia, matchedBc: matchedBc,
+    boxes: boxes
   };
 }
 
@@ -908,7 +924,7 @@ function cpRender(){
   /* 카운터 카드 active 표시 갱신 */
   cpRefreshCounterActive();
   if (!rows.length) {
-    tb.innerHTML = '<tr><td colspan="13" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>';
+    tb.innerHTML = '<tr><td colspan="14" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>';
     cpUpdateSummary({total:0, fit:0, short:0, zero:0});
     cpUpdateProgress(0, 0);
     return;
@@ -948,6 +964,18 @@ function cpRender(){
       findBtn  = '<button class="cp-find-btn'+openCls+'" onclick="cpToggleCandidates('+i+')" title="대체바코드 후보 찾기">🔍 대체</button>';
       asIsBtn  = '<button class="cp-asis-btn" onclick="cpConfirmAsIs('+i+')" title="이대로 확정 (출고가능한 ' + m.canShip + '개만 진행)">✓ 이대로</button>';
     }
+    /* 박스바코드 셀 — 재고에 등록된 박스ID. 여러 개면 "첫 + N" 표시, 0개면 회색 '-' */
+    var boxCell;
+    if (m.boxes && m.boxes.length === 1) {
+      boxCell = '<td class="cell-box" title="원본 바코드 '+escH(m.matchedBc)+'">'+escH(m.boxes[0])+'</td>';
+    } else if (m.boxes && m.boxes.length > 1) {
+      var extra = m.boxes.length - 1;
+      var tipList = m.boxes.join(', ');
+      boxCell = '<td class="cell-box" title="총 '+m.boxes.length+'개 박스 — '+escH(tipList)+'">'+escH(m.boxes[0])+' <span style="color:var(--mu);font-size:.7rem">+'+extra+'</span></td>';
+    } else {
+      var dash = (m.matchedBc && stockQty[m.matchedBc]) ? '<span title="재고는 있지만 박스ID 누락 (입고 시 기재 안 됨)" style="color:var(--y)">- ⚠</span>' : '<span style="color:var(--mu)">-</span>';
+      boxCell = '<td class="cell-box">'+dash+'</td>';
+    }
     html += '<tr class="' + rowCls + '">'+
       '<td class="no-dim" style="color:var(--mu);font-family:var(--mo);font-size:.72rem">'+(i+1)+'</td>'+
       '<td class="cp-cell-po">'+escH(r.po)+'</td>'+
@@ -956,6 +984,7 @@ function cpRender(){
       '<td style="font-family:var(--mo);font-size:.72rem;color:var(--mu)">'+escH(r.skuId)+'</td>'+
       '<td class="cell-name" title="'+escH(r.skuName)+'">'+escH(r.skuName)+'</td>'+
       '<td class="cell-bc">'+escH(r.barcode)+'</td>'+
+      boxCell +
       '<td class="cell-num">'+r.qty+'</td>'+
       '<td class="cell-num" style="color:'+(m.have>0?'var(--g)':'var(--r)')+'">'+m.have+'</td>'+
       '<td class="cell-num">'+m.canShip+'</td>'+
@@ -970,7 +999,7 @@ function cpRender(){
   });
   if (!anyShown) {
     var filterLbl = cpFilter==='fit'?'🟢 충족':cpFilter==='short'?'🟡 부족':cpFilter==='zero'?'🔴 재고 없음':cpFilter;
-    html = '<tr><td colspan="13" class="empty-row">이 필터('+filterLbl+')에 해당하는 라인이 없습니다 — 위 카운터를 다시 눌러 전체로 돌아갈 수 있습니다</td></tr>';
+    html = '<tr><td colspan="14" class="empty-row">이 필터('+filterLbl+')에 해당하는 라인이 없습니다 — 위 카운터를 다시 눌러 전체로 돌아갈 수 있습니다</td></tr>';
   }
   tb.innerHTML = html;
   cpUpdateSummary(sum);
@@ -1076,7 +1105,7 @@ function cpRenderCandidatePanel(idx, row, matched){
       '</div>';
     }).join('') + '</div>';
   }
-  return '<tr class="cp-cand-row"><td colspan="13">'+
+  return '<tr class="cp-cand-row"><td colspan="14">'+
     '<div class="cp-cand-title">🔍 대체바코드 후보 — PO 바코드 <b style="color:var(--y)">'+escH(poBc)+'</b> 가 매칭될 원본 재고 바코드 찾기'+unmapBtn+'</div>'+
     listHtml +
     '<div class="cp-cand-manual">'+
