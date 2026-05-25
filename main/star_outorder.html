@@ -2410,6 +2410,12 @@ function cpDownloadDoneExcel(){
     pallets: workSession.pallets||[],
     holdPool: workSession.holdPool||[]
   };
+  /* JSON 을 32000자 청크로 분할 — XLSX 셀당 32767자 제한 회피 */
+  var jsonStr = JSON.stringify(snap);
+  var CHUNK_SZ = 32000;
+  var chunks = [];
+  for (var __i=0; __i<jsonStr.length; __i+=CHUNK_SZ) chunks.push(jsonStr.slice(__i, __i+CHUNK_SZ));
+
   var metaAoa = [
     ['key','value'],
     ['schema', snap.schema],
@@ -2425,9 +2431,15 @@ function cpDownloadDoneExcel(){
     ['shipBoxesCount', (snap.shipBoxes||[]).length],
     ['palletsCount', (snap.pallets||[]).length],
     ['holdPoolCount', (snap.holdPool||[]).length],
-    ['__JSON__', JSON.stringify(snap)]
+    ['__JSON_CHUNKS__', chunks.length],
+    ['__JSON_TOTAL_LEN__', jsonStr.length]
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(metaAoa), '_세션메타');
+
+  /* JSON 청크 시트 — 각 청크가 한 행. 복원 시 idx 로 정렬 후 이어붙임 */
+  var jsonAoa = [['chunk_idx','data']];
+  chunks.forEach(function(c, i){ jsonAoa.push([i, c]); });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(jsonAoa), '_JSON');
 
   /* 파일명: 업체_시각_세션ID */
   var pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
@@ -2450,12 +2462,26 @@ function cpUploadDoneExcel(file){
   reader.onload = function(e){
     try {
       var wb = XLSX.read(e.target.result, {type:'array'});
-      var metaSheet = wb.Sheets['_세션메타'];
-      if (!metaSheet) throw new Error('백업 파일이 아닙니다 (_세션메타 시트 없음)');
-      var aoa = XLSX.utils.sheet_to_json(metaSheet, {header:1, defval:''});
-      var jsonRow = aoa.find(function(row){ return row && row[0] === '__JSON__'; });
-      if (!jsonRow || !jsonRow[1]) throw new Error('백업 JSON 데이터 없음');
-      var snap = JSON.parse(String(jsonRow[1]));
+      var snap;
+      /* 우선 새 방식: _JSON 시트의 청크 이어붙이기 */
+      var jsonSheet = wb.Sheets['_JSON'];
+      if (jsonSheet) {
+        var jsonAoa = XLSX.utils.sheet_to_json(jsonSheet, {header:1, defval:''});
+        var chunks = jsonAoa.slice(1)
+          .filter(function(r){ return r && r.length>=2 && r[1] !== ''; })
+          .sort(function(a,b){ return (+a[0]) - (+b[0]); });
+        if (!chunks.length) throw new Error('_JSON 시트에 청크 없음');
+        var combined = chunks.map(function(r){ return String(r[1]||''); }).join('');
+        snap = JSON.parse(combined);
+      } else {
+        /* 구 방식 fallback: _세션메타 시트의 __JSON__ 한 셀 */
+        var metaSheet = wb.Sheets['_세션메타'];
+        if (!metaSheet) throw new Error('백업 파일이 아닙니다 (_JSON 또는 _세션메타 시트 없음)');
+        var aoa = XLSX.utils.sheet_to_json(metaSheet, {header:1, defval:''});
+        var jsonRow = aoa.find(function(row){ return row && row[0] === '__JSON__'; });
+        if (!jsonRow || !jsonRow[1]) throw new Error('백업 JSON 데이터 없음 (구 형식 __JSON__ 도 없음)');
+        snap = JSON.parse(String(jsonRow[1]));
+      }
       if (snap.schema !== 'cp-session-v1') throw new Error('호환 안 되는 백업 스키마: '+snap.schema);
 
       var savedStr = snap.savedAt ? new Date(snap.savedAt).toLocaleString() : '-';
