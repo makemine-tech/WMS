@@ -2744,19 +2744,27 @@ function cpPrintMixLabel(shipBoxNo){
   var vendor = workSession.vendor || '';
   var totalQty = activeScans.reduce(function(s,x){return s + (+x.qty||0);}, 0);
 
-  var rowsHtml = activeScans.map(function(s, idx){
+  /* 같은 바코드끼리 합산 — 한 SKU 가 여러 scans 로 쪼개진 경우 한 줄로 (목록 짧게) */
+  var byBc = {};
+  var orderBc = [];
+  activeScans.forEach(function(s){
+    var k = String(s.barcode||'?');
+    if (!byBc[k]) { byBc[k] = { sample:s, qty:0 }; orderBc.push(k); }
+    byBc[k].qty += (+s.qty||0);
+  });
+  var rowsHtml = orderBc.map(function(k){
+    var s = byBc[k].sample;
+    var qtySum = byBc[k].qty;
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
-    /* ⚠ 혼적 라벨도 대체바코드 우선 — alt 가 있으면 alt 로 표기 (사장님 정책) */
+    /* 출고 바코드 — alt 가 있으면 alt (마커 없이 깔끔하게) */
     var altBc = (meta.altBarcode||'').trim();
     var labelBc = altBc || s.barcode;
-    var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(s.barcode));
-    var marker = hasAlt ? ' <span style="font-family:Courier New,monospace;font-size:7pt;color:#000">'+escH(cpAltMarker(s.barcode, altBc))+'</span>' : '';
     return '<tr>'+
       '<td>'+escH(r.skuId||'-')+'</td>'+
       '<td>'+escH(meta.code||'-')+'</td>'+
-      '<td class="bc">'+escH(labelBc)+marker+'</td>'+
-      '<td class="num">'+(+s.qty||0)+'</td>'+
+      '<td class="bc">'+escH(labelBc)+'</td>'+
+      '<td class="num">'+qtySum+'</td>'+
     '</tr>';
   }).join('');
 
@@ -2777,7 +2785,7 @@ function cpPrintMixLabel(shipBoxNo){
         '<tbody>' + rowsHtml + '</tbody>'+
       '</table>'+
       '<div class="ml-bottom">'+
-        '<span>총 ' + activeScans.length + ' SKU · ' + totalQty + '개</span>'+
+        '<span>총 ' + orderBc.length + ' SKU · ' + totalQty + '개</span>'+
       '</div>'+
     '</div>';
 
