@@ -367,6 +367,33 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-tbl .c-ctr{color:#ffb84a;font-weight:800}
 .cp-done-tbl .c-pal{color:var(--p);font-weight:800;text-align:center}
 .cp-done-empty{padding:1.3rem;text-align:center;color:var(--mu);font-size:.84rem}
+/* 완료풀 박스 그룹 — 첫 행에 rowspan + 라벨 버튼 */
+.cp-done-tbl td.grp-cell{border-right:2px solid var(--br);vertical-align:top}
+.cp-done-tbl tr.grp-first td{border-top:2px solid var(--g)}
+.cp-mix-print-btn{display:inline-block;background:linear-gradient(135deg,var(--y),#f7d068);color:#0f1117;border:none;font-size:.7rem;font-weight:900;padding:.32rem .65rem;border-radius:5px;cursor:pointer;margin-right:.4rem;letter-spacing:.02em}
+.cp-mix-print-btn:hover{background:linear-gradient(135deg,#f7d068,#f8da7c);transform:translateY(-1px)}
+.cp-mix-print-btn:active{transform:translateY(0)}
+
+/* ─── 혼적 라벨 (150x100mm 가로 인쇄 전용) ─── */
+.mix-label-area{display:none}
+.mix-label{width:150mm;height:100mm;padding:5mm 6mm;box-sizing:border-box;background:#fff;color:#000;font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;display:flex;flex-direction:column}
+.ml-title{border-top:3px solid #000;border-bottom:3px solid #000;padding:2.5mm 0;font-size:13pt;font-weight:900;text-align:center;letter-spacing:-.3pt}
+.ml-meta{display:flex;justify-content:space-between;margin:3.5mm 0 3mm;font-weight:800;font-size:10pt;border-bottom:.4mm solid #888;padding-bottom:2mm}
+.ml-meta .lbl{color:#444;margin-right:1.5mm}
+.ml-tbl{width:100%;border-collapse:collapse;font-size:9.5pt;flex:1}
+.ml-tbl th,.ml-tbl td{border:.4mm solid #000;padding:1.4mm 1.8mm;text-align:left;vertical-align:middle}
+.ml-tbl th{background:#e6e6e6;font-weight:900;text-align:center;font-size:9pt}
+.ml-tbl td.num{text-align:right;font-weight:900}
+.ml-tbl td.bc{font-family:'Courier New',monospace;letter-spacing:.5pt}
+.ml-bottom{border-top:2.5px solid #000;margin-top:2mm;padding-top:1.5mm;display:flex;justify-content:space-between;font-size:8pt;color:#555}
+
+/* 평시: mix-label-area 숨김. 인쇄 시: body.printing-label 일 때만 라벨 보이고 나머지 숨김 */
+@media print {
+  body.printing-label > *{visibility:hidden}
+  body.printing-label .mix-label-area{visibility:visible;display:block;position:absolute;left:0;top:0;width:150mm;height:100mm}
+  body.printing-label .mix-label-area *{visibility:visible}
+  body.printing-label .print-area{display:none!important}
+}
 
 /* ─── 처리 대기 패널 (혼적 박스 SKU pending) ─── */
 .cp-pending-panel{background:rgba(240,196,74,.04);border:1.5px solid var(--y);border-radius:9px;padding:.7rem .85rem;margin-top:.85rem}
@@ -854,6 +881,9 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 
 <!-- 인쇄 영역 — 평소 안 보임, 인쇄 시에만 보임 -->
 <div class="print-area print-only" id="printArea"></div>
+
+<!-- 혼적 라벨 인쇄 영역 (150x100mm 가로) — body.printing-label 일 때만 보임 -->
+<div class="mix-label-area" id="mixLabelArea"></div>
 
 <div class="unified-ftr no-print">
   © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
@@ -2165,36 +2195,137 @@ function cpRefreshDonePool(){
     progCache[idx] = cpComputeRowProgress(idx);
     return progCache[idx];
   }
-  /* 시간 역순 — 마지막 스캔이 가장 위 */
-  var html = scans.slice().reverse().map(function(s){
+  /* 박스번호별 그룹화 — 같은 출고박스의 SKU 들이 셀묶음으로 보이도록.
+   * 그룹 정렬: 그룹 내 최신 ts 기준 역순 (최근 박스가 위) */
+  var shipBoxesByNo = {};
+  (workSession.shipBoxes||[]).forEach(function(b){ shipBoxesByNo[b.boxNo] = b; });
+  var groupMap = {};
+  scans.forEach(function(s){
+    var key = s.shipBoxNo || s.srcBoxBarcode || s.boxBarcode || '?';
+    if (!groupMap[key]) {
+      var sb = shipBoxesByNo[key];
+      /* 혼적 박스 판정: shipBox 의 srcBoxBarcode 가 boxNo 와 다르거나 없으면 혼적용 새 박스 (센터-NNN) */
+      var isMix = !sb || !sb.srcBoxBarcode || sb.srcBoxBarcode !== key;
+      groupMap[key] = { boxNo:key, scans:[], latestTs:0, isMix:isMix, srcLabel: (sb && sb.srcBoxBarcode) || '' };
+    }
+    groupMap[key].scans.push(s);
+    if ((s.ts||0) > groupMap[key].latestTs) groupMap[key].latestTs = s.ts || 0;
+  });
+  var groups = Object.keys(groupMap).map(function(k){ return groupMap[k]; })
+                    .sort(function(a,b){ return b.latestTs - a.latestTs; });
+
+  var html = '';
+  groups.forEach(function(g){
+    var grpScans = g.scans.slice().sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+    var rowSpan = grpScans.length;
+    var firstSrcBc = '';
+    /* 각 행 — 첫 행에만 박스번호/박스바코드 셀 + 라벨버튼 (혼적만) */
+    grpScans.forEach(function(s, i){
+      var r = rows[s.srcIdx] || {};
+      var meta = stockMeta[normBarcode(s.barcode)] || {};
+      var code = meta.code || '-';
+      var size = meta.size || '-';
+      var need = +r.qty || 0;
+      var prog = getProg(s.srcIdx);
+      var rem = Math.max(0, need - prog.shipped);
+      var remCls = rem === 0 ? 'c-rem zero' : 'c-rem';
+      var rowCls = (s.undone ? 'undone ' : '') + (i===0 ? 'grp-first' : '');
+      var srcBcLabel = s.srcBoxBarcode || s.boxBarcode || g.boxNo;
+      if (i===0) firstSrcBc = srcBcLabel;
+      var groupCells = '';
+      if (i === 0) {
+        var printBtn = g.isMix
+          ? '<button class="cp-mix-print-btn" onclick="cpPrintMixLabel(\''+escH(g.boxNo)+'\')" title="혼적 라벨 인쇄 (150x100mm)">📃 라벨</button>'
+          : '';
+        groupCells =
+          '<td class="c-box grp-cell" rowspan="'+rowSpan+'">' + printBtn + escH(g.boxNo) + '</td>'+
+          '<td class="c-box grp-cell" rowspan="'+rowSpan+'" style="color:var(--mu)">' + escH(srcBcLabel) + '</td>';
+      }
+      html += '<tr class="'+rowCls+'">'+
+        groupCells +
+        '<td class="c-bc">'  + escH(s.barcode) + '</td>'+
+        '<td class="c-code">'+ escH(code) + '</td>'+
+        '<td class="c-size">'+ escH(size) + '</td>'+
+        '<td class="c-need">'+ need + '</td>'+
+        '<td class="c-ship">+'+ s.qty + '</td>'+
+        '<td class="'+remCls+'">'+ rem + '</td>'+
+        '<td class="c-eta">' + escH(r.eta||'-') + '</td>'+
+        '<td class="c-ctr">' + escH(r.center||'-') + '</td>'+
+        '<td class="c-pal">' + (s.palletNo||'-') + '</td>'+
+      '</tr>';
+    });
+  });
+  body.innerHTML = html;
+}
+
+/* ═══════════ 혼적 라벨 인쇄 (150x100mm 가로) ═══════════ */
+function cpPrintMixLabel(shipBoxNo){
+  if (!workSession) return;
+  var activeScans = (workSession.scans||[]).filter(function(s){
+    return !s.undone && s.shipBoxNo === shipBoxNo;
+  });
+  if (!activeScans.length) { cpFlash('warn','⚠️ 이 박스에 적재 항목 없음'); return; }
+  var rows = workSession.rows || [];
+  var firstRow = rows[activeScans[0].srcIdx] || {};
+  var center = firstRow.center || '';
+  var vendor = workSession.vendor || '';
+  var totalQty = activeScans.reduce(function(s,x){return s + (+x.qty||0);}, 0);
+
+  var rowsHtml = activeScans.map(function(s, idx){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
-    var code = meta.code || '-';
-    var size = meta.size || '-';
-    var need = +r.qty || 0;          /* PO 발주수량 */
-    var prog = getProg(s.srcIdx);
-    var rem = Math.max(0, need - prog.shipped);
-    var remCls = rem === 0 ? 'c-rem zero' : 'c-rem';
-    var rowCls = s.undone ? 'undone' : '';
-    var shipNo = s.shipBoxNo || s.srcBoxBarcode || s.boxBarcode || (s.type==='item'?'(단품)':'-');
-    var srcBc = s.srcBoxBarcode || s.boxBarcode || '';
-    /* 박스바코드 없으면 박스번호 그대로 (사장님 정책) */
-    var srcBcLabel = srcBc || shipNo;
-    return '<tr class="'+rowCls+'">'+
-      '<td class="c-box">' + escH(shipNo) + '</td>'+
-      '<td class="c-box" style="color:var(--mu)">' + escH(srcBcLabel) + '</td>'+
-      '<td class="c-bc">'  + escH(s.barcode) + '</td>'+
-      '<td class="c-code">'+ escH(code) + '</td>'+
-      '<td class="c-size">'+ escH(size) + '</td>'+
-      '<td class="c-need">'+ need + '</td>'+
-      '<td class="c-ship">+'+ s.qty + '</td>'+
-      '<td class="'+remCls+'">'+ rem + '</td>'+
-      '<td class="c-eta">' + escH(r.eta||'-') + '</td>'+
-      '<td class="c-ctr">' + escH(r.center||'-') + '</td>'+
-      '<td class="c-pal">' + (s.palletNo||'-') + '</td>'+
+    return '<tr>'+
+      '<td>'+escH(r.skuId||'-')+'</td>'+
+      '<td>'+escH(meta.code||'-')+'</td>'+
+      '<td class="bc">'+escH(s.barcode)+'</td>'+
+      '<td class="num">'+(+s.qty||0)+'</td>'+
     '</tr>';
   }).join('');
-  body.innerHTML = html;
+
+  var labelHtml =
+    '<div class="mix-label">'+
+      '<div class="ml-title">박스 혼적리스트 (박스번호 : ' + escH(shipBoxNo) + ')</div>'+
+      '<div class="ml-meta">'+
+        '<span><span class="lbl">업체명 :</span>' + escH(vendor||'') + '</span>'+
+        '<span><span class="lbl">입고센터 :</span>' + escH(center||'') + '</span>'+
+      '</div>'+
+      '<table class="ml-tbl">'+
+        '<thead><tr>'+
+          '<th style="width:25%">SKU ID</th>'+
+          '<th style="width:25%">품번</th>'+
+          '<th style="width:30%">바코드</th>'+
+          '<th style="width:20%">수량</th>'+
+        '</tr></thead>'+
+        '<tbody>' + rowsHtml + '</tbody>'+
+      '</table>'+
+      '<div class="ml-bottom">'+
+        '<span>총 ' + activeScans.length + ' SKU · ' + totalQty + '개</span>'+
+        '<span>' + fmtDt(Date.now()) + '</span>'+
+      '</div>'+
+    '</div>';
+
+  var area = document.getElementById('mixLabelArea');
+  if (!area) { cpFlash('er','라벨 영역 없음'); return; }
+  area.innerHTML = labelHtml;
+
+  /* 동적 @page 스타일 — 150x100mm landscape, margin 0 */
+  var oldStyle = document.getElementById('mix-label-pagestyle');
+  if (oldStyle) oldStyle.remove();
+  var st = document.createElement('style');
+  st.id = 'mix-label-pagestyle';
+  st.textContent = '@media print { @page { size: 150mm 100mm landscape; margin: 0; } }';
+  document.head.appendChild(st);
+
+  document.body.classList.add('printing-label');
+  setTimeout(function(){
+    window.print();
+    /* 인쇄 다이얼로그 닫힌 후 정리 (브라우저별로 시점 다를 수 있어 여유) */
+    setTimeout(function(){
+      document.body.classList.remove('printing-label');
+      var s = document.getElementById('mix-label-pagestyle');
+      if (s) s.remove();
+    }, 1500);
+  }, 80);
 }
 
 /* ═══════════ 처리 대기 (혼적 박스 SKU) ═══════════ */
