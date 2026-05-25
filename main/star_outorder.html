@@ -1900,6 +1900,43 @@ function cpHandleScan(raw){
   return cpProcessItemScan(raw);
 }
 
+/* ───── 발주수량 초과 검사 ─────
+ * items: [{srcIdx, qty}] — 이번에 적재 시도할 항목들
+ * 반환: { ok, violations:[{srcIdx, row, barcode, current, addQty, need, overBy}] }
+ * 이미 누적된 shipped + 이번 add > canShip 이면 violation */
+function cpCheckOverflow(items){
+  var rows = (workSession && workSession.rows) || [];
+  /* srcIdx 별로 합산 (같은 srcIdx 가 한 번에 여러 줄 들어올 수 있음) */
+  var addBySrc = {};
+  (items||[]).forEach(function(it){
+    if (!it || it.srcIdx === undefined || it.srcIdx < 0) return;
+    addBySrc[it.srcIdx] = (addBySrc[it.srcIdx]||0) + (+it.qty||0);
+  });
+  var violations = [];
+  Object.keys(addBySrc).forEach(function(k){
+    var idx = +k;
+    var add = addBySrc[k];
+    var p = cpComputeRowProgress(idx);
+    var r = rows[idx] || {};
+    if (p.shipped + add > p.need) {
+      violations.push({
+        srcIdx: idx, row: r,
+        barcode: r.srcBarcode || r.poBarcode || '',
+        skuName: r.skuName || '',
+        current: p.shipped, addQty: add, need: p.need,
+        overBy: (p.shipped + add) - p.need
+      });
+    }
+  });
+  return { ok: violations.length === 0, violations: violations };
+}
+function cpFormatViolations(vs){
+  return vs.map(function(v){
+    return '• <b>'+escH(v.barcode)+'</b>'+(v.skuName?' ('+escH(v.skuName)+')':'')+
+           ' 현재 '+v.current+'/'+v.need+', 이번 +'+v.addQty+' → 초과 <b style="color:#ff5b5b">+'+v.overBy+'</b>';
+  }).join('<br>');
+}
+
 /* ── 박스 모드: 박스바코드 → 박스 안 SKU 처리
  *   - 단일·매칭 박스: 자동 적재 (같은 센터 open shipBox 에 묶거나 새로 생성)
  *   - 혼적·잔류 박스: 자동 적재 안 함, pending 으로 → [출고처리] 클릭 필요
@@ -1983,10 +2020,17 @@ function cpProcessBoxScan(raw){
     return;
   }
 
-  /* 단일·매칭 박스 — 자동 적재. 출고박스번호 = 원본 박스바코드 그대로
-   * (별도 번호 안 매김 — 사장님 정책: ASC 시작 원본 박스가 혼적 없이 나가면 그대로 사용) */
+  /* 단일·매칭 박스 — 자동 적재. 출고박스번호 = 원본 박스바코드 그대로 */
   var firstCenter = (sessRows[matchedItems[0].srcIdx]||{}).center || '';
   var firstEta = (sessRows[matchedItems[0].srcIdx]||{}).eta || '';
+  /* 발주수량 초과 검사 — 박스 단위 차단 (어느 SKU 라도 초과면 박스 전체 안 됨) */
+  var ovCheck = cpCheckOverflow(matchedItems);
+  if (!ovCheck.ok) {
+    cpFlash('er','❌ <b>발주수량 초과 차단</b> — 박스 '+escH(boxId)+'<span class="sub">'+cpFormatViolations(ovCheck.violations)+'<br>박스 분리 후 가능한 SKU 만 다시 시도하거나 보류하세요.</span>');
+    cpSpeak('초과 차단');
+    cpUpdateDisplay({ type:'box', input:boxId, scans:[], unmatched:unmatchedSku, allUnmatched:false, overflow:ovCheck.violations });
+    return;
+  }
   var shipBoxNo = boxId;
   cpRegisterShipBox(shipBoxNo, firstCenter, firstEta);
   var newScans = matchedItems.map(function(it){
@@ -2075,6 +2119,13 @@ function cpProcessItemScan(raw){
     return;
   }
   var row = sessRows[idx];
+  /* 발주수량 초과 검사 (단건 +1) */
+  var ovCheck = cpCheckOverflow([{srcIdx:idx, qty:1}]);
+  if (!ovCheck.ok) {
+    cpFlash('er','❌ <b>발주수량 초과 차단</b><span class="sub">'+cpFormatViolations(ovCheck.violations)+'</span>');
+    cpSpeak('초과 차단');
+    return;
+  }
   /* 상품 모드는 단일 SKU 라 혼적 X — 항상 자동 적재 + shipBox 매김 */
   var shipBoxNo = cpEnsureShipBox(row.center || '', row.eta || '');
   var newScan = {
@@ -2982,6 +3033,13 @@ function cpConfirmShip(){
     shipBoxNo = nextNo;
   } else {
     shipBoxNo = boxVal;
+  }
+  /* 발주수량 초과 검사 — 선택된 SKU 중 하나라도 초과면 차단 */
+  var ovCheck = cpCheckOverflow(pickedItems.map(function(p){return {srcIdx:p.srcIdx, qty:p.qty};}));
+  if (!ovCheck.ok) {
+    cpFlash('er','❌ <b>발주수량 초과 차단</b> — 출고처리 불가<span class="sub">'+cpFormatViolations(ovCheck.violations)+'<br>초과되는 SKU 만 체크 해제 후 다시 시도하거나 보류로 보내세요.</span>');
+    cpSpeak('초과 차단');
+    return;
   }
   /* scans push + pending 제거 — 모두 (cpPopupCenter, cpPopupEta) 그룹의 파렛트 */
   var newScans = pickedItems.map(function(p){
