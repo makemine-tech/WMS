@@ -181,7 +181,10 @@ h1 em{color:var(--g);font-style:normal}
 .cp-drop.has-file{background:rgba(74,240,168,.06);border-color:var(--g);color:var(--g)}
 .cp-meta{font-size:.7rem;color:var(--mu);margin-top:.45rem;font-family:var(--mo)}
 .cp-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.85rem}
-.cp-sc{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.62rem .85rem;text-align:center}
+.cp-sc{background:var(--s1);border:1.5px solid var(--br);border-radius:8px;padding:.62rem .85rem;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;position:relative}
+.cp-sc:hover{border-color:var(--mu)}
+.cp-sc.active{border-color:var(--g);background:rgba(74,240,168,.06)}
+.cp-sc.active::after{content:'필터됨';position:absolute;top:-7px;right:8px;font-size:.55rem;font-family:var(--mo);color:#0f1117;background:var(--g);padding:.06rem .4rem;border-radius:3px;letter-spacing:.04em;font-weight:800}
 .cp-sc-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.16rem}
 .cp-sc-v{font-size:1.5rem;font-weight:900;font-family:var(--mo)}
 .cp-sc.fit .cp-sc-v{color:var(--g)}
@@ -207,6 +210,21 @@ tr.cp-row-short td{background:rgba(240,196,74,.03)}
 .cp-find-btn{background:rgba(192,132,252,.1);color:var(--p);border:1px solid rgba(192,132,252,.4);border-radius:5px;font-size:.66rem;font-weight:700;padding:.16rem .45rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
 .cp-find-btn:hover{background:rgba(192,132,252,.18)}
 .cp-find-btn.open{background:var(--p);color:#0f1117}
+/* 이대로 확정 버튼 */
+.cp-asis-btn{background:rgba(74,240,168,.1);color:var(--g);border:1px solid rgba(74,240,168,.4);border-radius:5px;font-size:.66rem;font-weight:700;padding:.16rem .45rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
+.cp-asis-btn:hover{background:rgba(74,240,168,.18)}
+/* 확정됨 표시 */
+.cp-chip.asis{background:rgba(124,131,153,.2);color:var(--mu);border:1px solid var(--mu)}
+tr.cp-row-asis td{opacity:.55}
+tr.cp-row-asis td.no-dim{opacity:1}
+.cp-asis-undo{background:transparent;border:1px solid var(--mu);color:var(--mu);border-radius:5px;font-size:.62rem;padding:.12rem .42rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
+.cp-asis-undo:hover{background:rgba(124,131,153,.12);color:var(--tx)}
+/* 진행 상태 헤더 */
+.cp-progress{margin-bottom:.6rem;padding:.55rem .85rem;background:var(--s1);border:1px solid var(--br);border-radius:7px;font-size:.78rem;color:var(--tx);display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.cp-progress.ready{border-color:var(--g);background:rgba(74,240,168,.06)}
+.cp-progress .pg-count{font-family:var(--mo);font-weight:800}
+.cp-progress .pg-bar{flex:1;min-width:120px;height:6px;background:var(--s2);border-radius:3px;overflow:hidden}
+.cp-progress .pg-fill{height:100%;background:linear-gradient(90deg,var(--g),#6affc0);transition:width .25s}
 /* 후보 패널 (인라인 행) */
 tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-top:1px dashed rgba(192,132,252,.3);border-bottom:1px solid rgba(192,132,252,.25)}
 .cp-cand-title{font-size:.74rem;color:var(--p);font-weight:800;margin-bottom:.45rem;font-family:var(--mo);letter-spacing:.04em}
@@ -395,10 +413,17 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
     </div>
 
     <div class="cp-summary">
-      <div class="cp-sc"><div class="cp-sc-l">전체 라인</div><div class="cp-sc-v" id="cpSumTotal">0</div></div>
-      <div class="cp-sc fit"><div class="cp-sc-l">🟢 충족</div><div class="cp-sc-v" id="cpSumFit">0</div></div>
-      <div class="cp-sc short"><div class="cp-sc-l">🟡 부족</div><div class="cp-sc-v" id="cpSumShort">0</div></div>
-      <div class="cp-sc zero"><div class="cp-sc-l">🔴 재고 없음</div><div class="cp-sc-v" id="cpSumZero">0</div></div>
+      <div class="cp-sc"       id="cpScAll"   onclick="cpSetFilter('all')"  ><div class="cp-sc-l">전체 라인</div><div class="cp-sc-v" id="cpSumTotal">0</div></div>
+      <div class="cp-sc fit"   id="cpScFit"   onclick="cpSetFilter('fit')"  ><div class="cp-sc-l">🟢 충족</div><div class="cp-sc-v" id="cpSumFit">0</div></div>
+      <div class="cp-sc short" id="cpScShort" onclick="cpSetFilter('short')"><div class="cp-sc-l">🟡 부족</div><div class="cp-sc-v" id="cpSumShort">0</div></div>
+      <div class="cp-sc zero"  id="cpScZero"  onclick="cpSetFilter('zero')" ><div class="cp-sc-l">🔴 재고 없음</div><div class="cp-sc-v" id="cpSumZero">0</div></div>
+    </div>
+
+    <div class="cp-progress" id="cpProgress" style="display:none">
+      <span>📋 처리 진행</span>
+      <span class="pg-count"><span id="cpPgDone">0</span> / <span id="cpPgTotal">0</span></span>
+      <div class="pg-bar"><div class="pg-fill" id="cpPgFill" style="width:0%"></div></div>
+      <span id="cpPgHint" style="font-size:.72rem;color:var(--mu)"></span>
     </div>
 
     <div class="items-sec">
@@ -427,9 +452,9 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
     </div>
 
     <div class="cp-step-cta">
-      <span class="label">Step 1 — 발주 업로드 + 재고 대조 완료 후 Step 2(스캔/파렛트 적재)로 진행</span>
+      <span class="label" id="cpScanHint">발주 업로드 후 부족·없음 행을 모두 [🔍 대체] 또는 [✓ 이대로 확정] 처리하면 스캔 시작 활성화됩니다</span>
       <button class="btn btn-s" onclick="cpReset()">🔄 처음부터</button>
-      <button class="btn btn-b" disabled title="Step 2 에서 구현">▶ 스캔 시작 (Step 2)</button>
+      <button class="btn btn-b" id="cpScanBtn" disabled onclick="cpStartScan()" title="모든 행이 처리되어야 활성화">▶ 스캔 시작 (Step 2)</button>
     </div>
   </div>
 
@@ -669,7 +694,8 @@ var CP_HEADER_ALIASES = {
   palletN:  ['파렛트번호', '팔레트번호'],
   expiry:   ['유통(소비)기한', '유통기한', '소비기한']
 };
-var cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0 };
+var cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{} };
+var cpFilter = 'all';  /* 'all'|'fit'|'short'|'zero' — 카운터 카드 클릭 필터 */
 
 function cpFindCol(headers, aliases){
   for (var i=0; i<aliases.length; i++){
@@ -734,6 +760,9 @@ function cpHandleExcel(file){
       cpState.rows = rows;
       cpState.fileName = file.name;
       cpState.uploadedAt = Date.now();
+      cpState.asIs = {};   /* 새 PO 업로드 시 이전 확정 흔적 초기화 */
+      cpFilter = 'all';
+      cpExpandedRow = -1;
       cpSavePersist();
       cpRender();
       var fi = document.getElementById('cpFileInfo');
@@ -876,31 +905,51 @@ function cpRender(){
   var tb = document.getElementById('cpRowsBody');
   if (!tb) return;
   var rows = cpState.rows || [];
+  /* 카운터 카드 active 표시 갱신 */
+  cpRefreshCounterActive();
   if (!rows.length) {
     tb.innerHTML = '<tr><td colspan="13" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>';
     cpUpdateSummary({total:0, fit:0, short:0, zero:0});
+    cpUpdateProgress(0, 0);
     return;
   }
   var sum = {total:rows.length, fit:0, short:0, zero:0};
-  var html = '';
+  var pendingCount = 0;   /* 사용자 액션 필요한 행 (= fit 아니고 asIs 도 아님) */
+  /* 1) 모든 행 분류해서 집계 (필터와 무관) */
+  var classified = rows.map(function(r){ return cpClassify(r); });
   rows.forEach(function(r, i){
-    var m = cpClassify(r);
+    var m = classified[i];
     sum[m.status]++;
+    var done = (m.status === 'fit') || !!cpState.asIs[i];
+    if (!done) pendingCount++;
+  });
+  /* 2) 필터링된 행만 표시 */
+  var html = '';
+  var anyShown = false;
+  rows.forEach(function(r, i){
+    var m = classified[i];
+    if (cpFilter !== 'all' && m.status !== cpFilter) return;
+    anyShown = true;
+    var asIs = !!cpState.asIs[i];
     var chipLabel = m.status === 'fit' ? '🟢 충족' : m.status === 'short' ? '🟡 부족 ' + m.short : '🔴 없음';
     var rowCls = m.status === 'zero' ? 'cp-row-zero' : m.status === 'short' ? 'cp-row-short' : '';
-    /* [ALT] 배지 — 대체바코드로 매칭됐을 때만 */
+    if (asIs) rowCls += ' cp-row-asis';
     var altBadge = '';
     if (m.matchedVia === 'alt') {
       altBadge = '<span class="cp-alt-badge" title="대체바코드 매칭: 원본 ' + escH(m.matchedBc) + ' 의 재고를 사용">ALT</span>';
     }
-    /* 🔍 후보 찾기 버튼 — 재고없음·부족 행에만 (이미 alt 매칭된 건 제외 시키지 말고 더 좋은 후보 찾기 허용) */
-    var findBtn = '';
-    if (m.status !== 'fit') {
+    var asIsChip = '';
+    var findBtn = '', asIsBtn = '', undoBtn = '';
+    if (asIs) {
+      asIsChip = ' <span class="cp-chip asis" title="이대로 확정됨 — 출고가능한 만큼만 진행 (' + m.canShip + '개)">✓ 확정</span>';
+      undoBtn = '<button class="cp-asis-undo" onclick="cpUndoAsIs('+i+')" title="확정 해제">취소</button>';
+    } else if (m.status !== 'fit') {
       var openCls = (cpExpandedRow === i) ? ' open' : '';
-      findBtn = '<button class="cp-find-btn'+openCls+'" onclick="cpToggleCandidates('+i+')" title="대체바코드 후보 찾기">🔍 대체</button>';
+      findBtn  = '<button class="cp-find-btn'+openCls+'" onclick="cpToggleCandidates('+i+')" title="대체바코드 후보 찾기">🔍 대체</button>';
+      asIsBtn  = '<button class="cp-asis-btn" onclick="cpConfirmAsIs('+i+')" title="이대로 확정 (출고가능한 ' + m.canShip + '개만 진행)">✓ 이대로</button>';
     }
     html += '<tr class="' + rowCls + '">'+
-      '<td style="color:var(--mu);font-family:var(--mo);font-size:.72rem">'+(i+1)+'</td>'+
+      '<td class="no-dim" style="color:var(--mu);font-family:var(--mo);font-size:.72rem">'+(i+1)+'</td>'+
       '<td class="cp-cell-po">'+escH(r.po)+'</td>'+
       '<td class="cp-cell-center">'+escH(r.center)+'</td>'+
       '<td class="cp-cell-eta">'+escH(r.eta)+'</td>'+
@@ -910,7 +959,7 @@ function cpRender(){
       '<td class="cell-num">'+r.qty+'</td>'+
       '<td class="cell-num" style="color:'+(m.have>0?'var(--g)':'var(--r)')+'">'+m.have+'</td>'+
       '<td class="cell-num">'+m.canShip+'</td>'+
-      '<td><span class="cp-chip '+m.status+'">'+chipLabel+'</span>'+altBadge+findBtn+'</td>'+
+      '<td class="no-dim"><span class="cp-chip '+m.status+'">'+chipLabel+'</span>'+altBadge+asIsChip+findBtn+asIsBtn+undoBtn+'</td>'+
       '<td class="cell-num">'+(r.box||0)+'</td>'+
       '<td class="cell-num">'+(r.palletT?(r.palletN+'/'+r.palletT):'-')+'</td>'+
     '</tr>';
@@ -919,8 +968,88 @@ function cpRender(){
       html += cpRenderCandidatePanel(i, r, m);
     }
   });
+  if (!anyShown) {
+    var filterLbl = cpFilter==='fit'?'🟢 충족':cpFilter==='short'?'🟡 부족':cpFilter==='zero'?'🔴 재고 없음':cpFilter;
+    html = '<tr><td colspan="13" class="empty-row">이 필터('+filterLbl+')에 해당하는 라인이 없습니다 — 위 카운터를 다시 눌러 전체로 돌아갈 수 있습니다</td></tr>';
+  }
   tb.innerHTML = html;
   cpUpdateSummary(sum);
+  cpUpdateProgress(rows.length - pendingCount, rows.length);
+}
+
+/* ── 카운터 카드 active 표시 ── */
+function cpRefreshCounterActive(){
+  ['All','Fit','Short','Zero'].forEach(function(k){
+    var el = document.getElementById('cpSc'+k);
+    if (!el) return;
+    var key = k.toLowerCase();
+    el.classList.toggle('active', cpFilter === key);
+  });
+}
+/* ── 필터 토글 ── */
+function cpSetFilter(f){
+  cpFilter = (cpFilter === f && f !== 'all') ? 'all' : f;  /* 같은 거 다시 누르면 전체로 (전체는 토글X) */
+  cpExpandedRow = -1;  /* 필터 바뀌면 인라인 패널 닫음 (행 인덱스 의미가 흐려질 수 있음) */
+  cpRender();
+}
+/* ── 이대로 확정 ── */
+function cpConfirmAsIs(i){
+  if (!cpState.rows[i]) return;
+  cpState.asIs[i] = true;
+  cpExpandedRow = -1;
+  cpSavePersist();
+  cpRender();
+}
+function cpUndoAsIs(i){
+  if (!cpState.asIs[i]) return;
+  delete cpState.asIs[i];
+  cpSavePersist();
+  cpRender();
+}
+/* ── 진행 상태 + 스캔 시작 활성화 ── */
+function cpUpdateProgress(done, total){
+  var pg = document.getElementById('cpProgress');
+  var btn = document.getElementById('cpScanBtn');
+  var hint = document.getElementById('cpScanHint');
+  if (!pg || !btn) return;
+  if (!total) {
+    pg.style.display='none';
+    btn.disabled = true;
+    btn.title = '먼저 PO 엑셀을 업로드하세요';
+    if (hint) hint.textContent = '발주 업로드 후 부족·없음 행을 모두 [🔍 대체] 또는 [✓ 이대로 확정] 처리하면 스캔 시작 활성화됩니다';
+    return;
+  }
+  pg.style.display='';
+  document.getElementById('cpPgDone').textContent = done;
+  document.getElementById('cpPgTotal').textContent = total;
+  var pct = total ? Math.round(done/total*100) : 0;
+  document.getElementById('cpPgFill').style.width = pct + '%';
+  var pendingLeft = total - done;
+  var pgHint = document.getElementById('cpPgHint');
+  if (pendingLeft > 0) {
+    pg.classList.remove('ready');
+    if (pgHint) pgHint.textContent = '남은 ' + pendingLeft + '건 — 부족·없음 행을 [🔍 대체] 또는 [✓ 이대로 확정] 으로 처리하세요';
+    btn.disabled = true;
+    btn.title = '남은 ' + pendingLeft + '건 처리 필요';
+    if (hint) hint.innerHTML = '⏳ <b>' + pendingLeft + '건</b> 처리 필요 — 모두 정리되면 스캔 시작이 활성화됩니다';
+  } else {
+    pg.classList.add('ready');
+    if (pgHint) pgHint.textContent = '✓ 모든 행 처리 완료 — 스캔 시작 가능';
+    btn.disabled = false;
+    btn.title = '스캔/파렛트 적재 단계로 진행';
+    if (hint) hint.innerHTML = '✓ 모든 행 처리 완료 — <b style="color:var(--g)">스캔 시작</b> 가능';
+  }
+}
+/* ── 스캔 시작 (Step 2 자리) ── */
+function cpStartScan(){
+  /* Step 2 구현 전 임시 — 사용자가 흐름 알 수 있게 안내 */
+  var fit = 0, asIsCount = 0, shipQty = 0;
+  cpState.rows.forEach(function(r, i){
+    var m = cpClassify(r);
+    if (m.status === 'fit') { fit++; shipQty += m.canShip; }
+    else if (cpState.asIs[i]) { asIsCount++; shipQty += m.canShip; }
+  });
+  setMsg('cpMsg','inf','▶ Step 2(스캔/파렛트 적재) 진입 준비 완료 — 충족 ' + fit + '건 + 이대로확정 ' + asIsCount + '건 = 총 출고 ' + shipQty + '개 예정. (Step 2 화면은 다음 작업에서 활성화 예정)');
 }
 
 function cpRenderCandidatePanel(idx, row, matched){
@@ -974,7 +1103,9 @@ function cpReset(){
   if (cpState.rows.length || cpState.vendor) {
     if (!confirm('업로드된 쿠팡 데이터와 업체정보를 모두 비웁니다. 계속할까요?')) return;
   }
-  cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0 };
+  cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{} };
+  cpFilter = 'all';
+  cpExpandedRow = -1;
   cpSavePersist();
   cpSyncToForm();
   cpRender();
@@ -997,6 +1128,7 @@ function cpLoadPersist(){
       cpState.rows       = Array.isArray(v.rows) ? v.rows : [];
       cpState.fileName   = v.fileName || '';
       cpState.uploadedAt = +v.uploadedAt || 0;
+      cpState.asIs       = (v.asIs && typeof v.asIs==='object') ? v.asIs : {};
     }
   } catch(e){}
 }
