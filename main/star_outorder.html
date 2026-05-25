@@ -3212,7 +3212,8 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
   var vendor = (workSession && workSession.vendor) || '';
   var vendorCode = (workSession && workSession.vendorCode) || '';
   var posStr = (g.pos||[]).filter(Boolean).join(', ') || '-';
-  /* 박스 단위 행 — 박스번호+박스수 셀이 rowspan 으로 병합. 박스 안 SKU 마다 한 줄. */
+  /* 박스 단위 행 — 컬럼 순서: # / SKU ID / 상품명·바코드 / 박스번호(rowspan) / 박스수(rowspan) / 수량 / 비고
+   * 박스 안 첫 SKU 에 박스번호+박스수 셀이 rowspan 으로 들어감. */
   var rowCounter = 0;
   var skuRows = (g.boxes||[]).map(function(box){
     var span = box.items.length || 1;
@@ -3227,14 +3228,15 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
         ? '<td rowspan="'+span+'" style="font-family:monospace;font-weight:800;vertical-align:middle">'+escH(box.boxNo)+'</td>'+
           '<td class="num-emph" rowspan="'+span+'" style="vertical-align:middle">1</td>'
         : '';
+      /* 비고: 기존 status (발주현황) 가 있으면, 없으면 빈값 — 소비기한 통합됨 */
+      var remarkText = it.status || it.expiry || '';
       return '<tr>'+
         '<td>'+rowCounter+'</td>'+
-        boxCells +
         '<td style="font-family:monospace">'+escH(it.skuId||'-')+'</td>'+
         '<td style="text-align:left">'+nameCell+'</td>'+
+        boxCells +
         '<td class="num-emph">'+it.qty+'</td>'+
-        '<td>'+escH(it.expiry||'')+'</td>'+
-        '<td>'+escH(it.status||'')+'</td>'+
+        '<td>'+escH(remarkText)+'</td>'+
       '</tr>';
     }).join('');
   }).join('');
@@ -3272,21 +3274,19 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
       '<colgroup>'+
         '<col style="width:4%">'+
         '<col style="width:12%">'+
-        '<col style="width:8%">'+
-        '<col style="width:11%">'+
-        '<col style="width:35%">'+
+        '<col style="width:38%">'+
         '<col style="width:13%">'+
-        '<col style="width:9%">'+
         '<col style="width:8%">'+
+        '<col style="width:13%">'+
+        '<col style="width:12%">'+
       '</colgroup>'+
       '<thead><tr>'+
         '<th>#</th>'+
-        '<th>박스번호</th>'+
-        '<th>박스수</th>'+
         '<th>SKU ID</th>'+
         '<th>상품명 / 바코드</th>'+
+        '<th>박스번호</th>'+
+        '<th>박스수</th>'+
         '<th>수량</th>'+
-        '<th>소비기한</th>'+
         '<th>비고</th>'+
       '</tr></thead>'+
       '<tbody>'+ skuRows +'</tbody>'+
@@ -3299,69 +3299,53 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
   '</section>';
 }
 
-/* 폰트 자동 축소 (페이지가 297mm 초과 시) */
+/* 폰트 자동 축소 (페이지가 297mm 초과 시) — 8단계 (작은 폰트까지) */
 var SHIP_FIT_STEPS = [
   {'--ship-sku-fs':'9.5pt','--ship-sku-num-fs':'19pt','--ship-sku-th-fs':'9pt','--ship-sku-cell-pad':'5px 6px','--ship-sku-lh':'1.35'},
   {'--ship-sku-fs':'8.5pt','--ship-sku-num-fs':'17pt','--ship-sku-th-fs':'8.5pt','--ship-sku-cell-pad':'4px 5px','--ship-sku-lh':'1.3'},
   {'--ship-sku-fs':'7.5pt','--ship-sku-num-fs':'15pt','--ship-sku-th-fs':'8pt','--ship-sku-cell-pad':'3px 4px','--ship-sku-lh':'1.25'},
-  {'--ship-sku-fs':'6.5pt','--ship-sku-num-fs':'13pt','--ship-sku-th-fs':'7.5pt','--ship-sku-cell-pad':'2px 3px','--ship-sku-lh':'1.2'},
-  {'--ship-sku-fs':'5.5pt','--ship-sku-num-fs':'11pt','--ship-sku-th-fs':'7pt','--ship-sku-cell-pad':'2px 3px','--ship-sku-lh':'1.15'}
+  {'--ship-sku-fs':'6.8pt','--ship-sku-num-fs':'13pt','--ship-sku-th-fs':'7.5pt','--ship-sku-cell-pad':'2.5px 3px','--ship-sku-lh':'1.2'},
+  {'--ship-sku-fs':'6.0pt','--ship-sku-num-fs':'11.5pt','--ship-sku-th-fs':'7pt','--ship-sku-cell-pad':'2px 3px','--ship-sku-lh':'1.15'},
+  {'--ship-sku-fs':'5.5pt','--ship-sku-num-fs':'10pt','--ship-sku-th-fs':'6.5pt','--ship-sku-cell-pad':'1.5px 2px','--ship-sku-lh':'1.1'},
+  {'--ship-sku-fs':'5.0pt','--ship-sku-num-fs':'9pt','--ship-sku-th-fs':'6pt','--ship-sku-cell-pad':'1px 2px','--ship-sku-lh':'1.08'},
+  {'--ship-sku-fs':'4.5pt','--ship-sku-num-fs':'8pt','--ship-sku-th-fs':'5.5pt','--ship-sku-cell-pad':'1px 1.5px','--ship-sku-lh':'1.05'}
 ];
 function cpFitShipPageToA4(pageEl){
   if (!pageEl) return;
   for (var step=0; step<SHIP_FIT_STEPS.length; step++){
-    if (step === 0) { /* 기본 */ }
-    else {
+    if (step > 0) {
       var vars = SHIP_FIT_STEPS[step];
       Object.keys(vars).forEach(function(k){ pageEl.style.setProperty(k, vars[k]); });
     }
-    /* 측정 — 297mm = 1122px @ 96dpi 정도. scrollHeight 측정 */
-    if (pageEl.scrollHeight <= pageEl.clientHeight + 0.5) break;
+    /* reflow 강제 — 변경 즉시 반영 */
+    void pageEl.offsetHeight;
+    /* 측정: scrollHeight 가 clientHeight 보다 크면 컨텐츠 넘침 */
+    if (pageEl.scrollHeight <= pageEl.clientHeight + 1) break;
   }
 }
 
-/* 인쇄 트리거 */
+/* 인쇄 트리거 — 항상 1부 A4 세로 (사장님이 프린터에서 부수 설정) */
 function cpPrintShipList(){
   if (!workSession) { cpFlash('warn','⚠️ 세션 없음'); return; }
   var groups = cpBuildShipListGroups();
   if (!groups.length) { cpFlash('warn','⚠️ 적재된 데이터가 없습니다'); return; }
 
-  /* 인쇄 부수 선택 — 기본 duplex 2부 (사장님 정책) */
-  var useDuplex = confirm('출고적재리스트 인쇄 부수 선택\n\n[확인] = 2부 인쇄 (A4 가로 · 좌우 동일 · 사장님 정책)\n[취소] = 1부 인쇄 (A4 세로)');
-
   var area = document.getElementById('shipListArea');
   if (!area) { cpFlash('er','적재리스트 영역 없음'); return; }
-  var pagesHtml = groups.map(function(g, i){ return cpBuildShipPageHtml(g, groups.length, i); }).join('');
-  var bodyHtml;
-  if (useDuplex) {
-    /* 한 페이지를 좌우 두 번 — 그룹마다 .ship-duplex-sheet */
-    bodyHtml = groups.map(function(g, i){
-      var pg = cpBuildShipPageHtml(g, groups.length, i);
-      return '<div class="ship-duplex-sheet">'+
-        '<div class="ship-duplex-half">'+pg+'</div>'+
-        '<div class="ship-duplex-half">'+pg+'</div>'+
-      '</div>';
-    }).join('');
-  } else {
-    bodyHtml = pagesHtml;
-  }
-  area.innerHTML = bodyHtml;
+  area.innerHTML = groups.map(function(g, i){ return cpBuildShipPageHtml(g, groups.length, i); }).join('');
 
-  /* @page 동적 — duplex 면 가로 A4, 일반이면 세로 A4 */
+  /* @page A4 세로 */
   var oldStyle = document.getElementById('ship-list-pagestyle');
   if (oldStyle) oldStyle.remove();
   var st = document.createElement('style');
   st.id = 'ship-list-pagestyle';
-  st.textContent = useDuplex
-    ? '@media print { @page { size: A4 landscape; margin: 0; } }'
-    : '@media print { @page { size: A4 portrait; margin: 0; } }';
+  st.textContent = '@media print { @page { size: A4 portrait; margin: 0; } }';
   document.head.appendChild(st);
 
   /* 폰트 자동 축소 — 오프스크린 렌더 후 측정 */
   var savedCss = area.style.cssText;
   area.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;visibility:hidden';
   requestAnimationFrame(function(){
-    /* 각 .ship-page 측정 후 폰트 단계 적용 */
     area.querySelectorAll('.ship-page').forEach(function(pg){ cpFitShipPageToA4(pg); });
     area.style.cssText = savedCss;
     document.body.classList.add('printing-shiplist');
@@ -3374,7 +3358,7 @@ function cpPrintShipList(){
       }, 1500);
     }, 80);
   });
-  cpFlash('ok','✓ 출고적재리스트 인쇄 — '+groups.length+'페이지' + (useDuplex?' × 2부 좌우동일':' × 1부'));
+  cpFlash('ok','✓ 쿠팡출고 적재리스트 — '+groups.length+'페이지 인쇄');
 }
 
 /* ═══════════ 엑셀 백업 / 복원 ═══════════
