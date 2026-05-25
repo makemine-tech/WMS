@@ -2266,8 +2266,13 @@ function cpOpenShipPopup(pickedId){
   /* 출고박스 옵션 = 같은 센터의 open shipBoxes + '새 박스' */
   var boxesEl = document.getElementById('cpShipPopupBoxes');
   if (boxesEl) {
+    /* 혼적 출고처리 팝업의 '기존 박스' 후보 — 우리가 새로 세팅한 박스만.
+     * 단일·매칭 박스 (srcBoxBarcode === boxNo, ASC... 원본 그대로) 는 제외 */
     var openBoxes = (workSession.shipBoxes||[]).filter(function(b){
-      return b.status === 'open' && b.center === cpPopupCenter;
+      if (b.status !== 'open') return false;
+      if (b.center !== cpPopupCenter) return false;
+      if (b.srcBoxBarcode && b.srcBoxBarcode === b.boxNo) return false;
+      return true;
     });
     var nextNo = cpNextShipBoxNo(cpPopupCenter);
     var optsHtml = '';
