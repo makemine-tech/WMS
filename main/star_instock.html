@@ -221,6 +221,9 @@ h1 em{color:var(--g);font-style:normal}
   <a class="btn btn-y" href="/star_outorder.html" style="text-decoration:none;color:#0f1117;display:inline-flex;align-items:center">📋 출고지시서</a>
   <span style="font-size:.72rem;color:var(--mu)">입고: 002 양식 12열 (마지막 L열 = 비고) / 출고: 박스바코드·바코드·수량·비고 4열</span>
   <span style="margin-left:auto;font-size:.7rem;color:var(--mu);font-family:var(--mo)" id="syncInfo"></span>
+  <span class="btn dz-mini" style="background:linear-gradient(135deg,#c91d2f,#e6394e);color:#fff;border:1.5px solid #8c1422;box-shadow:0 4px 12px rgba(201,29,47,.35);font-weight:900" title="한글표시사항 엑셀 업로드 — 바코드 기준으로 기존 입고 로그의 상품명·품번·사이즈·재질·색상·제조국을 덮어씁니다">📋 한글표시사항 입력
+    <input type="file" accept=".xlsx,.xls" onchange="handleKoLabelExcel(this.files[0]);this.value='';">
+  </span>
 </div>
 
 <!-- 스캔 패널 -->
@@ -548,6 +551,152 @@ function cell(r, c){
   var v = r[c];
   if (v===null||v===undefined) return '';
   return (typeof v==='number') ? v : String(v).trim();
+}
+
+/* ─────────────── 한글표시사항 입력 (메타 일괄 덮어쓰기) ───────────────
+ * 엑셀의 바코드 기준 (원바코드 OR 대체바코드 매칭) 으로 입고 로그(type='in')의
+ * 메타 필드 (상품명/품번/사이즈/재질/색상/제조국) 를 일괄 덮어씀.
+ * 출고지시서 상품 라벨 인쇄 시 이 메타가 사용됨. */
+function handleKoLabelExcel(file){
+  if (!file) return;
+  if (!/\.xlsx?$/i.test(file.name)) { setMsg('m0','er','❌ .xlsx 파일만 지원합니다'); return; }
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  setMsg('m0','inf','<span>한글표시사항 엑셀 분석 중...</span>');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:true });
+      if (aoa.length < 2) { setMsg('m0','er','❌ 데이터 행이 없습니다'); return; }
+
+      /* 헤더 검색 — 가장 위쪽 행 중 '바코드' 가 포함된 행을 헤더로 인식 (일부 양식은 1행 아닌 2~3행 헤더) */
+      var headerRow = -1;
+      for (var hi=0; hi<Math.min(aoa.length, 10); hi++){
+        var row = aoa[hi] || [];
+        var hasBc = row.some(function(c){
+          var s = String(c||'').trim();
+          return /바코드|Barcode|BARCODE/i.test(s);
+        });
+        if (hasBc) { headerRow = hi; break; }
+      }
+      if (headerRow < 0) { setMsg('m0','er','❌ 바코드 컬럼을 찾을 수 없습니다 (헤더에 \'바코드\' 필요)'); return; }
+      var headers = (aoa[headerRow]||[]).map(function(h){return String(h||'').trim();});
+
+      var ALIAS = {
+        barcode:  ['바코드','상품바코드','SKU Barcode','Barcode','BARCODE','대체바코드','대비바코드'],
+        name:     ['상품명','품명','Name','품목명','제품명'],
+        code:     ['품번','모델','모델명','Code','품목코드','품목번호','상품코드','모델번호'],
+        size:     ['사이즈','Size','크기','치수','규격'],
+        material: ['재질','소재','Material','성분','원재료'],
+        color:    ['색상','컬러','Color','Colour'],
+        origin:   ['제조국','원산지','Origin','생산국','제조원','수입국']
+      };
+      function findCol(aliases){
+        for (var i=0; i<aliases.length; i++){
+          var a = aliases[i];
+          for (var j=0; j<headers.length; j++){
+            if (headers[j] === a) return j;
+          }
+        }
+        return -1;
+      }
+      var idx = {};
+      Object.keys(ALIAS).forEach(function(k){ idx[k] = findCol(ALIAS[k]); });
+      if (idx.barcode < 0) { setMsg('m0','er','❌ 바코드 컬럼을 찾을 수 없습니다'); return; }
+
+      /* 엑셀 행 파싱 */
+      var sheetItems = [];
+      for (var i=headerRow+1; i<aoa.length; i++){
+        var row = aoa[i]; if (!row) continue;
+        var bcRaw = row[idx.barcode];
+        if (bcRaw===null||bcRaw===undefined||String(bcRaw).trim()==='') continue;
+        var item = { barcode: String(bcRaw).trim() };
+        ['name','code','size','material','color','origin'].forEach(function(k){
+          if (idx[k] >= 0) {
+            var v = row[idx[k]];
+            if (v !== null && v !== undefined && String(v).trim() !== '') {
+              item[k] = (typeof v === 'number') ? String(v) : String(v).trim();
+            }
+          }
+        });
+        sheetItems.push(item);
+      }
+      if (!sheetItems.length) { setMsg('m0','er','❌ 유효한 데이터 행이 없습니다'); return; }
+
+      /* logs 에서 매칭 인덱스 — type:'in' 만, 원바코드 + altBarcode 둘 다 */
+      var byBc = {};
+      logs.forEach(function(lg){
+        if (lg.type !== 'in') return;
+        var bc1 = normBarcode(lg.barcode);
+        var bc2 = normBarcode(lg.altBarcode);
+        if (bc1) { (byBc[bc1] = byBc[bc1] || []).push(lg.key); }
+        if (bc2 && bc2 !== bc1) { (byBc[bc2] = byBc[bc2] || []).push(lg.key); }
+      });
+
+      var updates = {};
+      var matched = 0, unmatched = 0, updatedLogs = 0;
+      var matchedFieldCount = 0;
+      var unmatchedBcs = [];
+      var basePath = 'wms_sync/groups/' + groupId + '/star_instock/logs/';
+      sheetItems.forEach(function(item){
+        var key = normBarcode(item.barcode);
+        var logKeys = byBc[key] || [];
+        if (!logKeys.length) {
+          unmatched++;
+          if (unmatchedBcs.length < 8) unmatchedBcs.push(item.barcode);
+          return;
+        }
+        matched++;
+        /* 같은 logKey 가 원/대체 양쪽으로 들어왔으면 중복 제거 */
+        var seen = {};
+        logKeys.forEach(function(lk){
+          if (seen[lk]) return; seen[lk] = true;
+          updatedLogs++;
+          ['name','code','size','material','color','origin'].forEach(function(k){
+            if (item[k] !== undefined) {
+              updates[basePath + lk + '/' + k] = item[k];
+              matchedFieldCount++;
+            }
+          });
+        });
+      });
+
+      if (!Object.keys(updates).length) {
+        setMsg('m0','warn','⚠️ 매칭된 입고 로그가 없습니다 — 엑셀 ' + sheetItems.length + '건 모두 미매칭');
+        return;
+      }
+
+      /* 어떤 필드들이 채워질지 안내 */
+      var willFillFields = Object.keys(ALIAS).filter(function(k){
+        return k !== 'barcode' && idx[k] >= 0;
+      });
+      var confirmMsg = '📋 한글표시사항 일괄 입력\n\n' +
+        '엑셀 데이터: ' + sheetItems.length + '건\n' +
+        '✓ 매칭: ' + matched + '건 (바코드 + 대체바코드 매칭)\n' +
+        (unmatched ? '⚠ 미매칭: ' + unmatched + '건\n' : '') +
+        (unmatchedBcs.length ? '   예: ' + unmatchedBcs.join(', ') + '\n' : '') +
+        '\n채울 필드: ' + willFillFields.join(', ') +
+        '\n업데이트할 입고 로그: ' + updatedLogs + '건' +
+        '\n총 셀 업데이트: ' + matchedFieldCount + '개\n\n' +
+        '※ 기존 메타 (상품명/품번/사이즈/재질/색상/제조국) 가 덮어쓰기됩니다.\n' +
+        '※ 출고지시서 상품 라벨 인쇄 시 이 정보가 사용됩니다.\n\n' +
+        '계속하시겠습니까?';
+      if (!confirm(confirmMsg)) { setMsg('m0','warn','⚠️ 한글표시사항 입력 취소'); return; }
+
+      setMsg('m0','inf','<span>업데이트 중... (' + matchedFieldCount + ' 셀)</span>');
+      firebase.database().ref().update(updates).then(function(){
+        setMsg('m0','ok','✅ 한글표시사항 입력 완료 · 매칭 ' + matched + '건 · 입고로그 ' + updatedLogs + '건 · 셀 ' + matchedFieldCount + '개 업데이트' + (unmatched ? ' · ⚠ 미매칭 '+unmatched+'건' : ''));
+      }).catch(function(err){
+        setMsg('m0','er','❌ 업데이트 실패: '+(err&&err.message||err));
+      });
+    } catch(err){
+      console.error(err);
+      setMsg('m0','er','❌ 엑셀 분석 실패: '+err.message);
+    }
+  };
+  reader.onerror = function(){ setMsg('m0','er','❌ 파일 읽기 실패'); };
+  reader.readAsArrayBuffer(file);
 }
 
 /* ─────────────── 엑셀 일괄 출고 ───────────────
