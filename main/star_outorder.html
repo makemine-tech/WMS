@@ -407,20 +407,96 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   body.printing-label .print-area{display:none!important}
 }
 
-/* ─── 상품 라벨 (80x40mm 가로 인쇄 전용) ─── */
+/* ─── 상품 라벨 (80x40mm 가로 인쇄 전용) — 사장님 이미지 기반 재설계 ─── */
 .prod-label-area{display:none}
-.prod-label{width:80mm;height:40mm;padding:2.5mm 3mm;box-sizing:border-box;background:#fff;color:#000;font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;display:grid;grid-template-columns:1fr 32mm;grid-template-rows:1fr auto;gap:1mm 2mm;page-break-after:always}
+.prod-label{
+  width:80mm;height:40mm;
+  padding:1.8mm 2mm;
+  box-sizing:border-box;
+  background:#fff;color:#000;
+  font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;
+  display:flex;flex-direction:column;
+  page-break-after:always;
+}
 .prod-label:last-child{page-break-after:auto}
-.prod-label .pl-left{display:flex;flex-direction:column;gap:.6mm;font-size:6pt;line-height:1.2}
-.prod-label .pl-row{display:flex;gap:1.2mm;align-items:baseline}
-.prod-label .pl-key{font-weight:900;color:#000;min-width:11mm;letter-spacing:-.2pt}
-.prod-label .pl-val{font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.prod-label .pl-val.name{font-size:6.5pt;white-space:normal;line-height:1.15}
-.prod-label .pl-val.big{font-size:11pt;font-weight:900;letter-spacing:-.3pt}
-.prod-label .pl-right{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5mm}
-.prod-label .pl-right svg{width:32mm;height:13mm;max-width:100%}
-.prod-label .pl-bc-num{font-family:'Courier New',monospace;font-size:7pt;font-weight:800;letter-spacing:.4pt}
-.prod-label .pl-bottom{grid-column:1/-1;font-size:5pt;line-height:1.25;color:#222;border-top:.3mm solid #888;padding-top:.6mm;margin-top:.2mm}
+/* 상단 본문: 좌측 정보 (48mm) + 우측 바코드 (28mm) */
+.prod-label .pl-main{
+  display:grid;
+  grid-template-columns:1fr 31mm;
+  gap:1.5mm;
+  flex:1;
+  min-height:0;
+}
+.prod-label .pl-left{
+  display:flex;flex-direction:column;
+  gap:.4mm;
+  min-width:0;
+  font-size:7.5pt;line-height:1.15;
+}
+.prod-label .pl-row{
+  display:flex;gap:1.5mm;align-items:baseline;
+  min-width:0;
+}
+.prod-label .pl-key{
+  font-weight:900;color:#000;
+  letter-spacing:-.5pt;
+  min-width:10mm;
+  flex-shrink:0;
+  font-size:8pt;
+}
+.prod-label .pl-val{
+  font-weight:700;
+  flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* 상품명: 2줄까지 wrap 허용 */
+.prod-label .pl-val.name{
+  font-size:7.5pt;font-weight:700;
+  white-space:normal;line-height:1.18;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;
+  letter-spacing:-.2pt;
+}
+/* 사이즈/품번: 가장 크게 강조 */
+.prod-label .pl-val.big{
+  font-size:15pt;font-weight:900;
+  letter-spacing:-.5pt;line-height:1;
+  margin-top:.2mm;
+}
+.prod-label .pl-row.big-row{margin:.4mm 0}
+/* 작은 정보 (재질·색상·제조국) */
+.prod-label .pl-val.small{
+  font-size:6.8pt;font-weight:500;
+  letter-spacing:-.2pt;
+}
+/* 우측 바코드 */
+.prod-label .pl-right{
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:.4mm;
+  min-width:0;
+}
+.prod-label .pl-right svg{
+  width:31mm;height:17mm;
+  display:block;
+}
+.prod-label .pl-bc-num{
+  font-family:'Courier New',monospace;
+  font-size:7.8pt;font-weight:800;
+  letter-spacing:.3pt;
+  white-space:nowrap;
+}
+/* 하단 안내 띠 */
+.prod-label .pl-bottom{
+  flex-shrink:0;
+  font-size:5.6pt;line-height:1.3;
+  color:#222;
+  border-top:.4mm solid #555;
+  padding-top:.7mm;
+  margin-top:.6mm;
+  letter-spacing:-.1pt;
+}
+.prod-label .pl-bottom div{margin-top:.2mm}
 
 @media print {
   body.printing-product-label > *{visibility:hidden}
@@ -2241,21 +2317,23 @@ function cpPrintLabelsFromItems(items){
     for (var i=0; i<qty; i++) {
       labels.push(
         '<div class="prod-label">'+
-          '<div class="pl-left">'+
-            '<div class="pl-row"><span class="pl-key">상품명:</span><span class="pl-val name">'+escH(name)+'</span></div>'+
-            '<div class="pl-row"><span class="pl-key">사이즈:</span><span class="pl-val big">'+escH(size)+'</span></div>'+
-            '<div class="pl-row"><span class="pl-key">품 번:</span><span class="pl-val big">'+escH(code)+'</span></div>'+
-            '<div class="pl-row"><span class="pl-key">재 질:</span><span class="pl-val">'+escH(material||'-')+'</span></div>'+
-            '<div class="pl-row"><span class="pl-key">색 상:</span><span class="pl-val">'+escH(color||'-')+'</span></div>'+
-            '<div class="pl-row"><span class="pl-key">제조국:</span><span class="pl-val">'+escH(origin||'-')+'</span></div>'+
-          '</div>'+
-          '<div class="pl-right">'+
-            '<svg data-bc="'+escAttrLocal(bc)+'"></svg>'+
-            '<div class="pl-bc-num">'+escH(bc)+'</div>'+
+          '<div class="pl-main">'+
+            '<div class="pl-left">'+
+              '<div class="pl-row"><span class="pl-key">상품명:</span><span class="pl-val name">'+escH(name)+'</span></div>'+
+              '<div class="pl-row big-row"><span class="pl-key">사이즈:</span><span class="pl-val big">'+escH(size)+'</span></div>'+
+              '<div class="pl-row big-row"><span class="pl-key">품 번:</span><span class="pl-val big">'+escH(code)+'</span></div>'+
+              '<div class="pl-row"><span class="pl-key">재 질:</span><span class="pl-val small">'+escH(material||'-')+'</span></div>'+
+              '<div class="pl-row"><span class="pl-key">색 상:</span><span class="pl-val small">'+escH(color||'-')+'</span></div>'+
+              '<div class="pl-row"><span class="pl-key">제조국:</span><span class="pl-val small">'+escH(origin||'-')+'</span></div>'+
+            '</div>'+
+            '<div class="pl-right">'+
+              '<svg data-bc="'+escAttrLocal(bc)+'"></svg>'+
+              '<div class="pl-bc-num">'+escH(bc)+'</div>'+
+            '</div>'+
           '</div>'+
           '<div class="pl-bottom">'+
-            '※ 소비자부주의로 인한 제품 보상은 되지 않으니, 소재에 맞는 세탁법 꼭 확인해 주십시오.<br>'+
-            '경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645'+
+            '<div>※ 소비자부주의로 인한 제품 보상은 되지 않으니, 소재에 맞는 세탁법 꼭 확인해 주십시오.</div>'+
+            '<div>경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645</div>'+
           '</div>'+
         '</div>'
       );
@@ -2270,10 +2348,21 @@ function cpPrintLabelsFromItems(items){
     svgs.forEach(function(svg){
       var v = svg.getAttribute('data-bc') || '';
       try {
+        /* SVG 크기 31mm × 17mm. height 단위는 px (svg 내부 좌표) — 64 정도면 적당히 채움.
+         * width 도 약간 키워 굵게. JsBarcode 가 자동 컨텐츠 크기 맞추고 CSS 가 최종 사이즈 결정. */
         JsBarcode(svg, v, {
-          format:'CODE128', displayValue:false, width:1.8, height:50,
-          margin:0, background:'#ffffff', lineColor:'#000000'
+          format:'CODE128',
+          displayValue:false,
+          width:2.2,
+          height:64,
+          margin:0,
+          background:'#ffffff',
+          lineColor:'#000000'
         });
+        /* JsBarcode 가 svg 의 width/height 속성 설정함 — viewBox 와 함께 자동 스케일 되도록 */
+        svg.removeAttribute('width');
+        svg.removeAttribute('height');
+        svg.setAttribute('preserveAspectRatio', 'none');
       } catch(e){}
     });
   } else {
