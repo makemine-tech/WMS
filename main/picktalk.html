@@ -76,7 +76,7 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 /* 목록 카드 */
 .list-body{padding:.5rem .8rem 0}
 .feed-list{display:flex;flex-direction:column;gap:.5rem}
-.feed-card{background:var(--s1);border:1px solid var(--br);border-left:4px solid var(--mu);border-radius:10px;padding:.7rem .85rem;display:flex;flex-direction:column;gap:.4rem;position:relative;cursor:pointer;transition:background .12s}
+.feed-card{background:var(--s1);border:1px solid var(--br);border-left:4px solid var(--mu);border-radius:10px;padding:.7rem .85rem;display:flex;flex-direction:column;gap:.4rem;position:relative;cursor:pointer;transition:background .12s;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .feed-card:active{background:#1a2030}
 .fc-row1{display:flex;align-items:center;justify-content:space-between;gap:.5rem;min-width:0}
 .fc-cat{display:inline-flex;align-items:center;gap:.32rem;font-size:.78rem;font-weight:800;min-width:0;flex:1}
@@ -128,6 +128,8 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .empty-ico{font-size:3rem;opacity:.45;margin-bottom:.7rem}
 .empty-msg{font-size:.92rem;line-height:1.5}
 .empty-sub{font-size:.74rem;margin-top:.45rem;color:rgba(124,131,153,.7)}
+.empty-cta{margin-top:1.1rem;background:linear-gradient(135deg,var(--g),#3dd693);color:#0f1117;border:none;font-size:.92rem;font-weight:800;padding:.78rem 1.5rem;border-radius:10px;cursor:pointer;box-shadow:0 6px 16px rgba(74,240,168,.3);display:inline-flex;align-items:center;gap:.42rem;min-height:44px}
+.empty-cta:active{transform:scale(.97)}
 .loading{display:flex;align-items:center;justify-content:center;padding:2rem;color:var(--mu);font-size:.86rem}
 
 /* ─── 캘린더 ─── */
@@ -849,6 +851,64 @@ function mapToArr(obj, sortKey){
   });
 }
 
+/* ───────── 모달 스택 (뒤로가기 / ESC 로 닫기) ─────────
+ * 모바일 뒤로가기 제스처·하드웨어 버튼이 모달을 닫게 하려고
+ * 모달이 열릴 때 history state 를 push, 닫힐 때 pop 한다.
+ * - close 함수가 confirm() 등으로 막혀 모달이 그대로 남으면 state 를 복구. */
+var __modalStack = [];
+var __modalDef = {
+  reg:      { el:'regModal',      close: function(){ closeRegister(); } },
+  tut:      { el:'tutorialModal', close: function(){ closeTutorial(); } },
+  edit:     { el:'editModal',     close: function(){ closeEditor(); } },
+  action:   { el:'actionSheet',   close: function(){ closeActions(); } },
+  lightbox: { el:'lightbox',      close: function(){ closeLightbox(); } }
+};
+function __modalIsOpen(key){
+  var def=__modalDef[key]; if (!def) return false;
+  var el=document.getElementById(def.el); if (!el) return false;
+  return el.classList.contains('open');
+}
+function pushModal(key){
+  if (!__modalDef[key]) return;
+  /* 동일 키가 최상단이면 중복 push 안 함 (예: 등록→편집 재진입) */
+  if (__modalStack.length && __modalStack[__modalStack.length-1] === key) return;
+  __modalStack.push(key);
+  try { history.pushState({pickModal:key}, ''); } catch(e){}
+}
+function popModal(key){
+  /* 명시적 close 경로(✕ 버튼, 저장 완료 등). history 도 한 칸 되감음.
+   * popstate 핸들링 중이면 브라우저가 이미 한 칸 뒤로 갔으므로 stack 만 정리. */
+  var idx=__modalStack.lastIndexOf(key);
+  if (idx < 0) return;
+  __modalStack.splice(idx, 1);
+  if (__modalInPopstate) return;
+  if (history.state && history.state.pickModal){
+    __modalSkipNextPop = true;
+    try { history.back(); } catch(e){}
+  }
+}
+var __modalSkipNextPop = false;
+var __modalInPopstate = false;
+window.addEventListener('popstate', function(){
+  if (__modalSkipNextPop){ __modalSkipNextPop=false; return; }
+  if (!__modalStack.length) return;
+  var key=__modalStack[__modalStack.length-1];
+  var def=__modalDef[key]; if (!def) return;
+  __modalInPopstate = true;
+  try { def.close(); } finally { __modalInPopstate = false; }
+  /* close 가 취소된 경우(예: 작성 중 confirm 거절) state 복구 */
+  if (__modalIsOpen(key)){
+    try { history.pushState({pickModal:key}, ''); } catch(e){}
+  }
+});
+window.addEventListener('keydown', function(e){
+  if (e.key !== 'Escape' && e.key !== 'Esc') return;
+  if (!__modalStack.length) return;
+  e.preventDefault();
+  /* popstate 가 close 를 트리거하도록 history.back */
+  try { history.back(); } catch(e){}
+});
+
 /* ───────── 인증 ───────── */
 function doLogout(){
   if (!window.WMSync || !WMSync.isReady()) return;
@@ -1110,7 +1170,7 @@ function renderFeedCard(lg){
       return '<img class="fc-photo" src="'+p+'" onclick="event.stopPropagation();showPhoto(\''+keyEsc+'\','+i+')" alt="">';
     }).join('')+'</div>';
   }
-  return '<div class="feed-card" style="border-left-color:'+color+'" onclick="openEditLog(\''+escAttr(lg._key)+'\')">'+
+  return '<div class="feed-card" data-logkey="'+escAttr(lg._key)+'" style="border-left-color:'+color+'">'+
     '<div class="fc-row1">'+
       '<div class="fc-cat"><span class="ic">'+icon+'</span><span class="name">'+escH(name)+'</span></div>'+
       '<div style="display:flex;align-items:center;gap:.32rem;flex-shrink:0">'+ unreadBadge + stateBadge +'</div>'+
@@ -1162,8 +1222,10 @@ function renderList(){
     }
     var sub = isArchivedView
       ? '완료 필터에서 "📦 모두 보관" 누르면 여기로 옵니다'
-      : '아래 ➕ 버튼을 눌러 작업을 등록하세요';
-    list.innerHTML='<div class="empty-state"><div class="empty-ico">📭</div><div class="empty-msg">'+msg+'</div><div class="empty-sub">'+sub+'</div></div>';
+      : '바로 등록하려면 아래 버튼을 누르세요';
+    var cta = isArchivedView ? '' :
+      '<button class="empty-cta" onclick="openRegister()">＋ 새 작업 등록</button>';
+    list.innerHTML='<div class="empty-state"><div class="empty-ico">📭</div><div class="empty-msg">'+msg+'</div><div class="empty-sub">'+sub+'</div>'+cta+'</div>';
     return;
   }
   list.innerHTML=data.slice(0,200).map(renderFeedCard).join('');
@@ -1272,6 +1334,7 @@ function openActions(logKey){
   /* 열기 */
   document.getElementById('actionBackdrop').classList.add('open');
   document.getElementById('actionSheet').classList.add('open');
+  pushModal('action');
 }
 function actionEditLog(){
   if (!actionTargetKey) return;
@@ -1295,6 +1358,7 @@ function closeActions(){
   document.getElementById('actionBackdrop').classList.remove('open');
   document.getElementById('actionSheet').classList.remove('open');
   actionTargetKey=null;
+  popModal('action');
 }
 function changeComplete(name){
   if (!actionTargetKey || !logsRef) return;
@@ -1328,6 +1392,74 @@ function actionDeleteLog(){
     toast('삭제 실패: '+(err&&err.message||err),'er');
   });
 }
+
+/* ───── 카드 인터랙션: 짧게 누르면 편집, 길게 누르면(500ms) 액션 시트 ─────
+ * - feedList / calDayList 컨테이너에 위임으로 한 번만 바인딩 → innerHTML 교체에도 유지됨
+ * - 사진(.fc-photo), 안읽음 배지(.fc-unread)는 자기 onclick 이 있으므로 카드 핸들링 스킵 */
+(function setupCardLongPress(){
+  function findCard(el, container){
+    while (el && el !== container){
+      if (el.classList){
+        if (el.classList.contains('fc-photo') || el.classList.contains('fc-unread')) return null;
+        if (el.classList.contains('feed-card')) return el;
+      }
+      el = el.parentNode;
+    }
+    return null;
+  }
+  function bind(containerId){
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    var timer = null, startX = 0, startY = 0, longFired = false, armedKey = null;
+    function clearTimer(){ if (timer){ clearTimeout(timer); timer = null; } }
+    container.addEventListener('pointerdown', function(e){
+      if (e.button && e.button !== 0) return; /* 좌클릭/터치만 */
+      var card = findCard(e.target, container);
+      if (!card) return;
+      var key = card.getAttribute('data-logkey');
+      if (!key) return;
+      longFired = false;
+      armedKey = key;
+      startX = e.clientX; startY = e.clientY;
+      clearTimer();
+      timer = setTimeout(function(){
+        longFired = true;
+        timer = null;
+        if (navigator.vibrate){ try { navigator.vibrate(30); } catch(_){} }
+        openActions(armedKey);
+      }, 500);
+    });
+    container.addEventListener('pointermove', function(e){
+      if (!timer) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      if (dx*dx + dy*dy > 100){ clearTimer(); armedKey = null; }
+    });
+    container.addEventListener('pointerup', clearTimer);
+    container.addEventListener('pointercancel', function(){ clearTimer(); armedKey = null; });
+    container.addEventListener('pointerleave', clearTimer);
+    container.addEventListener('click', function(e){
+      var card = findCard(e.target, container);
+      if (!card) return;
+      if (longFired){
+        longFired = false;
+        e.preventDefault(); e.stopPropagation();
+        return;
+      }
+      var key = card.getAttribute('data-logkey');
+      if (key) openEditLog(key);
+    });
+    container.addEventListener('contextmenu', function(e){
+      /* 데스크탑 우클릭/모바일 long-press 콘텍스트 메뉴 차단 (카드 위에서만) */
+      if (findCard(e.target, container)) e.preventDefault();
+    });
+  }
+  function init(){ bind('feedList'); bind('calDayList'); }
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
 
 /* ───────── 캘린더 ───────── */
 function renderCalendar(){
@@ -1443,7 +1575,10 @@ function renderCalDayList(){
   }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
   head.textContent=ymdIntToShort(day)+' · '+data.length+'건';
   if (!data.length){
-    list.innerHTML='<div class="empty-state" style="padding:1.5rem 1rem"><div class="empty-msg" style="font-size:.84rem">이 날 등록된 작업이 없습니다</div></div>';
+    list.innerHTML='<div class="empty-state" style="padding:1.5rem 1rem">'+
+      '<div class="empty-msg" style="font-size:.84rem">이 날 등록된 작업이 없습니다</div>'+
+      '<button class="empty-cta" style="margin-top:.85rem;padding:.62rem 1.1rem;font-size:.84rem" onclick="openRegister()">＋ 새 작업 등록</button>'+
+    '</div>';
     return;
   }
   list.innerHTML=data.map(renderFeedCard).join('');
@@ -1461,6 +1596,7 @@ function openRegister(){
   regPhotos=[];
   document.getElementById('regModal').classList.add('open');
   document.getElementById('regTitle').textContent='새 작업 등록';
+  pushModal('reg');
   renderRegStep();
 }
 function closeRegister(){
@@ -1470,6 +1606,7 @@ function closeRegister(){
   document.getElementById('regModal').classList.remove('open');
   regState=null;
   regPhotos=[];
+  popModal('reg');
 }
 
 /* 편집 모드 — 등록 모달 재사용, 카테고리 잠금 */
@@ -1486,6 +1623,7 @@ function openEditLog(logKey){
   regPhotos = Array.isArray(lg.photos) ? lg.photos.slice() : [];
   document.getElementById('regModal').classList.add('open');
   document.getElementById('regTitle').textContent = lg.archived ? '📦 보관된 항목' : '✏️ 작업 편집';
+  pushModal('reg');
   renderRegStep();
   /* 편집 모달 푸터의 삭제/복구 버튼 토글 */
   var me=getUserUid();
@@ -1508,6 +1646,7 @@ function modalDeleteLog(){
   logsRef.child(key).remove().then(function(){
     document.getElementById('regModal').classList.remove('open');
     regState=null; regPhotos=[];
+    popModal('reg');
     toast('삭제됨','ok');
   }).catch(function(err){
     toast('삭제 실패: '+(err&&err.message||err),'er');
@@ -1522,6 +1661,7 @@ function modalRestoreLog(){
   logsRef.child(key).update(update).then(function(){
     document.getElementById('regModal').classList.remove('open');
     regState=null; regPhotos=[];
+    popModal('reg');
     toast('↩️ 보관 해제됨 — 목록에 다시 표시','ok');
   }).catch(function(err){
     toast('복구 실패: '+(err&&err.message||err),'er');
@@ -1809,9 +1949,11 @@ function openLightbox(src){
   if (!lb || !im || !src) return;
   im.src=src;
   lb.classList.add('open');
+  pushModal('lightbox');
 }
 function closeLightbox(){
   var lb=document.getElementById('lightbox'); if (lb) lb.classList.remove('open');
+  popModal('lightbox');
 }
 function openLightboxDataIdx(idx){
   /* 등록 모달 내부에서 사용 */
@@ -1886,6 +2028,7 @@ function submitLog(){
     document.getElementById('regModal').classList.remove('open');
     regState=null;
     regPhotos=[];
+    popModal('reg');
     toast(label,'ok');
     showTab('list');
     var feed=document.getElementById('tabList'); if(feed) feed.scrollTop=0;
@@ -2055,6 +2198,7 @@ function openCatEditor(id){
       '</div>'+
     '</div>';
   document.getElementById('editModal').classList.add('open');
+  pushModal('edit');
 }
 function pickIcon(ic){
   if (!editState) return;
@@ -2098,10 +2242,12 @@ function openSimpleEditor(kind, id){
   html+='</div>';
   document.getElementById('editBody').innerHTML=html;
   document.getElementById('editModal').classList.add('open');
+  pushModal('edit');
 }
 function closeEditor(){
   document.getElementById('editModal').classList.remove('open');
   editState=null;
+  popModal('edit');
 }
 function saveEditor(){
   if (!editState || !setRef) return;
@@ -2188,6 +2334,7 @@ function platformLabel(p){
 
 function openTutorial(){
   document.getElementById('tutorialModal').classList.add('open');
+  pushModal('tut');
   /* 첫 진입 시 현재 플랫폼 자동 선택 */
   var p = detectPlatform();
   if (tutPlat === 'auto') tutPlat = (p === 'desktop' ? 'ios' : p);
@@ -2196,6 +2343,7 @@ function openTutorial(){
 }
 function closeTutorial(){
   document.getElementById('tutorialModal').classList.remove('open');
+  popModal('tut');
 }
 function setTutPlat(p){
   tutPlat = p;
