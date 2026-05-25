@@ -243,6 +243,38 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-cand-manual{margin-top:.55rem;display:flex;gap:.32rem;align-items:center;flex-wrap:wrap}
 .cp-cand-manual input{background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.32rem .5rem;font-size:.78rem;font-family:var(--mo);outline:none;width:160px}
 .cp-cand-manual input:focus{border-color:var(--p)}
+
+/* ───── Step 2: 스캔 작업 화면 ───── */
+.cp-session-hdr{background:linear-gradient(135deg,#1d2533,#161b26);border:1.5px solid var(--g);border-radius:10px;padding:.75rem .95rem;margin-bottom:.85rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.cp-session-hdr .ss-dot{width:9px;height:9px;border-radius:50%;background:var(--g);animation:pulseDot 1.4s ease-in-out infinite}
+@keyframes pulseDot{0%,100%{box-shadow:0 0 0 0 rgba(74,240,168,.55)}50%{box-shadow:0 0 0 8px rgba(74,240,168,0)}}
+.cp-session-hdr .ss-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.05rem;display:block}
+.cp-session-hdr .ss-v{font-weight:800;font-size:.86rem;color:var(--tx)}
+.cp-session-hdr .ss-id{font-family:var(--mo);font-size:.7rem;color:var(--mu)}
+.cp-session-hdr .ss-fillers{display:flex;gap:1rem;flex:1;flex-wrap:wrap}
+.cp-session-hdr .ss-actions{display:flex;gap:.4rem;margin-left:auto}
+.cp-resume-banner{background:rgba(240,196,74,.08);border:1px solid var(--y);border-radius:8px;padding:.72rem .9rem;margin-bottom:.85rem;font-size:.84rem;color:var(--y);display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.cp-resume-banner .label{flex:1;min-width:200px}
+.cp-resume-banner button{font-size:.78rem;padding:.42rem .85rem}
+.cp-scan-main{display:grid;grid-template-columns:1fr 320px;gap:.85rem;margin-top:.85rem}
+@media(max-width:980px){.cp-scan-main{grid-template-columns:1fr}}
+.cp-scan-input-wrap{background:linear-gradient(135deg,#1c2331,#161b26);border:2px solid var(--br);border-radius:11px;padding:1rem 1.1rem;margin-bottom:.85rem;transition:border-color .15s}
+.cp-scan-input-wrap.box{border-color:var(--b);box-shadow:0 0 0 4px rgba(91,156,246,.08)}
+.cp-scan-input-wrap.item{border-color:var(--g);box-shadow:0 0 0 4px rgba(74,240,168,.08)}
+.cp-mode-toggle{display:flex;gap:.4rem;margin-bottom:.65rem}
+.cp-mode-btn{flex:1;padding:.55rem .8rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:7px;font-size:.84rem;font-weight:800;cursor:pointer;transition:all .15s}
+.cp-mode-btn.on.box{border-color:var(--b);background:rgba(91,156,246,.16);color:var(--b)}
+.cp-mode-btn.on.item{border-color:var(--g);background:rgba(74,240,168,.16);color:var(--g)}
+.cp-mode-btn:hover:not(.on){color:var(--tx);border-color:var(--mu)}
+.cp-scan-inp{width:100%;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:8px;padding:.85rem 1rem;font-size:1.2rem;font-family:var(--mo);outline:none;letter-spacing:.02em}
+.cp-scan-inp:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(74,240,168,.18)}
+.cp-scan-hint{margin-top:.45rem;font-size:.74rem;color:var(--mu);font-family:var(--mo)}
+.cp-scan-side{display:flex;flex-direction:column;gap:.65rem}
+.cp-panel{background:var(--s1);border:1px solid var(--br);border-radius:9px;padding:.75rem .9rem}
+.cp-panel-title{font-size:.7rem;color:var(--mu);font-family:var(--mo);letter-spacing:.06em;margin-bottom:.5rem;font-weight:800}
+.cp-recent{font-size:.78rem;color:var(--mu);font-family:var(--mo)}
+.cp-recent .empty{padding:.4rem 0;color:var(--mu);font-size:.74rem;text-align:center}
+.btn-toolbar{display:flex;gap:.4rem;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -383,6 +415,16 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   <div id="tabCoupang" style="display:none">
     <div id="cpMsg" class="msg" style="display:none"></div>
 
+    <!-- ▷ PO 매칭/검수 뷰 (Step 1) -->
+    <div id="cpPoView">
+    <!-- 재진입 시 활성 세션 안내 배너 -->
+    <div class="cp-resume-banner" id="cpResumeBanner" style="display:none">
+      <span style="font-size:1.1rem">🔁</span>
+      <span class="label" id="cpResumeLabel">진행 중인 스캔 세션이 있습니다.</span>
+      <button class="btn btn-g" onclick="cpResumeSession()">이어서 작업</button>
+      <button class="btn btn-s" onclick="cpDiscardSession()">버리고 새로 시작</button>
+    </div>
+
     <div class="form-panel">
       <div class="form-title" style="color:#ffb84a">① 업체 정보 (인쇄·기록용)</div>
       <div class="form-row">
@@ -457,6 +499,64 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <button class="btn btn-s" onclick="cpReset()">🔄 처음부터</button>
       <button class="btn btn-b" id="cpScanBtn" disabled onclick="cpStartScan()" title="모든 행이 처리되어야 활성화">▶ 스캔 시작 (Step 2)</button>
     </div>
+    </div><!-- /cpPoView -->
+
+    <!-- ▷ 스캔 작업 뷰 (Step 2) -->
+    <div id="cpScanView" style="display:none">
+      <div id="cpScanMsg" class="msg" style="display:none"></div>
+
+      <div class="cp-session-hdr">
+        <span class="ss-dot" title="실시간 동기 중"></span>
+        <div class="ss-fillers">
+          <div><span class="ss-l">업체</span><div class="ss-v" id="cpSsVendor">-</div></div>
+          <div><span class="ss-l">PO 파일</span><div class="ss-v" id="cpSsFile">-</div></div>
+          <div><span class="ss-l">시작</span><div class="ss-v" id="cpSsStart">-</div></div>
+          <div><span class="ss-l">세션 ID</span><div class="ss-id" id="cpSsId">-</div></div>
+        </div>
+        <div class="ss-actions">
+          <button class="btn btn-s" onclick="cpPauseScan()" title="세션은 그대로 두고 PO뷰로 돌아갑니다 — 작업 이어할 수 있음">⏸ 일시정지</button>
+          <button class="btn btn-r" onclick="cpEndScan()" title="세션 완료 처리 — 인쇄/출고실행은 Step E에서">📤 작업 종료</button>
+        </div>
+      </div>
+
+      <div class="cp-scan-input-wrap" id="cpScanInputWrap">
+        <div class="cp-mode-toggle">
+          <button class="cp-mode-btn box on" id="cpModeBox" onclick="cpSetScanMode('box')">📦 박스 모드 (일괄)</button>
+          <button class="cp-mode-btn item" id="cpModeItem" onclick="cpSetScanMode('item')">🏷️ 상품 모드 (단건)</button>
+        </div>
+        <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력 (모드 선택 후 스캔)" autocomplete="off" autofocus>
+        <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄. (Step 2-B 에서 동작)</div>
+      </div>
+
+      <div class="cp-scan-main">
+        <div>
+          <div class="cp-panel">
+            <div class="cp-panel-title">📋 PO 진행 (요약)</div>
+            <div id="cpScanProgress" style="font-size:.84rem;color:var(--mu)">Step 2-D 에서 표시</div>
+          </div>
+          <div class="cp-panel" style="margin-top:.65rem">
+            <div class="cp-panel-title">🕐 최근 스캔 5건</div>
+            <div class="cp-recent" id="cpRecentScans">
+              <div class="empty">아직 스캔 기록 없음 (Step 2-B 에서 동작)</div>
+            </div>
+            <div class="btn-toolbar" style="margin-top:.55rem">
+              <button class="btn btn-s" disabled title="Step 2-B 에서">↩ 마지막 취소</button>
+              <button class="btn btn-s" disabled title="Step 2-B 에서">↩↩ 마지막 5건 보기</button>
+            </div>
+          </div>
+        </div>
+        <div class="cp-scan-side">
+          <div class="cp-panel">
+            <div class="cp-panel-title">🚛 파렛트 트래커</div>
+            <div id="cpPalletPanel" style="font-size:.82rem;color:var(--mu)">Step 2-C 에서 표시</div>
+          </div>
+          <div class="cp-panel">
+            <div class="cp-panel-title">⏸ 보류 풀</div>
+            <div id="cpHoldPanel" style="font-size:.82rem;color:var(--mu)">Step 2-D 에서 표시 (혼적 보류분)</div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /cpScanView -->
   </div>
 
   <!-- ─────────────── 목록 화면 ─────────────── -->
@@ -655,6 +755,9 @@ function attachRefs(){
       cpRender();
     }
   }, function(err){ console.warn('[outorder] altMap read 실패', err); });
+
+  /* 4) 활성 세션 자동 복원 안내 (있을 때만) */
+  cpCheckResumeOnAttach();
 }
 function mergeAltIndex(base, map){
   /* base 는 로그에서 추출된 byAlt, map 은 altMap (영구 등록).
@@ -709,6 +812,23 @@ var CP_HEADER_ALIASES = {
 };
 var cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{} };
 var cpFilter = 'all';  /* 'all'|'fit'|'short'|'zero' — 카운터 카드 클릭 필터 */
+
+/* ─────────────── 쿠팡 스캔 세션 (Step 2) ─────────────── */
+/* 진행 중인 세션 1개를 활성 — 다중 디바이스 실시간 동기 (Firebase 권위)
+ * 데이터 안전 7중망: Firebase + localStorage + beforeunload + 세션 복원 + 일시정지 + ...
+ */
+var workSession = null;          /* 현재 활성 세션 객체 (Firebase 값과 동기) */
+var workSessionRef = null;       /* coupangSessions/{id} ref */
+var cpScanMode = 'box';          /* 'box'|'item' */
+var cpScanSubView = 'po';        /* 'po'|'scan' — 쿠팡 탭 sub-view */
+function cpSessLsKey(){ return 'star_outorder.coupang.activeSessionId.' + (groupId||'_'); }
+function cpNewSessionId(){
+  var d = new Date(), pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
+  return 'CS' + d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'-'+Math.random().toString(36).slice(2,5).toUpperCase();
+}
+function cpHasActiveSession(){
+  return workSession && workSession.status === 'active';
+}
 
 function cpFindCol(headers, aliases){
   for (var i=0; i<aliases.length; i++){
@@ -1069,17 +1189,222 @@ function cpUpdateProgress(done, total){
     if (hint) hint.innerHTML = '✓ 모든 행 처리 완료 — <b style="color:var(--g)">스캔 시작</b> 가능';
   }
 }
-/* ── 스캔 시작 (Step 2 자리) ── */
+/* ── 스캔 sub-view 전환 ── */
+function cpSetSubView(v){
+  cpScanSubView = v;
+  var po = document.getElementById('cpPoView');
+  var sc = document.getElementById('cpScanView');
+  if (po) po.style.display = (v==='scan') ? 'none' : '';
+  if (sc) sc.style.display = (v==='scan') ? '' : 'none';
+  if (v === 'scan') {
+    /* 스캔 입력 자동 포커스 */
+    setTimeout(function(){
+      var inp = document.getElementById('cpScanInp');
+      if (inp) inp.focus();
+    }, 50);
+  }
+}
+
+/* ── 새 스캔 세션 시작 ── */
 function cpStartScan(){
-  /* Step 2 구현 전 임시 — 사용자가 흐름 알 수 있게 안내 */
-  var fit = 0, asIsCount = 0, shipQty = 0;
+  if (!groupId || typeof firebase === 'undefined') {
+    setMsg('cpMsg','er','❌ Firebase 연결 안 됨 — 로그인 확인'); return;
+  }
+  /* 이미 진행 중 세션 있으면 안내 */
+  if (cpHasActiveSession()) {
+    setMsg('cpMsg','warn','⚠️ 이미 진행 중 세션이 있습니다. 일시정지/종료 후 새로 시작하세요.');
+    cpSetSubView('scan');
+    return;
+  }
+  /* 출고 대상 라인 정리 — fit 또는 asIs 인 행만 */
+  var shipRows = [];
   cpState.rows.forEach(function(r, i){
     var m = cpClassify(r);
-    if (m.status === 'fit') { fit++; shipQty += m.canShip; }
-    else if (cpState.asIs[i]) { asIsCount++; shipQty += m.canShip; }
+    var isAsIs = !!cpState.asIs[i];
+    if (m.status === 'fit' || isAsIs) {
+      shipRows.push({
+        srcIdx: i,
+        po: r.po, skuId: r.skuId, skuName: r.skuName,
+        poBarcode: r.barcode, srcBarcode: m.matchedBc,
+        center: r.center, eta: r.eta,
+        qty: r.qty,                  /* PO 요청 수량 */
+        canShip: m.canShip,          /* 실제 출고가능 (fit=qty, asIs=have 만큼) */
+        matchedVia: m.matchedVia || null,
+        asIs: isAsIs
+      });
+    }
   });
-  setMsg('cpMsg','inf','▶ Step 2(스캔/파렛트 적재) 진입 준비 완료 — 충족 ' + fit + '건 + 이대로확정 ' + asIsCount + '건 = 총 출고 ' + shipQty + '개 예정. (Step 2 화면은 다음 작업에서 활성화 예정)');
+  if (!shipRows.length) {
+    setMsg('cpMsg','er','❌ 출고 대상 라인이 없습니다 (충족/확정된 행 없음)'); return;
+  }
+  var sid = cpNewSessionId();
+  var now = Date.now();
+  var sess = {
+    sessionId: sid,
+    status: 'active',
+    createdAt: now,
+    createdBy: getUserId(),
+    updatedAt: now,
+    vendor: cpState.vendor || '',
+    vendorCode: cpState.vendorCode || '',
+    note: cpState.note || '',
+    poFileName: cpState.fileName || '',
+    uploadedAt: cpState.uploadedAt || 0,
+    rows: shipRows,
+    scans: [],     /* Step 2-B */
+    pallets: [],   /* Step 2-C */
+    holdPool: []   /* Step 2-D */
+  };
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sid);
+  ref.set(sess).then(function(){
+    workSession = sess;
+    workSessionRef = ref;
+    try { localStorage.setItem(cpSessLsKey(), sid); } catch(_){}
+    cpAttachSessionListener();
+    cpRefreshSessionHdr();
+    cpSetSubView('scan');
+    setMsg('cpScanMsg','ok','✓ 세션 시작 — 출고 대상 ' + shipRows.length + '라인. 안전하게 실시간 저장됩니다.');
+  }).catch(function(err){
+    setMsg('cpMsg','er','❌ 세션 생성 실패: ' + (err && err.message || err));
+  });
 }
+
+/* ── 활성 세션 Firebase 리스너 (다중 디바이스 동기) ── */
+function cpAttachSessionListener(){
+  if (!workSessionRef) return;
+  workSessionRef.on('value', function(snap){
+    var v = snap.val();
+    if (!v) {
+      /* 다른 곳에서 삭제됨 */
+      cpDetachSession();
+      setMsg('cpMsg','warn','⚠️ 세션이 다른 디바이스에서 삭제되었습니다.');
+      cpSetSubView('po');
+      return;
+    }
+    workSession = v;
+    cpRefreshSessionHdr();
+    /* B/C/D 묶음에서 cpRefreshScanProgress / cpRefreshPallet / cpRefreshRecent / cpRefreshHold 호출 */
+  });
+}
+function cpDetachSession(){
+  if (workSessionRef) { try { workSessionRef.off(); } catch(_){} }
+  workSession = null;
+  workSessionRef = null;
+  try { localStorage.removeItem(cpSessLsKey()); } catch(_){}
+}
+
+/* ── 세션 헤더 갱신 ── */
+function cpRefreshSessionHdr(){
+  if (!workSession) return;
+  var setT = function(id, val){ var el = document.getElementById(id); if (el) el.textContent = val; };
+  setT('cpSsVendor', workSession.vendor || '(미입력)');
+  setT('cpSsFile',   workSession.poFileName || '-');
+  setT('cpSsStart',  workSession.createdAt ? fmtDt(workSession.createdAt) : '-');
+  setT('cpSsId',     workSession.sessionId || '-');
+}
+
+/* ── 일시정지 — 세션 유지, PO뷰로 ── */
+function cpPauseScan(){
+  if (!cpHasActiveSession()) { cpSetSubView('po'); return; }
+  /* 세션은 active 상태 유지 (다른 사람 / 나중에 이어갈 수 있게) */
+  setMsg('cpMsg','inf','⏸ 일시정지 — 세션은 살아 있습니다. 다시 들어가면 이어서 작업 가능합니다.');
+  cpSetSubView('po');
+  cpShowResumeBanner();
+}
+
+/* ── 작업 종료 — 세션을 completed 처리 ── */
+function cpEndScan(){
+  if (!workSession || !workSessionRef) { cpSetSubView('po'); return; }
+  var scanCount = (workSession.scans||[]).length;
+  if (!confirm('이 세션을 종료할까요?\n\n• 스캔 ' + scanCount + '건이 기록됩니다\n• 종료 후엔 이어서 추가 스캔 불가\n• 인쇄·출고실행은 다음 단계 (Step E)')) return;
+  workSessionRef.update({ status:'completed', completedAt: Date.now(), completedBy: getUserId() }).then(function(){
+    setMsg('cpMsg','ok','✓ 세션 종료됨 (' + scanCount + '건 스캔)');
+    cpDetachSession();
+    cpSetSubView('po');
+    cpHideResumeBanner();
+  }).catch(function(err){
+    setMsg('cpScanMsg','er','❌ 종료 실패: ' + (err && err.message || err));
+  });
+}
+
+/* ── 세션 복원 (재진입 시) ── */
+function cpCheckResumeOnAttach(){
+  /* 그룹 연결됨 — localStorage 에 저장된 활성 세션 ID 가 있으면 확인 */
+  var sid = null;
+  try { sid = localStorage.getItem(cpSessLsKey()); } catch(_){}
+  if (!sid) return;
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sid);
+  ref.once('value').then(function(snap){
+    var v = snap.val();
+    if (!v || v.status !== 'active') {
+      try { localStorage.removeItem(cpSessLsKey()); } catch(_){}
+      return;
+    }
+    /* 활성 세션 발견 — 배너 표시 (사용자가 결정) */
+    workSession = v;
+    workSessionRef = ref;
+    cpShowResumeBanner();
+  });
+}
+function cpShowResumeBanner(){
+  var b = document.getElementById('cpResumeBanner');
+  var lb = document.getElementById('cpResumeLabel');
+  if (!b || !workSession) return;
+  b.style.display='';
+  var scanCnt = (workSession.scans||[]).length;
+  lb.innerHTML = '🔁 진행 중 세션 — <b>' + escH(workSession.vendor||'(업체 미입력)') + '</b> · 시작 ' + fmtDt(workSession.createdAt) + ' · 스캔 ' + scanCnt + '건';
+}
+function cpHideResumeBanner(){
+  var b = document.getElementById('cpResumeBanner');
+  if (b) b.style.display='none';
+}
+function cpResumeSession(){
+  if (!workSession || !workSessionRef) return;
+  cpAttachSessionListener();
+  cpHideResumeBanner();
+  cpSetSubView('scan');
+  setMsg('cpScanMsg','ok','✓ 세션 이어서 작업 중');
+}
+function cpDiscardSession(){
+  if (!workSession || !workSessionRef) return;
+  if (!confirm('이 세션을 버리고 새로 시작할까요?\n\n• 기존 스캔 ' + ((workSession.scans||[]).length) + '건이 보존 (status=abandoned)\n• 다시 못 이어옴')) return;
+  workSessionRef.update({ status:'abandoned', abandonedAt: Date.now() }).then(function(){
+    cpDetachSession();
+    cpHideResumeBanner();
+    setMsg('cpMsg','inf','세션 버림. 새 작업 가능합니다.');
+  });
+}
+
+/* ── 스캔 모드 토글 (Step 2-B 에서 본격 사용) ── */
+function cpSetScanMode(m){
+  cpScanMode = (m === 'item') ? 'item' : 'box';
+  var box = document.getElementById('cpModeBox');
+  var item = document.getElementById('cpModeItem');
+  var wrap = document.getElementById('cpScanInputWrap');
+  var inp = document.getElementById('cpScanInp');
+  var hint = document.getElementById('cpScanHintText');
+  if (box && item) { box.classList.toggle('on', cpScanMode==='box'); item.classList.toggle('on', cpScanMode==='item'); }
+  if (wrap) { wrap.classList.toggle('box', cpScanMode==='box'); wrap.classList.toggle('item', cpScanMode==='item'); }
+  if (inp) {
+    inp.placeholder = cpScanMode==='box' ? '📦 박스바코드 스캔/입력' : '🏷️ 상품바코드 스캔/입력';
+    inp.focus();
+  }
+  if (hint) {
+    hint.textContent = cpScanMode==='box'
+      ? '박스 모드: 박스바코드 1회 스캔 → 그 박스 안 모든 SKU 일괄 현재 파렛트로 (Step 2-B 에서 동작)'
+      : '상품 모드: 상품바코드 1회 스캔 = 1개 출고 (Step 2-B 에서 동작)';
+  }
+}
+
+/* ── beforeunload 가드 — 활성 세션 있고 스캔 화면일 때만 ── */
+window.addEventListener('beforeunload', function(e){
+  if (cpHasActiveSession() && cpScanSubView === 'scan') {
+    var msg = '쿠팡 스캔 작업 진행 중입니다. 페이지를 나가면 일시정지됩니다 (작업은 저장되어 다시 들어올 수 있음).';
+    e.preventDefault();
+    e.returnValue = msg;
+    return msg;
+  }
+});
 
 function cpRenderCandidatePanel(idx, row, matched){
   var cands = cpFindAltCandidates(row);
