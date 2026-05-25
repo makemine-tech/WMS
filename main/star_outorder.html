@@ -314,10 +314,24 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .dp-meta-top .scanned-at{color:var(--g)}
 .dp-center{font-size:4.5rem;font-weight:900;line-height:1.05;color:#ffb84a;letter-spacing:-.03em;text-shadow:0 2px 18px rgba(255,184,74,.18);word-break:keep-all;margin:.2rem 0}
 .dp-center.warn{color:var(--y);text-shadow:0 2px 18px rgba(240,196,74,.2)}
+.dp-center.size-md{font-size:3.2rem}
+.dp-center.size-sm{font-size:2.4rem;line-height:1.15}
+.dp-center.size-xs{font-size:1.8rem;line-height:1.25}
+.dp-center .sep{color:rgba(255,184,74,.45);margin:0 .35rem;font-weight:400}
+.dp-center.warn .sep{color:rgba(240,196,74,.45)}
 .dp-eta{font-size:1.7rem;font-weight:800;color:var(--b);font-family:var(--mo);letter-spacing:-.01em}
-.dp-product{font-size:1.15rem;font-weight:700;color:var(--tx);margin-top:.3rem;line-height:1.35;word-break:keep-all}
-.dp-product .bc{font-family:var(--mo);color:var(--y);font-weight:800}
-.dp-product .alt-tag{display:inline-block;font-family:var(--mo);font-size:.7rem;color:var(--p);background:rgba(192,132,252,.16);border:1px solid rgba(192,132,252,.4);border-radius:4px;padding:.06rem .42rem;margin-left:.4rem;letter-spacing:.04em;vertical-align:middle}
+.dp-product{margin-top:.3rem;display:flex;flex-direction:column;gap:.2rem}
+.dp-product .line{display:flex;gap:.7rem;align-items:baseline;padding:.36rem .55rem;border-radius:7px;background:rgba(124,131,153,.05);flex-wrap:wrap;font-family:var(--mo)}
+.dp-product .line.diff{background:rgba(240,196,74,.08);border-left:3px solid var(--y);padding-left:.55rem}
+.dp-product .bc{color:var(--y);font-weight:800;font-size:1rem;min-width:80px}
+.dp-product .sep{color:rgba(124,131,153,.5);font-weight:400}
+.dp-product .code{color:var(--g);font-weight:700;font-size:.95rem}
+.dp-product .size{color:var(--tx);font-weight:700;font-size:.95rem}
+.dp-product .qty{color:var(--g);font-weight:900;font-size:1.15rem;margin-left:auto;min-width:60px;text-align:right}
+.dp-product .colon{color:rgba(124,131,153,.5);font-weight:400;margin:0 .1rem}
+.dp-product .ctr{color:#ffb84a;font-weight:800;font-size:.95rem;padding:.14rem .55rem;background:rgba(255,184,74,.1);border-radius:5px;border:1px solid rgba(255,184,74,.35);min-width:70px;text-align:center}
+.dp-product .ctr.diff{background:rgba(240,196,74,.16);border-color:var(--y);color:var(--y)}
+.dp-product .alt-tag{display:inline-block;font-family:var(--mo);font-size:.62rem;color:var(--p);background:rgba(192,132,252,.16);border:1px solid rgba(192,132,252,.4);border-radius:4px;padding:.06rem .35rem;margin-left:.35rem;letter-spacing:.04em;vertical-align:middle}
 .dp-qty{display:flex;gap:1.3rem;font-family:var(--mo);font-size:1.4rem;font-weight:900;margin-top:.3rem;flex-wrap:wrap}
 .dp-qty .lab{font-size:.7rem;color:var(--mu);font-weight:700;letter-spacing:.04em;display:block;margin-bottom:.1rem}
 .dp-qty .v.ship{color:var(--g)}
@@ -1695,33 +1709,52 @@ function cpUpdateDisplay(ev){
   setT('dpType', ev.type==='box' ? ('📦 박스 — ' + escH(ev.input)) : ('🏷️ 상품 — ' + escH(ev.input)));
   setT('dpScannedAt', '⏱ ' + ts);
 
-  /* 센터 (가장 큰 글씨 + TTS) */
-  var centerHtml;
-  if (isMixCenter) {
-    centerHtml = '⚠ 혼적 — ' + centerKeys.length + '개 센터';
-  } else {
-    centerHtml = escH(centerKeys[0] || '?');
-  }
-  setT('dpCenter', centerHtml);
+  /* 센터 (가장 큰 글씨 + TTS)
+   * - 단일 센터: 이름 그대로 4.5rem
+   * - 혼적: 모든 센터 병기 (어디로 분산되는지 한눈에) + 폰트 자동 축소 */
   var cEl = document.getElementById('dpCenter');
-  if (cEl) cEl.classList.toggle('warn', isMixCenter);
+  if (cEl) {
+    cEl.classList.remove('warn','size-md','size-sm','size-xs');
+    var centerHtml;
+    if (isMixCenter) {
+      centerHtml = centerKeys.map(escH).join('<span class="sep">·</span>');
+      cEl.classList.add('warn');
+      /* 폰트 자동 축소 — 센터 수 / 총 글자 수 기준 */
+      var totalLen = centerKeys.join(' · ').length;
+      if (centerKeys.length >= 4 || totalLen > 22) cEl.classList.add('size-xs');
+      else if (centerKeys.length === 3 || totalLen > 14) cEl.classList.add('size-sm');
+      else cEl.classList.add('size-md');
+    } else {
+      centerHtml = escH(centerKeys[0] || '?');
+    }
+    cEl.innerHTML = centerHtml;
+  }
 
   /* 입고일 */
-  var etaHtml = isMixEta ? ('입고일 혼적 — ' + etaKeys.join(' / ')) : ('입고일 ' + escH(etaKeys[0] || '—'));
+  var etaHtml = isMixEta ? ('입고일 ' + etaKeys.map(escH).join(' / ')) : ('입고일 ' + escH(etaKeys[0] || '—'));
   setT('dpEta', etaHtml);
 
-  /* 상품 */
-  var prodHtml;
-  if (ev.type === 'box') {
-    var skuLabels = ev.scans.map(function(s){
-      var r = rows[s.srcIdx] || {};
-      return '<div><span class="bc">'+escH(s.barcode)+'</span> '+escH(r.skuName||'')+' <b style="color:var(--g)">+'+s.qty+'</b></div>';
-    }).join('');
-    prodHtml = skuLabels;
-  } else {
-    var alt = s0.matchedVia === 'alt' ? '<span class="alt-tag">ALT</span>' : '';
-    prodHtml = '<span class="bc">'+escH(s0.barcode)+'</span>'+alt+' '+escH(row.skuName||'');
+  /* 상품 라인 — 바코드 · 품번 · 사이즈 - 수량 : 센터명
+   * 각 SKU 한 줄. 혼적 시 다른 센터(첫 줄의 센터와 다른 줄)는 diff 강조. */
+  var firstCenter = (rows[s0.srcIdx]||{}).center || '';
+  function lineHtml(s, isItemMode){
+    var r = rows[s.srcIdx] || {};
+    var meta = stockMeta[normBarcode(s.barcode)] || {};
+    var code = meta.code || '';
+    var size = meta.size || '';
+    var ctr = r.center || '';
+    var isDiff = isMixCenter && ctr && firstCenter && ctr !== firstCenter;
+    var alt = (isItemMode && s.matchedVia === 'alt') ? '<span class="alt-tag">ALT</span>' : '';
+    return '<div class="line'+(isDiff?' diff':'')+'">'+
+      '<span class="bc">'+escH(s.barcode)+'</span>'+alt+
+      (code ? '<span class="sep">·</span><span class="code">'+escH(code)+'</span>' : '') +
+      (size ? '<span class="sep">·</span><span class="size">'+escH(size)+'</span>' : '') +
+      '<span class="qty">'+ (s.qty>0?'+':'') + s.qty +'개</span>'+
+      '<span class="colon">:</span>'+
+      '<span class="ctr'+(isDiff?' diff':'')+'">'+escH(ctr||'?')+'</span>'+
+    '</div>';
   }
+  var prodHtml = ev.scans.map(function(s){ return lineHtml(s, ev.type==='item'); }).join('');
   setT('dpProduct', prodHtml);
 
   /* 수량 표시 — 이번 스캔 + 누적 + 남은(PO) */
