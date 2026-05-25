@@ -852,7 +852,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <div class="cp-pending-panel" id="cpPendingPanel" style="display:none">
         <div class="cp-pending-title">
           ⏳ 처리 대기 — 출고처리 필요 <span class="count" id="cpPendingCount">0</span>
-          <span style="margin-left:auto;font-size:.7rem;color:var(--mu);font-weight:700">혼적 박스의 SKU 는 자동 적재되지 않습니다 — [출고처리] 클릭해서 출고박스에 묶으세요</span>
+          <span style="font-size:.7rem;color:var(--mu);font-weight:700;flex:1;min-width:200px">혼적 박스의 SKU 는 자동 적재되지 않습니다 — [출고처리] 클릭해서 출고박스에 묶으세요</span>
+          <button class="dp-label-btn" id="cpPendingLabelBtn" onclick="cpPrintLabelsForAllPending()" title="처리 대기 모든 SKU 의 상품 라벨 일괄 인쇄 (잔류 제외)">📃 일괄 상품라벨</button>
         </div>
         <div class="cp-pending-list" id="cpPendingList"></div>
       </div>
@@ -2756,9 +2757,6 @@ function cpRefreshPending(){
       var size = meta.size || '-';
       var isFirst = i === 0;
       var pidEsc = escH(p.id);
-      var boxBtn = (isFirst && items.length >= 2)
-        ? '<button class="box-bundle-btn" onclick="cpPrintLabelsForBox(\''+escH(boxKey)+'\')" title="이 원본 박스('+escH(boxKey)+')의 매칭 SKU '+items.length+'종 · '+boxQty+'장 일괄 인쇄">📃 박스라벨</button>'
-        : '';
       html += '<div class="pd-row '+(isFirst?'box-first':'')+'" data-pid="'+pidEsc+'">'+
         '<span class="src" title="원본 박스: '+escH(p.srcBoxBarcode)+'">📦 '+escH(p.srcBoxBarcode)+'</span>'+
         '<span class="bc">'+escH(p.barcode)+'</span>'+
@@ -2766,25 +2764,26 @@ function cpRefreshPending(){
         '<span class="size">'+escH(size)+'</span>'+
         '<span class="qty">'+p.qty+'개</span>'+
         '<span class="ctr">'+escH(p.center||'?')+'</span>'+
-        '<button class="pd-label-btn" onclick="cpPrintLabelsForPending(\''+pidEsc+'\')" title="이 SKU 라벨 '+p.qty+'장 인쇄">📃 라벨</button>'+
-        boxBtn +
         '<button class="ship-btn" onclick="cpOpenShipPopup(\''+pidEsc+'\')">✓ 출고처리</button>'+
       '</div>';
     });
   });
   list.innerHTML = html;
+  /* 헤더의 일괄 라벨 버튼 활성/툴팁 갱신 */
+  var btn = document.getElementById('cpPendingLabelBtn');
+  if (btn) {
+    var totalQty = pending.reduce(function(s,x){return s+(+x.qty||0);},0);
+    btn.disabled = !pending.length;
+    btn.title = pending.length
+      ? '처리 대기 ' + pending.length + '종 · ' + totalQty + '장 상품 라벨 일괄 인쇄 (잔류는 자동 제외)'
+      : '대기 항목 없음';
+  }
 }
 
-/* 처리 대기 1건 라벨 인쇄 */
-function cpPrintLabelsForPending(pid){
-  var p = ((workSession||{}).pending||[]).find(function(x){return x.id===pid;});
-  if (!p) { cpFlash('warn','대기 항목 없음'); return; }
-  cpPrintLabelsFromItems([{ barcode: p.barcode, qty: p.qty, srcIdx: p.srcIdx }]);
-}
-/* 같은 원본 박스의 매칭 pending SKU 일괄 라벨 (잔류는 자동 제외 — pending 에 안 들어가 있음) */
-function cpPrintLabelsForBox(srcBoxBarcode){
-  var items = ((workSession||{}).pending||[]).filter(function(x){return x.srcBoxBarcode===srcBoxBarcode;});
-  if (!items.length) { cpFlash('warn','이 박스의 대기 항목 없음'); return; }
+/* 처리 대기 전체 일괄 라벨 인쇄 — 잔류는 어차피 pending 에 안 들어가 있어 자동 제외 */
+function cpPrintLabelsForAllPending(){
+  var items = (workSession||{}).pending||[];
+  if (!items.length) { cpFlash('warn','⚠️ 대기 항목 없음'); return; }
   cpPrintLabelsFromItems(items.map(function(p){return { barcode:p.barcode, qty:p.qty, srcIdx:p.srcIdx };}));
 }
 
