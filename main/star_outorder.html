@@ -970,6 +970,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
               <th title="출고박스번호 — 혼적은 센터-NNN, 단일·매칭은 원본 그대로">박스번호</th>
               <th title="원본 입고박스 바코드 — 박스 출처">박스바코드</th>
               <th>바코드</th>
+              <th title="라벨에 인쇄될 출고 바코드 (있을 때만)">대체바코드</th>
               <th>품번</th>
               <th>사이즈</th>
               <th style="text-align:right">입고예정</th>
@@ -980,7 +981,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
               <th style="text-align:center">파렛</th>
             </tr></thead>
             <tbody id="cpDoneBody">
-              <tr><td colspan="11" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>
+              <tr><td colspan="12" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>
             </tbody>
           </table>
         </div>
@@ -2648,7 +2649,7 @@ function cpRefreshDonePool(){
   if (meta) meta.textContent = '박스 ' + Object.keys(distinctBox).length + ' · 총 출고 ' + totalShip + '개';
 
   if (!activeScans.length) {
-    body.innerHTML = '<tr><td colspan="11" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>';
     return;
   }
   /* 진행률 매번 계산 안 하도록 cache */
@@ -2706,9 +2707,16 @@ function cpRefreshDonePool(){
           '<td class="c-box grp-cell" rowspan="'+rowSpan+'">' + printBtn + escH(g.boxNo) + '</td>'+
           '<td class="c-box grp-cell" rowspan="'+rowSpan+'" style="color:var(--mu)">' + escH(srcBcLabel) + '</td>';
       }
+      /* 대체바코드 셀 — alt 있으면 보라색 강조, 없으면 회색 '-' */
+      var altBc = (meta.altBarcode||'').trim();
+      var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(s.barcode));
+      var altHtml = hasAlt
+        ? '<span style="color:var(--p);font-weight:900" title="라벨 인쇄 시 사용: '+escH(altBc)+'">'+escH(altBc)+'</span>'
+        : '<span style="color:var(--mu)">-</span>';
       html += '<tr class="'+rowCls+'">'+
         groupCells +
         '<td class="c-bc">'  + escH(s.barcode) + '</td>'+
+        '<td class="c-bc">'  + altHtml + '</td>'+
         '<td class="c-code">'+ escH(code) + '</td>'+
         '<td class="c-size">'+ escH(size) + '</td>'+
         '<td class="c-need">'+ need + '</td>'+
@@ -2739,10 +2747,15 @@ function cpPrintMixLabel(shipBoxNo){
   var rowsHtml = activeScans.map(function(s, idx){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
+    /* ⚠ 혼적 라벨도 대체바코드 우선 — alt 가 있으면 alt 로 표기 (사장님 정책) */
+    var altBc = (meta.altBarcode||'').trim();
+    var labelBc = altBc || s.barcode;
+    var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(s.barcode));
+    var marker = hasAlt ? ' <span style="font-family:Courier New,monospace;font-size:7pt;color:#000">'+escH(cpAltMarker(s.barcode, altBc))+'</span>' : '';
     return '<tr>'+
       '<td>'+escH(r.skuId||'-')+'</td>'+
       '<td>'+escH(meta.code||'-')+'</td>'+
-      '<td class="bc">'+escH(s.barcode)+'</td>'+
+      '<td class="bc">'+escH(labelBc)+marker+'</td>'+
       '<td class="num">'+(+s.qty||0)+'</td>'+
     '</tr>';
   }).join('');
@@ -2806,17 +2819,20 @@ function cpDownloadDoneExcel(){
   var progCache = {};
   rows.forEach(function(r, i){ progCache[i] = cpComputeRowProgress(i); });
 
-  /* 시트 1: 완료풀 (사람용 표) — 직관적 한글 컬럼 */
-  var doneAoa = [['출고박스번호','원본박스바코드','상품바코드','품번','사이즈','발주수량','출고수량','잔여수량','입고예정일','입고센터','파렛트번호','출고상태']];
+  /* 시트 1: 완료풀 (사람용 표) — 직관적 한글 컬럼 + 대체바코드 */
+  var doneAoa = [['출고박스번호','원본박스바코드','상품바코드','대체바코드','품번','사이즈','발주수량','출고수량','잔여수량','입고예정일','입고센터','파렛트번호','출고상태']];
   (workSession.scans||[]).slice().reverse().forEach(function(s){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
     var prog = progCache[s.srcIdx] || {shipped:0};
     var need = +r.qty || 0;
+    var altBc = (meta.altBarcode||'').trim();
+    var altCol = (altBc && normBarcode(altBc) !== normBarcode(s.barcode||'')) ? altBc : '';
     doneAoa.push([
       s.shipBoxNo || s.srcBoxBarcode || '',
       s.srcBoxBarcode || s.boxBarcode || (s.shipBoxNo||''),
       s.barcode || '',
+      altCol,
       meta.code || '',
       meta.size || '',
       need,
