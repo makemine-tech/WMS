@@ -771,6 +771,7 @@ function setMsg(id, kind, html){
 function hideMsg(id){ var el=document.getElementById(id); if(el) el.style.display='none'; }
 function escH(s){ if(s===null||s===undefined) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function normBarcode(v){ if(v===null||v===undefined) return ''; return String(v).trim().replace(/\s+/g,'').toUpperCase(); }
+function normBoxId(v){ if(v===null||v===undefined) return ''; return String(v).trim().toUpperCase(); }
 function pad2(n){ n=String(n); return n.length<2 ? '0'+n : n; }
 function ymd(ts){ var d=new Date(ts); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function fmtDt(ts){ if(!ts) return ''; var d=new Date(ts); return ymd(ts)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
@@ -848,8 +849,8 @@ function attachRefs(){
         if (!byBc[bc] || (lg.ts||0) > (byBc[bc].ts||0)) byBc[bc] = lg;
         var alt = normBarcode(lg.altBarcode);
         if (alt && alt !== bc) byAlt[alt] = bc;
-        /* 박스ID — 비어있지 않을 때만 집계 (중복 제거) */
-        var boxId = String(lg.box||'').trim();
+        /* 박스ID — 대문자+공백제거 정규화 (입력값과 일치하도록) */
+        var boxId = normBoxId(lg.box);
         if (boxId) {
           if (!boxes[bc]) boxes[bc] = {};
           boxes[bc][boxId] = true;
@@ -1567,22 +1568,20 @@ function cpHandleScan(raw){
 
 /* ── 박스 모드: 박스바코드 → 박스 안 모든 SKU 일괄 출고 ── */
 function cpProcessBoxScan(raw){
-  var boxId = String(raw).trim();
+  var boxId = normBoxId(raw);
   if (!boxId) return;
   var contents = boxIndex[boxId];
   if (!contents || !Object.keys(contents).length) {
     cpFlash('er','❌ <b>박스ID 못 찾음</b>: '+escH(boxId)+'<span class="sub">우리 입고(star_instock)에 이 박스ID로 등록된 SKU가 없습니다. 상품 모드로 시도하거나 박스ID 확인하세요.</span>');
     return;
   }
-  /* 박스 안 각 SKU 를 세션 rows 와 매칭 — 라인 인덱스 찾기 (direct or alt) */
+  /* 박스 안 각 SKU 를 세션 rows 와 매칭 */
   var sessRows = workSession.rows || [];
   var newScans = [];
-  var matchedSku = [];
-  var unmatchedSku = [];   /* 박스에 있지만 PO 에 없는 SKU = 혼적 후보 */
+  var unmatchedSku = [];   /* 박스에 있지만 PO 에 없는 SKU = 잔여재고 / 혼적 후보 */
   Object.keys(contents).forEach(function(bc){
     var inQty = contents[bc] || 0;
     if (inQty <= 0) return;
-    /* 세션 rows 에서 매칭 라인 찾기 — srcBarcode(원본) 우선, 없으면 poBarcode 의 alt 가 이 bc 인 경우 */
     var idx = -1;
     for (var i=0; i<sessRows.length; i++){
       var r = sessRows[i];
@@ -1592,14 +1591,13 @@ function cpProcessBoxScan(raw){
       unmatchedSku.push({bc:bc, qty:inQty});
       return;
     }
-    matchedSku.push({bc:bc, qty:inQty, idx:idx});
     newScans.push({
       ts: Date.now(),
       by: getUserId(),
       type: 'box',
       input: boxId,
       boxBarcode: boxId,
-      barcode: bc,           /* 원본(재고) 바코드 */
+      barcode: bc,
       poBarcode: sessRows[idx].poBarcode,
       qty: inQty,
       palletNo: cpCurPallet(),
@@ -1607,22 +1605,27 @@ function cpProcessBoxScan(raw){
       undone: false
     });
   });
+
+  /* 박스 안 SKU 가 모두 PO 외 = 잔여재고 박스. 적재는 안 하지만 디스플레이는 띄움 */
   if (!newScans.length) {
-    cpFlash('warn','⚠️ <b>박스 안 SKU 가 PO 에 없음</b>: '+escH(boxId)+'<span class="sub">혼적 박스 후보 — Step 2-D 에서 분리/보류 모달로 처리됩니다. 현재는 미반영.</span>');
+    cpFlash('warn','⚠️ <b>박스 '+escH(boxId)+'</b>: PO 출고 대상 SKU 없음 — 박스 안 '+unmatchedSku.length+'종 모두 잔여재고. 보류 또는 그대로 두기');
+    cpUpdateDisplay({
+      type:'box', input:boxId, scans:[], unmatched:unmatchedSku, allUnmatched:true
+    });
     return;
   }
+
   cpAppendScans(newScans, function(){
     var totalQty = newScans.reduce(function(s,x){return s+x.qty;}, 0);
     var msg = '✓ <b>박스 ' + escH(boxId) + '</b> 적재 — ' + newScans.length + ' SKU · ' + totalQty + '개';
     if (unmatchedSku.length) {
-      msg += '<span class="sub">⚠️ 박스에 PO 외 SKU ' + unmatchedSku.length + '개 (혼적) — 보류 버튼으로 빼낼 수 있음</span>';
+      msg += '<span class="sub">⚠️ 박스에 PO 외 SKU ' + unmatchedSku.length + '종 (잔여재고) 포함 — 혼적 박스. 분리하거나 보류하세요</span>';
       cpFlash('warn', msg);
     } else {
       cpFlash('ok', msg);
     }
-    /* 큰 디스플레이 갱신 — 박스 스캔이면 첫 매칭 라인의 정보 + 혼적 표시 */
     cpUpdateDisplay({
-      type: 'box', input: boxId, scans: newScans, unmatched: unmatchedSku
+      type: 'box', input: boxId, scans: newScans, unmatched: unmatchedSku, allUnmatched:false
     });
   });
 }
@@ -1679,17 +1682,19 @@ function cpProcessItemScan(raw){
 function cpUpdateDisplay(ev){
   var d = document.getElementById('cpDisplay'); if (!d) return;
   d.classList.remove('idle','warn','active');
-  if (!ev || !ev.scans || !ev.scans.length){
+  /* 박스 안 모두 PO 외 = scans 없음. 그래도 디스플레이는 띄워서 사장님이 판단하도록 */
+  var hasScans = ev && ev.scans && ev.scans.length > 0;
+  var hasUnmatched = ev && ev.unmatched && ev.unmatched.length > 0;
+  if (!ev || (!hasScans && !hasUnmatched)){
     d.classList.add('idle');
     return;
   }
   var rows = (workSession && workSession.rows) || [];
-  /* 가장 먼저 매칭된 라인 기준으로 center/eta/상품명 표시 */
-  var s0 = ev.scans[0];
-  var row = rows[s0.srcIdx] || {};
-  /* 박스 내 다른 센터/일자가 섞여있는지 검사 */
+  var s0 = hasScans ? ev.scans[0] : null;
+  var row = s0 ? (rows[s0.srcIdx] || {}) : {};
+  /* 박스 내 센터/일자 분포 검사 (매칭된 SKU 기준) */
   var centers = {}, etas = {};
-  ev.scans.forEach(function(s){
+  (ev.scans||[]).forEach(function(s){
     var r = rows[s.srcIdx] || {};
     if (r.center) centers[r.center] = (centers[r.center]||0) + s.qty;
     if (r.eta) etas[r.eta] = true;
@@ -1698,31 +1703,41 @@ function cpUpdateDisplay(ev){
   var etaKeys = Object.keys(etas);
   var isMixCenter = centerKeys.length > 1;
   var isMixEta = etaKeys.length > 1;
-  var hasUnmatched = ev.unmatched && ev.unmatched.length > 0;
-  var isWarn = isMixCenter || isMixEta || hasUnmatched;
+  /* 혼적 = 다중 센터 OR PO외 SKU 포함 OR 전부 PO외 (잔여재고 박스) */
+  var isMixed = isMixCenter || hasUnmatched;
+  var isWarn = isMixed || isMixEta;
   d.classList.add(isWarn ? 'warn' : 'active');
 
   var setT = function(id, html){ var el = document.getElementById(id); if (el) el.innerHTML = html; };
   /* meta-top */
-  var d2 = new Date(s0.ts), pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
+  var nowMs = s0 ? s0.ts : Date.now();
+  var d2 = new Date(nowMs), pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
   var ts = pad(d2.getHours())+':'+pad(d2.getMinutes())+':'+pad(d2.getSeconds());
-  setT('dpType', ev.type==='box' ? ('📦 박스 — ' + escH(ev.input)) : ('🏷️ 상품 — ' + escH(ev.input)));
+  var typeLabel = ev.type==='box' ? ('📦 박스 — ' + escH(ev.input)) : ('🏷️ 상품 — ' + escH(ev.input));
+  if (ev.allUnmatched) typeLabel += ' <span style="color:var(--y);font-weight:800">· 잔여재고 박스</span>';
+  setT('dpType', typeLabel);
   setT('dpScannedAt', '⏱ ' + ts);
 
   /* 센터 (가장 큰 글씨 + TTS)
-   * - 단일 센터: 이름 그대로 4.5rem
-   * - 혼적: 모든 센터 병기 (어디로 분산되는지 한눈에) + 폰트 자동 축소 */
+   * - 단일 매칭 센터 + PO 외 없음: 센터명 4.5rem
+   * - 혼적 (다중 센터 OR PO외 포함): '⚠ 혼적' 명시 + 모든 센터 병기 (+ PO외 표시) */
   var cEl = document.getElementById('dpCenter');
   if (cEl) {
     cEl.classList.remove('warn','size-md','size-sm','size-xs');
     var centerHtml;
-    if (isMixCenter) {
-      centerHtml = centerKeys.map(escH).join('<span class="sep">·</span>');
+    if (ev.allUnmatched) {
+      /* 박스 안 모두 PO 외 — 큰 글씨에 명확히 표시 */
+      centerHtml = '⚠ 잔여재고';
+      cEl.classList.add('warn','size-md');
+    } else if (isMixed) {
+      /* 혼적 — 모든 매칭된 센터를 표시하고 PO외가 있으면 ' + PO외' 추가 */
+      var parts = centerKeys.slice();
+      if (hasUnmatched) parts.push('PO외 ' + ev.unmatched.length + '종');
+      centerHtml = '⚠ 혼적 — ' + parts.map(escH).join('<span class="sep">·</span>');
       cEl.classList.add('warn');
-      /* 폰트 자동 축소 — 센터 수 / 총 글자 수 기준 */
-      var totalLen = centerKeys.join(' · ').length;
-      if (centerKeys.length >= 4 || totalLen > 22) cEl.classList.add('size-xs');
-      else if (centerKeys.length === 3 || totalLen > 14) cEl.classList.add('size-sm');
+      var totalLen = ('혼적 — ' + parts.join(' · ')).length;
+      if (parts.length >= 4 || totalLen > 26) cEl.classList.add('size-xs');
+      else if (parts.length >= 3 || totalLen > 16) cEl.classList.add('size-sm');
       else cEl.classList.add('size-md');
     } else {
       centerHtml = escH(centerKeys[0] || '?');
@@ -1730,14 +1745,18 @@ function cpUpdateDisplay(ev){
     cEl.innerHTML = centerHtml;
   }
 
-  /* 입고일 */
-  var etaHtml = isMixEta ? ('입고일 ' + etaKeys.map(escH).join(' / ')) : ('입고일 ' + escH(etaKeys[0] || '—'));
+  /* 입고일 — scans 가 있을 때만 의미 있음 */
+  var etaHtml;
+  if (ev.allUnmatched) etaHtml = '입고일 — (PO 대상 없음)';
+  else if (isMixEta) etaHtml = '입고일 ' + etaKeys.map(escH).join(' / ');
+  else etaHtml = '입고일 ' + escH(etaKeys[0] || '—');
   setT('dpEta', etaHtml);
 
   /* 상품 라인 — 바코드 · 품번 · 사이즈 - 수량 : 센터명
-   * 각 SKU 한 줄. 혼적 시 다른 센터(첫 줄의 센터와 다른 줄)는 diff 강조. */
-  var firstCenter = (rows[s0.srcIdx]||{}).center || '';
-  function lineHtml(s, isItemMode){
+   * - 매칭 SKU: 라인 + 센터칩 (혼적 시 첫 라인 센터와 다르면 .diff 강조)
+   * - PO외 SKU: 회색 톤 + "PO외" 칩 (잔여재고 표시) */
+  var firstCenter = s0 ? ((rows[s0.srcIdx]||{}).center || '') : '';
+  function matchedLineHtml(s, isItemMode){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
     var code = meta.code || '';
@@ -1749,31 +1768,44 @@ function cpUpdateDisplay(ev){
       '<span class="bc">'+escH(s.barcode)+'</span>'+alt+
       (code ? '<span class="sep">·</span><span class="code">'+escH(code)+'</span>' : '') +
       (size ? '<span class="sep">·</span><span class="size">'+escH(size)+'</span>' : '') +
-      '<span class="qty">'+ (s.qty>0?'+':'') + s.qty +'개</span>'+
+      '<span class="qty">+' + s.qty +'개</span>'+
       '<span class="colon">:</span>'+
       '<span class="ctr'+(isDiff?' diff':'')+'">'+escH(ctr||'?')+'</span>'+
     '</div>';
   }
-  var prodHtml = ev.scans.map(function(s){ return lineHtml(s, ev.type==='item'); }).join('');
-  setT('dpProduct', prodHtml);
+  function unmatchedLineHtml(u){
+    var meta = stockMeta[u.bc] || {};
+    var code = meta.code || '';
+    var size = meta.size || '';
+    return '<div class="line diff" style="opacity:.78">'+
+      '<span class="bc">'+escH(u.bc)+'</span>'+
+      (code ? '<span class="sep">·</span><span class="code">'+escH(code)+'</span>' : '') +
+      (size ? '<span class="sep">·</span><span class="size">'+escH(size)+'</span>' : '') +
+      '<span class="qty" style="color:var(--mu)">'+u.qty+'개</span>'+
+      '<span class="colon">:</span>'+
+      '<span class="ctr diff" title="PO 출고 대상 아님 — 잔여재고로 박스에 남아있음">PO외</span>'+
+    '</div>';
+  }
+  var prodLines = (ev.scans||[]).map(function(s){ return matchedLineHtml(s, ev.type==='item'); });
+  if (hasUnmatched) {
+    ev.unmatched.forEach(function(u){ prodLines.push(unmatchedLineHtml(u)); });
+  }
+  setT('dpProduct', prodLines.join(''));
 
-  /* 수량 표시 — 이번 스캔 + 누적 + 남은(PO) */
-  var thisShip = ev.scans.reduce(function(s,x){return s + x.qty;}, 0);
+  /* 수량 표시 */
+  var thisShip = (ev.scans||[]).reduce(function(s,x){return s + x.qty;}, 0);
   var acc = 0, need = 0;
-  /* 박스 스캔의 경우 여러 srcIdx — 첫 라인 기준 진행률만 표시하면 오해 소지. 합산해서 보여줌. */
   var seen = {};
-  ev.scans.forEach(function(s){
+  (ev.scans||[]).forEach(function(s){
     if (seen[s.srcIdx]) return; seen[s.srcIdx] = true;
-    var r = rows[s.srcIdx] || {};
     var p = cpComputeRowProgress(s.srcIdx);
     acc += p.shipped;
     need += p.need;
   });
   var rem = Math.max(0, need - acc);
-  setT('dpShip', '+' + thisShip);
+  setT('dpShip', ev.allUnmatched ? '0' : ('+' + thisShip));
   setT('dpAcc', String(acc));
   setT('dpRem', String(rem));
-  /* over 면 빨강 */
   var dpAccEl = document.getElementById('dpAcc');
   if (dpAccEl) {
     dpAccEl.classList.remove('over','ship','rem');
@@ -1784,19 +1816,24 @@ function cpUpdateDisplay(ev){
   var mw = document.getElementById('dpMixWarn');
   if (mw) {
     var warnTexts = [];
-    if (isMixCenter) warnTexts.push('센터 ' + centerKeys.length + '개 혼적 ('+centerKeys.join(', ')+')');
-    if (isMixEta) warnTexts.push('입고일 ' + etaKeys.length + '개 혼적');
-    if (hasUnmatched) warnTexts.push('PO 외 SKU ' + ev.unmatched.length + '개 포함');
+    if (ev.allUnmatched) warnTexts.push('박스 내 모든 SKU 가 PO 출고 대상 아님 — 잔여재고 박스');
+    else {
+      if (isMixCenter) warnTexts.push('센터 ' + centerKeys.length + '개 ('+centerKeys.join(', ')+')');
+      if (isMixEta) warnTexts.push('입고일 ' + etaKeys.length + '개');
+      if (hasUnmatched) warnTexts.push('PO 외 SKU ' + ev.unmatched.length + '종 (잔여재고)');
+    }
     if (warnTexts.length) {
       mw.style.display = '';
-      mw.innerHTML = '⚠ ' + warnTexts.join(' · ') + ' — 보류 검토 권장';
+      mw.innerHTML = '⚠ 혼적 — ' + warnTexts.join(' · ') + ' · 보류 또는 분리 결정 필요';
     } else {
       mw.style.display = 'none';
     }
   }
 
-  /* TTS — 센터명 (혼적이면 "혼적 박스") */
-  cpSpeak(isMixCenter ? '혼적 박스' : (centerKeys[0] || ''));
+  /* TTS — 혼적/잔여재고/단일 센터 별로 다른 안내 */
+  if (ev.allUnmatched) cpSpeak('잔여재고 박스');
+  else if (isMixed) cpSpeak('혼적 박스 — ' + centerKeys.join(' '));
+  else cpSpeak(centerKeys[0] || '');
 }
 
 /* TTS */
