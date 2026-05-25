@@ -1837,15 +1837,179 @@ function cpPauseScan(){
 /* ── 작업 종료 — 세션을 completed 처리 ── */
 function cpEndScan(){
   if (!workSession || !workSessionRef) { cpSetSubView('po'); return; }
-  var scanCount = (workSession.scans||[]).length;
-  if (!confirm('이 세션을 종료할까요?\n\n• 스캔 ' + scanCount + '건이 기록됩니다\n• 종료 후엔 이어서 추가 스캔 불가\n• 인쇄·출고실행은 다음 단계 (Step E)')) return;
-  workSessionRef.update({ status:'completed', completedAt: Date.now(), completedBy: getUserId() }).then(function(){
-    setMsg('cpMsg','ok','✓ 세션 종료됨 (' + scanCount + '건 스캔)');
+  /* ════ Step E-1: 작업종료 — 검증 → 자동마감 → 재고차감 → orders 저장 ════ */
+  var scans = (workSession.scans||[]).filter(function(s){return !s.undone;});
+  var pending = (workSession.pending||[]);
+  var holdPool = (workSession.holdPool||[]);
+
+  /* 검증 1: 스캔 0건이면 종료 의미 X */
+  if (!scans.length) {
+    cpFlash('warn','⚠️ 적재된 스캔이 없습니다 — 종료 불가');
+    return;
+  }
+  /* 검증 2: 처리 대기 (혼적 미처리) — 차단 */
+  if (pending.length) {
+    alert('❌ 종료 차단 — 처리 대기 ' + pending.length + '건이 남아 있습니다.\n\n모든 대기 SKU 를 [출고처리] 또는 [보류] 처리한 후 다시 시도하세요.');
+    return;
+  }
+  /* 검증 3: 보류 풀 — 안내 후 확인 (보류는 출고에서 빠진 상태라 OK 가능) */
+  if (holdPool.length) {
+    if (!confirm('⚠️ 보류 항목 ' + holdPool.length + '건이 있습니다.\n\n보류된 박스는 이번 출고에 포함되지 않습니다 (재고에서 차감 안 됨).\n\n그대로 작업종료할까요?')) return;
+  }
+
+  /* 미마감 파렛트 자동 마감 — 모든 활성 그룹의 현재 파렛트를 pallets[] 에 push */
+  var pallets = (workSession.pallets||[]).slice();
+  var palletCounters = Object.assign({}, workSession.palletCounters||{});
+  var groups = cpListPalletGroups();
+  groups.forEach(function(g){
+    var cur = cpCurPallet(g.eta, g.center);
+    var seenBox = {};
+    scans.forEach(function(s){
+      var eta = s.palletEta || ((workSession.rows||[])[s.srcIdx]||{}).eta || '';
+      var ctr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
+      if (eta !== g.eta || ctr !== g.center) return;
+      if ((s.palletNo||1) !== cur) return;
+      if (s.srcBoxBarcode) seenBox[s.srcBoxBarcode] = true;
+    });
+    var boxCount = Object.keys(seenBox).length;
+    /* 이미 마감된 기록과 중복 안 되도록 — 그 그룹·번호가 pallets 에 없으면 추가 */
+    var dup = pallets.some(function(p){ return p.key===g.key && p.no===cur; });
+    if (!dup) {
+      pallets.push({
+        key: g.key, eta: g.eta, center: g.center,
+        no: cur, boxCount: boxCount,
+        closedAt: Date.now(), closedBy: getUserId(),
+        autoClosed: true
+      });
+      palletCounters[g.key] = cur + 1;
+    }
+  });
+
+  /* 출고 합계 / 요약 */
+  var totalQty = scans.reduce(function(s,x){return s+(+x.qty||0);},0);
+  var shipBoxes = (workSession.shipBoxes||[]);
+  var ordSummary = '출고 ' + scans.length + '건 · 총 ' + totalQty + '개 · 출고박스 ' + shipBoxes.length + '개 · 파렛트 ' + pallets.length + '개';
+  if (!confirm('이 세션을 종료할까요?\n\n• ' + ordSummary + '\n• 실재고 즉시 차감\n• 저장된 지시서로 변환\n• 다음 단계: 출고적재리스트 인쇄 (E-2)\n\n계속하시겠습니까?')) return;
+
+  if (!groupId || typeof firebase === 'undefined') { cpFlash('er','❌ Firebase 연결 안 됨'); return; }
+
+  /* ─── 1) star_instock/logs 에 출고로그 일괄 push (재고 차감) ─── */
+  var logsBase = firebase.database().ref('wms_sync/groups/' + groupId + '/star_instock/logs');
+  var ordersBase = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/orders');
+  var stockUpdates = {};
+  var pushedKeys = [];
+  var rows = workSession.rows || [];
+  var nowTs = Date.now();
+  var byUser = getUserId();
+  scans.forEach(function(s){
+    var r = rows[s.srcIdx] || {};
+    var meta = stockMeta[normBarcode(s.barcode)] || {};
+    var newKey = logsBase.push().key;
+    pushedKeys.push(newKey);
+    stockUpdates[newKey] = {
+      type: 'out',
+      barcode: s.barcode,
+      box: s.srcBoxBarcode || s.boxBarcode || '',
+      qty: +s.qty || 0,
+      ts: nowTs,
+      by: byUser,
+      source: 'coupang-out',
+      note: 'Coupang ' + (s.shipBoxNo||'') + ' · ' + (workSession.vendor||''),
+      /* 추적용 메타 */
+      coupangSessionId: workSession.sessionId,
+      shipBoxNo: s.shipBoxNo || '',
+      palletNo: s.palletNo || 1,
+      eta: r.eta || '',
+      center: r.center || ''
+    };
+  });
+
+  /* ─── 2) star_outorder/orders 에 한 세션 = 한 지시서 ─── */
+  var d = new Date(), pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
+  var orderId = 'O' + d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'-CP';
+  var orderItems = scans.map(function(s){
+    var r = rows[s.srcIdx] || {};
+    var meta = stockMeta[normBarcode(s.barcode)] || {};
+    var altBc = (meta.altBarcode||'').trim();
+    return {
+      shipBoxNo: s.shipBoxNo || '',
+      srcBoxBarcode: s.srcBoxBarcode || s.boxBarcode || '',
+      box: s.srcBoxBarcode || s.boxBarcode || '',          /* 기존 호환 */
+      barcode: s.barcode,                                   /* 원바코드 */
+      altBarcode: altBc,                                    /* 라벨용 */
+      poBarcode: s.poBarcode || r.poBarcode || '',
+      skuId: r.skuId || '',
+      skuName: r.skuName || meta.name || '',
+      name: meta.name || r.skuName || '',
+      code: meta.code || '',
+      size: meta.size || '',
+      color: meta.color || '',
+      material: meta.material || '',
+      origin: meta.origin || '',
+      qty: +s.qty || 0,
+      pallet: s.palletNo || 1,                              /* 기존 호환 (필드명 pallet) */
+      boxCnt: 0,
+      note: '',
+      eta: r.eta || '',
+      center: r.center || '',
+      palletEta: s.palletEta || r.eta || '',
+      palletCenter: s.palletCenter || r.center || '',
+      palletNo: s.palletNo || 1,
+      matchedVia: s.matchedVia || 'direct'
+    };
+  });
+  var orderRec = {
+    orderId: orderId,
+    createdAt: nowTs,
+    createdBy: byUser,
+    outboundDate: d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()),
+    customer: workSession.vendor || '쿠팡',
+    items: orderItems,
+    status: 'executed',                                     /* 작업종료 = 즉시 실행 */
+    printedAt: 0,
+    executedAt: nowTs,
+    executedBy: byUser,
+    executedLogKeys: pushedKeys,
+    /* 쿠팡 추가 메타 */
+    orderType: 'coupang',
+    coupang: {
+      sessionId: workSession.sessionId,
+      vendor: workSession.vendor || '',
+      vendorCode: workSession.vendorCode || '',
+      note: workSession.note || '',
+      poFileName: workSession.poFileName || '',
+      shipBoxes: shipBoxes,
+      pallets: pallets,
+      holdPool: holdPool,
+      totalQty: totalQty,
+      totalSkus: orderItems.length
+    }
+  };
+
+  /* ─── 3) 일괄 트랜잭션: 재고차감 + 지시서 저장 + 세션 마감 ─── */
+  /* multi-path update: logs + orders + coupangSessions/{sid} */
+  var bigUpdate = {};
+  Object.keys(stockUpdates).forEach(function(k){
+    bigUpdate['wms_sync/groups/' + groupId + '/star_instock/logs/' + k] = stockUpdates[k];
+  });
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/orders/' + orderId] = orderRec;
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/status'] = 'completed';
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/completedAt'] = nowTs;
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/completedBy'] = byUser;
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/orderId'] = orderId;
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/pallets'] = pallets;
+  bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/palletCounters'] = palletCounters;
+
+  setMsg('cpScanMsg','inf','⏳ 처리 중 — 재고 차감 + 지시서 저장 중...');
+  firebase.database().ref().update(bigUpdate).then(function(){
+    cpFlash('ok','✓ 작업종료 완료 — 지시서 ' + orderId + ' 생성, 재고 ' + pushedKeys.length + '건 차감');
+    setMsg('cpMsg','ok','✓ 출고 완료 — 저장된 지시서 탭에서 확인. (출고적재리스트 인쇄는 다음 단계)');
     cpDetachSession();
     cpSetSubView('po');
     cpHideResumeBanner();
+    cpSpeak('출고 완료');
   }).catch(function(err){
-    setMsg('cpScanMsg','er','❌ 종료 실패: ' + (err && err.message || err));
+    cpFlash('er','❌ 작업종료 실패: ' + (err && err.message || err) + ' — 다시 시도하거나 백업 후 관리자 확인');
   });
 }
 
