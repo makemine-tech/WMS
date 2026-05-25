@@ -311,8 +311,13 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-display.warn{border-color:var(--y);box-shadow:0 0 0 5px rgba(240,196,74,.07)}
 .cp-display.idle::after{content:'스캔 대기 중...';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1rem;color:rgba(124,131,153,.4);font-family:var(--mo);pointer-events:none}
 .cp-display.idle > *{opacity:.25}
-.dp-meta-top{display:flex;justify-content:space-between;align-items:center;font-size:.74rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em}
+.dp-meta-top{display:flex;justify-content:space-between;align-items:center;font-size:.74rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;gap:.6rem;flex-wrap:wrap}
 .dp-meta-top .scanned-at{color:var(--g)}
+.dp-meta-top .right{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.dp-label-btn{background:linear-gradient(135deg,#E8B82C,#EAC74A);color:#1F5F1F;border:1.5px solid #c89519;font-size:.74rem;font-weight:900;padding:.35rem .75rem;border-radius:6px;cursor:pointer;letter-spacing:.02em;box-shadow:0 2px 8px rgba(232,184,44,.35)}
+.dp-label-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(232,184,44,.5)}
+.dp-label-btn:active{transform:translateY(0)}
+.dp-label-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .dp-center{font-size:4.5rem;font-weight:900;line-height:1.05;color:#ffb84a;letter-spacing:-.03em;text-shadow:0 2px 18px rgba(255,184,74,.18);word-break:keep-all;margin:.2rem 0}
 .dp-center.warn{color:var(--y);text-shadow:0 2px 18px rgba(240,196,74,.2)}
 .dp-center.size-md{font-size:3.2rem}
@@ -400,6 +405,29 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   body.printing-label .mix-label-area{visibility:visible;display:block;position:absolute;left:0;top:0;width:150mm;height:100mm}
   body.printing-label .mix-label-area *{visibility:visible}
   body.printing-label .print-area{display:none!important}
+}
+
+/* ─── 상품 라벨 (80x40mm 가로 인쇄 전용) ─── */
+.prod-label-area{display:none}
+.prod-label{width:80mm;height:40mm;padding:2.5mm 3mm;box-sizing:border-box;background:#fff;color:#000;font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;display:grid;grid-template-columns:1fr 32mm;grid-template-rows:1fr auto;gap:1mm 2mm;page-break-after:always}
+.prod-label:last-child{page-break-after:auto}
+.prod-label .pl-left{display:flex;flex-direction:column;gap:.6mm;font-size:6pt;line-height:1.2}
+.prod-label .pl-row{display:flex;gap:1.2mm;align-items:baseline}
+.prod-label .pl-key{font-weight:900;color:#000;min-width:11mm;letter-spacing:-.2pt}
+.prod-label .pl-val{font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prod-label .pl-val.name{font-size:6.5pt;white-space:normal;line-height:1.15}
+.prod-label .pl-val.big{font-size:11pt;font-weight:900;letter-spacing:-.3pt}
+.prod-label .pl-right{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5mm}
+.prod-label .pl-right svg{width:32mm;height:13mm;max-width:100%}
+.prod-label .pl-bc-num{font-family:'Courier New',monospace;font-size:7pt;font-weight:800;letter-spacing:.4pt}
+.prod-label .pl-bottom{grid-column:1/-1;font-size:5pt;line-height:1.25;color:#222;border-top:.3mm solid #888;padding-top:.6mm;margin-top:.2mm}
+
+@media print {
+  body.printing-product-label > *{visibility:hidden}
+  body.printing-product-label .prod-label-area{visibility:visible;display:block;position:absolute;left:0;top:0;width:80mm}
+  body.printing-product-label .prod-label-area *{visibility:visible}
+  body.printing-product-label .print-area{display:none!important}
+  body.printing-product-label .mix-label-area{display:none!important}
 }
 
 /* ─── 처리 대기 패널 (혼적 박스 SKU pending) ─── */
@@ -770,7 +798,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div class="cp-display idle" id="cpDisplay">
           <div class="dp-meta-top">
             <span id="dpType">대기 중</span>
-            <span class="scanned-at" id="dpScannedAt"></span>
+            <span class="right">
+              <span class="scanned-at" id="dpScannedAt"></span>
+              <button class="dp-label-btn" id="dpLabelBtn" onclick="cpPrintProductLabels()" disabled title="현재 박스의 SKU 들 상품라벨 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨</button>
+            </span>
           </div>
           <div class="dp-center" id="dpCenter">—</div>
           <div class="dp-eta" id="dpEta">입고일 —</div>
@@ -912,11 +943,15 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 <!-- 혼적 라벨 인쇄 영역 (150x100mm 가로) — body.printing-label 일 때만 보임 -->
 <div class="mix-label-area" id="mixLabelArea"></div>
 
+<!-- 상품 라벨 인쇄 영역 (80x40mm 가로, 수량만큼 반복) — body.printing-product-label 일 때만 -->
+<div class="prod-label-area" id="prodLabelArea"></div>
+
 <div class="unified-ftr no-print">
   © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
 </div>
 
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
@@ -1741,6 +1776,7 @@ function cpSetScanMode(m){
  * workSession.holdPool[] : 보류된 항목 [{ts, by, boxBarcode, scanCount, reason, scanIds:[]}]
  */
 var cpTtsEnabled = true;
+var cpLastDisplayEv = null;  /* 마지막 cpUpdateDisplay 의 ev — 상품 라벨 인쇄용 */
 function cpPalletKey(eta, center){ return String(eta||'')+'|'+String(center||''); }
 function cpCurPallet(eta, center){
   if (!workSession) return 1;
@@ -2155,6 +2191,114 @@ function cpUpdateDisplay(ev){
   if (ev.allUnmatched) cpSpeak('잔류 박스');
   else if (isMixed) cpSpeak('혼적 박스 — ' + centerKeys.join(' '));
   else cpSpeak(centerKeys[0] || '');
+
+  /* 상품 라벨 버튼 활성화 — 매칭 스캔이 있을 때만 */
+  cpLastDisplayEv = ev;
+  var lblBtn = document.getElementById('dpLabelBtn');
+  if (lblBtn) {
+    var hasScans = !!(ev.scans && ev.scans.length);
+    lblBtn.disabled = !hasScans;
+    lblBtn.title = hasScans
+      ? '이 박스 SKU 들 상품라벨 인쇄 (80x40mm, 수량만큼 — 총 ' + ev.scans.reduce(function(s,x){return s+(+x.qty||0);},0) + '장)'
+      : '스캔된 항목이 없습니다';
+  }
+}
+
+/* ═══════════ 상품 라벨 인쇄 (80x40mm 가로, 수량만큼) ═══════════ */
+function cpPrintProductLabels(){
+  if (!cpLastDisplayEv || !cpLastDisplayEv.scans || !cpLastDisplayEv.scans.length){
+    cpFlash('warn','⚠️ 인쇄할 박스 정보가 없습니다');
+    return;
+  }
+  var ev = cpLastDisplayEv;
+  var rows = (workSession && workSession.rows) || [];
+  /* 라벨 HTML — SKU 마다 qty 만큼 반복 */
+  var labels = [];
+  ev.scans.forEach(function(s){
+    var meta = stockMeta[normBarcode(s.barcode)] || {};
+    var r = rows[s.srcIdx] || {};
+    /* 표시 데이터 */
+    var name = meta.name || r.skuName || '';
+    var size = meta.size || '';
+    var code = meta.code || '';
+    var material = meta.material || '';
+    var color = meta.color || '';
+    var origin = meta.origin || '';
+    var bc = s.barcode || '';
+    var qty = +s.qty || 1;
+    for (var i=0; i<qty; i++) {
+      labels.push(
+        '<div class="prod-label">'+
+          '<div class="pl-left">'+
+            '<div class="pl-row"><span class="pl-key">상품명:</span><span class="pl-val name">'+escH(name)+'</span></div>'+
+            '<div class="pl-row"><span class="pl-key">사이즈:</span><span class="pl-val big">'+escH(size)+'</span></div>'+
+            '<div class="pl-row"><span class="pl-key">품 번:</span><span class="pl-val big">'+escH(code)+'</span></div>'+
+            '<div class="pl-row"><span class="pl-key">재 질:</span><span class="pl-val">'+escH(material||'-')+'</span></div>'+
+            '<div class="pl-row"><span class="pl-key">색 상:</span><span class="pl-val">'+escH(color||'-')+'</span></div>'+
+            '<div class="pl-row"><span class="pl-key">제조국:</span><span class="pl-val">'+escH(origin||'-')+'</span></div>'+
+          '</div>'+
+          '<div class="pl-right">'+
+            '<svg data-bc="'+escAttrLocal(bc)+'"></svg>'+
+            '<div class="pl-bc-num">'+escH(bc)+'</div>'+
+          '</div>'+
+          '<div class="pl-bottom">'+
+            '※ 소비자부주의로 인한 제품 보상은 되지 않으니, 소재에 맞는 세탁법 꼭 확인해 주십시오.<br>'+
+            '경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645'+
+          '</div>'+
+        '</div>'
+      );
+    }
+  });
+
+  if (!labels.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  var area = document.getElementById('prodLabelArea');
+  if (!area){ cpFlash('er','라벨 영역 없음'); return; }
+  area.innerHTML = labels.join('');
+
+  /* JsBarcode 렌더 — 각 svg 에 적용 */
+  if (typeof JsBarcode !== 'undefined') {
+    var svgs = area.querySelectorAll('svg[data-bc]');
+    svgs.forEach(function(svg){
+      var v = svg.getAttribute('data-bc') || '';
+      try {
+        JsBarcode(svg, v, {
+          format: 'CODE128',
+          displayValue: false,
+          width: 1.8,
+          height: 50,
+          margin: 0,
+          background: '#ffffff',
+          lineColor: '#000000'
+        });
+      } catch(e){ /* 일부 바코드 포맷 안 맞으면 무시 */ }
+    });
+  } else {
+    cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄됩니다');
+  }
+
+  /* 동적 @page 80x40mm */
+  var oldStyle = document.getElementById('prod-label-pagestyle');
+  if (oldStyle) oldStyle.remove();
+  var st = document.createElement('style');
+  st.id = 'prod-label-pagestyle';
+  st.textContent = '@media print { @page { size: 80mm 40mm; margin: 0; } }';
+  document.head.appendChild(st);
+
+  document.body.classList.add('printing-product-label');
+  setTimeout(function(){
+    window.print();
+    setTimeout(function(){
+      document.body.classList.remove('printing-product-label');
+      var s = document.getElementById('prod-label-pagestyle');
+      if (s) s.remove();
+    }, 1500);
+  }, 100);
+}
+
+/* 작은 헬퍼 (attribute escape) */
+function escAttrLocal(s){
+  if (s===null||s===undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 /* TTS */
