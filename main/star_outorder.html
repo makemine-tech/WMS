@@ -201,6 +201,30 @@ tr.cp-row-zero td{background:rgba(240,88,88,.04)}
 tr.cp-row-short td{background:rgba(240,196,74,.03)}
 .cp-step-cta{margin-top:.85rem;padding:.95rem 1rem;background:var(--s1);border:1px solid var(--br);border-radius:9px;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
 .cp-step-cta .label{flex:1;font-size:.78rem;color:var(--mu)}
+/* ALT 배지 — 대체바코드로 매칭된 행 */
+.cp-alt-badge{display:inline-flex;align-items:center;font-family:var(--mo);font-size:.6rem;font-weight:800;color:var(--p);background:rgba(192,132,252,.16);border:1px solid rgba(192,132,252,.4);border-radius:4px;padding:.06rem .32rem;margin-left:.32rem;letter-spacing:.04em;vertical-align:middle;cursor:help}
+/* 후보 찾기 버튼 */
+.cp-find-btn{background:rgba(192,132,252,.1);color:var(--p);border:1px solid rgba(192,132,252,.4);border-radius:5px;font-size:.66rem;font-weight:700;padding:.16rem .45rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
+.cp-find-btn:hover{background:rgba(192,132,252,.18)}
+.cp-find-btn.open{background:var(--p);color:#0f1117}
+/* 후보 패널 (인라인 행) */
+tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-top:1px dashed rgba(192,132,252,.3);border-bottom:1px solid rgba(192,132,252,.25)}
+.cp-cand-title{font-size:.74rem;color:var(--p);font-weight:800;margin-bottom:.45rem;font-family:var(--mo);letter-spacing:.04em}
+.cp-cand-list{display:flex;flex-direction:column;gap:.35rem;max-height:200px;overflow:auto}
+.cp-cand-item{display:flex;align-items:center;gap:.55rem;padding:.45rem .65rem;background:var(--s2);border:1px solid var(--br);border-radius:6px;font-size:.78rem;flex-wrap:wrap}
+.cp-cand-item:hover{border-color:var(--p)}
+.cp-cand-item .cb{font-family:var(--mo);color:var(--y);font-weight:800;font-size:.8rem;min-width:90px}
+.cp-cand-item .nm{flex:1;color:var(--tx);min-width:140px}
+.cp-cand-item .qt{font-family:var(--mo);color:var(--g);font-weight:800;min-width:48px;text-align:right}
+.cp-cand-item .rs{font-size:.66rem;color:var(--mu);font-family:var(--mo);background:rgba(124,131,153,.12);border-radius:4px;padding:.08rem .42rem}
+.cp-cand-item .rs.pat{color:#ffb84a;background:rgba(255,184,74,.1)}
+.cp-cand-item .rs.sku{color:var(--b);background:rgba(91,156,246,.1)}
+.cp-cand-confirm{background:var(--p);color:#0f1117;border:none;border-radius:5px;font-size:.7rem;font-weight:800;padding:.32rem .65rem;cursor:pointer}
+.cp-cand-confirm:hover{background:#d4a4ff}
+.cp-cand-none{font-size:.78rem;color:var(--mu);padding:.55rem;text-align:center}
+.cp-cand-manual{margin-top:.55rem;display:flex;gap:.32rem;align-items:center;flex-wrap:wrap}
+.cp-cand-manual input{background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.32rem .5rem;font-size:.78rem;font-family:var(--mo);outline:none;width:160px}
+.cp-cand-manual input:focus{border-color:var(--p)}
 </style>
 </head>
 <body>
@@ -457,6 +481,9 @@ var logsRef = null;       /* star_instock/logs — 메타 조회 + 출고 실행
 var allOrders = [];       /* 저장된 지시서 전체 */
 var stockMeta = {};       /* 바코드(normalized) → 가장 최근 in-log 메타 */
 var stockQty = {};        /* 바코드(normalized) → 현재고 (입고합 - 출고합) */
+var stockByAlt = {};      /* 정규화된 altBarcode → 원본 barcode (입고 로그 + altMap 병합) */
+var altMap = {};          /* Firebase 저장 영구 매핑 {normalizedAlt: {src, by, ts, source}} */
+var altMapRef = null;
 
 /* 현재 작성중 지시서 */
 var curOrder = newOrder();
@@ -552,12 +579,13 @@ function attachRefs(){
     renderList();
   }, function(err){ setMsg('m0','er','❌ 지시서 읽기 실패: ' + (err && err.message || err)); });
 
-  /* 2) star_instock/logs — 재고 메타 + 현재고 집계 */
+  /* 2) star_instock/logs — 재고 메타 + 현재고 집계 + altBarcode reverse 인덱스 */
   logsRef = db.ref('wms_sync/groups/' + groupId + '/star_instock/logs');
   logsRef.on('value', function(snap){
     var v = snap.val() || {};
-    var byBc = {};   /* stockMeta (마지막 입고 메타) */
-    var qty = {};    /* stockQty (입고합 - 출고합) */
+    var byBc = {};      /* stockMeta */
+    var qty = {};       /* stockQty */
+    var byAlt = {};     /* altBarcode → 원본 barcode (입고 로그 기준) */
     Object.keys(v).forEach(function(k){
       var lg = v[k] || {};
       var bc = normBarcode(lg.barcode);
@@ -568,15 +596,39 @@ function attachRefs(){
       } else {
         qty[bc] = (qty[bc] || 0) + q;
         if (!byBc[bc] || (lg.ts||0) > (byBc[bc].ts||0)) byBc[bc] = lg;
+        var alt = normBarcode(lg.altBarcode);
+        if (alt && alt !== bc) byAlt[alt] = bc;
       }
     });
     stockMeta = byBc;
     stockQty = qty;
-    /* 쿠팡 탭이 열려있으면 매칭 결과 자동 갱신 */
+    stockByAlt = mergeAltIndex(byAlt, altMap);
     if (document.getElementById('tabCoupang') && document.getElementById('tabCoupang').style.display !== 'none') {
       cpRender();
     }
   }, function(err){ console.warn('[outorder] logs read 실패', err); });
+
+  /* 3) star_outorder/altMap — 사용자가 영구 등록한 PO 바코드 → 원본 매핑 */
+  altMapRef = db.ref('wms_sync/groups/' + groupId + '/star_outorder/altMap');
+  altMapRef.on('value', function(snap){
+    altMap = snap.val() || {};
+    stockByAlt = mergeAltIndex(stockByAlt, altMap);
+    if (document.getElementById('tabCoupang') && document.getElementById('tabCoupang').style.display !== 'none') {
+      cpRender();
+    }
+  }, function(err){ console.warn('[outorder] altMap read 실패', err); });
+}
+function mergeAltIndex(base, map){
+  /* base 는 로그에서 추출된 byAlt, map 은 altMap (영구 등록).
+   * altMap 이 더 우선 (사용자 명시 설정이라). */
+  var out = {};
+  Object.keys(base||{}).forEach(function(k){ out[k] = base[k]; });
+  Object.keys(map||{}).forEach(function(k){
+    var entry = map[k];
+    var src = entry && entry.src ? normBarcode(entry.src) : '';
+    if (src) out[k] = src;
+  });
+  return out;
 }
 
 /* ─────────────── 탭 ─────────────── */
@@ -696,16 +748,128 @@ function cpHandleExcel(file){
 }
 
 function cpClassify(row){
-  /* 재고 매칭: 충족 / 부족 / 없음 / 초과 */
+  /* 재고 매칭: 충족 / 부족 / 없음. PO 바코드 → 직접 → altBarcode fallback */
   var bc = normBarcode(row.barcode);
-  var have = bc ? (stockQty[bc] || 0) : 0;
   var need = +row.qty || 0;
+  var matchedVia = null;     /* 'direct' | 'alt' | null */
+  var matchedBc = bc;        /* 실제 재고를 본 바코드 */
+  var have = 0;
+
+  if (bc) {
+    if (stockQty[bc] && stockQty[bc] > 0) {
+      have = stockQty[bc]; matchedVia = 'direct';
+    } else if (stockByAlt[bc]) {
+      /* PO 바코드가 누군가의 altBarcode 로 등록되어 있음 → 원본으로 우회 */
+      var src = stockByAlt[bc];
+      have = stockQty[src] || 0;
+      matchedBc = src;
+      if (have > 0) matchedVia = 'alt';
+    } else {
+      have = stockQty[bc] || 0;  /* 음수일 수도 (출고가 더 많은 비정상 케이스) */
+    }
+  }
   var canShip = Math.max(0, Math.min(have, need));
   var status;
   if (have <= 0) status = 'zero';
   else if (have < need) status = 'short';
   else status = 'fit';
-  return { have:have, canShip:canShip, short: Math.max(0, need-have), status:status };
+  return {
+    have: have, canShip: canShip, short: Math.max(0, need-have), status: status,
+    matchedVia: matchedVia, matchedBc: matchedBc
+  };
+}
+
+/* ── 대체바코드 후보 추천 ── */
+function cpFindAltCandidates(row){
+  /* 반환: [{bc, qty, meta, reason: 'pat'|'sku', note}] */
+  var poBc = normBarcode(row.barcode);
+  var poSku = String(row.skuId||'').trim().toUpperCase();
+  var results = [];
+  var seen = {};
+  function addCand(bc, reason, note){
+    if (!bc || seen[bc]) return;
+    if (bc === poBc) return; /* 자기 자신 제외 */
+    var qty = stockQty[bc] || 0;
+    var meta = stockMeta[bc] || {};
+    seen[bc] = true;
+    results.push({ bc:bc, qty:qty, meta:meta, reason:reason, note:note });
+  }
+  /* 1) Prefix/Suffix ±1 글자 차이 — PO 바코드 기준 */
+  if (poBc) {
+    /* PO 가 더 긴 경우: 끝/앞 1자 제거 시 일치 */
+    if (poBc.length >= 2) {
+      addCand(poBc.slice(0, -1),  'pat', 'PO 뒤 1자 제거');
+      addCand(poBc.slice(1),      'pat', 'PO 앞 1자 제거');
+    }
+    /* PO 가 더 짧은 경우: 알파벳 1자 prefix/suffix 모든 후보 (재고에 있는 것만) */
+    var alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    for (var i=0; i<alpha.length; i++){
+      var c = alpha[i];
+      addCand(poBc + c, 'pat', 'PO 뒤 + ' + c);
+      addCand(c + poBc, 'pat', 'PO 앞 + ' + c);
+    }
+  }
+  /* 2) SKU ID 일치 — 재고 메타의 code / skuId / altBarcode 등과 비교 */
+  if (poSku) {
+    Object.keys(stockMeta).forEach(function(bc){
+      var m = stockMeta[bc]||{};
+      var cands = [m.code, m.skuId, m.alt, m.altBarcode].filter(Boolean).map(function(x){
+        return String(x).trim().toUpperCase();
+      });
+      if (cands.indexOf(poSku) >= 0) {
+        addCand(bc, 'sku', 'SKU ID 일치 (' + poSku + ')');
+      }
+    });
+  }
+  /* 재고 > 0 인 후보만 노이즈 제거. 그중 재고 많은 순. */
+  results = results.filter(function(c){ return (c.qty||0) > 0; });
+  results.sort(function(a,b){ return (b.qty||0) - (a.qty||0); });
+  return results.slice(0, 6);
+}
+
+/* ── 후보 패널 토글 (인라인 행) ── */
+var cpExpandedRow = -1;
+function cpToggleCandidates(idx){
+  if (cpExpandedRow === idx) { cpExpandedRow = -1; }
+  else { cpExpandedRow = idx; }
+  cpRender();
+}
+
+/* ── 대체 매핑 확정 → altMap 저장 ── */
+function cpConfirmAlt(poBc, srcBc){
+  poBc = normBarcode(poBc); srcBc = normBarcode(srcBc);
+  if (!poBc || !srcBc) { setMsg('cpMsg','warn','⚠️ 바코드가 비어있습니다'); return; }
+  if (poBc === srcBc) { setMsg('cpMsg','warn','⚠️ 같은 바코드는 매핑할 수 없습니다'); return; }
+  if (!altMapRef) { setMsg('cpMsg','er','❌ Firebase 연결 안 됨 (로그인 확인)'); return; }
+  /* 충돌: 이미 다른 src 로 매핑된 경우 사용자에게 확인 */
+  var existing = altMap[poBc];
+  if (existing && existing.src && normBarcode(existing.src) !== srcBc) {
+    if (!confirm('⚠️ 이 PO 바코드는 이미 ' + existing.src + ' 로 매핑되어 있습니다.\n' + srcBc + ' 로 덮어쓸까요?')) return;
+  }
+  var entry = { src: srcBc, by: getUserId(), ts: Date.now(), source: 'cpManual' };
+  altMapRef.child(poBc).set(entry).then(function(){
+    setMsg('cpMsg','ok','✓ 대체바코드 등록: ' + poBc + ' → ' + srcBc + ' (다음부터 자동 매칭)');
+    cpExpandedRow = -1;
+    /* on('value') 리스너가 altMap, stockByAlt 갱신 후 cpRender 자동 호출 */
+  }).catch(function(err){
+    setMsg('cpMsg','er','❌ 저장 실패: ' + (err && err.message || err));
+  });
+}
+function cpManualConfirm(idx){
+  var row = cpState.rows[idx]; if (!row) return;
+  var inp = document.getElementById('cpManualInp_'+idx);
+  if (!inp) return;
+  var src = (inp.value||'').trim();
+  if (!src) { setMsg('cpMsg','warn','⚠️ 원본 바코드를 입력하세요'); return; }
+  cpConfirmAlt(row.barcode, src);
+}
+function cpUnmap(poBc){
+  poBc = normBarcode(poBc);
+  if (!poBc || !altMapRef) return;
+  if (!confirm('이 대체바코드 매핑을 해제할까요?\n' + poBc + ' → ' + (altMap[poBc] && altMap[poBc].src))) return;
+  altMapRef.child(poBc).remove().then(function(){
+    setMsg('cpMsg','ok','✓ 매핑 해제됨: ' + poBc);
+  });
 }
 
 function cpRender(){
@@ -718,12 +882,24 @@ function cpRender(){
     return;
   }
   var sum = {total:rows.length, fit:0, short:0, zero:0};
-  tb.innerHTML = rows.map(function(r, i){
+  var html = '';
+  rows.forEach(function(r, i){
     var m = cpClassify(r);
     sum[m.status]++;
     var chipLabel = m.status === 'fit' ? '🟢 충족' : m.status === 'short' ? '🟡 부족 ' + m.short : '🔴 없음';
     var rowCls = m.status === 'zero' ? 'cp-row-zero' : m.status === 'short' ? 'cp-row-short' : '';
-    return '<tr class="' + rowCls + '">'+
+    /* [ALT] 배지 — 대체바코드로 매칭됐을 때만 */
+    var altBadge = '';
+    if (m.matchedVia === 'alt') {
+      altBadge = '<span class="cp-alt-badge" title="대체바코드 매칭: 원본 ' + escH(m.matchedBc) + ' 의 재고를 사용">ALT</span>';
+    }
+    /* 🔍 후보 찾기 버튼 — 재고없음·부족 행에만 (이미 alt 매칭된 건 제외 시키지 말고 더 좋은 후보 찾기 허용) */
+    var findBtn = '';
+    if (m.status !== 'fit') {
+      var openCls = (cpExpandedRow === i) ? ' open' : '';
+      findBtn = '<button class="cp-find-btn'+openCls+'" onclick="cpToggleCandidates('+i+')" title="대체바코드 후보 찾기">🔍 대체</button>';
+    }
+    html += '<tr class="' + rowCls + '">'+
       '<td style="color:var(--mu);font-family:var(--mo);font-size:.72rem">'+(i+1)+'</td>'+
       '<td class="cp-cell-po">'+escH(r.po)+'</td>'+
       '<td class="cp-cell-center">'+escH(r.center)+'</td>'+
@@ -734,12 +910,53 @@ function cpRender(){
       '<td class="cell-num">'+r.qty+'</td>'+
       '<td class="cell-num" style="color:'+(m.have>0?'var(--g)':'var(--r)')+'">'+m.have+'</td>'+
       '<td class="cell-num">'+m.canShip+'</td>'+
-      '<td><span class="cp-chip '+m.status+'">'+chipLabel+'</span></td>'+
+      '<td><span class="cp-chip '+m.status+'">'+chipLabel+'</span>'+altBadge+findBtn+'</td>'+
       '<td class="cell-num">'+(r.box||0)+'</td>'+
       '<td class="cell-num">'+(r.palletT?(r.palletN+'/'+r.palletT):'-')+'</td>'+
     '</tr>';
-  }).join('');
+    /* 인라인 후보 패널 */
+    if (cpExpandedRow === i) {
+      html += cpRenderCandidatePanel(i, r, m);
+    }
+  });
+  tb.innerHTML = html;
   cpUpdateSummary(sum);
+}
+
+function cpRenderCandidatePanel(idx, row, matched){
+  var cands = cpFindAltCandidates(row);
+  var poBc = String(row.barcode||'').trim();
+  var existing = altMap[normBarcode(poBc)];
+  var unmapBtn = '';
+  if (existing && existing.src) {
+    unmapBtn = '<button class="btn btn-r" style="font-size:.7rem;padding:.28rem .55rem;margin-left:.4rem" onclick="cpUnmap(\''+escH(poBc)+'\')">기존 매핑 해제 (→ '+escH(existing.src)+')</button>';
+  }
+  var listHtml;
+  if (!cands.length) {
+    listHtml = '<div class="cp-cand-none">자동 추천 후보 없음 — 아래에서 직접 입력하세요</div>';
+  } else {
+    listHtml = '<div class="cp-cand-list">' + cands.map(function(c){
+      var name = (c.meta.name || '?') + (c.meta.color ? ' / '+c.meta.color : '') + (c.meta.size ? ' / '+c.meta.size : '');
+      var rsCls = c.reason === 'pat' ? 'rs pat' : c.reason === 'sku' ? 'rs sku' : 'rs';
+      return '<div class="cp-cand-item">'+
+        '<span class="cb">'+escH(c.bc)+'</span>'+
+        '<span class="nm" title="'+escH(name)+'">'+escH(name)+'</span>'+
+        '<span class="qt">재고 '+c.qty+'</span>'+
+        '<span class="'+rsCls+'" title="'+escH(c.note||'')+'">'+(c.reason==='pat'?'패턴':c.reason==='sku'?'SKU':'')+'</span>'+
+        '<button class="cp-cand-confirm" onclick="cpConfirmAlt(\''+escH(poBc)+'\',\''+escH(c.bc)+'\')">이게 맞다 ✓</button>'+
+      '</div>';
+    }).join('') + '</div>';
+  }
+  return '<tr class="cp-cand-row"><td colspan="13">'+
+    '<div class="cp-cand-title">🔍 대체바코드 후보 — PO 바코드 <b style="color:var(--y)">'+escH(poBc)+'</b> 가 매칭될 원본 재고 바코드 찾기'+unmapBtn+'</div>'+
+    listHtml +
+    '<div class="cp-cand-manual">'+
+      '<span style="font-size:.72rem;color:var(--mu)">직접 입력:</span>'+
+      '<input type="text" id="cpManualInp_'+idx+'" placeholder="원본 바코드" autocomplete="off">'+
+      '<button class="cp-cand-confirm" onclick="cpManualConfirm('+idx+')">매핑 등록</button>'+
+      '<button class="btn btn-s" style="font-size:.7rem;padding:.28rem .55rem" onclick="cpToggleCandidates('+idx+')">닫기</button>'+
+    '</div>'+
+  '</td></tr>';
 }
 function cpUpdateSummary(s){
   document.getElementById('cpSumTotal').textContent = s.total;
