@@ -253,9 +253,17 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-session-hdr .ss-id{font-family:var(--mo);font-size:.7rem;color:var(--mu)}
 .cp-session-hdr .ss-fillers{display:flex;gap:1rem;flex:1;flex-wrap:wrap}
 .cp-session-hdr .ss-actions{display:flex;gap:.4rem;margin-left:auto}
-.cp-resume-banner{background:rgba(240,196,74,.08);border:1px solid var(--y);border-radius:8px;padding:.72rem .9rem;margin-bottom:.85rem;font-size:.84rem;color:var(--y);display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
-.cp-resume-banner .label{flex:1;min-width:200px}
-.cp-resume-banner button{font-size:.78rem;padding:.42rem .85rem}
+.cp-resume-banner{background:rgba(240,196,74,.08);border:1px solid var(--y);border-radius:8px;padding:.7rem .9rem;margin-bottom:.85rem;font-size:.84rem;color:var(--y)}
+.cp-resume-banner .rb-hdr{font-weight:900;letter-spacing:.04em;margin-bottom:.55rem;font-size:.84rem}
+.cp-resume-banner .rb-row{display:flex;align-items:center;gap:.55rem;padding:.5rem .65rem;background:rgba(15,17,23,.4);border:1px solid rgba(240,196,74,.3);border-radius:7px;margin-bottom:.4rem;flex-wrap:wrap}
+.cp-resume-banner .rb-row:last-child{margin-bottom:0}
+.cp-resume-banner .rb-row.mine{border-color:var(--g);background:rgba(74,240,168,.06)}
+.cp-resume-banner .rb-row .rb-info{flex:1;min-width:220px;color:var(--tx);font-size:.84rem}
+.cp-resume-banner .rb-row .rb-info b{color:var(--y);font-weight:900}
+.cp-resume-banner .rb-row.mine .rb-info b{color:var(--g)}
+.cp-resume-banner .rb-row .rb-meta{font-size:.7rem;color:var(--mu);font-family:var(--mo);display:block;margin-top:.2rem}
+.cp-resume-banner .rb-row button{font-size:.78rem;padding:.42rem .85rem;white-space:nowrap}
+.cp-resume-banner .rb-hint{font-size:.72rem;color:var(--mu);margin-top:.4rem}
 .cp-scan-main{display:grid;grid-template-columns:1fr 320px;gap:.85rem;margin-top:.85rem}
 @media(max-width:980px){.cp-scan-main{grid-template-columns:1fr}}
 .cp-scan-input-wrap{background:linear-gradient(135deg,#1c2331,#161b26);border:2px solid var(--br);border-radius:11px;padding:1rem 1.1rem;margin-bottom:.85rem;transition:border-color .15s}
@@ -778,13 +786,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 
     <!-- ▷ PO 매칭/검수 뷰 (Step 1) -->
     <div id="cpPoView">
-    <!-- 재진입 시 활성 세션 안내 배너 -->
-    <div class="cp-resume-banner" id="cpResumeBanner" style="display:none">
-      <span style="font-size:1.1rem">🔁</span>
-      <span class="label" id="cpResumeLabel">진행 중인 스캔 세션이 있습니다.</span>
-      <button class="btn btn-g" onclick="cpResumeSession()">이어서 작업</button>
-      <button class="btn btn-s" onclick="cpDiscardSession()">버리고 새로 시작</button>
-    </div>
+    <!-- 재진입 시 활성 세션 안내 배너 — 다중 디바이스에서 시작된 세션 모두 표시 -->
+    <div class="cp-resume-banner" id="cpResumeBanner" style="display:none"></div>
 
     <div class="form-panel">
       <div class="form-title" style="color:#ffb84a">① 업체 정보 (인쇄·기록용)</div>
@@ -1846,54 +1849,124 @@ function cpEndScan(){
   });
 }
 
-/* ── 세션 복원 (재진입 시) ── */
+/* ── 다중 디바이스 이어작업 — 그룹의 활성/일시정지 세션 전체 발견 ── */
+var cpDiscoveredSessions = [];   /* fetch 한 미완료 세션 캐시 */
+
 function cpCheckResumeOnAttach(){
-  /* 그룹 연결됨 — localStorage 에 저장된 활성 세션 ID 가 있으면 확인 */
-  var sid = null;
-  try { sid = localStorage.getItem(cpSessLsKey()); } catch(_){}
-  if (!sid) return;
-  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sid);
+  if (!groupId || typeof firebase === 'undefined') return;
+  /* 그룹의 coupangSessions 전체 fetch — status 가 active 또는 paused 인 것만 */
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions');
   ref.once('value').then(function(snap){
-    var v = snap.val();
-    if (!v || v.status !== 'active') {
+    var v = snap.val() || {};
+    var live = [];
+    Object.keys(v).forEach(function(k){
+      var s = v[k]; if (!s) return;
+      if (s.status === 'active' || s.status === 'paused') {
+        s.sessionId = s.sessionId || k;
+        live.push(s);
+      }
+    });
+    /* 최근 활동 순 정렬 */
+    live.sort(function(a,b){ return (b.updatedAt||b.createdAt||0) - (a.updatedAt||a.createdAt||0); });
+    cpDiscoveredSessions = live;
+    if (!live.length) {
       try { localStorage.removeItem(cpSessLsKey()); } catch(_){}
       return;
     }
-    /* 활성 세션 발견 — 배너 표시 (사용자가 결정) */
-    workSession = v;
-    workSessionRef = ref;
-    cpShowResumeBanner();
-  });
+    /* 우선 — 이 PC 의 localStorage 에 저장된 sessionId 와 같은 세션이 있으면 mine */
+    var mineId = null;
+    try { mineId = localStorage.getItem(cpSessLsKey()); } catch(_){}
+    cpShowResumeBanner(live, mineId);
+  }).catch(function(err){ console.warn('[cpCheckResumeOnAttach]', err); });
 }
-function cpShowResumeBanner(){
+
+function cpShowResumeBanner(sessions, mineId){
   var b = document.getElementById('cpResumeBanner');
-  var lb = document.getElementById('cpResumeLabel');
-  if (!b || !workSession) return;
+  if (!b) return;
+  if (!sessions || !sessions.length) { b.style.display='none'; b.innerHTML=''; return; }
   b.style.display='';
-  var scanCnt = (workSession.scans||[]).length;
-  lb.innerHTML = '🔁 진행 중 세션 — <b>' + escH(workSession.vendor||'(업체 미입력)') + '</b> · 시작 ' + fmtDt(workSession.createdAt) + ' · 스캔 ' + scanCnt + '건';
+  var rowsHtml = sessions.map(function(s){
+    var isMine = mineId && s.sessionId === mineId;
+    var statusBadge = s.status === 'paused' ? '⏸ 일시정지' : '🟢 진행 중';
+    var scanCnt = (s.scans||[]).length;
+    var penCnt = (s.pending||[]).length;
+    var sBoxes = (s.shipBoxes||[]).length;
+    var sid = escAttrLocal(s.sessionId);
+    return '<div class="rb-row'+(isMine?' mine':'')+'">'+
+      '<div class="rb-info">'+
+        statusBadge + ' · <b>' + escH(s.vendor||'(업체 미입력)') + '</b>' + (isMine ? ' <span style="color:var(--g);font-size:.7rem">(이 PC 에서 시작)</span>' : '') +
+        '<span class="rb-meta">시작 '+escH(fmtDt(s.createdAt))+' · 스캔 '+scanCnt+'건 · 출고박스 '+sBoxes+'개 · 대기 '+penCnt+'건 · ID '+escH(s.sessionId)+'</span>'+
+      '</div>'+
+      '<button class="btn btn-g" onclick="cpResumeSession(\''+sid+'\')">이어서 작업</button>'+
+      '<button class="btn btn-r" onclick="cpDiscardSession(\''+sid+'\')">버리기</button>'+
+    '</div>';
+  }).join('');
+  var multi = sessions.length > 1;
+  b.innerHTML =
+    '<div class="rb-hdr">🔁 진행 중 세션 ' + sessions.length + '개 — 이어서 작업하거나 버리세요</div>' +
+    rowsHtml +
+    '<div class="rb-hint">' + (multi ? '여러 PC 에서 시작된 세션이 있을 수 있습니다. ' : '') + '※ "버리기" 누르면 abandoned 처리되어 다시 이어작업 못 합니다.</div>';
 }
+
 function cpHideResumeBanner(){
   var b = document.getElementById('cpResumeBanner');
-  if (b) b.style.display='none';
+  if (b) { b.style.display='none'; b.innerHTML=''; }
 }
-function cpResumeSession(){
-  if (!workSession || !workSessionRef) return;
-  cpAttachSessionListener();
-  cpRefreshSessionHdr();
-  cpRefreshScanUI();
-  cpHideResumeBanner();
-  cpSetSubView('scan');
-  setMsg('cpScanMsg','ok','✓ 세션 이어서 작업 중');
-}
-function cpDiscardSession(){
-  if (!workSession || !workSessionRef) return;
-  if (!confirm('이 세션을 버리고 새로 시작할까요?\n\n• 기존 스캔 ' + ((workSession.scans||[]).length) + '건이 보존 (status=abandoned)\n• 다시 못 이어옴')) return;
-  workSessionRef.update({ status:'abandoned', abandonedAt: Date.now() }).then(function(){
-    cpDetachSession();
+
+/* 특정 세션 이어작업 — sessionId 인자 받음 */
+function cpResumeSession(sessionId){
+  if (!sessionId) {
+    /* 인자 없으면 첫 발견 세션 */
+    if (!cpDiscoveredSessions.length) { setMsg('cpMsg','warn','이어갈 세션 없음'); return; }
+    sessionId = cpDiscoveredSessions[0].sessionId;
+  }
+  if (!groupId || typeof firebase === 'undefined') return;
+  /* 기존 활성 세션이 있고 다른 ID 면 listener 해제 */
+  if (workSessionRef && workSession && workSession.sessionId !== sessionId) {
+    try { workSessionRef.off(); } catch(_){}
+  }
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sessionId);
+  ref.once('value').then(function(snap){
+    var v = snap.val();
+    if (!v) { setMsg('cpMsg','er','❌ 세션 못 찾음'); return; }
+    workSession = v;
+    workSession.sessionId = workSession.sessionId || sessionId;
+    workSessionRef = ref;
+    /* 일시정지 → active 로 복귀 + 이 PC 에 sessionId 마킹 */
+    if (v.status === 'paused') {
+      workSessionRef.update({ status:'active', resumedAt: Date.now(), resumedBy: getUserId() }).catch(function(){});
+      workSession.status = 'active';
+    }
+    try { localStorage.setItem(cpSessLsKey(), sessionId); } catch(_){}
+    cpAttachSessionListener();
+    cpRefreshSessionHdr();
+    cpRefreshScanUI();
     cpHideResumeBanner();
-    setMsg('cpMsg','inf','세션 버림. 새 작업 가능합니다.');
-  });
+    cpSetSubView('scan');
+    setMsg('cpScanMsg','ok','✓ 세션 이어서 작업 — '+sessionId);
+  }).catch(function(err){ setMsg('cpMsg','er','❌ 세션 로드 실패: '+(err && err.message||err)); });
+}
+
+/* 특정 세션 버리기 */
+function cpDiscardSession(sessionId){
+  if (!sessionId) { setMsg('cpMsg','warn','sessionId 없음'); return; }
+  if (!groupId || typeof firebase === 'undefined') return;
+  var sess = cpDiscoveredSessions.find(function(s){return s.sessionId===sessionId;});
+  var scanCnt = sess ? (sess.scans||[]).length : 0;
+  if (!confirm('이 세션을 버리시겠습니까?\n\n• ID: '+sessionId+'\n• 기존 스캔 '+scanCnt+'건은 보존됨 (status=abandoned)\n• 다시 이어작업 불가')) return;
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sessionId);
+  ref.update({ status:'abandoned', abandonedAt: Date.now(), abandonedBy: getUserId() }).then(function(){
+    /* 로컬 localStorage 정리 */
+    try {
+      if (localStorage.getItem(cpSessLsKey()) === sessionId) localStorage.removeItem(cpSessLsKey());
+    } catch(_){}
+    /* 발견 목록에서 제거 → 배너 갱신 */
+    cpDiscoveredSessions = cpDiscoveredSessions.filter(function(s){return s.sessionId!==sessionId;});
+    var mineId = null;
+    try { mineId = localStorage.getItem(cpSessLsKey()); } catch(_){}
+    cpShowResumeBanner(cpDiscoveredSessions, mineId);
+    setMsg('cpMsg','inf','세션 버림: '+sessionId);
+  }).catch(function(err){ setMsg('cpMsg','er','❌ 버리기 실패: '+(err && err.message||err)); });
 }
 
 /* ── 스캔 모드 토글 (Step 2-B 에서 본격 사용) ── */
