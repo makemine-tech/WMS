@@ -447,15 +447,16 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .prod-label .pl-val{
   font-weight:700;
   flex:1;min-width:0;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  overflow:hidden;white-space:nowrap;
 }
-/* 상품명: 2줄까지 wrap 허용 */
+/* 상품명: 3줄까지 wrap 허용 (잘리지 않고 자동 폰트 축소) */
 .prod-label .pl-val.name{
   font-size:7.5pt;font-weight:700;
   white-space:normal;line-height:1.18;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
   overflow:hidden;
   letter-spacing:-.2pt;
+  word-break:keep-all;
+  max-height:8mm;
 }
 /* 사이즈/품번: 가장 크게 강조 */
 .prod-label .pl-val.big{
@@ -2399,18 +2400,10 @@ function cpPrintLabelsFromItems(items){
     svgs.forEach(function(svg){
       var v = svg.getAttribute('data-bc') || '';
       try {
-        /* SVG 크기 31mm × 17mm. height 단위는 px (svg 내부 좌표) — 64 정도면 적당히 채움.
-         * width 도 약간 키워 굵게. JsBarcode 가 자동 컨텐츠 크기 맞추고 CSS 가 최종 사이즈 결정. */
         JsBarcode(svg, v, {
-          format:'CODE128',
-          displayValue:false,
-          width:2.2,
-          height:64,
-          margin:0,
-          background:'#ffffff',
-          lineColor:'#000000'
+          format:'CODE128', displayValue:false, width:2.2, height:64,
+          margin:0, background:'#ffffff', lineColor:'#000000'
         });
-        /* JsBarcode 가 svg 의 width/height 속성 설정함 — viewBox 와 함께 자동 스케일 되도록 */
         svg.removeAttribute('width');
         svg.removeAttribute('height');
         svg.setAttribute('preserveAspectRatio', 'none');
@@ -2419,22 +2412,69 @@ function cpPrintLabelsFromItems(items){
   } else {
     cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄');
   }
-  var oldStyle = document.getElementById('prod-label-pagestyle');
-  if (oldStyle) oldStyle.remove();
-  var st = document.createElement('style');
-  st.id = 'prod-label-pagestyle';
-  st.textContent = '@media print { @page { size: 80mm 40mm; margin: 0; } }';
-  document.head.appendChild(st);
-  document.body.classList.add('printing-product-label');
-  setTimeout(function(){
-    window.print();
+
+  /* 폰트 자동 축소 — 측정용으로 잠시 오프스크린에 렌더 후 각 셀 fit */
+  var savedCss = area.style.cssText;
+  area.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;width:80mm;z-index:-1;visibility:hidden';
+  /* 다음 페인트 후 측정 — DOM reflow 보장 */
+  requestAnimationFrame(function(){
+    area.querySelectorAll('.prod-label').forEach(function(lbl){ cpFitLabelText(lbl); });
+    area.style.cssText = savedCss;  /* 원복 — CSS 의 display:none 으로 돌아감 */
+
+    /* @page 80x40mm + 인쇄 */
+    var oldStyle = document.getElementById('prod-label-pagestyle');
+    if (oldStyle) oldStyle.remove();
+    var st = document.createElement('style');
+    st.id = 'prod-label-pagestyle';
+    st.textContent = '@media print { @page { size: 80mm 40mm; margin: 0; } }';
+    document.head.appendChild(st);
+    document.body.classList.add('printing-product-label');
     setTimeout(function(){
-      document.body.classList.remove('printing-product-label');
-      var s = document.getElementById('prod-label-pagestyle');
-      if (s) s.remove();
-    }, 1500);
-  }, 100);
+      window.print();
+      setTimeout(function(){
+        document.body.classList.remove('printing-product-label');
+        var s = document.getElementById('prod-label-pagestyle');
+        if (s) s.remove();
+      }, 1500);
+    }, 80);
+  });
   cpFlash('ok','✓ 상품 라벨 '+labels.length+'장 인쇄 시작');
+}
+
+/* 라벨 안 각 값 셀의 폰트를 컨테이너 너비/높이에 맞게 자동 축소
+ * .pl-val (nowrap), .pl-val.name (3줄 wrap), .pl-bc-num (단일 줄) 등 */
+function cpFitLabelText(rootEl){
+  if (!rootEl) return;
+  /* 우선 일반 값 셀 (nowrap) — 가로 폭 기준 */
+  rootEl.querySelectorAll('.pl-val:not(.name)').forEach(function(el){
+    cpShrinkToFit(el, /*wrap*/false, /*minRatio*/0.45);
+  });
+  /* 상품명 (wrap) — 가로폭 + 최대 높이 기준 (CSS max-height:8mm) */
+  rootEl.querySelectorAll('.pl-val.name').forEach(function(el){
+    cpShrinkToFit(el, /*wrap*/true, /*minRatio*/0.55);
+  });
+  /* 바코드 번호 */
+  rootEl.querySelectorAll('.pl-bc-num').forEach(function(el){
+    cpShrinkToFit(el, /*wrap*/false, /*minRatio*/0.55);
+  });
+}
+function cpShrinkToFit(el, wrap, minRatio){
+  if (!el) return;
+  var cs = window.getComputedStyle(el);
+  var startSize = parseFloat(cs.fontSize);
+  if (!startSize) return;
+  var minSize = Math.max(6, startSize * (minRatio||0.5));   /* 최소 6px */
+  var size = startSize;
+  el.style.fontSize = size + 'px';
+  for (var i=0; i<40; i++) {
+    var over = wrap
+      ? (el.scrollHeight > el.clientHeight + 0.5)
+      : (el.scrollWidth  > el.clientWidth  + 0.5);
+    if (!over) break;
+    if (size <= minSize) break;
+    size -= 0.5;
+    el.style.fontSize = size + 'px';
+  }
 }
 
 /* 작은 헬퍼 (attribute escape) */
