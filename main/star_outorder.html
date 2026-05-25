@@ -274,7 +274,33 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-panel-title{font-size:.7rem;color:var(--mu);font-family:var(--mo);letter-spacing:.06em;margin-bottom:.5rem;font-weight:800}
 .cp-recent{font-size:.78rem;color:var(--mu);font-family:var(--mo)}
 .cp-recent .empty{padding:.4rem 0;color:var(--mu);font-size:.74rem;text-align:center}
+.cp-recent .rec{display:flex;gap:.45rem;align-items:center;padding:.32rem .5rem;border-radius:5px;background:rgba(74,240,168,.04);border-left:2.5px solid var(--g);margin-bottom:.28rem;font-size:.76rem}
+.cp-recent .rec.box{border-left-color:var(--b);background:rgba(91,156,246,.04)}
+.cp-recent .rec.undone{opacity:.35;text-decoration:line-through}
+.cp-recent .rec .t{color:var(--mu);font-size:.64rem;min-width:36px}
+.cp-recent .rec .b{color:var(--y);font-weight:800;min-width:90px;overflow:hidden;text-overflow:ellipsis}
+.cp-recent .rec .q{color:var(--g);font-weight:800;margin-left:auto}
+.cp-recent .rec.box .q{color:var(--b)}
 .btn-toolbar{display:flex;gap:.4rem;flex-wrap:wrap}
+/* PO 진행 라인 */
+.cp-prog-row{display:flex;align-items:center;gap:.4rem;padding:.28rem .42rem;border-bottom:1px solid rgba(37,43,59,.5);font-size:.74rem;font-family:var(--mo)}
+.cp-prog-row:last-child{border-bottom:0}
+.cp-prog-row .bc{color:var(--y);font-weight:800;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-prog-row .nm{flex:1;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:80px;font-family:inherit;font-size:.74rem}
+.cp-prog-row .nm small{color:var(--mu);font-size:.65rem;margin-left:.32rem}
+.cp-prog-row .qt{font-weight:800;min-width:64px;text-align:right}
+.cp-prog-row.done .qt{color:var(--g)}
+.cp-prog-row.partial .qt{color:var(--y)}
+.cp-prog-row.pending .qt{color:var(--mu)}
+.cp-prog-row.over .qt{color:var(--r)}
+.cp-prog-empty{padding:.5rem 0;color:var(--mu);font-size:.74rem;text-align:center}
+/* 스캔 결과 즉시 피드백 (입력 박스 옆 또는 위) */
+.cp-flash{padding:.55rem .85rem;border-radius:7px;margin-top:.55rem;font-size:.84rem;line-height:1.45}
+.cp-flash.ok{background:rgba(74,240,168,.1);border:1px solid var(--g);color:var(--g)}
+.cp-flash.warn{background:rgba(240,196,74,.08);border:1px solid var(--y);color:var(--y)}
+.cp-flash.er{background:rgba(240,88,88,.08);border:1px solid var(--r);color:var(--r)}
+.cp-flash b{font-weight:900}
+.cp-flash .sub{display:block;font-size:.74rem;color:var(--mu);margin-top:.2rem;font-family:var(--mo)}
 </style>
 </head>
 <body>
@@ -524,24 +550,25 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           <button class="cp-mode-btn box on" id="cpModeBox" onclick="cpSetScanMode('box')">📦 박스 모드 (일괄)</button>
           <button class="cp-mode-btn item" id="cpModeItem" onclick="cpSetScanMode('item')">🏷️ 상품 모드 (단건)</button>
         </div>
-        <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력 (모드 선택 후 스캔)" autocomplete="off" autofocus>
-        <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄. (Step 2-B 에서 동작)</div>
+        <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력 (모드 선택 후 스캔)" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)">
+        <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄 출고</div>
+        <div id="cpScanFlash" style="display:none"></div>
       </div>
 
       <div class="cp-scan-main">
         <div>
           <div class="cp-panel">
-            <div class="cp-panel-title">📋 PO 진행 (요약)</div>
-            <div id="cpScanProgress" style="font-size:.84rem;color:var(--mu)">Step 2-D 에서 표시</div>
+            <div class="cp-panel-title">📋 PO 진행 — 라인별 발주 vs 스캔</div>
+            <div id="cpScanProgress"><div class="cp-prog-empty">세션 라인 없음</div></div>
           </div>
           <div class="cp-panel" style="margin-top:.65rem">
             <div class="cp-panel-title">🕐 최근 스캔 5건</div>
             <div class="cp-recent" id="cpRecentScans">
-              <div class="empty">아직 스캔 기록 없음 (Step 2-B 에서 동작)</div>
+              <div class="empty">아직 스캔 기록 없음 — 위에서 바코드를 스캔하세요</div>
             </div>
             <div class="btn-toolbar" style="margin-top:.55rem">
-              <button class="btn btn-s" disabled title="Step 2-B 에서">↩ 마지막 취소</button>
-              <button class="btn btn-s" disabled title="Step 2-B 에서">↩↩ 마지막 5건 보기</button>
+              <button class="btn btn-s" id="cpUndoBtn" onclick="cpUndoLast()" title="마지막 스캔 취소">↩ 마지막 취소</button>
+              <span style="font-size:.7rem;color:var(--mu);align-self:center">최대 5건까지 되돌리기 가능</span>
             </div>
           </div>
         </div>
@@ -608,6 +635,7 @@ var allOrders = [];       /* 저장된 지시서 전체 */
 var stockMeta = {};       /* 바코드(normalized) → 가장 최근 in-log 메타 */
 var stockQty = {};        /* 바코드(normalized) → 현재고 (입고합 - 출고합) */
 var stockBoxes = {};      /* 바코드(normalized) → 이 바코드가 들어있는 박스ID 배열 (입고 기준, 중복 제거) */
+var boxIndex = {};        /* 박스ID(원본 케이스) → { barcode: 입고합계, ... } — 박스 일괄 스캔에 사용 */
 var stockByAlt = {};      /* 정규화된 altBarcode → 원본 barcode (입고 로그 + altMap 병합) */
 var altMap = {};          /* Firebase 저장 영구 매핑 {normalizedAlt: {src, by, ts, source}} */
 var altMapRef = null;
@@ -714,6 +742,7 @@ function attachRefs(){
     var qty = {};       /* stockQty */
     var byAlt = {};     /* altBarcode → 원본 barcode (입고 로그 기준) */
     var boxes = {};     /* barcode → Set 처럼 사용할 객체 {boxId: true} */
+    var bIdx = {};      /* boxIndex: boxId → { barcode: 누적입고qty } */
     Object.keys(v).forEach(function(k){
       var lg = v[k] || {};
       var bc = normBarcode(lg.barcode);
@@ -731,6 +760,9 @@ function attachRefs(){
         if (boxId) {
           if (!boxes[bc]) boxes[bc] = {};
           boxes[bc][boxId] = true;
+          /* boxIndex: 같은 박스+barcode 에 여러 입고 로그가 있으면 합산 */
+          if (!bIdx[boxId]) bIdx[boxId] = {};
+          bIdx[boxId][bc] = (bIdx[boxId][bc] || 0) + q;
         }
       }
     });
@@ -740,6 +772,7 @@ function attachRefs(){
     stockMeta = byBc;
     stockQty = qty;
     stockBoxes = boxList;
+    boxIndex = bIdx;
     stockByAlt = mergeAltIndex(byAlt, altMap);
     if (document.getElementById('tabCoupang') && document.getElementById('tabCoupang').style.display !== 'none') {
       cpRender();
@@ -1262,6 +1295,7 @@ function cpStartScan(){
     try { localStorage.setItem(cpSessLsKey(), sid); } catch(_){}
     cpAttachSessionListener();
     cpRefreshSessionHdr();
+    cpRefreshScanUI();
     cpSetSubView('scan');
     setMsg('cpScanMsg','ok','✓ 세션 시작 — 출고 대상 ' + shipRows.length + '라인. 안전하게 실시간 저장됩니다.');
   }).catch(function(err){
@@ -1283,7 +1317,8 @@ function cpAttachSessionListener(){
     }
     workSession = v;
     cpRefreshSessionHdr();
-    /* B/C/D 묶음에서 cpRefreshScanProgress / cpRefreshPallet / cpRefreshRecent / cpRefreshHold 호출 */
+    cpRefreshScanUI();
+    /* C/D 묶음에서 cpRefreshPallet / cpRefreshHold 추가 호출 */
   });
 }
 function cpDetachSession(){
@@ -1361,6 +1396,8 @@ function cpHideResumeBanner(){
 function cpResumeSession(){
   if (!workSession || !workSessionRef) return;
   cpAttachSessionListener();
+  cpRefreshSessionHdr();
+  cpRefreshScanUI();
   cpHideResumeBanner();
   cpSetSubView('scan');
   setMsg('cpScanMsg','ok','✓ 세션 이어서 작업 중');
@@ -1395,6 +1432,248 @@ function cpSetScanMode(m){
       : '상품 모드: 상품바코드 1회 스캔 = 1개 출고 (Step 2-B 에서 동작)';
   }
 }
+
+/* ═══════════ 스캔 처리 (Step 2-B) ═══════════ */
+/* 입력 → 모드별 처리 → scans 누적 → Firebase update → UI 갱신
+ * scans entry: { ts, by, type:'box'|'item', input(원본스캔값), boxBarcode, barcode, qty, palletNo, srcIdx, undone }
+ */
+var cpCurPallet = 1;  /* Step 2-C 에서 트래커. 현재는 1 고정 */
+
+function cpOnScanKey(ev){
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  var inp = document.getElementById('cpScanInp');
+  var raw = (inp.value||'').trim();
+  if (!raw) return;
+  cpHandleScan(raw);
+  inp.value = '';
+  inp.focus();
+}
+
+function cpFlash(kind, html){
+  var el = document.getElementById('cpScanFlash');
+  if (!el) return;
+  el.className = 'cp-flash ' + (kind||'ok');
+  el.innerHTML = html;
+  el.style.display = '';
+  /* 4초 후 자동 페이드 — 다음 스캔 때 덮어쓰기 */
+  clearTimeout(cpFlash._t);
+  cpFlash._t = setTimeout(function(){ el.style.display='none'; }, 5500);
+}
+
+function cpHandleScan(raw){
+  if (!cpHasActiveSession()) { cpFlash('er','❌ 활성 세션이 없습니다 — 다시 스캔 시작하세요'); return; }
+  if (cpScanMode === 'box') return cpProcessBoxScan(raw);
+  return cpProcessItemScan(raw);
+}
+
+/* ── 박스 모드: 박스바코드 → 박스 안 모든 SKU 일괄 출고 ── */
+function cpProcessBoxScan(raw){
+  var boxId = String(raw).trim();
+  if (!boxId) return;
+  var contents = boxIndex[boxId];
+  if (!contents || !Object.keys(contents).length) {
+    cpFlash('er','❌ <b>박스ID 못 찾음</b>: '+escH(boxId)+'<span class="sub">우리 입고(star_instock)에 이 박스ID로 등록된 SKU가 없습니다. 상품 모드로 시도하거나 박스ID 확인하세요.</span>');
+    return;
+  }
+  /* 박스 안 각 SKU 를 세션 rows 와 매칭 — 라인 인덱스 찾기 (direct or alt) */
+  var sessRows = workSession.rows || [];
+  var newScans = [];
+  var matchedSku = [];
+  var unmatchedSku = [];   /* 박스에 있지만 PO 에 없는 SKU = 혼적 후보 */
+  Object.keys(contents).forEach(function(bc){
+    var inQty = contents[bc] || 0;
+    if (inQty <= 0) return;
+    /* 세션 rows 에서 매칭 라인 찾기 — srcBarcode(원본) 우선, 없으면 poBarcode 의 alt 가 이 bc 인 경우 */
+    var idx = -1;
+    for (var i=0; i<sessRows.length; i++){
+      var r = sessRows[i];
+      if (normBarcode(r.srcBarcode) === bc || normBarcode(r.poBarcode) === bc) { idx = i; break; }
+    }
+    if (idx < 0) {
+      unmatchedSku.push({bc:bc, qty:inQty});
+      return;
+    }
+    matchedSku.push({bc:bc, qty:inQty, idx:idx});
+    newScans.push({
+      ts: Date.now(),
+      by: getUserId(),
+      type: 'box',
+      input: boxId,
+      boxBarcode: boxId,
+      barcode: bc,           /* 원본(재고) 바코드 */
+      poBarcode: sessRows[idx].poBarcode,
+      qty: inQty,
+      palletNo: cpCurPallet,
+      srcIdx: idx,
+      undone: false
+    });
+  });
+  if (!newScans.length) {
+    cpFlash('warn','⚠️ <b>박스 안 SKU 가 PO 에 없음</b>: '+escH(boxId)+'<span class="sub">혼적 박스 후보 — Step 2-D 에서 분리/보류 모달로 처리됩니다. 현재는 미반영.</span>');
+    return;
+  }
+  cpAppendScans(newScans, function(){
+    var totalQty = newScans.reduce(function(s,x){return s+x.qty;}, 0);
+    var msg = '✓ <b>박스 ' + escH(boxId) + '</b> 적재 — ' + newScans.length + ' SKU · ' + totalQty + '개';
+    if (unmatchedSku.length) {
+      msg += '<span class="sub">⚠️ 박스에 PO 외 SKU ' + unmatchedSku.length + '개 (혼적) — 미반영 (Step 2-D)</span>';
+      cpFlash('warn', msg);
+    } else {
+      cpFlash('ok', msg);
+    }
+  });
+}
+
+/* ── 상품 모드: 상품바코드 → 1건 출고 ── */
+function cpProcessItemScan(raw){
+  var bc = normBarcode(raw);
+  if (!bc) return;
+  var sessRows = workSession.rows || [];
+  var idx = -1, matchedVia = 'direct';
+  for (var i=0; i<sessRows.length; i++){
+    var r = sessRows[i];
+    if (normBarcode(r.srcBarcode) === bc) { idx = i; break; }
+    if (normBarcode(r.poBarcode) === bc) { idx = i; break; }
+  }
+  /* alt fallback */
+  if (idx < 0 && stockByAlt[bc]) {
+    var src = stockByAlt[bc];
+    for (var j=0; j<sessRows.length; j++){
+      if (normBarcode(sessRows[j].srcBarcode) === src) { idx = j; matchedVia = 'alt'; break; }
+    }
+  }
+  if (idx < 0) {
+    cpFlash('er','❌ <b>PO 에 없는 바코드</b>: '+escH(raw)+'<span class="sub">이 바코드는 현재 출고 대상에 없습니다. PO 확인 또는 박스 모드로 시도하세요.</span>');
+    return;
+  }
+  var row = sessRows[idx];
+  var newScan = {
+    ts: Date.now(),
+    by: getUserId(),
+    type: 'item',
+    input: raw,
+    boxBarcode: '',
+    barcode: row.srcBarcode,
+    poBarcode: row.poBarcode,
+    qty: 1,
+    palletNo: cpCurPallet,
+    srcIdx: idx,
+    matchedVia: matchedVia,
+    undone: false
+  };
+  cpAppendScans([newScan], function(){
+    var name = row.skuName || '';
+    var prog = cpComputeRowProgress(idx);
+    var altBadge = matchedVia==='alt' ? ' <span style="color:var(--p);font-weight:800">[ALT]</span>' : '';
+    cpFlash('ok','✓ <b>'+escH(name||row.poBarcode)+'</b>'+altBadge+' +1 (총 '+prog.shipped+' / '+prog.need+')');
+  });
+}
+
+/* ── 스캔 결과를 Firebase 에 안전하게 append ── */
+function cpAppendScans(newScans, onDone){
+  if (!workSessionRef || !newScans || !newScans.length) return;
+  /* 현재 workSession.scans 에 합치고 push (서버 권위 — on('value') 가 다시 우리 workSession 갱신) */
+  var cur = (workSession.scans || []).slice();
+  var combined = cur.concat(newScans);
+  workSessionRef.update({ scans: combined, updatedAt: Date.now() }).then(function(){
+    /* on('value') 리스너가 곧 workSession 갱신 + UI 갱신 — 빠른 피드백 위해 즉시도 갱신 */
+    workSession.scans = combined;
+    cpRefreshScanUI();
+    if (onDone) onDone();
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err)+'<span class="sub">네트워크 확인 후 다시 시도하세요. 로컬에는 보존됨.</span>');
+  });
+}
+
+/* ── 마지막 스캔 1건 취소 (최대 5건 누적 가능) ── */
+function cpUndoLast(){
+  if (!workSession || !workSessionRef) return;
+  var scans = (workSession.scans || []).slice();
+  /* 마지막부터 거꾸로, undone=false 인 것 찾기 */
+  var undoneCount = 0;
+  for (var i=scans.length-1; i>=0; i--){
+    if (!scans[i].undone) {
+      /* undo 5건 제한 — 이미 undone 처리된 게 5개면 더 못 함? 사장님 답변은 "마지막 5건" 이라
+       * 의미는 '되돌리기 가능한 깊이'. 5번까지 누를 수 있도록 */
+      scans[i].undone = true;
+      scans[i].undoneAt = Date.now();
+      scans[i].undoneBy = getUserId();
+      workSessionRef.update({ scans: scans, updatedAt: Date.now() }).then(function(){
+        workSession.scans = scans;
+        cpRefreshScanUI();
+        cpFlash('warn','↩ 마지막 스캔 취소됨');
+      }).catch(function(err){
+        cpFlash('er','❌ 취소 실패: '+escH(err && err.message || err));
+      });
+      return;
+    }
+    undoneCount++;
+    if (undoneCount >= 5) {
+      cpFlash('warn','⚠️ 최근 5건 모두 이미 취소된 상태입니다. 더 이전 건은 관리자에게 요청하세요.');
+      return;
+    }
+  }
+  cpFlash('warn','⚠️ 취소할 스캔이 없습니다');
+}
+
+/* ── 라인별 진행률 계산 ── */
+function cpComputeRowProgress(idx){
+  var row = (workSession && workSession.rows) ? workSession.rows[idx] : null;
+  if (!row) return { shipped:0, need:0, status:'pending' };
+  var shipped = 0;
+  (workSession.scans||[]).forEach(function(s){
+    if (s.undone) return;
+    if (s.srcIdx === idx) shipped += (+s.qty||0);
+  });
+  /* 박스 단위로 들어와서 shipped 가 need 를 넘을 수 있음 (박스 통째) → 'over' 표시 */
+  var need = +row.canShip || 0;
+  var status = (shipped===0) ? 'pending' : (shipped < need) ? 'partial' : (shipped === need) ? 'done' : 'over';
+  return { shipped:shipped, need:need, status:status };
+}
+
+/* ── PO 진행률 패널 ── */
+function cpRefreshProgress(){
+  var el = document.getElementById('cpScanProgress');
+  if (!el || !workSession) return;
+  var rows = workSession.rows || [];
+  if (!rows.length) { el.innerHTML = '<div class="cp-prog-empty">세션 라인 없음</div>'; return; }
+  var html = rows.map(function(r, i){
+    var p = cpComputeRowProgress(i);
+    var statusIcon = p.status==='done' ? '✓' : p.status==='partial' ? '◐' : p.status==='over' ? '⚠' : '○';
+    var name = r.skuName || '';
+    return '<div class="cp-prog-row '+p.status+'">'+
+      '<span class="bc" title="PO '+escH(r.poBarcode)+'">'+escH(r.poBarcode)+'</span>'+
+      '<span class="nm">'+escH(name)+'<small>'+escH(r.center||'')+'</small></span>'+
+      '<span class="qt">'+statusIcon+' '+p.shipped+'/'+p.need+'</span>'+
+    '</div>';
+  }).join('');
+  el.innerHTML = html;
+}
+
+/* ── 최근 스캔 5건 ── */
+function cpRefreshRecent(){
+  var el = document.getElementById('cpRecentScans');
+  if (!el || !workSession) return;
+  var scans = (workSession.scans || []).slice(-5).reverse();
+  if (!scans.length) { el.innerHTML = '<div class="empty">아직 스캔 기록 없음 — 위에서 바코드를 스캔하세요</div>'; return; }
+  el.innerHTML = scans.map(function(s){
+    var d = new Date(s.ts), pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
+    var ts = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+    var label = s.type==='box' ? '📦 '+escH(s.boxBarcode||'?') + ' → ' + escH(s.barcode||'?')
+                                : '🏷️ '+escH(s.barcode||'?');
+    var cls = 'rec ' + (s.type==='box'?'box':'item') + (s.undone?' undone':'');
+    return '<div class="'+cls+'"><span class="t">'+ts+'</span><span class="b">'+label+'</span><span class="q">+'+s.qty+'</span></div>';
+  }).join('');
+}
+
+/* ── 스캔 UI 통합 갱신 ── */
+function cpRefreshScanUI(){
+  cpRefreshRecent();
+  cpRefreshProgress();
+}
+
+/* ── 세션 리스너가 호출하도록 cpAttachSessionListener 안에서 갱신 호출 추가 ── */
 
 /* ── beforeunload 가드 — 활성 세션 있고 스캔 화면일 때만 ── */
 window.addEventListener('beforeunload', function(e){
