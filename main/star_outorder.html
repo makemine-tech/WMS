@@ -487,13 +487,16 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   letter-spacing:.3pt;
   white-space:nowrap;
 }
-/* 대체바코드 경고 배지 — alt 가 사용되어 인쇄될 때 작업자가 즉시 인지 */
-.prod-label .pl-alt-warn{
-  font-size:5.5pt;font-weight:900;
-  color:#c00;background:#fff3a8;border:.4mm solid #c00;
-  padding:.3mm .8mm;border-radius:.7mm;
+/* 대체바코드 사내 규약 마커 — '[ -B ]' / '[ A- ]' 형식.
+ * 받는 쪽엔 의미 모호하지만 사장님 작업자만 인지 가능. 라벨 우상단 작게. */
+.prod-label .pl-alt-marker{
+  font-size:6pt;font-weight:900;
+  color:#000;
+  font-family:'Courier New',monospace;
+  letter-spacing:0;
   align-self:flex-end;
-  line-height:1;letter-spacing:-.2pt;
+  line-height:1;
+  padding:0;
 }
 /* 하단 안내 띠 — 1줄, 1pt 작게(4.6pt), 구분선 1pt 가늘게, 3pt 아래로 내림 */
 .prod-label .pl-bottom{
@@ -2433,8 +2436,9 @@ function cpPrintLabelsFromItems(items){
     var labelBc = altBc || origBc;
     var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(origBc));
     var qty = +it.qty || 1;
-    var altWarnHtml = hasAlt
-      ? '<div class="pl-alt-warn" title="원바코드 '+escH(origBc)+' → 출고 라벨은 대체바코드로 인쇄">⚠ 대체</div>'
+    /* 사내 규약 마커 — 받는 쪽에 '대체' 단어 노출 X */
+    var altMarkerHtml = hasAlt
+      ? '<div class="pl-alt-marker" title="원바코드 '+escH(origBc)+' → 대체 '+escH(altBc)+'">'+escH(cpAltMarker(origBc, altBc))+'</div>'
       : '';
     for (var i=0; i<qty; i++) {
       labels.push(
@@ -2449,7 +2453,7 @@ function cpPrintLabelsFromItems(items){
               '<div class="pl-row"><span class="pl-key">제조국:</span><span class="pl-val small">'+escH(origin||'-')+'</span></div>'+
             '</div>'+
             '<div class="pl-right">'+
-              altWarnHtml +
+              altMarkerHtml +
               '<svg data-bc="'+escAttrLocal(labelBc)+'"></svg>'+
               '<div class="pl-bc-num">'+escH(labelBc)+'</div>'+
             '</div>'+
@@ -2550,6 +2554,25 @@ function cpShrinkToFit(el, wrap, minRatio){
     size -= 0.5;
     el.style.fontSize = size + 'px';
   }
+}
+
+/* 사내 규약 — 대체바코드 마커:
+ *   원 '1111' + alt '1111B' → '[ -B ]'  (뒤에 B 추가)
+ *   원 '1111' + alt 'A1111' → '[ A- ]'  (앞에 A 추가)
+ *   기타 (불일치 패턴) → '[ ALT ]' 폴백
+ *   사장님 정책: 받는 쪽(쿠팡)에 '대체' 같은 단어 노출 X, 사내 작업자만 알아봄 */
+function cpAltMarker(orig, alt){
+  orig = String(orig||''); alt = String(alt||'');
+  if (!alt || alt === orig) return '';
+  if (alt.length > orig.length) {
+    if (alt.slice(0, orig.length) === orig) {
+      return '[ -' + alt.slice(orig.length) + ' ]';
+    }
+    if (alt.slice(-orig.length) === orig) {
+      return '[ ' + alt.slice(0, alt.length - orig.length) + '- ]';
+    }
+  }
+  return '[ ALT ]';
 }
 
 /* 작은 헬퍼 (attribute escape) */
