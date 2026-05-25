@@ -2355,8 +2355,8 @@ function cpDownloadDoneExcel(){
   var progCache = {};
   rows.forEach(function(r, i){ progCache[i] = cpComputeRowProgress(i); });
 
-  /* 시트 1: 완료풀 (사람용 표) — '상태' 컬럼: 정상 / 취소 */
-  var doneAoa = [['박스번호','박스바코드','바코드','품번','사이즈','입고예정','출고','잔여','입고일','센터','파렛','상태']];
+  /* 시트 1: 완료풀 (사람용 표) — 직관적 한글 컬럼 */
+  var doneAoa = [['출고박스번호','원본박스바코드','상품바코드','품번','사이즈','발주수량','출고수량','잔여수량','입고예정일','입고센터','파렛트번호','출고상태']];
   (workSession.scans||[]).slice().reverse().forEach(function(s){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
@@ -2380,17 +2380,23 @@ function cpDownloadDoneExcel(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(doneAoa), '완료풀');
 
   /* 시트 2: 출고박스 요약 (사람용) */
-  var shipAoa = [['박스번호','센터','입고일','상태','SKU종수','총수량','원본박스(단일)','만든시각']];
+  var shipAoa = [['출고박스번호','입고센터','입고예정일','박스상태','상품종수','총출고수량','원본박스바코드','박스 만든시각']];
+  var statusKo = function(s){ return s==='closed' ? '마감' : s==='open' ? '진행중' : (s||''); };
+  var fmtDtLocal = function(ts){
+    if (!ts) return '';
+    var d=new Date(ts), p=function(n){n=String(n);return n.length<2?'0'+n:n;};
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+  };
   (workSession.shipBoxes||[]).forEach(function(b){
     var bScans = (workSession.scans||[]).filter(function(s){return !s.undone && s.shipBoxNo===b.boxNo;});
     var skuSet = {};
     var qSum = 0;
     bScans.forEach(function(s){ skuSet[s.barcode]=true; qSum += (+s.qty||0); });
     shipAoa.push([
-      b.boxNo, b.center||'', b.eta||'', b.status||'',
+      b.boxNo, b.center||'', b.eta||'', statusKo(b.status),
       Object.keys(skuSet).length, qSum,
       b.srcBoxBarcode || '',
-      b.createdAt ? new Date(b.createdAt).toISOString() : ''
+      fmtDtLocal(b.createdAt)
     ]);
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shipAoa), '출고박스');
@@ -2417,27 +2423,27 @@ function cpDownloadDoneExcel(){
   for (var __i=0; __i<jsonStr.length; __i+=CHUNK_SZ) chunks.push(jsonStr.slice(__i, __i+CHUNK_SZ));
 
   var metaAoa = [
-    ['key','value'],
-    ['schema', snap.schema],
-    ['savedAt(ISO)', new Date(snap.savedAt).toISOString()],
-    ['sessionId', snap.sessionId||''],
-    ['vendor', snap.vendor],
-    ['vendorCode', snap.vendorCode],
-    ['note', snap.note],
-    ['poFileName', snap.poFileName],
-    ['curPallet', snap.curPallet],
-    ['scansCount', (snap.scans||[]).length],
-    ['pendingCount', (snap.pending||[]).length],
-    ['shipBoxesCount', (snap.shipBoxes||[]).length],
-    ['palletsCount', (snap.pallets||[]).length],
-    ['holdPoolCount', (snap.holdPool||[]).length],
-    ['__JSON_CHUNKS__', chunks.length],
-    ['__JSON_TOTAL_LEN__', jsonStr.length]
+    ['항목','값'],
+    ['백업 스키마 버전', snap.schema],
+    ['저장 시각', fmtDtLocal(snap.savedAt)],
+    ['세션 ID', snap.sessionId||''],
+    ['업체명', snap.vendor],
+    ['업체코드', snap.vendorCode],
+    ['작업 메모', snap.note],
+    ['PO 엑셀 파일명', snap.poFileName],
+    ['현재 파렛트 번호', snap.curPallet],
+    ['출고 스캔 수', (snap.scans||[]).length],
+    ['처리 대기 수', (snap.pending||[]).length],
+    ['출고박스 수', (snap.shipBoxes||[]).length],
+    ['마감 파렛트 수', (snap.pallets||[]).length],
+    ['보류 풀 수', (snap.holdPool||[]).length],
+    ['(시스템) 백업 청크 수', chunks.length],
+    ['(시스템) 백업 데이터 길이', jsonStr.length]
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(metaAoa), '_세션메타');
 
   /* JSON 청크 시트 — 각 청크가 한 행. 복원 시 idx 로 정렬 후 이어붙임 */
-  var jsonAoa = [['chunk_idx','data']];
+  var jsonAoa = [['청크번호','데이터']];
   chunks.forEach(function(c, i){ jsonAoa.push([i, c]); });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(jsonAoa), '_JSON');
 
