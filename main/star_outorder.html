@@ -171,6 +171,36 @@ h1 em{color:var(--g);font-style:normal}
 .print-preview .p-sign .ps-l{font-size:8pt;color:#555;margin-bottom:1mm}
 
 .empty-state{text-align:center;padding:2.5rem 1rem;color:var(--mu);font-size:.86rem;background:var(--s1);border:1px dashed var(--br);border-radius:10px}
+
+/* ─────────────── 쿠팡 모드 (Step 1) ─────────────── */
+.cp-hero{background:linear-gradient(135deg,#1a1f2c,#161b26);border:1.5px solid var(--br);border-radius:10px;padding:1rem 1.1rem;margin-bottom:.85rem}
+.cp-hero-title{font-size:.82rem;color:#ffb84a;font-family:var(--mo);font-weight:800;letter-spacing:.06em;margin-bottom:.65rem;display:flex;align-items:center;gap:.4rem}
+.cp-drop{display:flex;align-items:center;gap:.55rem;border:1.5px dashed rgba(255,184,74,.45);background:rgba(255,184,74,.04);border-radius:9px;padding:.85rem 1.1rem;font-size:.84rem;color:rgba(255,184,74,.95);cursor:pointer;position:relative;overflow:hidden;transition:background .15s,border-color .15s}
+.cp-drop:hover{background:rgba(255,184,74,.08);border-color:rgba(255,184,74,.8)}
+.cp-drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.cp-drop.has-file{background:rgba(74,240,168,.06);border-color:var(--g);color:var(--g)}
+.cp-meta{font-size:.7rem;color:var(--mu);margin-top:.45rem;font-family:var(--mo)}
+.cp-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.85rem}
+.cp-sc{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.62rem .85rem;text-align:center}
+.cp-sc-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.16rem}
+.cp-sc-v{font-size:1.5rem;font-weight:900;font-family:var(--mo)}
+.cp-sc.fit .cp-sc-v{color:var(--g)}
+.cp-sc.short .cp-sc-v{color:var(--y)}
+.cp-sc.zero .cp-sc-v{color:var(--r)}
+@media(max-width:720px){.cp-summary{grid-template-columns:repeat(2,1fr)}}
+/* 매칭 결과 테이블 */
+.cp-chip{display:inline-block;font-family:var(--mo);font-size:.66rem;font-weight:800;padding:.14rem .55rem;border-radius:10px;letter-spacing:.03em;white-space:nowrap}
+.cp-chip.fit{background:rgba(74,240,168,.16);color:var(--g);border:1px solid rgba(74,240,168,.4)}
+.cp-chip.short{background:rgba(240,196,74,.16);color:var(--y);border:1px solid rgba(240,196,74,.4)}
+.cp-chip.zero{background:rgba(240,88,88,.16);color:var(--r);border:1px solid rgba(240,88,88,.4)}
+.cp-chip.over{background:rgba(192,132,252,.14);color:var(--p);border:1px solid rgba(192,132,252,.4)}
+.cp-cell-center{color:#ffb84a;font-weight:700;font-size:.78rem}
+.cp-cell-po{font-family:var(--mo);font-size:.7rem;color:var(--mu)}
+.cp-cell-eta{font-family:var(--mo);color:var(--b);font-size:.74rem}
+tr.cp-row-zero td{background:rgba(240,88,88,.04)}
+tr.cp-row-short td{background:rgba(240,196,74,.03)}
+.cp-step-cta{margin-top:.85rem;padding:.95rem 1rem;background:var(--s1);border:1px solid var(--br);border-radius:9px;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.cp-step-cta .label{flex:1;font-size:.78rem;color:var(--mu)}
 </style>
 </head>
 <body>
@@ -204,6 +234,7 @@ h1 em{color:var(--g);font-style:normal}
 
   <div class="tabs">
     <button class="tab-btn on" id="tabNewBtn" onclick="setTab('new')">✏️ 새 지시서 작성</button>
+    <button class="tab-btn" id="tabCoupangBtn" onclick="setTab('coupang')" style="color:#ffb84a">📦 쿠팡 지시서</button>
     <button class="tab-btn" id="tabListBtn" onclick="setTab('list')">📚 저장된 지시서</button>
   </div>
 
@@ -306,6 +337,78 @@ h1 em{color:var(--g);font-style:normal}
     <div class="print-preview" id="printPreview"></div>
   </div>
 
+  <!-- ─────────────── 쿠팡 지시서 화면 (Step 1) ─────────────── -->
+  <div id="tabCoupang" style="display:none">
+    <div id="cpMsg" class="msg" style="display:none"></div>
+
+    <div class="form-panel">
+      <div class="form-title" style="color:#ffb84a">① 업체 정보 (인쇄·기록용)</div>
+      <div class="form-row">
+        <div class="fld">
+          <label>업체명</label>
+          <input type="text" id="cpVendor" placeholder="예: ○○상사" maxlength="80" oninput="cpOnHeaderChange()">
+        </div>
+        <div class="fld">
+          <label>업체코드 (선택)</label>
+          <input type="text" id="cpVendorCode" placeholder="예: V0001" maxlength="40" oninput="cpOnHeaderChange()">
+        </div>
+        <div class="fld" style="grid-column:span 2">
+          <label>작업 메모 (선택)</label>
+          <input type="text" id="cpNote" placeholder="배차 / 차량 / 기타 메모" maxlength="200" oninput="cpOnHeaderChange()">
+        </div>
+      </div>
+    </div>
+
+    <div class="cp-hero">
+      <div class="cp-hero-title">② 쿠팡 발주 엑셀 업로드 (쿠팡 양식 그대로 사용)</div>
+      <label class="cp-drop" id="cpDrop">
+        <span style="font-size:1.4rem">📤</span>
+        <span id="cpDropLabel">쿠팡 발주 엑셀(.xlsx) 선택 또는 드래그</span>
+        <input type="file" accept=".xlsx,.xls" onchange="cpHandleExcel(this.files[0]);this.value='';">
+      </label>
+      <div class="cp-meta">필수 열: 발주번호 · SKU ID · 상품명 · 바코드 · 물류센터 · 입고예정일 · 확정수량 · 박스수 · 파렛트수 · 파렛트번호 · 유통기한</div>
+      <div class="cp-meta" id="cpFileInfo" style="display:none;color:var(--g)"></div>
+    </div>
+
+    <div class="cp-summary">
+      <div class="cp-sc"><div class="cp-sc-l">전체 라인</div><div class="cp-sc-v" id="cpSumTotal">0</div></div>
+      <div class="cp-sc fit"><div class="cp-sc-l">🟢 충족</div><div class="cp-sc-v" id="cpSumFit">0</div></div>
+      <div class="cp-sc short"><div class="cp-sc-l">🟡 부족</div><div class="cp-sc-v" id="cpSumShort">0</div></div>
+      <div class="cp-sc zero"><div class="cp-sc-l">🔴 재고 없음</div><div class="cp-sc-v" id="cpSumZero">0</div></div>
+    </div>
+
+    <div class="items-sec">
+      <div class="tbl-wrap" style="max-height:55vh">
+        <table class="tbl">
+          <thead><tr>
+            <th>#</th>
+            <th>발주번호</th>
+            <th>물류센터</th>
+            <th>입고예정일</th>
+            <th>SKU ID</th>
+            <th>상품명</th>
+            <th>바코드</th>
+            <th style="text-align:right">발주수량</th>
+            <th style="text-align:right">현재고</th>
+            <th style="text-align:right">출고가능</th>
+            <th>매칭상태</th>
+            <th style="text-align:right">박스수</th>
+            <th style="text-align:right">파렛트</th>
+          </tr></thead>
+          <tbody id="cpRowsBody">
+            <tr><td colspan="13" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="cp-step-cta">
+      <span class="label">Step 1 — 발주 업로드 + 재고 대조 완료 후 Step 2(스캔/파렛트 적재)로 진행</span>
+      <button class="btn btn-s" onclick="cpReset()">🔄 처음부터</button>
+      <button class="btn btn-b" disabled title="Step 2 에서 구현">▶ 스캔 시작 (Step 2)</button>
+    </div>
+  </div>
+
   <!-- ─────────────── 목록 화면 ─────────────── -->
   <div id="tabList" style="display:none">
     <div class="list-filter">
@@ -353,6 +456,7 @@ var ordersRef = null;     /* star_outorder/orders */
 var logsRef = null;       /* star_instock/logs — 메타 조회 + 출고 실행 시 push */
 var allOrders = [];       /* 저장된 지시서 전체 */
 var stockMeta = {};       /* 바코드(normalized) → 가장 최근 in-log 메타 */
+var stockQty = {};        /* 바코드(normalized) → 현재고 (입고합 - 출고합) */
 
 /* 현재 작성중 지시서 */
 var curOrder = newOrder();
@@ -448,34 +552,250 @@ function attachRefs(){
     renderList();
   }, function(err){ setMsg('m0','er','❌ 지시서 읽기 실패: ' + (err && err.message || err)); });
 
-  /* 2) star_instock/logs — 재고 메타 조회용 (마지막 입고 로그 기준) */
+  /* 2) star_instock/logs — 재고 메타 + 현재고 집계 */
   logsRef = db.ref('wms_sync/groups/' + groupId + '/star_instock/logs');
   logsRef.on('value', function(snap){
     var v = snap.val() || {};
-    var byBc = {};
+    var byBc = {};   /* stockMeta (마지막 입고 메타) */
+    var qty = {};    /* stockQty (입고합 - 출고합) */
     Object.keys(v).forEach(function(k){
       var lg = v[k] || {};
-      if (lg.type === 'out') return; /* 메타는 입고 기준 */
       var bc = normBarcode(lg.barcode);
       if (!bc) return;
-      if (!byBc[bc] || (lg.ts||0) > (byBc[bc].ts||0)) byBc[bc] = lg;
+      var q = +lg.qty || 0;
+      if (lg.type === 'out') {
+        qty[bc] = (qty[bc] || 0) - q;
+      } else {
+        qty[bc] = (qty[bc] || 0) + q;
+        if (!byBc[bc] || (lg.ts||0) > (byBc[bc].ts||0)) byBc[bc] = lg;
+      }
     });
     stockMeta = byBc;
+    stockQty = qty;
+    /* 쿠팡 탭이 열려있으면 매칭 결과 자동 갱신 */
+    if (document.getElementById('tabCoupang') && document.getElementById('tabCoupang').style.display !== 'none') {
+      cpRender();
+    }
   }, function(err){ console.warn('[outorder] logs read 실패', err); });
 }
 
 /* ─────────────── 탭 ─────────────── */
 function setTab(t){
-  var n = document.getElementById('tabNew'), l = document.getElementById('tabList');
-  var nb = document.getElementById('tabNewBtn'), lb = document.getElementById('tabListBtn');
+  var n = document.getElementById('tabNew');
+  var c = document.getElementById('tabCoupang');
+  var l = document.getElementById('tabList');
+  var nb = document.getElementById('tabNewBtn');
+  var cb = document.getElementById('tabCoupangBtn');
+  var lb = document.getElementById('tabListBtn');
+  n.style.display='none'; c.style.display='none'; l.style.display='none';
+  nb.classList.remove('on'); cb.classList.remove('on'); lb.classList.remove('on');
   if (t === 'list') {
-    n.style.display='none'; l.style.display='';
-    nb.classList.remove('on'); lb.classList.add('on');
+    l.style.display=''; lb.classList.add('on');
     renderList();
+  } else if (t === 'coupang') {
+    c.style.display=''; cb.classList.add('on');
+    cpRefreshAll();
   } else {
-    n.style.display=''; l.style.display='none';
-    nb.classList.add('on'); lb.classList.remove('on');
+    n.style.display=''; nb.classList.add('on');
   }
+}
+
+/* ─────────────── 쿠팡 지시서 모드 (Step 1) ─────────────── */
+/* localStorage 키 — 그룹별로 별도 보관해서 다른 그룹 데이터와 섞이지 않게 */
+function cpLsKey(){ return 'star_outorder.coupang.draft.' + (groupId||'_'); }
+var CP_HEADER_ALIASES = {
+  po:       ['발주번호'],
+  status:   ['발주현황'],
+  skuId:    ['SKU ID', 'SKU'],
+  skuName:  ['SKU 이름', 'SKU명', '상품명'],
+  barcode:  ['SKU Barcode', '바코드'],
+  center:   ['물류센터'],
+  eta:      ['입고예정일', '도착예정일', '입고일'],
+  qty:      ['확정수량', '수량'],
+  box:      ['박스수'],
+  palletT:  ['파렛트수', '팔레트수'],
+  palletN:  ['파렛트번호', '팔레트번호'],
+  expiry:   ['유통(소비)기한', '유통기한', '소비기한']
+};
+var cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0 };
+
+function cpFindCol(headers, aliases){
+  for (var i=0; i<aliases.length; i++){
+    var a = aliases[i];
+    var idx = headers.findIndex(function(h){ return (h||'').toString().trim() === a; });
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+function cpFmtEta(raw){
+  if (raw === null || raw === undefined || raw === '') return '';
+  /* 엑셀 시리얼 날짜 처리 */
+  if (typeof raw === 'number' && raw > 30000 && raw < 80000 && window.XLSX && XLSX.SSF) {
+    try {
+      var d = XLSX.SSF.parse_date_code(raw);
+      if (d) return d.y + '-' + pad2(d.m) + '-' + pad2(d.d);
+    } catch(e){}
+  }
+  return String(raw).trim();
+}
+function cpHandleExcel(file){
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { setMsg('cpMsg','er','❌ XLSX 라이브러리 로딩 실패'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(e.target.result, { type:'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      if (aoa.length < 2) throw new Error('데이터가 비어 있습니다.');
+      var headers = aoa[0].map(function(h){ return (h||'').toString().trim(); });
+      var idx = {};
+      Object.keys(CP_HEADER_ALIASES).forEach(function(k){
+        idx[k] = cpFindCol(headers, CP_HEADER_ALIASES[k]);
+      });
+      var required = ['po','skuId','skuName','barcode','center','eta','qty'];
+      var missing = required.filter(function(k){ return idx[k] === -1; });
+      if (missing.length) throw new Error('엑셀에서 다음 열을 찾을 수 없습니다: ' + missing.join(', '));
+
+      var rows = aoa.slice(1)
+        .filter(function(r){ return r && r.some(function(c){ return c !== '' && c !== null; }); })
+        .map(function(r){
+          return {
+            po:       String(r[idx.po] || '').trim(),
+            status:   idx.status !== -1 ? String(r[idx.status]||'').trim() : '',
+            skuId:    String(r[idx.skuId]||'').trim(),
+            skuName:  String(r[idx.skuName]||'').trim(),
+            barcode:  String(r[idx.barcode]||'').trim(),
+            center:   String(r[idx.center]||'').trim(),
+            eta:      cpFmtEta(r[idx.eta]),
+            qty:      +r[idx.qty] || 0,
+            box:      idx.box     !== -1 ? (+r[idx.box]||0) : 0,
+            palletT:  idx.palletT !== -1 ? (+r[idx.palletT]||0) : 0,
+            palletN:  idx.palletN !== -1 ? (+r[idx.palletN]||0) : 0,
+            expiry:   idx.expiry  !== -1 ? String(r[idx.expiry]||'').trim() : ''
+          };
+        })
+        .filter(function(r){ return r.barcode || r.skuId; });
+
+      if (!rows.length) throw new Error('유효한 데이터 행이 없습니다');
+
+      cpState.rows = rows;
+      cpState.fileName = file.name;
+      cpState.uploadedAt = Date.now();
+      cpSavePersist();
+      cpRender();
+      var fi = document.getElementById('cpFileInfo');
+      fi.style.display=''; fi.textContent = '✓ ' + file.name + ' · ' + rows.length + '라인 업로드됨';
+      setMsg('cpMsg','ok','✓ ' + rows.length + '라인 업로드 — 재고 매칭 결과 아래 확인');
+    } catch(err) {
+      setMsg('cpMsg','er','❌ 엑셀 파싱 실패: ' + (err && err.message || err));
+    }
+  };
+  reader.onerror = function(){ setMsg('cpMsg','er','❌ 파일 읽기 실패'); };
+  reader.readAsArrayBuffer(file);
+}
+
+function cpClassify(row){
+  /* 재고 매칭: 충족 / 부족 / 없음 / 초과 */
+  var bc = normBarcode(row.barcode);
+  var have = bc ? (stockQty[bc] || 0) : 0;
+  var need = +row.qty || 0;
+  var canShip = Math.max(0, Math.min(have, need));
+  var status;
+  if (have <= 0) status = 'zero';
+  else if (have < need) status = 'short';
+  else status = 'fit';
+  return { have:have, canShip:canShip, short: Math.max(0, need-have), status:status };
+}
+
+function cpRender(){
+  var tb = document.getElementById('cpRowsBody');
+  if (!tb) return;
+  var rows = cpState.rows || [];
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="13" class="empty-row">아직 업로드 안 됨 — 위에서 쿠팡 발주 엑셀을 선택하세요</td></tr>';
+    cpUpdateSummary({total:0, fit:0, short:0, zero:0});
+    return;
+  }
+  var sum = {total:rows.length, fit:0, short:0, zero:0};
+  tb.innerHTML = rows.map(function(r, i){
+    var m = cpClassify(r);
+    sum[m.status]++;
+    var chipLabel = m.status === 'fit' ? '🟢 충족' : m.status === 'short' ? '🟡 부족 ' + m.short : '🔴 없음';
+    var rowCls = m.status === 'zero' ? 'cp-row-zero' : m.status === 'short' ? 'cp-row-short' : '';
+    return '<tr class="' + rowCls + '">'+
+      '<td style="color:var(--mu);font-family:var(--mo);font-size:.72rem">'+(i+1)+'</td>'+
+      '<td class="cp-cell-po">'+escH(r.po)+'</td>'+
+      '<td class="cp-cell-center">'+escH(r.center)+'</td>'+
+      '<td class="cp-cell-eta">'+escH(r.eta)+'</td>'+
+      '<td style="font-family:var(--mo);font-size:.72rem;color:var(--mu)">'+escH(r.skuId)+'</td>'+
+      '<td class="cell-name" title="'+escH(r.skuName)+'">'+escH(r.skuName)+'</td>'+
+      '<td class="cell-bc">'+escH(r.barcode)+'</td>'+
+      '<td class="cell-num">'+r.qty+'</td>'+
+      '<td class="cell-num" style="color:'+(m.have>0?'var(--g)':'var(--r)')+'">'+m.have+'</td>'+
+      '<td class="cell-num">'+m.canShip+'</td>'+
+      '<td><span class="cp-chip '+m.status+'">'+chipLabel+'</span></td>'+
+      '<td class="cell-num">'+(r.box||0)+'</td>'+
+      '<td class="cell-num">'+(r.palletT?(r.palletN+'/'+r.palletT):'-')+'</td>'+
+    '</tr>';
+  }).join('');
+  cpUpdateSummary(sum);
+}
+function cpUpdateSummary(s){
+  document.getElementById('cpSumTotal').textContent = s.total;
+  document.getElementById('cpSumFit').textContent   = s.fit;
+  document.getElementById('cpSumShort').textContent = s.short;
+  document.getElementById('cpSumZero').textContent  = s.zero;
+}
+function cpOnHeaderChange(){
+  cpState.vendor     = document.getElementById('cpVendor').value || '';
+  cpState.vendorCode = document.getElementById('cpVendorCode').value || '';
+  cpState.note       = document.getElementById('cpNote').value || '';
+  cpSavePersist();
+}
+function cpReset(){
+  if (cpState.rows.length || cpState.vendor) {
+    if (!confirm('업로드된 쿠팡 데이터와 업체정보를 모두 비웁니다. 계속할까요?')) return;
+  }
+  cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0 };
+  cpSavePersist();
+  cpSyncToForm();
+  cpRender();
+  var fi = document.getElementById('cpFileInfo');
+  if (fi) { fi.style.display='none'; fi.textContent=''; }
+  hideMsg('cpMsg');
+}
+function cpSavePersist(){
+  try { localStorage.setItem(cpLsKey(), JSON.stringify(cpState)); } catch(e){}
+}
+function cpLoadPersist(){
+  try {
+    var raw = localStorage.getItem(cpLsKey());
+    if (!raw) return;
+    var v = JSON.parse(raw);
+    if (v && typeof v === 'object') {
+      cpState.vendor     = v.vendor || '';
+      cpState.vendorCode = v.vendorCode || '';
+      cpState.note       = v.note || '';
+      cpState.rows       = Array.isArray(v.rows) ? v.rows : [];
+      cpState.fileName   = v.fileName || '';
+      cpState.uploadedAt = +v.uploadedAt || 0;
+    }
+  } catch(e){}
+}
+function cpSyncToForm(){
+  var v = document.getElementById('cpVendor');         if (v) v.value = cpState.vendor || '';
+  var c = document.getElementById('cpVendorCode');     if (c) c.value = cpState.vendorCode || '';
+  var n = document.getElementById('cpNote');           if (n) n.value = cpState.note || '';
+  var fi = document.getElementById('cpFileInfo');
+  if (fi && cpState.fileName) {
+    fi.style.display=''; fi.textContent = '✓ ' + cpState.fileName + ' · ' + cpState.rows.length + '라인 (저장됨)';
+  }
+}
+function cpRefreshAll(){
+  cpLoadPersist();
+  cpSyncToForm();
+  cpRender();
 }
 
 /* ─────────────── 헤더 폼 ─────────────── */
