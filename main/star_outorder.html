@@ -349,6 +349,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-title{font-size:.9rem;color:var(--g);font-family:var(--mo);letter-spacing:.04em;font-weight:800;margin-bottom:.6rem;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .cp-done-title .count{background:var(--g);color:#0f1117;padding:.12rem .55rem;border-radius:10px;font-size:.74rem;font-weight:900}
 .cp-done-title .meta{margin-left:auto;font-size:.7rem;color:var(--mu);font-weight:700}
+.cp-done-title .bak-actions{display:flex;gap:.4rem;align-items:center}
+.cp-done-title .bak-btn{background:var(--s2);color:var(--tx);border:1px solid var(--br);font-size:.72rem;font-weight:800;padding:.32rem .65rem;border-radius:5px;cursor:pointer;position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:.3rem}
+.cp-done-title .bak-btn:hover{border-color:var(--g);color:var(--g)}
+.cp-done-title .bak-btn.restore{color:var(--y);border-color:rgba(240,196,74,.35)}
+.cp-done-title .bak-btn.restore:hover{border-color:var(--y)}
+.cp-done-title .bak-btn input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 .cp-done-wrap{max-height:360px;overflow:auto;border:1px solid var(--br);border-radius:7px}
 .cp-done-tbl{width:100%;border-collapse:collapse;font-size:.8rem}
 .cp-done-tbl thead th{position:sticky;top:0;z-index:5;background:var(--s2);color:var(--mu);font-weight:800;text-align:left;padding:.52rem .55rem;font-size:.66rem;letter-spacing:.04em;border-bottom:1.5px solid var(--br);white-space:nowrap}
@@ -804,6 +810,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div class="cp-done-title">
           ✓ 완료풀 — 출고 누적 <span class="count" id="cpDoneCount">0</span>
           <span class="meta" id="cpDoneMeta"></span>
+          <span class="bak-actions">
+            <button class="bak-btn" onclick="cpDownloadDoneExcel()" title="현재 세션 전체를 엑셀로 백업">⬇ 엑셀 백업</button>
+            <button class="bak-btn restore" title="엑셀 백업 파일 업로드 → 그 시점으로 복원">⬆ 복원
+              <input type="file" accept=".xlsx,.xls" onchange="cpUploadDoneExcel(this.files[0]);this.value='';">
+            </button>
+          </span>
         </div>
         <div class="cp-done-wrap">
           <table class="cp-done-tbl">
@@ -2327,6 +2339,182 @@ function cpPrintMixLabel(shipBoxNo){
       if (s) s.remove();
     }, 1500);
   }, 80);
+}
+
+/* ═══════════ 엑셀 백업 / 복원 ═══════════
+ * 데이터 안전 추가 장치 — 완료풀(사람용 표) + _세션메타(복원용 JSON) 다중 시트로.
+ * 복원 시 새 sessionId-RESTORED 로 별도 세션 만듦 (기존은 paused).
+ */
+function cpDownloadDoneExcel(){
+  if (!workSession) { cpFlash('warn','⚠️ 진행 중 세션이 없습니다'); return; }
+  if (typeof XLSX === 'undefined') { cpFlash('er','❌ XLSX 라이브러리 로딩 실패'); return; }
+
+  var wb = XLSX.utils.book_new();
+  var rows = workSession.rows || [];
+  /* 진행률 캐시 */
+  var progCache = {};
+  rows.forEach(function(r, i){ progCache[i] = cpComputeRowProgress(i); });
+
+  /* 시트 1: 완료풀 (사람용 표) */
+  var doneAoa = [['박스번호','박스바코드','바코드','품번','사이즈','입고예정','출고','잔여','입고일','센터','파렛','undone']];
+  (workSession.scans||[]).slice().reverse().forEach(function(s){
+    var r = rows[s.srcIdx] || {};
+    var meta = stockMeta[normBarcode(s.barcode)] || {};
+    var prog = progCache[s.srcIdx] || {shipped:0};
+    var need = +r.qty || 0;
+    doneAoa.push([
+      s.shipBoxNo || s.srcBoxBarcode || '',
+      s.srcBoxBarcode || s.boxBarcode || (s.shipBoxNo||''),
+      s.barcode || '',
+      meta.code || '',
+      meta.size || '',
+      need,
+      +s.qty || 0,
+      Math.max(0, need - prog.shipped),
+      r.eta || '',
+      r.center || '',
+      s.palletNo || 1,
+      s.undone ? 1 : 0
+    ]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(doneAoa), '완료풀');
+
+  /* 시트 2: 출고박스 요약 (사람용) */
+  var shipAoa = [['박스번호','센터','입고일','상태','SKU종수','총수량','원본박스(단일)','만든시각']];
+  (workSession.shipBoxes||[]).forEach(function(b){
+    var bScans = (workSession.scans||[]).filter(function(s){return !s.undone && s.shipBoxNo===b.boxNo;});
+    var skuSet = {};
+    var qSum = 0;
+    bScans.forEach(function(s){ skuSet[s.barcode]=true; qSum += (+s.qty||0); });
+    shipAoa.push([
+      b.boxNo, b.center||'', b.eta||'', b.status||'',
+      Object.keys(skuSet).length, qSum,
+      b.srcBoxBarcode || '',
+      b.createdAt ? new Date(b.createdAt).toISOString() : ''
+    ]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shipAoa), '출고박스');
+
+  /* 시트 3: _세션메타 (복원용 JSON 한 셀) */
+  var snap = {
+    schema: 'cp-session-v1',
+    savedAt: Date.now(),
+    sessionId: workSession.sessionId,
+    vendor: workSession.vendor||'', vendorCode: workSession.vendorCode||'', note: workSession.note||'',
+    poFileName: workSession.poFileName||'', uploadedAt: workSession.uploadedAt||0,
+    curPallet: workSession.curPallet||1,
+    rows: workSession.rows||[],
+    scans: workSession.scans||[],
+    pending: workSession.pending||[],
+    shipBoxes: workSession.shipBoxes||[],
+    pallets: workSession.pallets||[],
+    holdPool: workSession.holdPool||[]
+  };
+  var metaAoa = [
+    ['key','value'],
+    ['schema', snap.schema],
+    ['savedAt(ISO)', new Date(snap.savedAt).toISOString()],
+    ['sessionId', snap.sessionId||''],
+    ['vendor', snap.vendor],
+    ['vendorCode', snap.vendorCode],
+    ['note', snap.note],
+    ['poFileName', snap.poFileName],
+    ['curPallet', snap.curPallet],
+    ['scansCount', (snap.scans||[]).length],
+    ['pendingCount', (snap.pending||[]).length],
+    ['shipBoxesCount', (snap.shipBoxes||[]).length],
+    ['palletsCount', (snap.pallets||[]).length],
+    ['holdPoolCount', (snap.holdPool||[]).length],
+    ['__JSON__', JSON.stringify(snap)]
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(metaAoa), '_세션메타');
+
+  /* 파일명: 업체_시각_세션ID */
+  var pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
+  var dt = new Date();
+  var tstamp = dt.getFullYear()+pad(dt.getMonth()+1)+pad(dt.getDate())+'-'+pad(dt.getHours())+pad(dt.getMinutes());
+  var safeVendor = (workSession.vendor||'세션').replace(/[\\/:*?"<>|]/g,'_').substring(0,20);
+  var fname = '쿠팡출고_백업_' + safeVendor + '_' + tstamp + '_' + (workSession.sessionId||'') + '.xlsx';
+  try {
+    XLSX.writeFile(wb, fname);
+    cpFlash('ok','✓ 엑셀 백업 다운로드: '+fname);
+  } catch(err){
+    cpFlash('er','❌ 다운로드 실패: '+escH(err && err.message || err));
+  }
+}
+
+function cpUploadDoneExcel(file){
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { cpFlash('er','❌ XLSX 라이브러리 없음'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(e.target.result, {type:'array'});
+      var metaSheet = wb.Sheets['_세션메타'];
+      if (!metaSheet) throw new Error('백업 파일이 아닙니다 (_세션메타 시트 없음)');
+      var aoa = XLSX.utils.sheet_to_json(metaSheet, {header:1, defval:''});
+      var jsonRow = aoa.find(function(row){ return row && row[0] === '__JSON__'; });
+      if (!jsonRow || !jsonRow[1]) throw new Error('백업 JSON 데이터 없음');
+      var snap = JSON.parse(String(jsonRow[1]));
+      if (snap.schema !== 'cp-session-v1') throw new Error('호환 안 되는 백업 스키마: '+snap.schema);
+
+      var savedStr = snap.savedAt ? new Date(snap.savedAt).toLocaleString() : '-';
+      var msg = '백업 복원하시겠습니까?\n\n'+
+                '저장 시각: ' + savedStr + '\n'+
+                '업체: ' + (snap.vendor||'-') + '\n'+
+                'PO 파일: ' + (snap.poFileName||'-') + '\n'+
+                '스캔 ' + (snap.scans||[]).length + '건 · 대기 ' + (snap.pending||[]).length + '건 · 출고박스 ' + (snap.shipBoxes||[]).length + '개\n\n'+
+                '※ 새 세션으로 복원됩니다 (기존 활성 세션은 일시정지 처리).';
+      if (!confirm(msg)) return;
+
+      if (!groupId || typeof firebase === 'undefined') { cpFlash('er','❌ Firebase 연결 안 됨'); return; }
+
+      /* 기존 활성 세션 paused */
+      if (workSessionRef && cpHasActiveSession()) {
+        workSessionRef.update({ status:'paused', pausedAt:Date.now(), pausedBy:getUserId() }).catch(function(){});
+        try { workSessionRef.off(); } catch(_){}
+      }
+
+      var newId = cpNewSessionId() + '-RESTORED';
+      var sess = {
+        sessionId: newId,
+        status: 'active',
+        createdAt: Date.now(),
+        createdBy: getUserId(),
+        updatedAt: Date.now(),
+        vendor: snap.vendor||'', vendorCode: snap.vendorCode||'', note: snap.note||'',
+        poFileName: snap.poFileName||'', uploadedAt: snap.uploadedAt||0,
+        curPallet: snap.curPallet||1,
+        rows: snap.rows||[],
+        scans: snap.scans||[],
+        pending: snap.pending||[],
+        shipBoxes: snap.shipBoxes||[],
+        pallets: snap.pallets||[],
+        holdPool: snap.holdPool||[],
+        restoredFrom: snap.sessionId||'',
+        restoredFromSavedAt: snap.savedAt||0,
+        restoredAt: Date.now()
+      };
+
+      var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + newId);
+      ref.set(sess).then(function(){
+        workSession = sess;
+        workSessionRef = ref;
+        try { localStorage.setItem(cpSessLsKey(), newId); } catch(_){}
+        cpAttachSessionListener();
+        cpRefreshSessionHdr();
+        cpRefreshScanUI();
+        cpSetSubView('scan');
+        cpFlash('ok','✓ 백업 복원 완료 — 새 세션 ' + newId + '. 스캔 ' + (snap.scans||[]).length + '건 적재 상태로 시작.');
+      }).catch(function(err){
+        cpFlash('er','❌ 복원 실패: '+escH(err && err.message || err));
+      });
+    } catch(err) {
+      cpFlash('er','❌ 백업 읽기 실패: '+escH(err && err.message || err));
+    }
+  };
+  reader.onerror = function(){ cpFlash('er','❌ 파일 읽기 실패'); };
+  reader.readAsArrayBuffer(file);
 }
 
 /* ═══════════ 처리 대기 (혼적 박스 SKU) ═══════════ */
