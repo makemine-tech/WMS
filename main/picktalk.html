@@ -156,6 +156,11 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .cal-day .dcnt{font-size:.6rem;font-weight:900;background:var(--b);color:#fff;border-radius:8px;padding:.04rem .35rem;margin-top:.18rem;min-width:18px}
 .cal-day.sel .dcnt{background:#0f1117;color:#fff}
 .cal-day.empty .dcnt{display:none}
+/* 캘린더 셀 우상단 날씨 아이콘 (오늘+16일까지만 표시) */
+.cal-day .dwx{position:absolute;top:2px;right:3px;font-size:.78rem;line-height:1;opacity:.95;pointer-events:none}
+.cal-day.sel .dwx{filter:drop-shadow(0 0 1px rgba(0,0,0,.5))}
+/* 카드 날짜 칩 내부의 작은 날씨 아이콘 */
+.m-pill .m-wx{margin-left:.32rem;font-size:.85em;opacity:.95}
 /* 컬러 라인 띠 — 카테고리 색, 시작/중간/끝 표시 */
 .cal-day{padding-bottom:14px}
 .cal-day .dlines{position:absolute;left:0;right:0;bottom:3px;display:flex;flex-direction:column;gap:1.5px;pointer-events:none}
@@ -864,6 +869,120 @@ function toast(msg, kind){
   w.appendChild(el);
   setTimeout(function(){ try{el.remove();}catch(e){} }, 2400);
 }
+/* ═══════════ 날씨 예보 (Open-Meteo, 키 불필요) ═══════════
+ * 좌표: 김포 양촌읍 대포산단로 42 (37.6114, 126.6271)
+ * - 16일치 일별 예보 (그 이상은 기상학적으로 불가능)
+ * - localStorage 1시간 캐시 (같은 날 여러 번 새로고침해도 API 안 부름)
+ * - WMO weather_code → 이모지 매핑 */
+var WEATHER = {
+  lat: 37.6114, lon: 126.6271, name: '김포 양촌',
+  data: {},          /* { 'YYYY-MM-DD': {code, max, min, pop} } */
+  loaded: false
+};
+var WEATHER_LS_KEY = 'picktalk.weather.v1';
+var WEATHER_TTL_MS = 60 * 60 * 1000; /* 1시간 */
+function weatherCodeToIcon(c){
+  if (c === 0) return '☀️';
+  if (c === 1) return '🌤️';
+  if (c === 2) return '⛅';
+  if (c === 3) return '☁️';
+  if (c === 45 || c === 48) return '🌫️';
+  if (c >= 51 && c <= 57) return '🌦️';
+  if (c >= 61 && c <= 67) return '🌧️';
+  if (c >= 71 && c <= 77) return '❄️';
+  if (c >= 80 && c <= 82) return '🌦️';
+  if (c >= 85 && c <= 86) return '🌨️';
+  if (c >= 95 && c <= 99) return '⛈️';
+  return '';
+}
+function weatherCodeToLabel(c){
+  if (c === 0) return '맑음';
+  if (c === 1) return '대체로 맑음';
+  if (c === 2) return '부분 구름';
+  if (c === 3) return '흐림';
+  if (c === 45 || c === 48) return '안개';
+  if (c >= 51 && c <= 57) return '이슬비';
+  if (c >= 61 && c <= 67) return '비';
+  if (c >= 71 && c <= 77) return '눈';
+  if (c >= 80 && c <= 82) return '소나기';
+  if (c >= 85 && c <= 86) return '눈 소나기';
+  if (c === 95) return '천둥번개';
+  if (c >= 96 && c <= 99) return '우박 천둥번개';
+  return '';
+}
+/* dateInt(YYYYMMDD) → 날씨 객체 {icon, label, max, min, pop} 또는 null (예보 범위 밖) */
+function weatherForDate(yi){
+  if (!yi || !WEATHER.loaded) return null;
+  var y = Math.floor(yi/10000), m = Math.floor((yi%10000)/100), d = yi%100;
+  var key = y + '-' + pad2(m) + '-' + pad2(d);
+  var w = WEATHER.data[key];
+  if (!w) return null;
+  return {
+    icon:  weatherCodeToIcon(w.code),
+    label: weatherCodeToLabel(w.code),
+    max:   w.max, min: w.min, pop: w.pop,
+    code:  w.code
+  };
+}
+function loadWeatherFromCache(){
+  try {
+    var raw = localStorage.getItem(WEATHER_LS_KEY);
+    if (!raw) return false;
+    var obj = JSON.parse(raw);
+    if (!obj || !obj.ts || !obj.data) return false;
+    if (Date.now() - obj.ts > WEATHER_TTL_MS) return false; /* 만료 */
+    WEATHER.data = obj.data;
+    WEATHER.loaded = true;
+    return true;
+  } catch(e){ return false; }
+}
+function saveWeatherToCache(){
+  try {
+    localStorage.setItem(WEATHER_LS_KEY, JSON.stringify({ ts: Date.now(), data: WEATHER.data }));
+  } catch(e){}
+}
+function fetchWeather(force){
+  if (!force && loadWeatherFromCache()){
+    /* 캐시 hit — 호출 불필요. 단 화면이 이미 그려졌으면 갱신 */
+    onWeatherReady();
+    return;
+  }
+  var url = 'https://api.open-meteo.com/v1/forecast'
+    + '?latitude=' + WEATHER.lat
+    + '&longitude=' + WEATHER.lon
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+    + '&timezone=Asia%2FSeoul&forecast_days=16';
+  fetch(url).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.daily || !Array.isArray(j.daily.time)) throw new Error('invalid response');
+    var t  = j.daily.time;
+    var wc = j.daily.weather_code || [];
+    var tx = j.daily.temperature_2m_max || [];
+    var tn = j.daily.temperature_2m_min || [];
+    var pp = j.daily.precipitation_probability_max || [];
+    var data = {};
+    for (var i=0; i<t.length; i++){
+      data[t[i]] = {
+        code: wc[i],
+        max:  Math.round(tx[i]),
+        min:  Math.round(tn[i]),
+        pop:  pp[i] || 0
+      };
+    }
+    WEATHER.data = data;
+    WEATHER.loaded = true;
+    saveWeatherToCache();
+    onWeatherReady();
+  }).catch(function(err){
+    console.warn('[weather] fetch 실패', err);
+    /* 실패 시 조용히 — 날씨 없이도 앱은 동작 */
+  });
+}
+/* 날씨 로드 완료 시 화면 갱신 — 이미 렌더된 목록·캘린더 다시 그림 */
+function onWeatherReady(){
+  try { if (typeof renderList === 'function') renderList(); } catch(e){}
+  try { if (typeof renderCalendar === 'function') renderCalendar(); } catch(e){}
+}
+
 /* 날짜 입력 — 입력값을 파싱해서 미리보기 갱신 (YYYY-MM-DD + 요일) */
 function onDateInput(inp){
   var prev = document.getElementById('fldDatePreview');
@@ -1215,7 +1334,15 @@ function renderFeedCard(lg){
   var name=lg.categoryName||c.name||'(삭제됨)';
   var color=c.color||'#7c8399';
   var meta=[];
-  if (lg.dateInt) meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+' ('+ymdIntDow(lg.dateInt)+')</span>');
+  if (lg.dateInt){
+    var _w = weatherForDate(lg.dateInt);
+    var _wPart = '';
+    if (_w && _w.icon){
+      var _wTitle = _w.label + ' · 최고 ' + _w.max + '° / 최저 ' + _w.min + '°' + (_w.pop >= 10 ? ' · 강수 ' + _w.pop + '%' : '');
+      _wPart = '<span class="m-wx" title="'+escAttr(_wTitle)+'">'+_w.icon+'</span>';
+    }
+    meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+' ('+ymdIntDow(lg.dateInt)+')'+_wPart+'</span>');
+  }
   if (lg.time) meta.push('<span class="m-pill m-time">🕐 '+escH(lg.time)+'</span>');
   var vendorTxt = '';
   if (Array.isArray(lg.vendorNames) && lg.vendorNames.length) vendorTxt = lg.vendorNames.join(', ');
@@ -1621,8 +1748,12 @@ function renderCalendar(){
         (extra > 0 ? '<div class="dline-more">+'+extra+'</div>' : '') +
       '</div>';
     }
+    /* 날씨 아이콘 — 오늘+16일 이내만, 그 외엔 비표시 */
+    var _calW = weatherForDate(di);
+    var _calWHtml = (_calW && _calW.icon) ? '<div class="dwx" title="'+escAttr(_calW.label+' '+_calW.max+'°/'+_calW.min+'°')+'">'+_calW.icon+'</div>' : '';
     html+='<div class="cal-day '+sel+' '+todayCls+'" onclick="selectCalDay('+di+')">'+
       '<div class="dnum">'+d+'</div>'+
+      _calWHtml +
       cntHtml +
       linesHtml +
     '</div>';
@@ -2875,9 +3006,14 @@ function setupFCM(){
   registerSW();
   /* 상단 알림 dot 초기 상태 */
   refreshTutorialState();
-  /* 페이지 복귀 시 앱 배지 재동기화 */
+  /* 날씨 예보 로드 — 캐시 우선 (1시간), 만료 시 fetch */
+  try { fetchWeather(false); } catch(e){ console.warn('[weather] init 실패', e); }
+  /* 페이지 복귀 시 앱 배지 재동기화 + 날씨 캐시 만료 검사 */
   document.addEventListener('visibilitychange', function(){
-    if (document.visibilityState === 'visible') syncAppBadge();
+    if (document.visibilityState === 'visible'){
+      syncAppBadge();
+      try { fetchWeather(false); } catch(e){}
+    }
   });
 })();
 </script>
