@@ -156,11 +156,13 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .cal-day .dcnt{font-size:.6rem;font-weight:900;background:var(--b);color:#fff;border-radius:8px;padding:.04rem .35rem;margin-top:.18rem;min-width:18px}
 .cal-day.sel .dcnt{background:#0f1117;color:#fff}
 .cal-day.empty .dcnt{display:none}
-/* 캘린더 셀 우상단 날씨 아이콘 (오늘+16일까지만 표시) */
-.cal-day .dwx{position:absolute;top:2px;right:3px;font-size:.78rem;line-height:1;opacity:.95;pointer-events:none;transform-origin:center}
-.cal-day.sel .dwx{filter:drop-shadow(0 0 1px rgba(0,0,0,.5))}
+/* 캘린더 셀 우상단 날씨 아이콘 (Meteocons 라인 SVG, 오늘+16일까지만) */
+.cal-day .dwx{position:absolute;top:2px;right:3px;width:22px;height:22px;line-height:0;opacity:.95;pointer-events:none;transform-origin:center}
+.cal-day .dwx img{width:100%;height:100%;display:block;filter:brightness(1.45) contrast(.95)}
+.cal-day.sel .dwx img{filter:brightness(0) contrast(1)} /* 선택 셀은 녹색 배경 → 검정이 더 보임 */
 /* 카드 날짜 칩 내부의 작은 날씨 아이콘 */
-.m-pill .m-wx{margin-left:.32rem;font-size:.85em;opacity:.95;display:inline-block;transform-origin:center}
+.m-pill .m-wx{margin-left:.32rem;width:18px;height:18px;display:inline-block;vertical-align:middle;line-height:0;transform-origin:center}
+.m-pill .m-wx img{width:100%;height:100%;display:block;filter:brightness(1.4) contrast(.95)}
 /* 비/눈/소나기/천둥 — 부드러운 펄스 + 파란 글로우 (스무스 강조) */
 @keyframes wxWetPulse{
   0%,100%{transform:scale(1);filter:drop-shadow(0 0 0 rgba(91,156,246,0))}
@@ -895,20 +897,24 @@ var WEATHER = {
   data: {},          /* { 'YYYY-MM-DD': {code, max, min, pop} } */
   loaded: false
 };
-var WEATHER_LS_KEY = 'picktalk.weather.v1';
+var WEATHER_LS_KEY = 'picktalk.weather.v2'; /* v1 캐시 (이모지용) 무효화 */
 var WEATHER_TTL_MS = 60 * 60 * 1000; /* 1시간 */
+/* Meteocons 라인 SVG CDN (jsdelivr) */
+var METEO_URL = 'https://cdn.jsdelivr.net/gh/basmilius/weather-icons@dev/production/line/svg-static/';
+/* WMO code → Meteocons 파일명 (확장자 .svg 제외) */
 function weatherCodeToIcon(c){
-  if (c === 0) return '☀️';
-  if (c === 1) return '🌤️';
-  if (c === 2) return '⛅';
-  if (c === 3) return '☁️';
-  if (c === 45 || c === 48) return '🌫️';
-  if (c >= 51 && c <= 57) return '🌦️';
-  if (c >= 61 && c <= 67) return '🌧️';
-  if (c >= 71 && c <= 77) return '❄️';
-  if (c >= 80 && c <= 82) return '🌦️';
-  if (c >= 85 && c <= 86) return '🌨️';
-  if (c >= 95 && c <= 99) return '⛈️';
+  if (c === 0) return 'clear-day';
+  if (c === 1) return 'partly-cloudy-day';
+  if (c === 2) return 'overcast-day';
+  if (c === 3) return 'cloudy';
+  if (c === 45 || c === 48) return 'fog';
+  if (c >= 51 && c <= 57) return 'drizzle';
+  if (c >= 61 && c <= 67) return 'rain';
+  if (c >= 71 && c <= 77) return 'snow';
+  if (c >= 80 && c <= 82) return 'partly-cloudy-day-rain';
+  if (c >= 85 && c <= 86) return 'partly-cloudy-day-snow';
+  if (c === 95) return 'thunderstorms';
+  if (c >= 96 && c <= 99) return 'thunderstorms-rain';
   return '';
 }
 function weatherCodeToLabel(c){
@@ -934,20 +940,22 @@ function isWetCode(c){
 function isStormCode(c){
   return c >= 95 && c <= 99;
 }
-/* dateInt(YYYYMMDD) → 날씨 객체 {icon, label, max, min, pop, wet, storm} 또는 null (예보 범위 밖) */
+/* dateInt(YYYYMMDD) → 날씨 객체 {icon, iconUrl, label, max, min, pop, wet, storm} 또는 null */
 function weatherForDate(yi){
   if (!yi || !WEATHER.loaded) return null;
   var y = Math.floor(yi/10000), m = Math.floor((yi%10000)/100), d = yi%100;
   var key = y + '-' + pad2(m) + '-' + pad2(d);
   var w = WEATHER.data[key];
   if (!w) return null;
+  var iconName = weatherCodeToIcon(w.code);
   return {
-    icon:  weatherCodeToIcon(w.code),
-    label: weatherCodeToLabel(w.code),
-    max:   w.max, min: w.min, pop: w.pop,
-    code:  w.code,
-    wet:   isWetCode(w.code),
-    storm: isStormCode(w.code)
+    icon:    iconName,
+    iconUrl: iconName ? (METEO_URL + iconName + '.svg') : '',
+    label:   weatherCodeToLabel(w.code),
+    max:     w.max, min: w.min, pop: w.pop,
+    code:    w.code,
+    wet:     isWetCode(w.code),
+    storm:   isStormCode(w.code)
   };
 }
 function loadWeatherFromCache(){
@@ -1363,10 +1371,10 @@ function renderFeedCard(lg){
   if (lg.dateInt){
     var _w = weatherForDate(lg.dateInt);
     var _wPart = '';
-    if (_w && _w.icon){
+    if (_w && _w.iconUrl){
       var _wTitle = _w.label + ' · 최고 ' + _w.max + '° / 최저 ' + _w.min + '°' + (_w.pop >= 10 ? ' · 강수 ' + _w.pop + '%' : '');
       var _wxCls  = 'm-wx' + (_w.storm ? ' storm' : _w.wet ? ' wet' : '');
-      _wPart = '<span class="'+_wxCls+'" title="'+escAttr(_wTitle)+'">'+_w.icon+'</span>';
+      _wPart = '<span class="'+_wxCls+'" title="'+escAttr(_wTitle)+'"><img src="'+_w.iconUrl+'" alt="'+escAttr(_w.label)+'" loading="lazy"></span>';
     }
     meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+' ('+ymdIntDow(lg.dateInt)+')'+_wPart+'</span>');
   }
@@ -1775,12 +1783,12 @@ function renderCalendar(){
         (extra > 0 ? '<div class="dline-more">+'+extra+'</div>' : '') +
       '</div>';
     }
-    /* 날씨 아이콘 — 오늘+16일 이내만, 비/눈/천둥은 펄스 강조 */
+    /* 날씨 아이콘 — Meteocons 라인 SVG (오늘+16일 이내, 비/눈/천둥은 펄스 강조) */
     var _calW = weatherForDate(di);
     var _calWHtml = '';
-    if (_calW && _calW.icon){
+    if (_calW && _calW.iconUrl){
       var _calWxCls = 'dwx' + (_calW.storm ? ' storm' : _calW.wet ? ' wet' : '');
-      _calWHtml = '<div class="'+_calWxCls+'" title="'+escAttr(_calW.label+' '+_calW.max+'°/'+_calW.min+'°')+'">'+_calW.icon+'</div>';
+      _calWHtml = '<div class="'+_calWxCls+'" title="'+escAttr(_calW.label+' '+_calW.max+'°/'+_calW.min+'°')+'"><img src="'+_calW.iconUrl+'" alt="'+escAttr(_calW.label)+'" loading="lazy"></div>';
     }
     html+='<div class="cal-day '+sel+' '+todayCls+'" onclick="selectCalDay('+di+')">'+
       '<div class="dnum">'+d+'</div>'+
