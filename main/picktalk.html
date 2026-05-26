@@ -809,6 +809,21 @@ function ymdInt(ts){ var d=new Date(ts); return d.getFullYear()*10000 + (d.getMo
 function dateToYmdInt(dStr){ if(!dStr) return 0; var p=dStr.split('-'); return (+p[0])*10000+(+p[1])*100+(+p[2]); }
 function ymdIntToDateStr(yi){ if(!yi) return ''; var y=Math.floor(yi/10000), m=Math.floor((yi%10000)/100), d=yi%100; return y+'-'+pad2(m)+'-'+pad2(d); }
 function ymdIntToShort(yi){ if(!yi) return ''; var y=Math.floor(yi/10000)%100, m=Math.floor((yi%10000)/100), d=yi%100; return pad2(y)+'.'+pad2(m)+'.'+pad2(d); }
+function ymdIntToYY(yi){ if(!yi) return ''; var y=Math.floor(yi/10000)%100, m=Math.floor((yi%10000)/100), d=yi%100; return pad2(y)+pad2(m)+pad2(d); }
+function ymdIntDow(yi){ if(!yi) return ''; var y=Math.floor(yi/10000), m=Math.floor((yi%10000)/100), d=yi%100; return ['일','월','화','수','목','금','토'][new Date(y,m-1,d).getDay()]; }
+/* 사용자 입력 파서 — YYMMDD(6) / YYYYMMDD(8) / YYYY-MM-DD(10) 모두 받아 dateInt 반환. 유효 안 하면 0. */
+function parseDateInput(s){
+  if (!s) return 0;
+  var digits = String(s).replace(/\D/g,'');
+  var y, m, d;
+  if (digits.length === 6){ y = 2000 + (+digits.slice(0,2)); m = +digits.slice(2,4); d = +digits.slice(4,6); }
+  else if (digits.length === 8){ y = +digits.slice(0,4); m = +digits.slice(4,6); d = +digits.slice(6,8); }
+  else return 0;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return 0;
+  var test = new Date(y, m-1, d);
+  if (test.getFullYear() !== y || test.getMonth() !== m-1 || test.getDate() !== d) return 0;
+  return y*10000 + m*100 + d;
+}
 /* 한 로그의 캘린더 표시 일자 범위.
    사용자가 지정한 dateInt 와 자동 등록 ts 일자 사이 모든 일자에 표시. */
 function getLogDateRange(lg){
@@ -848,6 +863,21 @@ function toast(msg, kind){
   el.textContent=msg;
   w.appendChild(el);
   setTimeout(function(){ try{el.remove();}catch(e){} }, 2400);
+}
+/* 날짜 입력 — 입력값을 파싱해서 미리보기 갱신 (YYYY-MM-DD + 요일) */
+function onDateInput(inp){
+  var prev = document.getElementById('fldDatePreview');
+  if (!prev) return;
+  var raw = (inp.value||'').trim();
+  if (!raw){ prev.textContent = '날짜 미입력'; prev.style.color=''; return; }
+  var di = parseDateInput(raw);
+  if (di){
+    prev.textContent = ymdIntToDateStr(di) + ' (' + ymdIntDow(di) + ')';
+    prev.style.color = 'var(--g)';
+  } else {
+    prev.textContent = '형식이 올바르지 않습니다 (예: 260526)';
+    prev.style.color = 'var(--r)';
+  }
 }
 /* 비고 펼침/접힘 — 부모 .fc-note 에 .open 클래스 토글, 버튼 화살표도 같이 갱신 */
 function toggleNote(btn){
@@ -1185,7 +1215,7 @@ function renderFeedCard(lg){
   var name=lg.categoryName||c.name||'(삭제됨)';
   var color=c.color||'#7c8399';
   var meta=[];
-  if (lg.dateInt) meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+'</span>');
+  if (lg.dateInt) meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+' ('+ymdIntDow(lg.dateInt)+')</span>');
   if (lg.time) meta.push('<span class="m-pill m-time">🕐 '+escH(lg.time)+'</span>');
   var vendorTxt = '';
   if (Array.isArray(lg.vendorNames) && lg.vendorNames.length) vendorTxt = lg.vendorNames.join(', ');
@@ -1737,7 +1767,7 @@ function modalRestoreLog(){
 function fillEditForm(lg){
   var el;
   if ((el=document.getElementById('fldTitle'))) el.value = lg.title || '';
-  if ((el=document.getElementById('fldDate')) && lg.dateInt) el.value = ymdIntToDateStr(lg.dateInt);
+  if ((el=document.getElementById('fldDate')) && lg.dateInt){ el.value = ymdIntToYY(lg.dateInt); onDateInput(el); }
   if ((el=document.getElementById('fldTime')) && lg.time) el.value = lg.time;
   if ((el=document.getElementById('fldNote'))) el.value = lg.note || '';
   /* 업체 (다중) */
@@ -1832,10 +1862,12 @@ function renderRegForm(){
     '<input type="text" class="fld-inp title" id="fldTitle" placeholder="예: A업체 파레트 3장 입고" maxlength="80" oninput="regOnChange()">'+
     '</div>';
   if (f.hasDate){
-    var today=ymd(Date.now());
+    var todayInt=ymdInt(Date.now());
+    var todayYY=ymdIntToYY(todayInt);
+    var todayPreview=ymdIntToDateStr(todayInt)+' ('+ymdIntDow(todayInt)+')';
     html+='<div class="fld"><div class="fld-l">날짜</div>'+
-      '<input type="date" class="fld-inp" id="fldDate" value="'+today+'">'+
-      '<div class="fld-hint">YYMMDD 입력 시 20YYMMDD 자동 변환 (달력에서 선택)</div>'+
+      '<input type="tel" class="fld-inp" id="fldDate" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="YYMMDD (예: 260526)" value="'+todayYY+'" oninput="onDateInput(this)">'+
+      '<div class="fld-hint">→ <span id="fldDatePreview" style="color:var(--g)">'+todayPreview+'</span></div>'+
       '</div>';
   }
   if (f.hasTime){
@@ -2054,7 +2086,11 @@ function submitLog(){
   };
   if (f.hasDate){
     var d=(document.getElementById('fldDate')||{}).value||'';
-    if (d) rec.dateInt=dateToYmdInt(d);
+    if (d){
+      var di=parseDateInput(d);
+      if (!di){ toast('날짜 형식이 올바르지 않습니다 (예: 260526)','er'); return; }
+      rec.dateInt=di;
+    }
   }
   if (f.hasTime){
     var t=(document.getElementById('fldTime')||{}).value||'';
