@@ -415,6 +415,21 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   body.printing-label .print-area{display:none!important}
 }
 
+/* ─── 명령 바코드 라벨 (50x30mm, 4장 1매씩) ─── */
+.cmd-label-area{display:none}
+.cmd-label{width:50mm;height:30mm;page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.2mm 1.5mm;box-sizing:border-box;font-family:Arial,sans-serif;color:#000;background:#fff;overflow:hidden}
+.cmd-label:last-child{page-break-after:auto}
+.cmd-label .cl-title{font-size:9pt;font-weight:900;margin-bottom:1mm;text-align:center;line-height:1.1;letter-spacing:-.3pt}
+.cmd-label .cl-bc{width:46mm;height:14mm;display:flex;align-items:center;justify-content:center}
+.cmd-label .cl-bc svg{width:100%;height:100%;display:block}
+.cmd-label .cl-text{font-size:6.5pt;font-family:'Courier New',monospace;letter-spacing:.4pt;margin-top:.8mm;color:#333}
+@media print {
+  body.printing-cmd-label > *{visibility:hidden}
+  body.printing-cmd-label .cmd-label-area{visibility:visible;display:block;position:absolute;left:0;top:0;width:50mm}
+  body.printing-cmd-label .cmd-label-area *{visibility:visible}
+  body.printing-cmd-label .print-area{display:none!important}
+}
+
 /* ─── 상품 라벨 (80x40mm 가로 인쇄 전용) — 사장님 이미지 기반 재설계 ─── */
 .prod-label-area{display:none}
 .prod-label{
@@ -967,6 +982,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div class="cp-mode-toggle">
           <button class="cp-mode-btn box on" id="cpModeBox" onclick="cpSetScanMode('box')">📦 박스 모드 (일괄)</button>
           <button class="cp-mode-btn item" id="cpModeItem" onclick="cpSetScanMode('item')">🏷️ 상품 모드 (단건)</button>
+          <button class="cp-mode-btn" onclick="cpPrintCommandLabels()" title="명령 바코드 4종 라벨 일괄 인쇄 (50x30mm) — 작업대에 붙여 빠른 모드 전환·라벨 출력 트리거" style="flex:0 0 auto;padding:.55rem .75rem">🖨 명령라벨</button>
         </div>
         <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)">
         <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄 출고</div>
@@ -1128,6 +1144,9 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 
 <!-- 상품 라벨 인쇄 영역 (80x40mm 가로, 수량만큼 반복) — body.printing-product-label 일 때만 -->
 <div class="prod-label-area" id="prodLabelArea"></div>
+
+<!-- 명령 바코드 라벨 인쇄 영역 (50x30mm 4장) — body.printing-cmd-label 일 때만 보임 -->
+<div class="cmd-label-area" id="cmdLabelArea"></div>
 
 <!-- 출고적재리스트 인쇄 영역 (A4 세로 또는 A4 가로 duplex 2부) — body.printing-shiplist 일 때만 -->
 <div class="ship-list-area" id="shipListArea"></div>
@@ -2279,9 +2298,90 @@ function cpFlash(kind, html){
 }
 
 function cpHandleScan(raw){
+  /* 명령 바코드 우선 처리 — 세션 무관하게 모드 전환은 동작, 인쇄는 데이터 체크는 각 함수가 */
+  if (cpHandleCommandBarcode(raw)) return;
   if (!cpHasActiveSession()) { cpFlash('er','❌ 활성 세션이 없습니다 — 다시 스캔 시작하세요'); return; }
   if (cpScanMode === 'box') return cpProcessBoxScan(raw);
   return cpProcessItemScan(raw);
+}
+
+/* ═══════════ 명령 바코드 (스캔 시 즉시 동작) + 인쇄 ═══════════
+ * 작업장 작업대에 50x30mm 라벨로 붙여두고 스캐너로 찍어서
+ * 모드 전환 / 상품라벨·혼적리스트 인쇄를 즉시 트리거. */
+var CP_COMMAND_BARCODES = [
+  { code:'#CMD#PRINT_LABEL', title:'📃 상품라벨 출력',   desc:'현재 박스 SKU' },
+  { code:'#CMD#PRINT_MIX',   title:'📋 혼적리스트 출력', desc:'현재 박스 기준' },
+  { code:'#CMD#MODE_BOX',    title:'📦 박스 모드',       desc:'박스바코드 일괄' },
+  { code:'#CMD#MODE_ITEM',   title:'🏷️ 상품 모드',      desc:'상품바코드 단건' }
+];
+/* 매칭되면 동작 수행 후 true, 명령 바코드가 아니면 false (호출자가 일반 스캔 분기로) */
+function cpHandleCommandBarcode(raw){
+  var s = String(raw||'').trim();
+  if (s.indexOf('#CMD#') !== 0) return false;
+  switch(s){
+    case '#CMD#PRINT_LABEL':
+      cpFlash('ok','📃 [명령 바코드] 상품라벨 인쇄');
+      cpPrintProductLabels();
+      return true;
+    case '#CMD#PRINT_MIX':
+      var ev = cpLastDisplayEv;
+      var shipBoxNo = ev && ev.scans && ev.scans[0] && ev.scans[0].shipBoxNo;
+      if (!shipBoxNo){
+        cpFlash('warn','⚠️ [명령] 혼적리스트 — 인쇄할 박스 정보가 없습니다 (먼저 박스 스캔)');
+        return true;
+      }
+      cpFlash('ok','📋 [명령 바코드] 혼적리스트 인쇄 — '+escH(shipBoxNo));
+      cpPrintMixLabel(shipBoxNo);
+      return true;
+    case '#CMD#MODE_BOX':
+      cpSetScanMode('box');
+      cpFlash('ok','📦 [명령 바코드] 박스 모드(일괄) 전환');
+      return true;
+    case '#CMD#MODE_ITEM':
+      cpSetScanMode('item');
+      cpFlash('ok','🏷️ [명령 바코드] 상품 모드(단건) 전환');
+      return true;
+    default:
+      cpFlash('warn','⚠️ 알 수 없는 명령 바코드: '+escH(s));
+      return true;
+  }
+}
+/* 명령 바코드 4종을 50x30mm 라벨로 한 번에 인쇄 (1매씩, 총 4매) */
+function cpPrintCommandLabels(){
+  var area = document.getElementById('cmdLabelArea');
+  if (!area){ alert('명령 라벨 영역이 없습니다'); return; }
+  if (typeof JsBarcode === 'undefined'){ alert('바코드 라이브러리가 로드되지 않았습니다'); return; }
+  area.innerHTML = CP_COMMAND_BARCODES.map(function(c, i){
+    return '<div class="cmd-label">'+
+      '<div class="cl-title">'+escH(c.title)+'</div>'+
+      '<div class="cl-bc"><svg id="cmdBc_'+i+'"></svg></div>'+
+      '<div class="cl-text">'+escH(c.desc)+'</div>'+
+    '</div>';
+  }).join('');
+  /* SVG 에 Code128 바코드 렌더 */
+  CP_COMMAND_BARCODES.forEach(function(c, i){
+    try {
+      JsBarcode('#cmdBc_'+i, c.code, {
+        format:'CODE128', width:1.4, height:40, displayValue:false, margin:0
+      });
+    } catch(e){ console.error('명령 바코드 렌더 실패', c.code, e); }
+  });
+  /* @page 50mm x 30mm */
+  var oldStyle = document.getElementById('cmd-label-pagestyle');
+  if (oldStyle) oldStyle.remove();
+  var st = document.createElement('style');
+  st.id = 'cmd-label-pagestyle';
+  st.textContent = '@media print { @page { size: 50mm 30mm; margin: 0; } }';
+  document.head.appendChild(st);
+  document.body.classList.add('printing-cmd-label');
+  setTimeout(function(){
+    window.print();
+    setTimeout(function(){
+      document.body.classList.remove('printing-cmd-label');
+      var s = document.getElementById('cmd-label-pagestyle');
+      if (s) s.remove();
+    }, 1500);
+  }, 100);
 }
 
 /* ───── 발주수량 초과 검사 ─────
