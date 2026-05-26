@@ -47,6 +47,19 @@ h1 em{color:var(--g);font-style:normal}
 .form-panel{background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:1rem 1.1rem;margin-bottom:.85rem}
 .form-title{font-size:.82rem;color:var(--g);font-family:var(--mo);font-weight:800;letter-spacing:.06em;margin-bottom:.65rem}
 .form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.6rem}
+/* 미니 액션 버튼 (label 옆 작은 버튼) */
+.cp-mini-btn{background:rgba(255,255,255,.06);border:1px solid var(--br);color:var(--mu);font-size:.66rem;font-weight:800;padding:.18rem .45rem;border-radius:4px;cursor:pointer;margin-left:.35rem;letter-spacing:-.005em;line-height:1.2;vertical-align:middle;font-family:inherit}
+.cp-mini-btn:hover{color:var(--tx);border-color:var(--mu);background:rgba(255,255,255,.10)}
+.cp-mini-btn:active{transform:scale(.96)}
+/* 업체 즐겨찾기 chip */
+.cp-vendor-picker{background:#0a0d13;border:1.5px solid var(--br);border-radius:8px;padding:.6rem .75rem;max-height:260px;overflow-y:auto}
+.cp-vendor-chip{display:inline-flex;align-items:center;gap:.32rem;background:rgba(91,156,246,.10);border:1px solid rgba(91,156,246,.45);color:var(--tx);font-size:.82rem;padding:.32rem .6rem .32rem .7rem;border-radius:999px;cursor:pointer;margin:0 .3rem .3rem 0;transition:all .12s;font-family:inherit}
+.cp-vendor-chip:hover{background:rgba(91,156,246,.20);border-color:var(--b)}
+.cp-vendor-chip:active{transform:scale(.96)}
+.cp-vendor-chip b{font-weight:700;letter-spacing:-.005em}
+.cp-vendor-chip .vc-x{background:transparent;border:none;color:var(--mu);font-size:.72rem;width:18px;height:18px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
+.cp-vendor-chip .vc-x:hover{background:rgba(240,88,88,.18);color:var(--r)}
+.cp-vendor-empty{color:var(--mu);font-size:.78rem;padding:.4rem .2rem}
 .fld{display:flex;flex-direction:column;gap:.2rem}
 .fld label{font-size:.7rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em}
 .fld input,.fld textarea{background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.55rem .7rem;font-size:.88rem;outline:none;font-family:inherit}
@@ -885,17 +898,21 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <div class="form-title" style="color:#ffb84a">① 업체 정보 (인쇄·기록용)</div>
       <div class="form-row">
         <div class="fld">
-          <label>업체명</label>
-          <input type="text" id="cpVendor" placeholder="예: ○○상사" maxlength="80" oninput="cpOnHeaderChange()">
+          <label>업체명
+            <button type="button" class="cp-mini-btn" onclick="cpSaveCurrentVendor()" title="현재 입력한 업체명·코드를 즐겨찾기에 저장 (다른 PC·직원과 공유)">💾 저장</button>
+            <button type="button" id="cpVendorPickerBtn" class="cp-mini-btn" onclick="cpToggleVendorPicker()" title="등록된 업체 목록 펼침">📋 목록</button>
+          </label>
+          <input type="text" id="cpVendor" placeholder="예: ○○상사" maxlength="80" oninput="cpOnHeaderChange()" autocomplete="off">
         </div>
         <div class="fld">
           <label>업체코드 (선택)</label>
-          <input type="text" id="cpVendorCode" placeholder="예: V0001" maxlength="40" oninput="cpOnHeaderChange()">
+          <input type="text" id="cpVendorCode" placeholder="예: V0001" maxlength="40" oninput="cpOnHeaderChange()" autocomplete="off">
         </div>
-        <div class="fld" style="grid-column:span 2">
+        <div class="fld" style="grid-column:1/-1">
           <label>작업 메모 (선택)</label>
           <input type="text" id="cpNote" placeholder="배차 / 차량 / 기타 메모" maxlength="200" oninput="cpOnHeaderChange()">
         </div>
+        <div class="fld" id="cpVendorPickerBox" style="grid-column:1/-1;display:none"></div>
       </div>
     </div>
 
@@ -1175,6 +1192,8 @@ var boxIndex = {};        /* 박스ID(원본 케이스) → { barcode: 입고합
 var stockByAlt = {};      /* 정규화된 altBarcode → 원본 barcode (입고 로그 + altMap 병합) */
 var altMap = {};          /* Firebase 저장 영구 매핑 {normalizedAlt: {src, by, ts, source}} */
 var altMapRef = null;
+var vendors = {};         /* 업체 즐겨찾기 {normalizedName: {name, code, ts, by, byName}} */
+var vendorsRef = null;
 
 /* 현재 작성중 지시서 */
 var curOrder = newOrder();
@@ -1326,7 +1345,14 @@ function attachRefs(){
     }
   }, function(err){ console.warn('[outorder] altMap read 실패', err); });
 
-  /* 4) 활성 세션 자동 복원 안내 (있을 때만) */
+  /* 4) star_outorder/vendors — 업체 즐겨찾기 (이름·코드, 다른 PC/직원과 공유) */
+  vendorsRef = db.ref('wms_sync/groups/' + groupId + '/star_outorder/vendors');
+  vendorsRef.on('value', function(snap){
+    vendors = snap.val() || {};
+    cpRenderVendorChips();
+  }, function(err){ console.warn('[outorder] vendors read 실패', err); });
+
+  /* 5) 활성 세션 자동 복원 안내 (있을 때만) */
   cpCheckResumeOnAttach();
 }
 function mergeAltIndex(base, map){
@@ -1607,6 +1633,101 @@ function cpUnmap(poBc){
   });
 }
 
+/* ═══════════ 업체 즐겨찾기 — 한 번 입력한 업체명·코드 저장/불러오기 ═══════════
+ * Firebase wms_sync/groups/<gid>/star_outorder/vendors/<key>
+ *   = { name, code, ts, by, byName }
+ * key 는 정규화된 업체명 (소문자 + 공백제거). 같은 업체 중복 등록 방지.
+ * UI: 업체명 label 옆 [💾 저장] [📋 목록] · 목록은 최근 사용순 chip. */
+function cpVendorKey(name){
+  return String(name||'').trim().toLowerCase().replace(/\s+/g,'');
+}
+function cpSaveCurrentVendor(){
+  var n = (document.getElementById('cpVendor')||{}).value || '';
+  var c = (document.getElementById('cpVendorCode')||{}).value || '';
+  cpSaveVendor(n, c);
+}
+function cpSaveVendor(name, code){
+  name = String(name||'').trim();
+  code = String(code||'').trim();
+  if (!name) { setMsg('cpMsg','warn','⚠️ 업체명을 입력하세요'); return; }
+  if (!vendorsRef) { setMsg('cpMsg','er','❌ Firebase 연결 안 됨 (로그인 확인)'); return; }
+  var key = cpVendorKey(name);
+  var u = (window.WMSync && WMSync.getUser()) ? WMSync.getUser() : null;
+  var entry = {
+    name: name, code: code, ts: Date.now(),
+    by: getUserId() || '',
+    byName: (u && (u.displayName || u.email)) || ''
+  };
+  vendorsRef.child(key).set(entry).then(function(){
+    setMsg('cpMsg','ok','✓ 업체 저장: '+name+(code?' ('+code+')':''));
+  }).catch(function(err){
+    setMsg('cpMsg','er','❌ 저장 실패: '+(err && err.message || err));
+  });
+}
+function cpDeleteVendor(key, name){
+  if (!key || !vendorsRef) return;
+  if (!confirm('이 업체를 즐겨찾기에서 삭제할까요?\n— '+name)) return;
+  vendorsRef.child(key).remove().then(function(){
+    setMsg('cpMsg','ok','✓ 삭제됨: '+name);
+  });
+}
+function cpApplyVendor(key){
+  var v = vendors[key]; if (!v) return;
+  var n = document.getElementById('cpVendor');
+  var c = document.getElementById('cpVendorCode');
+  if (n) n.value = v.name || '';
+  if (c) c.value = v.code || '';
+  if (typeof cpOnHeaderChange === 'function') cpOnHeaderChange();
+  /* 사용 시점 갱신 → 다음에 더 위로 정렬 */
+  if (vendorsRef) vendorsRef.child(key).child('ts').set(Date.now());
+  /* 펼침 자동 닫기 */
+  var box = document.getElementById('cpVendorPickerBox');
+  var btn = document.getElementById('cpVendorPickerBtn');
+  if (box) box.style.display = 'none';
+  if (btn) btn.textContent = '📋 목록';
+  setMsg('cpMsg','ok','✓ 업체 적용: '+(v.name||''));
+}
+function cpToggleVendorPicker(){
+  var box = document.getElementById('cpVendorPickerBox');
+  var btn = document.getElementById('cpVendorPickerBtn');
+  if (!box) return;
+  var isOpen = box.style.display !== 'none';
+  if (isOpen){
+    box.style.display = 'none';
+    if (btn) btn.textContent = '📋 목록';
+  } else {
+    cpRenderVendorChips(); /* 최신 상태로 다시 그리기 */
+    box.style.display = 'block';
+    if (btn) btn.textContent = '▲ 닫기';
+  }
+}
+function cpRenderVendorChips(){
+  var box = document.getElementById('cpVendorPickerBox');
+  if (!box) return;
+  /* picker box 가 펼쳐져 있지 않으면 굳이 다시 그릴 필요 없음 (펼치는 시점에 다시 그림) */
+  box.classList.add('cp-vendor-picker');
+  var keys = Object.keys(vendors).sort(function(a,b){
+    return (vendors[b].ts||0) - (vendors[a].ts||0);
+  });
+  if (!keys.length){
+    box.innerHTML = '<div class="cp-vendor-empty">등록된 업체가 없습니다. 업체명을 입력 후 위의 <b>💾 저장</b> 버튼을 누르세요.</div>';
+    return;
+  }
+  box.innerHTML =
+    '<div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem">등록된 업체 '+keys.length+'개 · 최근 사용순 · 클릭 시 자동 채움</div>' +
+    keys.map(function(k){
+      var v = vendors[k] || {};
+      var nameEsc = escH(v.name||'');
+      var codeHtml = v.code ? ' <span style="opacity:.65;font-size:.78em">('+escH(v.code)+')</span>' : '';
+      var kEsc = escAttrLocal(k);
+      var nEsc = escAttrLocal(v.name||'');
+      return '<span class="cp-vendor-chip" onclick="cpApplyVendor(\''+kEsc+'\')" title="클릭하면 업체명·코드 자동 채움">' +
+        '<b>'+nameEsc+'</b>'+codeHtml +
+        ' <button type="button" class="vc-x" onclick="event.stopPropagation();cpDeleteVendor(\''+kEsc+'\',\''+nEsc+'\')" title="삭제">✕</button>' +
+      '</span>';
+    }).join('');
+}
+
 function cpRender(){
   var tb = document.getElementById('cpRowsBody');
   if (!tb) return;
@@ -1833,6 +1954,14 @@ function cpStartScan(){
     cpSetSubView('scan');
     return;
   }
+  /* 업체 즐겨찾기 자동 등록 — vendor 가 채워져 있고 아직 등록 안 된 경우 한 번만 */
+  try {
+    var _vn = (cpState && cpState.vendor || '').trim();
+    if (_vn && vendorsRef){
+      var _vk = cpVendorKey(_vn);
+      if (!vendors[_vk]) cpSaveVendor(_vn, (cpState.vendorCode||'').trim());
+    }
+  } catch(e){ console.warn('[outorder] vendor 자동 등록 실패', e); }
   /* 출고 대상 라인 정리 — fit 또는 asIs 인 행만 */
   var shipRows = [];
   cpState.rows.forEach(function(r, i){
