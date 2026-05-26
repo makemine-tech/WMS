@@ -93,7 +93,11 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .fc-meta .m-time{background:rgba(91,156,246,.10);color:var(--b);font-family:var(--mo)}
 .fc-meta .m-vendor{background:rgba(255,140,90,.14);color:var(--o)}
 .fc-meta .m-status{background:rgba(192,132,252,.14);color:var(--p)}
-.fc-note{font-size:.78rem;color:var(--tx);line-height:1.5;background:rgba(255,255,255,.03);border-radius:5px;padding:.42rem .55rem;border-left:2px solid var(--br)}
+.fc-note{font-size:.78rem;color:var(--tx);line-height:1.5;background:rgba(255,255,255,.03);border-radius:5px;padding:.42rem .55rem;border-left:2px solid var(--br);display:flex;align-items:flex-start;gap:.45rem}
+.fc-note-text{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word}
+.fc-note-copy{flex-shrink:0;background:rgba(255,255,255,.06);border:1px solid var(--br);color:var(--mu);font-size:.66rem;font-weight:800;padding:.22rem .5rem;border-radius:5px;cursor:pointer;letter-spacing:-.005em;line-height:1.25;white-space:nowrap;font-family:inherit}
+.fc-note-copy:active{transform:scale(.94)}
+.fc-note-copy.ok{background:rgba(74,240,168,.16);border-color:var(--g);color:var(--g)}
 .fc-by{font-size:.64rem;color:var(--mu);font-family:var(--mo);display:flex;align-items:center;gap:.4rem;margin-top:.18rem;justify-content:space-between}
 .fc-by-name{color:rgba(232,234,240,.7);font-family:inherit;font-weight:700}
 .fc-by-time{font-family:var(--mo)}
@@ -843,6 +847,46 @@ function toast(msg, kind){
   w.appendChild(el);
   setTimeout(function(){ try{el.remove();}catch(e){} }, 2400);
 }
+/* 비고 복사 — 카드의 .fc-note 안 .fc-note-text 텍스트를 클립보드에 복사 */
+function copyNote(btn){
+  try{
+    var wrap = btn.parentNode;
+    var textEl = wrap && wrap.querySelector('.fc-note-text');
+    var text = textEl ? textEl.textContent : '';
+    if (!text){ toast('복사할 비고가 없습니다','warn'); return; }
+    var origHtml = btn.innerHTML;
+    var done = function(){
+      btn.classList.add('ok');
+      btn.innerHTML = '✓ 복사됨';
+      setTimeout(function(){
+        btn.classList.remove('ok');
+        btn.innerHTML = origHtml;
+      }, 1400);
+      toast('비고 복사됨','ok');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done, function(){ fallbackCopy(text, done); });
+    } else {
+      fallbackCopy(text, done);
+    }
+  } catch(e){ toast('복사 실패','er'); }
+}
+function fallbackCopy(text, done){
+  try{
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly','');
+    ta.style.position='fixed';
+    ta.style.left='-9999px';
+    ta.style.top='0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    var ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) done(); else toast('복사 실패','er');
+  } catch(e){ toast('복사 실패','er'); }
+}
 function mapToArr(obj, sortKey){
   if (!obj) return [];
   return Object.keys(obj).map(function(k){ var o=obj[k]||{}; o._id=k; return o; }).sort(function(a,b){
@@ -1169,7 +1213,7 @@ function renderFeedCard(lg){
                     '누르면 본인 확인 처리 (전체 안 읽은 '+unread+'명)';
     unreadBadge='<span class="'+badgeCls+'" title="'+titleAttr+'"'+clickAttr+'>'+label+' '+unread+'</span>';
   }
-  var noteHtml=lg.note?'<div class="fc-note">'+escH(lg.note)+'</div>':'';
+  var noteHtml=lg.note?'<div class="fc-note"><span class="fc-note-text">'+escH(lg.note)+'</span><button class="fc-note-copy" type="button" onclick="event.stopPropagation();copyNote(this)" aria-label="비고 복사">📋 복사</button></div>':'';
   var photosHtml='';
   if (Array.isArray(lg.photos) && lg.photos.length){
     var keyEsc=escAttr(lg._key);
