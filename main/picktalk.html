@@ -157,10 +157,26 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
 .cal-day.sel .dcnt{background:#0f1117;color:#fff}
 .cal-day.empty .dcnt{display:none}
 /* 캘린더 셀 우상단 날씨 아이콘 (오늘+16일까지만 표시) */
-.cal-day .dwx{position:absolute;top:2px;right:3px;font-size:.78rem;line-height:1;opacity:.95;pointer-events:none}
+.cal-day .dwx{position:absolute;top:2px;right:3px;font-size:.78rem;line-height:1;opacity:.95;pointer-events:none;transform-origin:center}
 .cal-day.sel .dwx{filter:drop-shadow(0 0 1px rgba(0,0,0,.5))}
 /* 카드 날짜 칩 내부의 작은 날씨 아이콘 */
-.m-pill .m-wx{margin-left:.32rem;font-size:.85em;opacity:.95}
+.m-pill .m-wx{margin-left:.32rem;font-size:.85em;opacity:.95;display:inline-block;transform-origin:center}
+/* 비/눈/소나기/천둥 — 부드러운 펄스 + 파란 글로우 (스무스 강조) */
+@keyframes wxWetPulse{
+  0%,100%{transform:scale(1);filter:drop-shadow(0 0 0 rgba(91,156,246,0))}
+  50%    {transform:scale(1.22);filter:drop-shadow(0 0 4px rgba(91,156,246,.85))}
+}
+.dwx.wet,.m-wx.wet{animation:wxWetPulse 2.4s ease-in-out infinite}
+/* 천둥번개(snow는 다른 색조)는 좀 더 강조 — 노란 글로우 */
+@keyframes wxStormPulse{
+  0%,100%{transform:scale(1);filter:drop-shadow(0 0 0 rgba(240,196,74,0))}
+  50%    {transform:scale(1.3);filter:drop-shadow(0 0 5px rgba(240,196,74,.95))}
+}
+.dwx.storm,.m-wx.storm{animation:wxStormPulse 1.8s ease-in-out infinite}
+/* 사용자가 모션 줄이기 설정 시 정지 (접근성) */
+@media (prefers-reduced-motion:reduce){
+  .dwx.wet,.m-wx.wet,.dwx.storm,.m-wx.storm{animation:none;filter:drop-shadow(0 0 3px rgba(91,156,246,.7))}
+}
 /* 컬러 라인 띠 — 카테고리 색, 시작/중간/끝 표시 */
 .cal-day{padding-bottom:14px}
 .cal-day .dlines{position:absolute;left:0;right:0;bottom:3px;display:flex;flex-direction:column;gap:1.5px;pointer-events:none}
@@ -910,7 +926,15 @@ function weatherCodeToLabel(c){
   if (c >= 96 && c <= 99) return '우박 천둥번개';
   return '';
 }
-/* dateInt(YYYYMMDD) → 날씨 객체 {icon, label, max, min, pop} 또는 null (예보 범위 밖) */
+/* 비/눈/소나기 — 강조 펄스 대상 */
+function isWetCode(c){
+  return (c >= 51 && c <= 67) || (c >= 71 && c <= 77) || (c >= 80 && c <= 86);
+}
+/* 천둥번개·우박 — 더 강한 강조 */
+function isStormCode(c){
+  return c >= 95 && c <= 99;
+}
+/* dateInt(YYYYMMDD) → 날씨 객체 {icon, label, max, min, pop, wet, storm} 또는 null (예보 범위 밖) */
 function weatherForDate(yi){
   if (!yi || !WEATHER.loaded) return null;
   var y = Math.floor(yi/10000), m = Math.floor((yi%10000)/100), d = yi%100;
@@ -921,7 +945,9 @@ function weatherForDate(yi){
     icon:  weatherCodeToIcon(w.code),
     label: weatherCodeToLabel(w.code),
     max:   w.max, min: w.min, pop: w.pop,
-    code:  w.code
+    code:  w.code,
+    wet:   isWetCode(w.code),
+    storm: isStormCode(w.code)
   };
 }
 function loadWeatherFromCache(){
@@ -1339,7 +1365,8 @@ function renderFeedCard(lg){
     var _wPart = '';
     if (_w && _w.icon){
       var _wTitle = _w.label + ' · 최고 ' + _w.max + '° / 최저 ' + _w.min + '°' + (_w.pop >= 10 ? ' · 강수 ' + _w.pop + '%' : '');
-      _wPart = '<span class="m-wx" title="'+escAttr(_wTitle)+'">'+_w.icon+'</span>';
+      var _wxCls  = 'm-wx' + (_w.storm ? ' storm' : _w.wet ? ' wet' : '');
+      _wPart = '<span class="'+_wxCls+'" title="'+escAttr(_wTitle)+'">'+_w.icon+'</span>';
     }
     meta.push('<span class="m-pill m-date">📅 '+ymdIntToShort(lg.dateInt)+' ('+ymdIntDow(lg.dateInt)+')'+_wPart+'</span>');
   }
@@ -1748,9 +1775,13 @@ function renderCalendar(){
         (extra > 0 ? '<div class="dline-more">+'+extra+'</div>' : '') +
       '</div>';
     }
-    /* 날씨 아이콘 — 오늘+16일 이내만, 그 외엔 비표시 */
+    /* 날씨 아이콘 — 오늘+16일 이내만, 비/눈/천둥은 펄스 강조 */
     var _calW = weatherForDate(di);
-    var _calWHtml = (_calW && _calW.icon) ? '<div class="dwx" title="'+escAttr(_calW.label+' '+_calW.max+'°/'+_calW.min+'°')+'">'+_calW.icon+'</div>' : '';
+    var _calWHtml = '';
+    if (_calW && _calW.icon){
+      var _calWxCls = 'dwx' + (_calW.storm ? ' storm' : _calW.wet ? ' wet' : '');
+      _calWHtml = '<div class="'+_calWxCls+'" title="'+escAttr(_calW.label+' '+_calW.max+'°/'+_calW.min+'°')+'">'+_calW.icon+'</div>';
+    }
     html+='<div class="cal-day '+sel+' '+todayCls+'" onclick="selectCalDay('+di+')">'+
       '<div class="dnum">'+d+'</div>'+
       _calWHtml +
