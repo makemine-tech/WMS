@@ -1194,6 +1194,8 @@ var altMap = {};          /* Firebase 저장 영구 매핑 {normalizedAlt: {src,
 var altMapRef = null;
 var vendors = {};         /* 업체 즐겨찾기 {normalizedName: {name, code, ts, by, byName}} */
 var vendorsRef = null;
+var lastHeaderRef = null; /* 사용자별 마지막 ① 업체 정보 입력값 — 새로고침/PC변경 시 자동 복원 */
+var _saveHeaderTimer = null;
 
 /* 현재 작성중 지시서 */
 var curOrder = newOrder();
@@ -1352,7 +1354,29 @@ function attachRefs(){
     cpRenderVendorChips();
   }, function(err){ console.warn('[outorder] vendors read 실패', err); });
 
-  /* 5) 활성 세션 자동 복원 안내 (있을 때만) */
+  /* 5) star_outorder/userHeader/<uid> — 사용자별 마지막 ① 업체 정보 (PC/브라우저 무관 복원) */
+  var _uid = (window.WMSync && WMSync.getUser() && WMSync.getUser().uid) || getUserId() || '';
+  if (_uid){
+    lastHeaderRef = db.ref('wms_sync/groups/' + groupId + '/star_outorder/userHeader/' + _uid);
+    lastHeaderRef.once('value').then(function(snap){
+      var d = snap.val();
+      if (!d) return;
+      /* Firebase 가 더 최신이면 그걸로 덮어쓰기 (다른 PC에서 변경한 값 반영).
+       * 비교 기준: Firebase ts > 로컬 cpState 의 _headerTs (localStorage 에 저장). */
+      var localTs = +(cpState._headerTs || 0);
+      var remoteTs = +(d.ts || 0);
+      if (remoteTs && remoteTs >= localTs){
+        if (d.vendor !== undefined)     cpState.vendor     = d.vendor || '';
+        if (d.vendorCode !== undefined) cpState.vendorCode = d.vendorCode || '';
+        if (d.note !== undefined)       cpState.note       = d.note || '';
+        cpState._headerTs = remoteTs;
+        cpSyncToForm();
+        cpSavePersist();
+      }
+    }).catch(function(err){ console.warn('[outorder] userHeader read 실패', err); });
+  }
+
+  /* 6) 활성 세션 자동 복원 안내 (있을 때만) */
   cpCheckResumeOnAttach();
 }
 function mergeAltIndex(base, map){
@@ -4429,13 +4453,30 @@ function cpOnHeaderChange(){
   cpState.vendor     = document.getElementById('cpVendor').value || '';
   cpState.vendorCode = document.getElementById('cpVendorCode').value || '';
   cpState.note       = document.getElementById('cpNote').value || '';
+  cpState._headerTs  = Date.now();
   cpSavePersist();
+  cpSaveLastHeaderDebounced();
+}
+/* 사용자별 마지막 ① 업체 정보 → Firebase 저장 (디바운스 700ms, 너무 잦은 쓰기 방지) */
+function cpSaveLastHeaderDebounced(){
+  if (!lastHeaderRef) return;
+  clearTimeout(_saveHeaderTimer);
+  _saveHeaderTimer = setTimeout(function(){
+    var u = (window.WMSync && WMSync.getUser()) ? WMSync.getUser() : null;
+    lastHeaderRef.set({
+      vendor:     cpState.vendor || '',
+      vendorCode: cpState.vendorCode || '',
+      note:       cpState.note || '',
+      ts:         cpState._headerTs || Date.now(),
+      byName:     (u && (u.displayName || u.email)) || ''
+    }).catch(function(err){ console.warn('[outorder] userHeader save 실패', err); });
+  }, 700);
 }
 function cpReset(){
   if (cpState.rows.length || cpState.vendor) {
     if (!confirm('업로드된 쿠팡 데이터와 업체정보를 모두 비웁니다. 계속할까요?')) return;
   }
-  cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{} };
+  cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{}, _headerTs:0 };
   cpFilter = 'all';
   cpExpandedRow = -1;
   cpSavePersist();
@@ -4444,6 +4485,11 @@ function cpReset(){
   var fi = document.getElementById('cpFileInfo');
   if (fi) { fi.style.display='none'; fi.textContent=''; }
   hideMsg('cpMsg');
+  /* Firebase 사용자별 마지막 header 도 같이 비워야 새로고침 시 안 돌아옴 */
+  if (lastHeaderRef){
+    clearTimeout(_saveHeaderTimer);
+    lastHeaderRef.remove().catch(function(){});
+  }
 }
 function cpSavePersist(){
   try { localStorage.setItem(cpLsKey(), JSON.stringify(cpState)); } catch(e){}
@@ -4461,6 +4507,7 @@ function cpLoadPersist(){
       cpState.fileName   = v.fileName || '';
       cpState.uploadedAt = +v.uploadedAt || 0;
       cpState.asIs       = (v.asIs && typeof v.asIs==='object') ? v.asIs : {};
+      cpState._headerTs  = +v._headerTs || 0;
     }
   } catch(e){}
 }
