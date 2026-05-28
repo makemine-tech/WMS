@@ -388,6 +388,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-tbl tbody td{padding:.42rem .55rem;border-bottom:1px solid rgba(37,43,59,.5);font-family:var(--mo);font-size:.8rem;white-space:nowrap;vertical-align:middle}
 .cp-done-tbl tbody tr:first-child td{background:rgba(74,240,168,.06)}  /* 가장 최근 행 강조 */
 .cp-done-tbl tbody tr.undone td{opacity:.35;text-decoration:line-through}
+/* 완료풀 개별 삭제 버튼 */
+.cp-done-del{background:transparent;border:1px solid rgba(240,88,88,.5);color:var(--r);font-size:.72rem;font-weight:800;width:24px;height:24px;border-radius:4px;cursor:pointer;padding:0;line-height:1;font-family:inherit}
+.cp-done-del:hover{background:rgba(240,88,88,.18)}
+.cp-done-del:active{transform:scale(.94)}
+.cp-done-tbl tbody tr.undone .cp-done-del{display:none}
 .cp-done-tbl .c-box{color:var(--b);font-weight:800}
 .cp-done-tbl .c-bc{color:var(--y);font-weight:800}
 .cp-done-tbl .c-code{color:var(--g);font-weight:700}
@@ -1141,9 +1146,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
               <th>입고일</th>
               <th>센터</th>
               <th style="text-align:center">파렛</th>
+              <th style="text-align:center" title="이 출고 항목 개별 삭제">✕</th>
             </tr></thead>
             <tbody id="cpDoneBody">
-              <tr><td colspan="12" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>
+              <tr><td colspan="13" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>
             </tbody>
           </table>
         </div>
@@ -3249,7 +3255,7 @@ function cpRefreshDonePool(){
   if (meta) meta.textContent = '박스 ' + Object.keys(distinctBox).length + ' · 총 출고 ' + totalShip + '개';
 
   if (!activeScans.length) {
-    body.innerHTML = '<tr><td colspan="12" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>';
+    body.innerHTML = '<tr><td colspan="13" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>';
     return;
   }
   /* 진행률 매번 계산 안 하도록 cache */
@@ -3313,6 +3319,9 @@ function cpRefreshDonePool(){
       var altHtml = hasAlt
         ? '<span style="color:var(--p);font-weight:900" title="라벨 인쇄 시 사용: '+escH(altBc)+'">'+escH(altBc)+'</span>'
         : '<span style="color:var(--mu)">-</span>';
+      /* 개별 삭제 버튼 — ts+barcode+srcBoxBarcode 조합으로 식별 */
+      var delBtn = s.undone ? '' :
+        '<button type="button" class="cp-done-del" title="이 출고 항목 삭제 (취소)" onclick="cpDeleteScanByKey('+(+s.ts||0)+',\''+escAttrLocal(s.barcode||'')+'\',\''+escAttrLocal(s.srcBoxBarcode||'')+'\')">✕</button>';
       html += '<tr class="'+rowCls+'">'+
         groupCells +
         '<td class="c-bc">'  + escH(s.barcode) + '</td>'+
@@ -3325,6 +3334,7 @@ function cpRefreshDonePool(){
         '<td class="c-eta">' + escH(r.eta||'-') + '</td>'+
         '<td class="c-ctr">' + escH(r.center||'-') + '</td>'+
         '<td class="c-pal">' + (s.palletNo||'-') + '</td>'+
+        '<td style="text-align:center">' + delBtn + '</td>'+
       '</tr>';
     });
   });
@@ -4331,6 +4341,36 @@ function cpAppendScans(newScans, onDone){
     if (onDone) onDone();
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err)+'<span class="sub">네트워크 확인 후 다시 시도하세요. 로컬에는 보존됨.</span>');
+  });
+}
+
+/* ── 완료풀 개별 항목 삭제 (취소 = undone:true 마킹) ──
+ * scans 배열에서 (ts, barcode, srcBoxBarcode) 3중 키로 첫 매칭 항목을 undone 처리.
+ * 5건 제한 없음. 재고 차감은 작업종료 시점에 활성 scans 기준으로만 일어나므로 안전. */
+function cpDeleteScanByKey(ts, barcode, srcBoxBarcode){
+  if (!workSession || !workSessionRef) return;
+  var scans = (workSession.scans || []).slice();
+  var idx = -1;
+  for (var i=0; i<scans.length; i++){
+    var s = scans[i];
+    if (s.undone) continue;
+    if (+s.ts === +ts && String(s.barcode||'') === String(barcode||'') && String(s.srcBoxBarcode||'') === String(srcBoxBarcode||'')) {
+      idx = i; break;
+    }
+  }
+  if (idx < 0) { cpFlash('warn','⚠️ 항목을 찾을 수 없습니다 (이미 삭제됨?)'); return; }
+  var s = scans[idx];
+  var info = (s.barcode||'') + ' × ' + (s.qty||0) + '개 (박스 ' + (s.shipBoxNo||s.srcBoxBarcode||'?') + ')';
+  if (!confirm('이 출고 항목을 삭제할까요?\n취소 후 다시 스캔하거나 추가 작업 가능합니다.\n\n' + info)) return;
+  scans[idx].undone = true;
+  scans[idx].undoneAt = Date.now();
+  scans[idx].undoneBy = getUserId();
+  workSessionRef.update({ scans: scans, updatedAt: Date.now() }).then(function(){
+    workSession.scans = scans;
+    cpRefreshScanUI();
+    cpFlash('warn','✕ 출고 항목 삭제됨 — ' + (s.barcode||'') + ' × ' + (s.qty||0));
+  }).catch(function(err){
+    cpFlash('er','❌ 삭제 실패: '+escH(err && err.message || err));
   });
 }
 
