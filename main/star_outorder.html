@@ -593,15 +593,15 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 
 /* ─── 출고적재리스트 (packing.html 양식 차용, .ship- prefix 로 격리) ─── */
 .ship-list-area{display:none}
-/* .ship-page 는 height 고정 X (min-height 만) — 컨텐츠 많으면 자연스럽게 다음 페이지로 흘러감.
- * @page margin 10mm 으로 인쇄 시 상하좌우 1cm 여백 확보. */
+/* 적재리스트 1박스 = 1페이지 고정. A4 세로 - @page margin 10mm = 콘텐츠 영역 277mm.
+ * 콘텐츠 넘침 시 cpFitShipPageToA4 가 폰트 축소 → 그래도 안 들어가면 zoom 비율 적용. */
 .ship-list-area .ship-page{
-  width:210mm;min-height:277mm;background:#fff;color:#111;
+  width:210mm;height:277mm;background:#fff;color:#111;
   padding:6mm 4mm 4mm;box-sizing:border-box;
   font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;
   font-size:10pt;display:flex;flex-direction:column;
   page-break-after:always;
-  overflow:visible;
+  overflow:hidden;
 }
 .ship-list-area .ship-page:last-child{page-break-after:auto}
 /* 박스 단위 (tbody) 가 페이지 사이에서 잘리지 않게.
@@ -3789,15 +3789,24 @@ var SHIP_FIT_STEPS = [
 ];
 function cpFitShipPageToA4(pageEl){
   if (!pageEl) return;
+  /* 1차: 폰트/패딩 단계 축소 */
   for (var step=0; step<SHIP_FIT_STEPS.length; step++){
     if (step > 0) {
       var vars = SHIP_FIT_STEPS[step];
       Object.keys(vars).forEach(function(k){ pageEl.style.setProperty(k, vars[k]); });
     }
-    /* reflow 강제 — 변경 즉시 반영 */
     void pageEl.offsetHeight;
-    /* 측정: scrollHeight 가 clientHeight 보다 크면 컨텐츠 넘침 */
-    if (pageEl.scrollHeight <= pageEl.clientHeight + 1) break;
+    if (pageEl.scrollHeight <= pageEl.clientHeight + 1) return; /* 들어감 — 종료 */
+  }
+  /* 2차 fallback: 최저 폰트로도 안 들어가면 zoom 비율로 전체 축소 (비율 유지) */
+  var avail = pageEl.clientHeight;
+  var need  = pageEl.scrollHeight;
+  if (need > avail + 1) {
+    var ratio = avail / need;
+    if (ratio < 0.4) ratio = 0.4; /* 하한 — 더 작아지면 가독성 X */
+    pageEl.style.zoom = ratio.toFixed(3);
+    /* zoom 적용 후 다시 reflow */
+    void pageEl.offsetHeight;
   }
 }
 
