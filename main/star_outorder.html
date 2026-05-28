@@ -676,9 +676,17 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-actions .commit-all:hover{filter:brightness(1.08)}
 .cp-staging-actions .print-all{background:rgba(255,255,255,.10);color:var(--tx);border:1px solid var(--br)}
 .cp-staging-actions .print-all:hover{background:rgba(255,255,255,.18)}
+.cp-staging-actions .pending-all{background:rgba(240,196,74,.16);color:var(--y);border:1.5px solid rgba(240,196,74,.55)}
+.cp-staging-actions .pending-all:hover{background:rgba(240,196,74,.28)}
 .cp-staging-actions .delete-all{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.55)}
 .cp-staging-actions .delete-all:hover{background:rgba(240,88,88,.12)}
 .cp-staging-actions .btn:active{transform:scale(.97)}
+/* 수량 inline 수정 input */
+.cp-staging-item .qty-input{width:54px;background:#0a0d13;color:var(--g);border:1.5px solid var(--br);border-radius:4px;padding:.16rem .3rem;font-family:var(--mo);font-weight:900;font-size:.82rem;text-align:right;outline:none;-moz-appearance:textfield}
+.cp-staging-item .qty-input::-webkit-outer-spin-button,
+.cp-staging-item .qty-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.cp-staging-item .qty-input:focus{border-color:var(--g);box-shadow:0 0 0 2px rgba(74,240,168,.18)}
+.cp-staging-item.un .qty-input{color:var(--mu)}
 .cp-staging-list{display:flex;flex-direction:column;gap:.5rem}
 .cp-staging-box{background:#0a0d13;border:1px solid var(--br);border-radius:8px;padding:.6rem .75rem}
 .cp-staging-box.mix{border-color:rgba(240,196,74,.5);background:rgba(240,196,74,.04)}
@@ -1111,6 +1119,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         </div>
         <div class="cp-staging-actions">
           <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
+          <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄 대기로</button>
           <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨 일괄 인쇄</button>
           <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 박스 혼적라벨 일괄 인쇄</button>
           <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체 삭제</button>
@@ -4126,35 +4135,16 @@ function cpOpenShipPopup(pickedId){
       '</label>';
     }).join('');
   }
-  /* 출고박스 옵션 = 같은 센터의 open shipBoxes + '새 박스' */
+  /* 출고박스 옵션 — 무조건 새 박스만 (사장님 정책: 처리대기 출고처리는 항상 새 박스, 기존 박스 재사용 X).
+   * cpNextShipBoxNo 는 이미 만들어진 박스(open/closed/입고완료)의 최대 번호 + 1 을 반환하므로 안전. */
   var boxesEl = document.getElementById('cpShipPopupBoxes');
   if (boxesEl) {
-    /* 혼적 출고처리 팝업의 '기존 박스' 후보 — 우리가 새로 세팅한 박스만.
-     * 단일·매칭 박스 (srcBoxBarcode === boxNo, ASC... 원본 그대로) 는 제외 */
-    var openBoxes = (workSession.shipBoxes||[]).filter(function(b){
-      if (b.status !== 'open') return false;
-      if (b.center !== cpPopupCenter) return false;
-      if (b.srcBoxBarcode && b.srcBoxBarcode === b.boxNo) return false;
-      return true;
-    });
     var nextNo = cpNextShipBoxNo(cpPopupCenter);
-    var optsHtml = '';
-    openBoxes.forEach(function(b, i){
-      /* 그 박스의 누적 수량 계산 */
-      var sumQty = (workSession.scans||[]).filter(function(s){ return !s.undone && s.shipBoxNo === b.boxNo; })
-                    .reduce(function(s,x){ return s + (+x.qty||0); }, 0);
-      optsHtml += '<label class="cp-box-opt'+(i===0?' sel':'')+'" data-box-no="'+escH(b.boxNo)+'">'+
-        '<input type="radio" name="cpShipBox" value="'+escH(b.boxNo)+'"'+(i===0?' checked':'')+' onchange="cpToggleBoxOpt(this)">'+
-        '<span class="no">📦 '+escH(b.boxNo)+'</span>'+
-        '<span class="info">기존 박스 · <b>'+sumQty+'</b>개 적재됨</span>'+
-      '</label>';
-    });
-    optsHtml += '<label class="cp-box-opt'+(!openBoxes.length?' sel':'')+'" data-box-no="__NEW__">'+
-      '<input type="radio" name="cpShipBox" value="__NEW__"'+(!openBoxes.length?' checked':'')+' onchange="cpToggleBoxOpt(this)">'+
-      '<span class="no">➕ '+escH(nextNo)+'</span>'+
-      '<span class="info">새 박스 생성</span>'+
+    boxesEl.innerHTML = '<label class="cp-box-opt sel" data-box-no="__NEW__">' +
+      '<input type="radio" name="cpShipBox" value="__NEW__" checked>' +
+      '<span class="no">➕ ' + escH(nextNo) + '</span>' +
+      '<span class="info">새 박스 자동 생성 (다음 순차 번호 — 기존 박스 번호 재사용 안 함)</span>' +
     '</label>';
-    boxesEl.innerHTML = optsHtml;
   }
   document.getElementById('cpShipPopupBack').classList.add('open');
   document.getElementById('cpShipPopupBox').classList.add('open');
@@ -4701,25 +4691,26 @@ function cpRefreshStaging(){
       }
       var itemCls = 'cp-staging-item ' + kind;
       var kindChip = '<span class="cp-staging-kind '+kind+'">'+kindLabel+'</span>';
+      /* 수량 수정 — input 으로. 0 이면 confirm 후 삭제, 그 외엔 staging 의 qty 갱신 */
+      var qtyInput = '<input type="number" class="qty-input" min="0" step="1" value="'+(+it.qty||0)+'" '+
+        'onchange="cpStagingUpdateQty(\''+escAttrLocal(it.id)+'\', this.value, this)" '+
+        'onclick="this.select()" title="수량 수정 (0 입력 시 삭제)">';
       return '<div class="'+itemCls+'">'+
         kindChip+
         '<span class="nm">'+escH(name)+(nameSmall?'<small>'+escH(nameSmall)+'</small>':'')+'</span>'+
         '<span class="bc">'+escH(it.barcode||'')+'</span>'+
-        '<span class="qt">'+(+it.qty||0)+'개</span>'+
+        qtyInput+'<span style="font-size:.7rem;color:var(--mu);margin-left:.18rem">개</span>'+
         '<span class="acts">'+
           '<button type="button" class="hold" onclick="cpStagingMoveToPending(\''+escAttrLocal(it.id)+'\')" title="이 항목을 처리 대기로 이동 (나중에 검토)">⏸ 대기</button>'+
           '<button type="button" class="del"  onclick="cpStagingDeleteItem(\''+escAttrLocal(it.id)+'\')" title="이 항목을 대기 목록에서 제거 (입고 안 함)">✕ 삭제</button>'+
         '</span>'+
       '</div>';
     }).join('');
-    /* 박스에 잔류만 있으면 commit-one 버튼 비활성 (입고할 게 없음) */
-    var canCommitBox = items.some(function(x){return !x.unmatched;});
-    var labelButtons = canCommitBox
+    /* 박스 헤더 — 박스 입고 버튼 제거 (사장님 정책: 일괄 입고만 사용). 라벨 버튼은 유지 */
+    var canPrint = items.some(function(x){return !x.unmatched;});
+    var labelButtons = canPrint
       ? '<button type="button" class="mini" onclick="cpStagingPrintBoxProductLabels(\''+escAttrLocal(k)+'\')" title="이 박스 매칭 SKU 상품라벨 인쇄 (80x40mm, 수량만큼)">📃 상품</button>'+
         '<button type="button" class="mini" onclick="cpStagingPrintBoxMixLabel(\''+escAttrLocal(k)+'\')" title="이 박스 혼적 리스트 인쇄 (150x100mm)">📋 혼적</button>'
-      : '';
-    var commitBtn = canCommitBox
-      ? '<button type="button" class="commit-one" onclick="cpStagingCommitBox(\''+escAttrLocal(k)+'\')" title="이 박스만 출고 완료 처리 (잔류는 자동 제외 X — 먼저 [✕] 또는 [⏸])">✓ 박스 입고</button>'
       : '<span style="margin-left:auto;font-size:.66rem;color:var(--mu);font-family:var(--mo)">매칭 SKU 없음 — 잔류 처리 필요</span>';
     var isItemBatch = first.type === 'item';
     var headerLabel = isItemBatch ? '🏷️ 상품 모드' : ('📦 ' + escH(boxId));
@@ -4729,7 +4720,6 @@ function cpRefreshStaging(){
         '<span class="sum">'+items.length+' SKU · '+totalQty+'개</span>'+
         badge+
         labelButtons+
-        commitBtn+
       '</div>'+
       itemsHtml +
     '</div>';
@@ -4882,6 +4872,81 @@ function cpStagingDeleteItem(itemId){
     cpFlash('warn','✕ 입고 대기 항목 삭제됨');
   }).catch(function(err){
     cpFlash('er','❌ 삭제 실패: '+escH(err && err.message || err));
+  });
+}
+
+/* 항목 수량 inline 수정 — 0 이면 confirm 후 삭제, 그 외는 qty 업데이트.
+ * 음수/숫자아님 거부. 매우 큰 수도 막지 않음 (사용자가 의도적으로 줄이는 경우만 일반적). */
+function cpStagingUpdateQty(itemId, raw, inputEl){
+  if (!workSessionRef) return;
+  var n = parseInt(raw, 10);
+  var sg = (workSession.staging || []).slice();
+  var idx = sg.findIndex(function(x){ return x.id === itemId; });
+  if (idx < 0) return;
+  var orig = sg[idx];
+  if (isNaN(n) || n < 0) {
+    if (inputEl) inputEl.value = orig.qty || 0;
+    cpFlash('warn','⚠️ 0 이상의 숫자만 입력 가능');
+    return;
+  }
+  if (n === (+orig.qty||0)) return; /* 변경 없음 */
+  if (n === 0) {
+    if (!confirm('수량을 0 으로 했습니다.\n이 항목을 입고 대기에서 삭제할까요?\n\n' + (orig.barcode||'') + ' (박스 ' + (orig.srcBoxBarcode||'?') + ')')) {
+      if (inputEl) inputEl.value = orig.qty || 0;
+      return;
+    }
+    sg.splice(idx, 1);
+    workSessionRef.update({ staging: sg, updatedAt: Date.now() }).then(function(){
+      workSession.staging = sg;
+      cpRefreshScanUI();
+      cpFlash('warn','✕ 수량 0 — 항목 삭제됨');
+    }).catch(function(err){
+      cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
+    });
+    return;
+  }
+  sg[idx] = Object.assign({}, orig, { qty: n, ts: Date.now() });
+  workSessionRef.update({ staging: sg, updatedAt: Date.now() }).then(function(){
+    workSession.staging = sg;
+    cpRefreshScanUI();
+    cpFlash('ok','✓ 수량 수정: '+(orig.barcode||'')+' → '+n+'개');
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
+    if (inputEl) inputEl.value = orig.qty || 0;
+  });
+}
+
+/* 입고 대기 → 처리 대기로 일괄 이동 (매칭 SKU 만, 잔류는 staging 에 남김) */
+function cpStagingMoveAllToPending(){
+  if (!workSessionRef) return;
+  var stg = (workSession.staging || []);
+  var matched = stg.filter(function(x){return !x.unmatched;});
+  if (!matched.length) { cpFlash('warn','⚠️ 이동할 매칭 SKU 없음'); return; }
+  var totalQty = matched.reduce(function(s,x){return s+(+x.qty||0);},0);
+  if (!confirm('입고 대기의 매칭 SKU ' + matched.length + '종 · ' + totalQty + '개를 처리 대기로 이동할까요?\n(잔류 SKU 는 입고 대기에 남습니다)')) return;
+  var sessRows = workSession.rows || [];
+  var newPending = matched.map(function(it){
+    var r = sessRows[it.srcIdx] || {};
+    return {
+      id: 'P' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
+      ts: Date.now(), by: getUserId(),
+      srcBoxBarcode: it.srcBoxBarcode || '',
+      barcode: it.barcode, poBarcode: it.poBarcode || '',
+      qty: it.qty,
+      srcIdx: it.srcIdx,
+      center: r.center || '',
+      eta: r.eta || ''
+    };
+  });
+  var remainStaging = stg.filter(function(x){return x.unmatched;});
+  var pp = (workSession.pending || []).slice().concat(newPending);
+  workSessionRef.update({ staging: remainStaging, pending: pp, updatedAt: Date.now() }).then(function(){
+    workSession.staging = remainStaging;
+    workSession.pending = pp;
+    cpRefreshScanUI();
+    cpFlash('warn','⏸ 입고 대기 '+matched.length+' SKU → 처리 대기로 이동됨'+(remainStaging.length?' (잔류 '+remainStaging.length+'건은 입고 대기에 남음)':''));
+  }).catch(function(err){
+    cpFlash('er','❌ 이동 실패: '+escH(err && err.message || err));
   });
 }
 
