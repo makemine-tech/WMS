@@ -2568,6 +2568,46 @@ function cpOnScanKey(ev){
   inp.focus();
 }
 
+/* ═══════════ 유휴 자동 복귀 (Idle Auto-Focus) ═══════════
+ * 2.5초간 어떤 활동도 없으면:
+ *   - 박스 모드로 자동 전환 (기본 세팅 복귀)
+ *   - cpScanInp 입력칸에 포커스
+ * 활동 = input/keydown/click/mousedown/touchstart
+ * 스캔 화면 + 활성 세션 + 모달 미열림 일 때만 동작 */
+var _cpIdleTimer = null;
+var CP_IDLE_MS = 2500;
+function cpResetIdleTimer(){
+  if (_cpIdleTimer) clearTimeout(_cpIdleTimer);
+  _cpIdleTimer = setTimeout(cpIdleAutoFocus, CP_IDLE_MS);
+}
+function cpIdleAutoFocus(){
+  if (cpScanSubView !== 'scan') return;
+  if (!cpHasActiveSession()) return;
+  /* 출고처리 팝업 같은 모달이 열려 있으면 건드리지 않음 */
+  var popup = document.getElementById('cpShipPopupBox');
+  if (popup && popup.classList.contains('open')) return;
+  var inp = document.getElementById('cpScanInp');
+  if (!inp) return;
+  if (document.activeElement === inp) return; /* 이미 포커스 */
+  if (cpScanMode !== 'box') cpSetScanMode('box');
+  inp.focus();
+  if (inp.value) inp.select();
+}
+function cpAttachIdleWatcher(){
+  if (cpAttachIdleWatcher._done) return;
+  cpAttachIdleWatcher._done = true;
+  ['input','keydown','click','mousedown','touchstart'].forEach(function(ev){
+    document.addEventListener(ev, cpResetIdleTimer, true);
+  });
+  cpResetIdleTimer();
+}
+/* 페이지 로드 후 자동 시작 */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', cpAttachIdleWatcher);
+} else {
+  cpAttachIdleWatcher();
+}
+
 function cpFlash(kind, html){
   var el = document.getElementById('cpScanFlash');
   if (!el) return;
