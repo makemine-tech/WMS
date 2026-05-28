@@ -676,6 +676,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-actions .commit-all:hover{filter:brightness(1.08)}
 .cp-staging-actions .print-all{background:rgba(255,255,255,.10);color:var(--tx);border:1px solid var(--br)}
 .cp-staging-actions .print-all:hover{background:rgba(255,255,255,.18)}
+.cp-staging-actions .delete-all{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.55)}
+.cp-staging-actions .delete-all:hover{background:rgba(240,88,88,.12)}
 .cp-staging-actions .btn:active{transform:scale(.97)}
 .cp-staging-list{display:flex;flex-direction:column;gap:.5rem}
 .cp-staging-box{background:#0a0d13;border:1px solid var(--br);border-radius:8px;padding:.6rem .75rem}
@@ -1103,6 +1105,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
           <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨 일괄 인쇄</button>
           <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 박스 혼적라벨 일괄 인쇄</button>
+          <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체 삭제</button>
         </div>
         <div class="cp-staging-list" id="cpStagingList"></div>
       </div>
@@ -2744,6 +2747,7 @@ function cpProcessBoxScan(raw){
     newStaging.push({
       id: 'S' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
       batchId: batchId,
+      type: 'box',           /* 박스 모드 — commit 시 박스 단위 그대로 묶음 */
       ts: Date.now(), by: getUserId(),
       srcBoxBarcode: boxId,
       barcode: it.bc, poBarcode: r.poBarcode || '',
@@ -2761,6 +2765,7 @@ function cpProcessBoxScan(raw){
     newStaging.push({
       id: 'S' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
       batchId: batchId,
+      type: 'box',
       ts: Date.now(), by: getUserId(),
       srcBoxBarcode: boxId,
       barcode: it.bc, poBarcode: '',
@@ -2833,7 +2838,7 @@ function cpNextShipBoxNo(center){
 }
 function pad3(n){ n=String(n); while(n.length<3) n='0'+n; return n; }
 
-/* ── 상품 모드: 상품바코드 → 1건 출고 ── */
+/* ── 상품 모드: 상품바코드 → 입고 대기로 (+1). 같은 SKU 는 qty 누적, 'ITEM' batchId 한 카드로 묶임 ── */
 function cpProcessItemScan(raw){
   var bc = normBarcode(raw);
   if (!bc) return;
@@ -2852,43 +2857,62 @@ function cpProcessItemScan(raw){
     }
   }
   if (idx < 0) {
-    cpFlash('er','❌ <b>PO 에 없는 바코드</b>: '+escH(raw)+'<span class="sub">이 바코드는 현재 출고 대상에 없습니다. PO 확인 또는 박스 모드로 시도하세요.</span>');
+    cpFlash('er','❌ <b>PO 에 없는 바코드</b>: '+escH(raw)+'<span class="sub">이 바코드는 현재 출고 대상에 없습니다.</span>');
     return;
   }
   var row = sessRows[idx];
-  /* 발주수량 초과 검사 (단건 +1) */
-  var ovCheck = cpCheckOverflow([{srcIdx:idx, qty:1}]);
-  if (!ovCheck.ok) {
-    cpFlash('er','❌ <b>발주수량 초과 차단</b><span class="sub">'+cpFormatViolations(ovCheck.violations)+'</span>');
+  /* 발주수량 초과 검사 — scans + staging 합도 같이 확인 */
+  var prog = cpComputeRowProgress(idx);
+  var stageAddForSrc = (workSession.staging || []).filter(function(x){
+    return !x.unmatched && x.srcIdx === idx;
+  }).reduce(function(s,x){return s+(+x.qty||0);},0);
+  if (prog.shipped + stageAddForSrc + 1 > prog.need) {
+    cpFlash('er','❌ <b>발주수량 초과 차단</b><span class="sub">'+escH(row.skuName||'')+' — 필요 '+prog.need+', 현재 입고+대기 '+(prog.shipped+stageAddForSrc)+'</span>');
     cpSpeak('초과 차단');
     return;
   }
-  /* 상품 모드는 단일 SKU 라 혼적 X — 항상 자동 적재 + shipBox 매김 */
-  var shipBoxNo = cpEnsureShipBox(row.center || '', row.eta || '');
-  var newScan = {
-    ts: Date.now(),
-    by: getUserId(),
-    type: 'item',
-    input: raw,
-    srcBoxBarcode: '', boxBarcode: '',
-    shipBoxNo: shipBoxNo,
-    barcode: row.srcBarcode,
-    poBarcode: row.poBarcode,
-    qty: 1,
-    palletEta: row.eta||'', palletCenter: row.center||'',
-    palletNo: cpCurPallet(row.eta, row.center),
-    srcIdx: idx,
-    matchedVia: matchedVia,
-    undone: false
-  };
-  cpAppendScans([newScan], function(){
+  /* staging 에 같은 srcIdx 항목 있으면 qty +1, 없으면 새로 — 상품 모드 카드 하나에 누적 */
+  var sg = (workSession.staging || []).slice();
+  var foundIdx = -1;
+  for (var k=0; k<sg.length; k++){
+    if (sg[k].type === 'item' && sg[k].batchId === 'ITEM' && sg[k].srcIdx === idx && !sg[k].unmatched) {
+      foundIdx = k; break;
+    }
+  }
+  var stagedItem;
+  if (foundIdx >= 0) {
+    sg[foundIdx] = Object.assign({}, sg[foundIdx], { qty: (+sg[foundIdx].qty||0) + 1, ts: Date.now() });
+    stagedItem = sg[foundIdx];
+  } else {
+    stagedItem = {
+      id: 'S' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
+      batchId: 'ITEM',                                    /* 상품 모드 전체를 한 카드로 묶음 */
+      type: 'item',                                       /* commit 시 SKU별 cpEnsureShipBox */
+      ts: Date.now(), by: getUserId(),
+      srcBoxBarcode: '',
+      barcode: row.srcBarcode, poBarcode: row.poBarcode || '',
+      qty: 1,
+      palletEta: row.eta || '', palletCenter: row.center || '',
+      palletNo: cpCurPallet(row.eta, row.center),
+      srcIdx: idx,
+      isMix: false,
+      hasOverflow: false,
+      unmatched: false,
+      matchedVia: matchedVia
+    };
+    sg.push(stagedItem);
+  }
+  workSessionRef.update({ staging: sg, updatedAt: Date.now() }).then(function(){
+    workSession.staging = sg;
+    cpRefreshScanUI();
     var name = row.skuName || '';
-    var prog = cpComputeRowProgress(idx);
     var altBadge = matchedVia==='alt' ? ' <span style="color:var(--p);font-weight:800">[ALT]</span>' : '';
-    cpFlash('ok','✓ <b>'+escH(name||row.poBarcode)+'</b>'+altBadge+' +1 (총 '+prog.shipped+' / '+prog.need+')');
-    cpUpdateDisplay({
-      type: 'item', input: raw, scans: [newScan], unmatched: []
-    });
+    var totalForSrc = stageAddForSrc + 1;
+    cpFlash('ok','📥 <b>'+escH(name||row.poBarcode)+'</b>'+altBadge+' → 입고 대기 (+1, 누적 '+totalForSrc+' · 필요 '+prog.need+')');
+    cpSpeak('대기 추가');
+    cpUpdateDisplay({ type:'item', input:raw, scans:[], staging:[stagedItem], unmatched:[] });
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
   });
 }
 
@@ -4643,9 +4667,11 @@ function cpRefreshStaging(){
     var commitBtn = canCommitBox
       ? '<button type="button" class="commit-one" onclick="cpStagingCommitBox(\''+escAttrLocal(k)+'\')" title="이 박스만 출고 완료 처리 (잔류는 자동 제외 X — 먼저 [✕] 또는 [⏸])">✓ 박스 입고</button>'
       : '<span style="margin-left:auto;font-size:.66rem;color:var(--mu);font-family:var(--mo)">매칭 SKU 없음 — 잔류 처리 필요</span>';
+    var isItemBatch = first.type === 'item';
+    var headerLabel = isItemBatch ? '🏷️ 상품 모드' : ('📦 ' + escH(boxId));
     return '<div class="'+boxCls+'">'+
       '<div class="cp-staging-box-head">'+
-        '<span class="bx">📦 '+escH(boxId)+'</span>'+
+        '<span class="bx">'+headerLabel+'</span>'+
         '<span class="sum">'+items.length+' SKU · '+totalQty+'개</span>'+
         badge+
         labelButtons+
@@ -4680,8 +4706,30 @@ function cpStagingCommitItems(items, onDone){
   Object.keys(byBatch).forEach(function(k){
     var batch = byBatch[k];
     var first = batch[0];
+    var isItemBatch = first.type === 'item';
+    if (isItemBatch) {
+      /* 상품 모드 — SKU 별로 cpEnsureShipBox (센터+eta 기준 open 박스 재사용) */
+      batch.forEach(function(it){
+        var r = sessRows[it.srcIdx] || {};
+        var shipBoxNo = cpEnsureShipBox(r.center || '', r.eta || '');
+        newScans.push({
+          ts: Date.now(), by: getUserId(),
+          type: 'item', input: it.barcode,
+          srcBoxBarcode: '', boxBarcode: '',
+          shipBoxNo: shipBoxNo,
+          barcode: it.barcode, poBarcode: it.poBarcode,
+          qty: it.qty,
+          palletEta: r.eta || '', palletCenter: r.center || '',
+          palletNo: it.palletNo || cpCurPallet(r.eta, r.center),
+          srcIdx: it.srcIdx,
+          matchedVia: it.matchedVia || 'direct',
+          undone: false
+        });
+      });
+      return;
+    }
+    /* 박스 모드 — 박스 단위 묶음. 단일 센터면 boxId 그대로, 혼적이면 센터-NNN */
     var boxId = first.srcBoxBarcode;
-    /* 단일 센터면 boxId 그대로, 혼적이면 센터-NNN */
     var centerSet = {};
     batch.forEach(function(it){
       var ctr = (sessRows[it.srcIdx]||{}).center;
@@ -4736,6 +4784,22 @@ function cpStagingCommitAll(){
   var stg = (workSession && workSession.staging) || [];
   if (!stg.length) { cpFlash('warn','⚠️ 입고 대기 항목 없음'); return; }
   cpStagingCommitItems(stg);
+}
+
+/* 입고 대기 전체 삭제 — 한 번에 비움 (confirm 후) */
+function cpStagingClearAll(){
+  if (!workSessionRef) return;
+  var stg = (workSession && workSession.staging) || [];
+  if (!stg.length) { cpFlash('warn','⚠️ 삭제할 항목 없음'); return; }
+  var totalQty = stg.reduce(function(s,x){return s+(+x.qty||0);},0);
+  if (!confirm('입고 대기 ' + stg.length + ' SKU · ' + totalQty + '개를 모두 삭제할까요?\n(입고되지 않고 대기 목록에서 모두 제거됩니다)')) return;
+  workSessionRef.update({ staging: [], updatedAt: Date.now() }).then(function(){
+    workSession.staging = [];
+    cpRefreshScanUI();
+    cpFlash('warn','✕ 입고 대기 전체 삭제됨 ('+stg.length+' SKU · '+totalQty+'개)');
+  }).catch(function(err){
+    cpFlash('er','❌ 삭제 실패: '+escH(err && err.message || err));
+  });
 }
 
 /* 박스 단위 입고 (batchId 단위) */
