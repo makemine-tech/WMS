@@ -739,6 +739,14 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .pd-row .ctr{color:#ffb84a;font-weight:800;padding:.1rem .5rem;background:rgba(255,184,74,.1);border-radius:5px;border:1px solid rgba(255,184,74,.3);font-size:.78rem;min-width:60px;text-align:center}
 .pd-row .ship-btn{margin-left:auto;background:var(--g);color:#0f1117;border:none;border-radius:5px;font-size:.78rem;font-weight:800;padding:.34rem .75rem;cursor:pointer}
 .pd-row .ship-btn:hover{background:#6affc0}
+/* 항목별 삭제 버튼 (✕) */
+.pd-row .pd-del-btn{background:transparent;color:var(--r);border:1px solid rgba(240,88,88,.55);width:28px;height:28px;border-radius:5px;font-size:.78rem;font-weight:800;cursor:pointer;padding:0;line-height:1;font-family:inherit}
+.pd-row .pd-del-btn:hover{background:rgba(240,88,88,.16)}
+.pd-row .pd-del-btn:active{transform:scale(.94)}
+/* 헤더 전체 삭제 버튼 */
+.cp-pending-clear-btn{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.55);border-radius:5px;font-size:.72rem;font-weight:800;padding:.28rem .65rem;cursor:pointer;font-family:inherit;letter-spacing:-.005em}
+.cp-pending-clear-btn:hover{background:rgba(240,88,88,.12)}
+.cp-pending-clear-btn:active{transform:scale(.96)}
 .pd-row .pd-label-btn{background:linear-gradient(135deg,#E8B82C,#EAC74A);color:#1F5F1F;border:1.5px solid #c89519;border-radius:5px;font-size:.74rem;font-weight:900;padding:.32rem .65rem;cursor:pointer;letter-spacing:.02em}
 .pd-row .pd-label-btn:hover{transform:translateY(-1px)}
 /* 박스 단위 묶음 인쇄용 헤더 라벨 행 (같은 srcBoxBarcode 그룹 첫 행에만) */
@@ -1150,6 +1158,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           ⏳ 처리 대기 — 출고처리 필요 <span class="count" id="cpPendingCount">0</span>
           <span style="font-size:.7rem;color:var(--mu);font-weight:700;flex:1;min-width:200px">혼적 박스의 SKU 는 자동 적재되지 않습니다 — [출고처리] 클릭해서 출고박스에 묶으세요</span>
           <button class="dp-label-btn" id="cpPendingLabelBtn" onclick="cpPrintLabelsForAllPending()" title="처리 대기 모든 SKU 의 상품 라벨 일괄 인쇄 (잔류 제외)">📃 일괄 상품라벨</button>
+          <button class="cp-pending-clear-btn" onclick="cpPendingClearAll()" title="처리 대기 모든 항목 한 번에 삭제 (확인 후)">✕ 전체 삭제</button>
         </div>
         <div class="cp-pending-list" id="cpPendingList"></div>
       </div>
@@ -4016,6 +4025,7 @@ function cpRefreshPending(){
         '<span class="qty">'+p.qty+'개</span>'+
         '<span class="ctr">'+escH(p.center||'?')+'</span>'+
         '<button class="ship-btn" onclick="cpOpenShipPopup(\''+pidEsc+'\')">✓ 출고처리</button>'+
+        '<button class="pd-del-btn" onclick="cpPendingDeleteItem(\''+pidEsc+'\')" title="이 항목 삭제 (입고되지 않음)">✕</button>'+
       '</div>';
     });
   });
@@ -4036,6 +4046,40 @@ function cpPrintLabelsForAllPending(){
   var items = (workSession||{}).pending||[];
   if (!items.length) { cpFlash('warn','⚠️ 대기 항목 없음'); return; }
   cpPrintLabelsFromItems(items.map(function(p){return { barcode:p.barcode, qty:p.qty, srcIdx:p.srcIdx };}));
+}
+
+/* 처리 대기 — 항목별 개별 삭제 (id 기준) */
+function cpPendingDeleteItem(pid){
+  if (!workSessionRef || !workSession) return;
+  var pending = (workSession.pending || []).slice();
+  var idx = pending.findIndex(function(p){ return p.id === pid; });
+  if (idx < 0) { cpFlash('warn','⚠️ 항목 없음'); return; }
+  var p = pending[idx];
+  if (!confirm('이 처리 대기 항목을 삭제할까요? (입고되지 않음)\n\n' + (p.barcode||'') + ' × ' + (p.qty||0) + '개 (박스 ' + (p.srcBoxBarcode||'?') + ')')) return;
+  pending.splice(idx, 1);
+  workSessionRef.update({ pending: pending, updatedAt: Date.now() }).then(function(){
+    workSession.pending = pending;
+    cpRefreshScanUI();
+    cpFlash('warn','✕ 처리 대기 항목 삭제됨');
+  }).catch(function(err){
+    cpFlash('er','❌ 삭제 실패: '+escH(err && err.message || err));
+  });
+}
+
+/* 처리 대기 — 전체 삭제 (confirm 후 한 번에 비움) */
+function cpPendingClearAll(){
+  if (!workSessionRef || !workSession) return;
+  var pending = (workSession.pending || []);
+  if (!pending.length) { cpFlash('warn','⚠️ 삭제할 항목 없음'); return; }
+  var totalQty = pending.reduce(function(s,x){return s+(+x.qty||0);},0);
+  if (!confirm('처리 대기 ' + pending.length + ' SKU · ' + totalQty + '개를 모두 삭제할까요?\n(입고되지 않고 대기 목록에서 모두 제거됩니다)')) return;
+  workSessionRef.update({ pending: [], updatedAt: Date.now() }).then(function(){
+    workSession.pending = [];
+    cpRefreshScanUI();
+    cpFlash('warn','✕ 처리 대기 전체 삭제됨 ('+pending.length+' SKU · '+totalQty+'개)');
+  }).catch(function(err){
+    cpFlash('er','❌ 삭제 실패: '+escH(err && err.message || err));
+  });
 }
 
 /* ═══════════ 출고처리 팝업 ═══════════
