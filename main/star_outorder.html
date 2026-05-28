@@ -555,6 +555,30 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   overflow:hidden;
   text-overflow:clip;
 }
+/* 마지막 줄 — 회사주소 + 우측 센터 약자 (인4, 이4 등) */
+.prod-label .pl-bottom-addr{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:1mm;
+  white-space:nowrap;
+}
+.prod-label .pl-bottom-addr .pl-addr-text{
+  overflow:hidden;
+  text-overflow:clip;
+  flex:1 1 auto;
+  min-width:0;
+}
+.prod-label .pl-ctr-tag{
+  flex-shrink:0;
+  font-size:9pt;
+  font-weight:900;
+  color:#000;
+  letter-spacing:.04em;
+  line-height:1;
+  font-family:Arial,sans-serif;
+  padding-left:1mm;
+}
 
 @media print {
   body.printing-product-label > *{visibility:hidden}
@@ -3062,6 +3086,15 @@ function cpPrintProductLabels(){
   }));
 }
 
+/* 센터명 약자 — 첫 글자 + 마지막 숫자. 예) '인천4' → '인4', '이천4' → '이4'. 숫자 없으면 첫 글자만 */
+function cpCenterAbbr(center){
+  if (!center) return '';
+  var s = String(center).trim();
+  if (!s) return '';
+  var m = s.match(/(\d+)\s*$/);
+  return s.charAt(0) + (m ? m[1] : '');
+}
+
 /* 라벨 인쇄 공통 — items: [{barcode, qty, srcIdx}, ...] */
 function cpPrintLabelsFromItems(items){
   if (!items || !items.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
@@ -3076,6 +3109,7 @@ function cpPrintLabelsFromItems(items){
     var material = meta.material || '';
     var color = meta.color || '';
     var origin = meta.origin || '';
+    var ctrAbbr = cpCenterAbbr(r.center || '');
     var origBc = it.barcode || '';
     /* ⚠ 중요 — 출고 라벨 바코드 결정:
      * stockMeta.altBarcode 가 있으면 그 alt 로 인쇄해야 함 (잘못 인쇄 시 전량 회수).
@@ -3108,7 +3142,9 @@ function cpPrintLabelsFromItems(items){
           '</div>'+
           '<div class="pl-bottom">'+
             '<div>※ 소비자부주의로 인한 제품 보상은 되지 않으니, 소재에 맞는 세탁법 꼭 확인해 주십시오.</div>'+
-            '<div>경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645</div>'+
+            '<div class="pl-bottom-addr"><span class="pl-addr-text">경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645</span>'+
+              (ctrAbbr ? '<span class="pl-ctr-tag" title="센터 ' + escAttrLocal(r.center||'') + '">' + escH(ctrAbbr) + '</span>' : '') +
+            '</div>'+
           '</div>'+
         '</div>'
       );
