@@ -680,10 +680,23 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-item .acts .hold{color:var(--y);border-color:rgba(240,196,74,.5)}
 .cp-staging-item .acts .hold:hover{background:rgba(240,196,74,.16)}
 .cp-staging-item .acts button:active{transform:scale(.94)}
-/* 잔류 SKU 행 — 회색 처리 + 좌측 회색 라인 */
-.cp-staging-item.un{background:rgba(124,131,153,.08);border-color:rgba(124,131,153,.35);border-left:3px solid var(--mu)}
-.cp-staging-item.un .nm{color:var(--mu)}
-.cp-staging-item.un .qt{color:var(--mu)}
+/* 카테고리별 좌측 컬러 라인 + 옅은 배경 (직관 구분) */
+.cp-staging-item{border-left:3px solid transparent}
+.cp-staging-item.normal{border-left-color:rgba(74,240,168,.55);background:rgba(74,240,168,.04)}
+.cp-staging-item.mix{border-left-color:var(--y);background:rgba(240,196,74,.07)}
+.cp-staging-item.over{border-left-color:var(--r);background:rgba(240,88,88,.07)}
+.cp-staging-item.un{border-left-color:var(--mu);background:rgba(124,131,153,.10)}
+.cp-staging-item.un .nm,.cp-staging-item.un .qt{color:var(--mu)}
+/* 카테고리 작은 칩 (행 시작) */
+.cp-staging-kind{display:inline-block;font-size:.6rem;font-weight:800;padding:.1rem .42rem;border-radius:3px;letter-spacing:.04em;margin-right:.4rem;font-family:var(--mo);flex-shrink:0;line-height:1.3}
+.cp-staging-kind.normal{background:rgba(74,240,168,.16);color:var(--g)}
+.cp-staging-kind.mix{background:rgba(240,196,74,.18);color:var(--y)}
+.cp-staging-kind.over{background:rgba(240,88,88,.18);color:var(--r)}
+.cp-staging-kind.un{background:rgba(124,131,153,.20);color:var(--mu)}
+/* 박스 카드 헤더 미니 아이콘 버튼 (상품라벨/혼적리스트) */
+.cp-staging-box-head .mini{background:rgba(255,255,255,.08);border:1px solid var(--br);color:var(--tx);font-size:.66rem;font-weight:800;padding:.22rem .42rem;border-radius:4px;cursor:pointer;font-family:inherit;line-height:1.2;letter-spacing:-.005em}
+.cp-staging-box-head .mini:hover{background:rgba(255,255,255,.14);border-color:var(--mu)}
+.cp-staging-box-head .mini:active{transform:scale(.94)}
 .cp-staging-empty{color:var(--mu);font-size:.78rem;padding:.45rem .3rem;font-family:var(--mo)}
 
 /* ─── 처리 대기 패널 (혼적 박스 SKU pending) ─── */
@@ -4536,6 +4549,15 @@ function cpRefreshStaging(){
     if (hasUnmatched) badge += '<span class="badge un">잔류 '+unmatchedCnt+'</span>';
     if (isMix && !hasUnmatched) badge += '<span class="badge mix">혼적</span>';
     if (hasOverflow) badge += '<span class="badge over">발주초과</span>';
+    /* SKU별 카테고리 판단을 위해 박스 내 "다수 센터" 먼저 계산 */
+    var matched = items.filter(function(x){ return !x.unmatched; });
+    var ctrCnt = {};
+    matched.forEach(function(x){
+      var rr = rows[x.srcIdx] || {};
+      var c = rr.center || '';
+      if (c) ctrCnt[c] = (ctrCnt[c]||0) + 1;
+    });
+    var primaryCenter = Object.keys(ctrCnt).sort(function(a,b){return ctrCnt[b]-ctrCnt[a];})[0] || '';
     var itemsHtml = items.map(function(it){
       var r = (it.srcIdx >= 0) ? (rows[it.srcIdx] || {}) : {};
       var meta = stockMeta[normBarcode(it.barcode)] || {};
@@ -4544,8 +4566,28 @@ function cpRefreshStaging(){
       var ctr  = r.center || (it.unmatched ? '미매칭' : '');
       var eta  = r.eta || '';
       var nameSmall = [code, ctr, eta].filter(Boolean).join(' · ');
-      var itemCls = 'cp-staging-item' + (it.unmatched ? ' un' : '');
+      /* 카테고리 판단:
+       *   un       — 우리 PO에 없는 SKU
+       *   over     — 발주수량 초과 (scans 합 + staging 합 > need)
+       *   mix      — 박스 안 다수 센터와 다른 센터
+       *   normal   — 그 외 (단일 센터 또는 다수 센터 동일) */
+      var kind = 'normal';
+      var kindLabel = '정상';
+      if (it.unmatched) { kind = 'un'; kindLabel = '잔류'; }
+      else {
+        var prog = cpComputeRowProgress(it.srcIdx);
+        var stageAddForSrc = items.filter(function(x){return !x.unmatched && x.srcIdx === it.srcIdx;})
+          .reduce(function(s,x){return s+(+x.qty||0);},0);
+        if (prog.shipped + stageAddForSrc > prog.need) {
+          kind = 'over'; kindLabel = '발주초과';
+        } else if (primaryCenter && r.center && r.center !== primaryCenter) {
+          kind = 'mix'; kindLabel = '다른센터';
+        }
+      }
+      var itemCls = 'cp-staging-item ' + kind;
+      var kindChip = '<span class="cp-staging-kind '+kind+'">'+kindLabel+'</span>';
       return '<div class="'+itemCls+'">'+
+        kindChip+
         '<span class="nm">'+escH(name)+(nameSmall?'<small>'+escH(nameSmall)+'</small>':'')+'</span>'+
         '<span class="bc">'+escH(it.barcode||'')+'</span>'+
         '<span class="qt">'+(+it.qty||0)+'개</span>'+
@@ -4557,6 +4599,10 @@ function cpRefreshStaging(){
     }).join('');
     /* 박스에 잔류만 있으면 commit-one 버튼 비활성 (입고할 게 없음) */
     var canCommitBox = items.some(function(x){return !x.unmatched;});
+    var labelButtons = canCommitBox
+      ? '<button type="button" class="mini" onclick="cpStagingPrintBoxProductLabels(\''+escAttrLocal(k)+'\')" title="이 박스 매칭 SKU 상품라벨 인쇄 (80x40mm, 수량만큼)">📃 상품</button>'+
+        '<button type="button" class="mini" onclick="cpStagingPrintBoxMixLabel(\''+escAttrLocal(k)+'\')" title="이 박스 혼적 리스트 인쇄 (150x100mm)">📋 혼적</button>'
+      : '';
     var commitBtn = canCommitBox
       ? '<button type="button" class="commit-one" onclick="cpStagingCommitBox(\''+escAttrLocal(k)+'\')" title="이 박스만 출고 완료 처리 (잔류는 자동 제외 X — 먼저 [✕] 또는 [⏸])">✓ 박스 입고</button>'
       : '<span style="margin-left:auto;font-size:.66rem;color:var(--mu);font-family:var(--mo)">매칭 SKU 없음 — 잔류 처리 필요</span>';
@@ -4565,6 +4611,7 @@ function cpRefreshStaging(){
         '<span class="bx">📦 '+escH(boxId)+'</span>'+
         '<span class="sum">'+items.length+' SKU · '+totalQty+'개</span>'+
         badge+
+        labelButtons+
         commitBtn+
       '</div>'+
       itemsHtml +
@@ -4720,13 +4767,104 @@ function cpStagingMoveToPending(itemId){
   });
 }
 
-/* 입고 대기 전체 SKU 라벨 일괄 인쇄 (입고 전 사전 점검) */
+/* 입고 대기 전체 SKU 상품 라벨 일괄 인쇄 (잔류 자동 제외) */
 function cpStagingPrintLabels(){
   var stg = (workSession && workSession.staging) || [];
-  if (!stg.length) { cpFlash('warn','⚠️ 입고 대기 항목 없음'); return; }
-  cpPrintLabelsFromItems(stg.map(function(it){
+  var matched = stg.filter(function(it){return !it.unmatched;});
+  if (!matched.length) { cpFlash('warn','⚠️ 인쇄할 매칭 SKU 없음'); return; }
+  cpPrintLabelsFromItems(matched.map(function(it){
     return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx };
   }));
+}
+
+/* 입고 대기 — 박스(batchId) 단위 상품 라벨 인쇄 */
+function cpStagingPrintBoxProductLabels(batchKey){
+  var stg = (workSession && workSession.staging) || [];
+  var items = stg.filter(function(x){
+    var k = x.batchId || ('B'+x.srcBoxBarcode);
+    return k === batchKey && !x.unmatched;
+  });
+  if (!items.length) { cpFlash('warn','⚠️ 박스에 매칭 SKU 없음'); return; }
+  cpPrintLabelsFromItems(items.map(function(it){
+    return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx };
+  }));
+}
+
+/* 입고 대기 — 박스(batchId) 단위 혼적 리스트 라벨 인쇄 (150x100mm).
+ * cpPrintMixLabel 은 shipBoxNo 기반이라 별도 구현. staging items 로 라벨 생성. */
+function cpStagingPrintBoxMixLabel(batchKey){
+  if (!workSession) return;
+  var stg = (workSession.staging || []);
+  var items = stg.filter(function(x){
+    var k = x.batchId || ('B'+x.srcBoxBarcode);
+    return k === batchKey && !x.unmatched;
+  });
+  if (!items.length) { cpFlash('warn','⚠️ 박스에 매칭 SKU 없음'); return; }
+  var rows = workSession.rows || [];
+  var firstRow = rows[items[0].srcIdx] || {};
+  var center = firstRow.center || '';
+  var vendor = workSession.vendor || '';
+  var boxId = items[0].srcBoxBarcode || '?';
+  var totalQty = items.reduce(function(s,x){return s + (+x.qty||0);}, 0);
+  /* 같은 바코드끼리 합산 */
+  var byBc = {}, orderBc = [];
+  items.forEach(function(it){
+    var k2 = String(it.barcode||'?');
+    if (!byBc[k2]) { byBc[k2] = { sample:it, qty:0 }; orderBc.push(k2); }
+    byBc[k2].qty += (+it.qty||0);
+  });
+  var rowsHtml = orderBc.map(function(k2){
+    var it = byBc[k2].sample;
+    var qtySum = byBc[k2].qty;
+    var r = rows[it.srcIdx] || {};
+    var meta = stockMeta[normBarcode(it.barcode)] || {};
+    var altBc = (meta.altBarcode||'').trim();
+    var labelBc = altBc || it.barcode;
+    return '<tr>'+
+      '<td>'+escH(r.skuId||'-')+'</td>'+
+      '<td>'+escH(meta.code||'-')+'</td>'+
+      '<td class="bc">'+escH(labelBc)+'</td>'+
+      '<td class="num">'+qtySum+'</td>'+
+    '</tr>';
+  }).join('');
+  var labelHtml =
+    '<div class="mix-label">'+
+      '<div class="ml-title">박스 혼적리스트 (박스 : ' + escH(boxId) + ')</div>'+
+      '<div class="ml-meta">'+
+        '<span><span class="lbl">업체명 :</span>' + escH(vendor||'') + '</span>'+
+        '<span><span class="lbl">입고센터 :</span>' + escH(center||'') + '</span>'+
+      '</div>'+
+      '<table class="ml-tbl">'+
+        '<thead><tr>'+
+          '<th style="width:25%">SKU ID</th>'+
+          '<th style="width:25%">품번</th>'+
+          '<th style="width:30%">바코드</th>'+
+          '<th style="width:20%">수량</th>'+
+        '</tr></thead>'+
+        '<tbody>' + rowsHtml + '</tbody>'+
+      '</table>'+
+      '<div class="ml-bottom">'+
+        '<span>총 ' + orderBc.length + ' SKU · ' + totalQty + '개</span>'+
+      '</div>'+
+    '</div>';
+  var area = document.getElementById('mixLabelArea');
+  if (!area) { cpFlash('er','라벨 영역 없음'); return; }
+  area.innerHTML = labelHtml;
+  var oldStyle = document.getElementById('mix-label-pagestyle');
+  if (oldStyle) oldStyle.remove();
+  var st = document.createElement('style');
+  st.id = 'mix-label-pagestyle';
+  st.textContent = '@media print { @page { size: 150mm 100mm landscape; margin: 0; } }';
+  document.head.appendChild(st);
+  document.body.classList.add('printing-label');
+  setTimeout(function(){
+    window.print();
+    setTimeout(function(){
+      document.body.classList.remove('printing-label');
+      var s = document.getElementById('mix-label-pagestyle');
+      if (s) s.remove();
+    }, 1500);
+  }, 80);
 }
 
 /* ── 세션 리스너가 호출하도록 cpAttachSessionListener 안에서 갱신 호출 추가 ── */
