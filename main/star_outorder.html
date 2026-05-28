@@ -2240,7 +2240,9 @@ function cpEndScan(){
       var ctr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
       if (eta !== g.eta || ctr !== g.center) return;
       if ((s.palletNo||1) !== cur) return;
-      if (s.srcBoxBarcode) seenBox[s.srcBoxBarcode] = true;
+      /* 박스 카운트 — 출고박스(shipBoxNo) 단위. 처리대기 출고처리로 만든 새 박스도 정확히 카운트 */
+      var k = s.shipBoxNo || s.srcBoxBarcode;
+      if (k) seenBox[k] = true;
     });
     var boxCount = Object.keys(seenBox).length;
     /* 이미 마감된 기록과 중복 안 되도록 — 그 그룹·번호가 pallets 에 없으면 추가 */
@@ -4299,20 +4301,21 @@ function cpRefreshPallet(){
   /* 각 그룹의 현재 파렛트 N번 + 박스카운트 */
   list.innerHTML = groups.map(function(g){
     var cur = cpCurPallet(g.eta, g.center);
-    /* 박스 카운트 — 그 그룹의 현재 파렛트(cur)에 적재된 distinct shipBoxNo 또는 srcBoxBarcode 기준
-     * 박스 단위 적재: shipBoxNo 가 박스단위와 같지 않을 수 있음. 그냥 distinct srcBoxBarcode (원본 박스) 카운트 */
+    /* 박스 카운트 — 출고박스(shipBoxNo) 단위로 distinct. 처리대기에서 새 박스 만들어 묶은 경우도 정확히 +1 */
     var seenBox = {};
-    var itemCount = 0;
+    var itemQty = 0;
     (workSession.scans||[]).forEach(function(s){
       if (s.undone) return;
       var eta = s.palletEta || ((workSession.rows||[])[s.srcIdx]||{}).eta || '';
       var ctr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
       if (eta !== g.eta || ctr !== g.center) return;
       if ((s.palletNo||1) !== cur) return;
-      if (s.type === 'box' && s.srcBoxBarcode) seenBox[s.srcBoxBarcode] = true;
-      else if (s.type === 'item') itemCount++;
+      var k = s.shipBoxNo || s.srcBoxBarcode;
+      if (k) seenBox[k] = true;
+      if (s.type === 'item') itemQty += (+s.qty||0);
     });
     var boxCount = Object.keys(seenBox).length;
+    var itemCount = itemQty;
     var keyEsc = String(g.key).replace(/'/g,"\\'").replace(/"/g,'&quot;');
     var meta = boxCount + '박스 적재' + (itemCount ? ' + 단품 '+itemCount+'개' : '');
     return '<div class="pl-row">'+
@@ -4349,7 +4352,7 @@ function cpNextPalletFor(key){
   var g = groups.find(function(x){return x.key===key;});
   if (!g) return;
   var cur = cpCurPallet(g.eta, g.center);
-  /* 박스 카운트 */
+  /* 박스 카운트 — 출고박스(shipBoxNo) 단위 distinct (처리대기 출고처리도 정확히 카운트) */
   var seenBox = {};
   (workSession.scans||[]).forEach(function(s){
     if (s.undone) return;
@@ -4357,7 +4360,8 @@ function cpNextPalletFor(key){
     var ctr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
     if (eta !== g.eta || ctr !== g.center) return;
     if ((s.palletNo||1) !== cur) return;
-    if (s.srcBoxBarcode) seenBox[s.srcBoxBarcode] = true;
+    var k = s.shipBoxNo || s.srcBoxBarcode;
+    if (k) seenBox[k] = true;
   });
   var boxCount = Object.keys(seenBox).length;
   var label = cpPalletShort(g.eta, g.center);
