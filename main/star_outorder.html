@@ -3358,7 +3358,13 @@ function cpRefreshDonePool(){
   var rows = workSession.rows || [];
   /* 카운트/요약 */
   var totalShip = activeScans.reduce(function(s,x){return s + (+x.qty||0);},0);
-  var distinctBox = {}; activeScans.forEach(function(s){ if (s.boxBarcode) distinctBox[s.boxBarcode]=true; });
+  /* 박스 카운트 = 출고박스(shipBoxNo) 단위.
+   * 처리대기에서 모아 새 박스로 묶은 경우, 원본 boxBarcode 가 여러 개라도 한 출고박스로 1 카운트. */
+  var distinctBox = {};
+  activeScans.forEach(function(s){
+    var k = s.shipBoxNo || s.boxBarcode || s.srcBoxBarcode;
+    if (k) distinctBox[k] = true;
+  });
   var cnt = document.getElementById('cpDoneCount');
   if (cnt) cnt.textContent = activeScans.length;
   var meta = document.getElementById('cpDoneMeta');
