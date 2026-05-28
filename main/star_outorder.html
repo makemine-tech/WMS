@@ -1077,7 +1077,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         </div>
         <div class="cp-staging-actions">
           <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
-          <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨을 일괄 인쇄 (입고 전에 사전 점검 가능)">📃 라벨 일괄 인쇄</button>
+          <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨 일괄 인쇄</button>
+          <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 박스 혼적라벨 일괄 인쇄</button>
         </div>
         <div class="cp-staging-list" id="cpStagingList"></div>
       </div>
@@ -4783,6 +4784,92 @@ function cpStagingPrintBoxProductLabels(batchKey){
   cpPrintLabelsFromItems(items.map(function(it){
     return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx };
   }));
+}
+
+/* 입고 대기 — 모든 박스 혼적 리스트 일괄 인쇄 (박스마다 한 페이지, 한 번의 window.print) */
+function cpStagingPrintAllMixLabels(){
+  if (!workSession) return;
+  var stg = (workSession.staging || []);
+  if (!stg.length) { cpFlash('warn','⚠️ 입고 대기 항목 없음'); return; }
+  /* batchId 별로 그룹 — 잔류 자동 제외 */
+  var byBatch = {};
+  var order = [];
+  stg.forEach(function(it){
+    if (it.unmatched) return;
+    var k = it.batchId || ('B'+it.srcBoxBarcode);
+    if (!byBatch[k]) { byBatch[k] = []; order.push(k); }
+    byBatch[k].push(it);
+  });
+  if (!order.length) { cpFlash('warn','⚠️ 매칭 SKU 있는 박스 없음 (모두 잔류)'); return; }
+  var rows = workSession.rows || [];
+  var vendor = workSession.vendor || '';
+  var allLabels = order.map(function(batchKey, batchIdx){
+    var items = byBatch[batchKey];
+    var firstRow = rows[items[0].srcIdx] || {};
+    var center = firstRow.center || '';
+    var boxId = items[0].srcBoxBarcode || '?';
+    var totalQty = items.reduce(function(s,x){return s + (+x.qty||0);}, 0);
+    var byBc = {}, orderBc = [];
+    items.forEach(function(it){
+      var k2 = String(it.barcode||'?');
+      if (!byBc[k2]) { byBc[k2] = { sample:it, qty:0 }; orderBc.push(k2); }
+      byBc[k2].qty += (+it.qty||0);
+    });
+    var rowsHtml = orderBc.map(function(k2){
+      var it = byBc[k2].sample;
+      var qtySum = byBc[k2].qty;
+      var r = rows[it.srcIdx] || {};
+      var meta = stockMeta[normBarcode(it.barcode)] || {};
+      var altBc = (meta.altBarcode||'').trim();
+      var labelBc = altBc || it.barcode;
+      return '<tr>'+
+        '<td>'+escH(r.skuId||'-')+'</td>'+
+        '<td>'+escH(meta.code||'-')+'</td>'+
+        '<td class="bc">'+escH(labelBc)+'</td>'+
+        '<td class="num">'+qtySum+'</td>'+
+      '</tr>';
+    }).join('');
+    /* 두 번째 박스부터 page-break */
+    var pageBreak = batchIdx > 0 ? 'page-break-before:always;' : '';
+    return '<div class="mix-label" style="'+pageBreak+'">'+
+      '<div class="ml-title">박스 혼적리스트 (박스 : ' + escH(boxId) + ')</div>'+
+      '<div class="ml-meta">'+
+        '<span><span class="lbl">업체명 :</span>' + escH(vendor||'') + '</span>'+
+        '<span><span class="lbl">입고센터 :</span>' + escH(center||'') + '</span>'+
+      '</div>'+
+      '<table class="ml-tbl">'+
+        '<thead><tr>'+
+          '<th style="width:25%">SKU ID</th>'+
+          '<th style="width:25%">품번</th>'+
+          '<th style="width:30%">바코드</th>'+
+          '<th style="width:20%">수량</th>'+
+        '</tr></thead>'+
+        '<tbody>' + rowsHtml + '</tbody>'+
+      '</table>'+
+      '<div class="ml-bottom">'+
+        '<span>총 ' + orderBc.length + ' SKU · ' + totalQty + '개</span>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  var area = document.getElementById('mixLabelArea');
+  if (!area) { cpFlash('er','라벨 영역 없음'); return; }
+  area.innerHTML = allLabels;
+  var oldStyle = document.getElementById('mix-label-pagestyle');
+  if (oldStyle) oldStyle.remove();
+  var st = document.createElement('style');
+  st.id = 'mix-label-pagestyle';
+  st.textContent = '@media print { @page { size: 150mm 100mm landscape; margin: 0; } }';
+  document.head.appendChild(st);
+  document.body.classList.add('printing-label');
+  setTimeout(function(){
+    window.print();
+    setTimeout(function(){
+      document.body.classList.remove('printing-label');
+      var s = document.getElementById('mix-label-pagestyle');
+      if (s) s.remove();
+    }, 1500);
+  }, 80);
+  cpFlash('ok','📋 박스 ' + order.length + '개 혼적라벨 인쇄 준비');
 }
 
 /* 입고 대기 — 박스(batchId) 단위 혼적 리스트 라벨 인쇄 (150x100mm).
