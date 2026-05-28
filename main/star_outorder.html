@@ -657,12 +657,14 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-box{background:#0a0d13;border:1px solid var(--br);border-radius:8px;padding:.6rem .75rem}
 .cp-staging-box.mix{border-color:rgba(240,196,74,.5);background:rgba(240,196,74,.04)}
 .cp-staging-box.over{border-color:rgba(240,88,88,.5);background:rgba(240,88,88,.04)}
+.cp-staging-box.un{border-color:rgba(124,131,153,.7);background:rgba(124,131,153,.06)}
 .cp-staging-box-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.45rem;flex-wrap:wrap}
 .cp-staging-box-head .bx{font-family:var(--mo);font-weight:900;color:var(--b);font-size:.82rem;letter-spacing:.02em}
 .cp-staging-box-head .sum{font-size:.72rem;color:var(--mu);font-family:var(--mo)}
 .cp-staging-box-head .badge{font-size:.62rem;font-weight:800;padding:.12rem .42rem;border-radius:4px;letter-spacing:.02em}
 .cp-staging-box-head .badge.mix{background:rgba(240,196,74,.18);color:var(--y);border:1px solid rgba(240,196,74,.5)}
 .cp-staging-box-head .badge.over{background:rgba(240,88,88,.18);color:var(--r);border:1px solid rgba(240,88,88,.5)}
+.cp-staging-box-head .badge.un{background:rgba(124,131,153,.2);color:var(--mu);border:1px solid rgba(124,131,153,.55)}
 .cp-staging-box-head .commit-one{margin-left:auto;background:rgba(74,240,168,.16);color:var(--g);border:1px solid var(--g);font-size:.7rem;font-weight:800;padding:.28rem .6rem;border-radius:5px;cursor:pointer}
 .cp-staging-box-head .commit-one:hover{background:rgba(74,240,168,.28)}
 .cp-staging-box-head .commit-one:active{transform:scale(.96)}
@@ -678,6 +680,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-item .acts .hold{color:var(--y);border-color:rgba(240,196,74,.5)}
 .cp-staging-item .acts .hold:hover{background:rgba(240,196,74,.16)}
 .cp-staging-item .acts button:active{transform:scale(.94)}
+/* 잔류 SKU 행 — 회색 처리 + 좌측 회색 라인 */
+.cp-staging-item.un{background:rgba(124,131,153,.08);border-color:rgba(124,131,153,.35);border-left:3px solid var(--mu)}
+.cp-staging-item.un .nm{color:var(--mu)}
+.cp-staging-item.un .qt{color:var(--mu)}
 .cp-staging-empty{color:var(--mu);font-size:.78rem;padding:.45rem .3rem;font-family:var(--mo)}
 
 /* ─── 처리 대기 패널 (혼적 박스 SKU pending) ─── */
@@ -1084,6 +1090,19 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         </div>
       </div>
 
+      <!-- 입고 대기 패널 — 가장 중요. 스캔 직후 즉시 위로 보이게 (cp-stage 직후) -->
+      <div class="cp-staging-panel" id="cpStagingPanel" style="display:none">
+        <div class="cp-staging-title">
+          📦 입고 대기 — 박스 검토 후 확정 <span class="count" id="cpStagingCount">0</span>
+          <span class="hint">박스 스캔하면 여기 담깁니다. 잔류·혼적·발주초과 SKU 도 함께 표시되니 [✕ 삭제] 또는 [⏸ 대기] 로 정리 후 [✓ 일괄 입고].</span>
+        </div>
+        <div class="cp-staging-actions">
+          <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
+          <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨을 일괄 인쇄 (입고 전에 사전 점검 가능)">📃 라벨 일괄 인쇄</button>
+        </div>
+        <div class="cp-staging-list" id="cpStagingList"></div>
+      </div>
+
       <!-- 하단 그리드: 최근 / PO 진행 -->
       <div class="cp-bottom-grid">
         <div class="cp-mini-panel">
@@ -1094,19 +1113,6 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           <div class="title">📋 PO 진행 요약</div>
           <div id="cpScanProgress"><div class="cp-prog-empty">세션 라인 없음</div></div>
         </div>
-      </div>
-
-      <!-- 입고 대기 패널 — 박스 스캔 후 검토하고 일괄 입고 (자동 입고 X) -->
-      <div class="cp-staging-panel" id="cpStagingPanel" style="display:none">
-        <div class="cp-staging-title">
-          📦 입고 대기 — 박스 검토 후 확정 <span class="count" id="cpStagingCount">0</span>
-          <span class="hint">박스 스캔하면 여기 담깁니다. 검토 후 [✓ 일괄 입고]를 눌러야 출고 완료됨.</span>
-        </div>
-        <div class="cp-staging-actions">
-          <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
-          <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨을 일괄 인쇄 (입고 전에 사전 점검 가능)">📃 라벨 일괄 인쇄</button>
-        </div>
-        <div class="cp-staging-list" id="cpStagingList"></div>
       </div>
 
       <!-- 처리 대기 패널 — 사용자가 [⏸ 대기로] 누른 SKU 가 쌓임 (보존만, 자동 적재 X) -->
@@ -2675,10 +2681,9 @@ function cpProcessBoxScan(raw){
     matchedItems.push({ bc:bc, qty:inQty, srcIdx:idx });
   });
 
-  /* 모두 잔류 — 적재 안 함, 디스플레이만 */
-  if (!matchedItems.length) {
-    cpFlash('warn','⚠️ <b>박스 '+escH(boxId)+'</b>: 출고 대상 SKU 없음 — 모두 잔류');
-    cpUpdateDisplay({ type:'box', input:boxId, scans:[], unmatched:unmatchedSku, allUnmatched:true });
+  /* 박스 안에 SKU 가 하나도 없는 비정상 케이스 */
+  if (!matchedItems.length && !unmatchedSku.length) {
+    cpFlash('er','❌ <b>박스 '+escH(boxId)+'</b>: 내용 SKU 없음');
     return;
   }
 
@@ -2689,26 +2694,46 @@ function cpProcessBoxScan(raw){
     if (ctr) centerSet[ctr] = true;
   });
   var isMix = Object.keys(centerSet).length > 1 || unmatchedSku.length > 0;
-  var ovCheck = cpCheckOverflow(matchedItems);
+  var ovCheck = matchedItems.length ? cpCheckOverflow(matchedItems) : { ok:true };
   var hasOverflow = !ovCheck.ok;
 
-  /* 모든 박스 → 입고 대기(staging) 로. 사용자가 [✓ 일괄 입고] 눌러야 scans 에 commit. */
+  /* 모든 박스 → 입고 대기(staging) 로. 매칭/잔류 모두 함께 표시. */
   var batchId = 'B' + Date.now() + '-' + Math.random().toString(36).slice(2,7);
-  var newStaging = matchedItems.map(function(it){
+  var newStaging = [];
+  /* 매칭 SKU */
+  matchedItems.forEach(function(it){
     var r = sessRows[it.srcIdx] || {};
-    return {
+    newStaging.push({
       id: 'S' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
       batchId: batchId,
       ts: Date.now(), by: getUserId(),
       srcBoxBarcode: boxId,
-      barcode: it.bc, poBarcode: r.poBarcode,
+      barcode: it.bc, poBarcode: r.poBarcode || '',
       qty: it.qty,
       palletEta: r.eta || '', palletCenter: r.center || '',
       palletNo: cpCurPallet(r.eta, r.center),
       srcIdx: it.srcIdx,
       isMix: isMix,
-      hasOverflow: hasOverflow
-    };
+      hasOverflow: hasOverflow,
+      unmatched: false
+    });
+  });
+  /* 잔류(매칭 안 됨) SKU — staging 에 같이 담아 사용자가 직접 처리 */
+  unmatchedSku.forEach(function(it){
+    newStaging.push({
+      id: 'S' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
+      batchId: batchId,
+      ts: Date.now(), by: getUserId(),
+      srcBoxBarcode: boxId,
+      barcode: it.bc, poBarcode: '',
+      qty: it.qty,
+      palletEta: '', palletCenter: '',
+      palletNo: 0,
+      srcIdx: -1,           /* 매칭 안 됨 — PO 라인 없음 */
+      isMix: isMix,
+      hasOverflow: false,
+      unmatched: true        /* 잔류 — 일괄 입고 차단 대상 */
+    });
   });
   var sg = (workSession.staging || []).slice().concat(newStaging);
   workSessionRef.update({ staging: sg, updatedAt: Date.now() }).then(function(){
@@ -2716,12 +2741,14 @@ function cpProcessBoxScan(raw){
     cpRefreshScanUI();
     var totalQty = newStaging.reduce(function(s,x){return s+x.qty;}, 0);
     var extra = '';
-    if (isMix)        extra += '<span class="sub">⚠ 혼적/잔류 SKU 포함 — 검토 필요</span>';
+    if (unmatchedSku.length) extra += '<span class="sub">⚠ 잔류(미매칭) SKU '+unmatchedSku.length+'종 — [✕ 삭제] 또는 [⏸ 대기]로 처리 필요</span>';
+    if (isMix && !unmatchedSku.length) extra += '<span class="sub">⚠ 혼적 — 여러 센터 SKU 포함</span>';
     if (hasOverflow)  extra += '<span class="sub">⚠ 발주수량 초과 SKU 포함 — 입고 전 점검</span>';
-    cpFlash(isMix || hasOverflow ? 'warn' : 'ok',
-      '📥 <b>박스 '+escH(boxId)+'</b> → 입고 대기 추가 ('+newStaging.length+' SKU · '+totalQty+'개). 검토 후 <b>[✓ 일괄 입고]</b> 클릭.'+extra);
-    cpSpeak(isMix ? '혼적 대기' : '대기 추가');
-    cpUpdateDisplay({ type:'box', input:boxId, scans:[], staging:newStaging, unmatched:unmatchedSku, isMix:isMix, allUnmatched:false });
+    var kind = (unmatchedSku.length || isMix || hasOverflow) ? 'warn' : 'ok';
+    cpFlash(kind,
+      '📥 <b>박스 '+escH(boxId)+'</b> → 입고 대기 추가 ('+newStaging.length+' SKU · '+totalQty+'개). 검토 후 <b>[✓ 일괄 입고]</b>.'+extra);
+    cpSpeak(unmatchedSku.length ? '잔류 포함' : (isMix ? '혼적 대기' : '대기 추가'));
+    cpUpdateDisplay({ type:'box', input:boxId, scans:[], staging:newStaging, unmatched:unmatchedSku, isMix:isMix, allUnmatched:!matchedItems.length });
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
   });
@@ -4501,19 +4528,24 @@ function cpRefreshStaging(){
     var totalQty = items.reduce(function(s,x){return s+(+x.qty||0);},0);
     var isMix = items.some(function(x){return x.isMix;});
     var hasOverflow = items.some(function(x){return x.hasOverflow;});
-    var boxCls = 'cp-staging-box' + (hasOverflow?' over':(isMix?' mix':''));
+    var unmatchedCnt = items.filter(function(x){return x.unmatched;}).length;
+    var hasUnmatched = unmatchedCnt > 0;
+    /* 시각 강조 우선순위: 잔류 > 초과 > 혼적 */
+    var boxCls = 'cp-staging-box' + (hasUnmatched?' un':(hasOverflow?' over':(isMix?' mix':'')));
     var badge = '';
-    if (isMix)       badge += '<span class="badge mix">혼적</span>';
+    if (hasUnmatched) badge += '<span class="badge un">잔류 '+unmatchedCnt+'</span>';
+    if (isMix && !hasUnmatched) badge += '<span class="badge mix">혼적</span>';
     if (hasOverflow) badge += '<span class="badge over">발주초과</span>';
     var itemsHtml = items.map(function(it){
-      var r = rows[it.srcIdx] || {};
+      var r = (it.srcIdx >= 0) ? (rows[it.srcIdx] || {}) : {};
       var meta = stockMeta[normBarcode(it.barcode)] || {};
-      var name = meta.name || r.skuName || '';
+      var name = meta.name || r.skuName || (it.unmatched ? '(우리 PO에 없음 — 잔류)' : '');
       var code = meta.code || '';
-      var ctr  = r.center || '';
+      var ctr  = r.center || (it.unmatched ? '미매칭' : '');
       var eta  = r.eta || '';
       var nameSmall = [code, ctr, eta].filter(Boolean).join(' · ');
-      return '<div class="cp-staging-item">'+
+      var itemCls = 'cp-staging-item' + (it.unmatched ? ' un' : '');
+      return '<div class="'+itemCls+'">'+
         '<span class="nm">'+escH(name)+(nameSmall?'<small>'+escH(nameSmall)+'</small>':'')+'</span>'+
         '<span class="bc">'+escH(it.barcode||'')+'</span>'+
         '<span class="qt">'+(+it.qty||0)+'개</span>'+
@@ -4523,22 +4555,35 @@ function cpRefreshStaging(){
         '</span>'+
       '</div>';
     }).join('');
+    /* 박스에 잔류만 있으면 commit-one 버튼 비활성 (입고할 게 없음) */
+    var canCommitBox = items.some(function(x){return !x.unmatched;});
+    var commitBtn = canCommitBox
+      ? '<button type="button" class="commit-one" onclick="cpStagingCommitBox(\''+escAttrLocal(k)+'\')" title="이 박스만 출고 완료 처리 (잔류는 자동 제외 X — 먼저 [✕] 또는 [⏸])">✓ 박스 입고</button>'
+      : '<span style="margin-left:auto;font-size:.66rem;color:var(--mu);font-family:var(--mo)">매칭 SKU 없음 — 잔류 처리 필요</span>';
     return '<div class="'+boxCls+'">'+
       '<div class="cp-staging-box-head">'+
         '<span class="bx">📦 '+escH(boxId)+'</span>'+
         '<span class="sum">'+items.length+' SKU · '+totalQty+'개</span>'+
         badge+
-        '<button type="button" class="commit-one" onclick="cpStagingCommitBox(\''+escAttrLocal(k)+'\')" title="이 박스만 출고 완료 처리">✓ 박스 입고</button>'+
+        commitBtn+
       '</div>'+
       itemsHtml +
     '</div>';
   }).join('');
 }
 
-/* staging 항목들을 scans 로 commit — 박스 단위 묶음 보장 */
+/* staging 항목들을 scans 로 commit — 박스 단위 묶음 보장.
+ * 잔류(unmatched) 항목이 섞여 있으면 사용자에게 처리 요청 후 차단 (자동 제외 X). */
 function cpStagingCommitItems(items, onDone){
   if (!items || !items.length) return;
   if (!workSessionRef) { cpFlash('er','❌ Firebase 연결 없음'); return; }
+  var unmatchedItems = items.filter(function(it){ return it.unmatched; });
+  if (unmatchedItems.length) {
+    var boxList = {};
+    unmatchedItems.forEach(function(it){ boxList[it.srcBoxBarcode||'?'] = true; });
+    cpFlash('er','❌ 잔류(미매칭) SKU '+unmatchedItems.length+'종이 포함되어 있습니다.<span class="sub">박스: '+Object.keys(boxList).join(', ')+' — 각 항목에 [✕ 삭제] 또는 [⏸ 대기]를 누른 후 다시 입고하세요.</span>');
+    return;
+  }
   var sessRows = workSession.rows || [];
   /* 같은 batchId 끼리 묶기 → shipBoxNo 결정 */
   var byBatch = {};
