@@ -995,11 +995,14 @@ function parseExcel(file) {
   });
 }
 
-/* (물류센터 + 파렛트수 + 파렛트번호) 그룹핑 = 1페이지 */
+/* (물류센터 + 입고예정일 + 파렛트수 + 파렛트번호) 그룹핑 = 1페이지.
+ * eta 는 raw 값 그대로 비교하면 형식 차이로 안 묶일 수 있어 formatEta 정규화 후 비교. */
 function groupRows(rows) {
   const map = new Map();
+  const yearNow = new Date().getFullYear();
   for (const r of rows) {
-    const key = `${r.center}::${r.palletT}::${r.palletN}`;
+    const etaKey = formatEta(r.eta, yearNow) || '__noeta__';
+    const key = `${r.center}::${etaKey}::${r.palletT}::${r.palletN}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(r);
   }
