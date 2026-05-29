@@ -713,8 +713,9 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   }
 }
 
-/* ─── 입고 대기 패널 (박스 스캔 후 사용자 확정 전) ─── */
-.cp-staging-panel{background:linear-gradient(135deg,rgba(91,156,246,.10),rgba(74,240,168,.06));border:2px solid rgba(91,156,246,.55);border-radius:11px;padding:.9rem 1rem;margin-top:.85rem}
+/* ─── 입고 대기 패널 (구 cp-display 자리 — cp-stage 좌측 6fr) ─── */
+.cp-staging-panel{background:linear-gradient(135deg,rgba(91,156,246,.10),rgba(74,240,168,.06));border:2px solid rgba(91,156,246,.55);border-radius:11px;padding:.9rem 1rem;min-height:340px;display:flex;flex-direction:column}
+.cp-staging-empty-big{display:flex;align-items:center;justify-content:center;flex:1;color:rgba(124,131,153,.6);font-size:1.1rem;font-weight:700;font-family:var(--mo);padding:3rem 1rem;letter-spacing:-.01em;text-align:center;line-height:1.6}
 .cp-staging-title{display:flex;align-items:center;gap:.55rem;font-size:.92rem;font-weight:900;color:var(--b);margin-bottom:.55rem;letter-spacing:-.005em;flex-wrap:wrap}
 .cp-staging-title .count{background:var(--b);color:#fff;font-family:var(--mo);padding:.12rem .55rem;border-radius:5px;font-size:.78rem;letter-spacing:-.005em}
 .cp-staging-title .hint{font-size:.7rem;color:var(--mu);font-weight:700;flex:1;min-width:200px}
@@ -1181,43 +1182,24 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div id="cpScanFlash" style="display:none"></div>
       </div>
 
-      <!-- 입고 대기 패널 — 박스바코드 스캔 자리 직후, 큰 디스플레이/파렛트 위 -->
-      <div class="cp-staging-panel" id="cpStagingPanel" style="display:none">
-        <div class="cp-staging-title">
-          📦 입고 대기 — 박스 검토 후 확정 <span class="count" id="cpStagingCount">0</span>
-          <span class="hint">박스 스캔하면 여기 담깁니다. 잔류·혼적·발주초과 SKU 도 함께 표시되니 [✕ 삭제] 또는 [⏸ 대기] 로 정리 후 [✓ 일괄 입고].</span>
-        </div>
-        <div class="cp-staging-actions">
-          <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
-          <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄 대기로</button>
-          <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨 일괄 인쇄</button>
-          <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 박스 혼적라벨 일괄 인쇄</button>
-          <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체 삭제</button>
-        </div>
-        <div class="cp-staging-list" id="cpStagingList"></div>
-      </div>
-
-      <!-- 메인 스테이지: 좌(큰 디스플레이) + 우(파렛트) -->
+      <!-- 메인 스테이지: 좌(입고 대기 카드 — 옛 디스플레이 자리) + 우(파렛트 세로) -->
       <div class="cp-stage">
-        <!-- 좌: 마지막 스캔 정보 큰 디스플레이 -->
-        <div class="cp-display idle" id="cpDisplay">
-          <div class="dp-meta-top">
-            <span id="dpType">대기 중</span>
-            <span class="right">
-              <span class="scanned-at" id="dpScannedAt"></span>
-              <button class="dp-label-btn" id="dpLabelBtn" onclick="cpPrintProductLabels()" disabled title="현재 박스의 SKU 들 상품라벨 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨</button>
-            </span>
+        <!-- 좌: 입고 대기 패널 (구 cp-display 자리). 카드 없을 땐 빈 안내. -->
+        <div class="cp-staging-panel" id="cpStagingPanel">
+          <div class="cp-staging-title">
+            📦 입고 대기 — 박스 검토 후 확정 <span class="count" id="cpStagingCount">0</span>
+            <span class="hint">박스/상품 바코드 스캔하면 여기 담깁니다. [✕ 삭제] / [⏸ 대기] 정리 후 [✓ 일괄 입고].</span>
           </div>
-          <div class="dp-center" id="dpCenter">—</div>
-          <div class="dp-eta" id="dpEta">입고일 —</div>
-          <div class="dp-product" id="dpProduct">상품 정보 —</div>
-          <div class="dp-qty" id="dpQty">
-            <div><span class="lab">출고 (이번 스캔)</span><span class="v ship" id="dpShip">—</span></div>
-            <div><span class="lab">누적 출고</span><span class="v ship" id="dpAcc">—</span></div>
-            <div><span class="lab">남은 (PO)</span><span class="v rem" id="dpRem">—</span></div>
+          <div class="cp-staging-actions">
+            <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
+            <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄 대기로</button>
+            <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨 일괄 인쇄</button>
+            <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 박스 혼적라벨 일괄 인쇄</button>
+            <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체 삭제</button>
           </div>
-          <div class="dp-mix-warn" id="dpMixWarn" style="display:none"></div>
-          <button class="dp-hold-btn" id="dpHoldBtn" onclick="cpHoldLast()">⏸ 보류 (마지막 박스/스캔 자동 취소 + 보류풀로)</button>
+          <div class="cp-staging-list" id="cpStagingList">
+            <div class="cp-staging-empty-big">📥 박스바코드 또는 상품바코드 스캔 대기 중...</div>
+          </div>
         </div>
         <!-- 우: 파렛트 카드 (입고일+센터별 독립) -->
         <div class="cp-pallet">
@@ -4930,12 +4912,12 @@ function cpRefreshStaging(){
   if (!panel || !list) return;
   var stg = (workSession && workSession.staging) || [];
   if (cnt) cnt.textContent = stg.length;
+  /* 패널은 항상 보임 (cp-stage 좌측 자리 — 옛 디스플레이 대체). 빈 상태는 안내 메시지로 */
   if (!stg.length) {
-    panel.style.display = 'none';
-    list.innerHTML = '';
+    list.innerHTML = '<div class="cp-staging-empty-big">📥 박스바코드 또는 상품바코드 스캔 대기 중...</div>';
+    cpRefreshStaging._lastItemQty = null;
     return;
   }
-  panel.style.display = '';
   /* batchId 별로 그룹 (박스 단위 표시) */
   var byBatch = {};
   var order = [];
