@@ -1375,6 +1375,31 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   </div>
 </div>
 
+<!-- 무인(바로) 인쇄 설정 안내 모달 — 복사/다운로드 가능한 텍스트 -->
+<div class="cp-popup-back" id="cpKioskBack" onclick="cpCloseKioskHelp()"></div>
+<div class="cp-popup-box" id="cpKioskBox">
+  <div class="cp-popup-hdr" style="color:var(--o)">
+    ❓ 미리보기 없이 바로 인쇄(무인 인쇄) 설정
+    <button class="x" onclick="cpCloseKioskHelp()" aria-label="닫기">✕</button>
+  </div>
+  <div class="cp-popup-body">
+    <div class="cp-popup-sec">
+      <div class="lbl">아래 내용을 복사하거나 txt 로 저장해서 보세요 (텍스트 선택·복사 가능)</div>
+      <textarea id="cpKioskText" readonly spellcheck="false"
+        style="width:100%;min-height:340px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:8px;padding:.8rem;font-family:var(--mo);font-size:.82rem;line-height:1.55;resize:vertical;white-space:pre;overflow:auto"></textarea>
+      <div id="cpKioskCopyMsg" style="font-size:.76rem;color:var(--g);font-weight:800;margin-top:.4rem;display:none">✓ 복사되었습니다</div>
+    </div>
+  </div>
+  <div class="cp-popup-foot" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+    <button class="cancel" onclick="cpAckKiosk()" title="설정을 마쳤다고 표시 — 덧방 스캔 시 안내 꼬리표가 숨겨집니다" style="background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:7px;font-weight:800;padding:.6rem 1rem;cursor:pointer">✓ 설정 완료로 표시</button>
+    <span style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <button onclick="cpCopyKioskHelp()" style="background:#0f1117;color:var(--o);border:1.5px solid var(--o);border-radius:7px;font-weight:800;padding:.6rem 1rem;cursor:pointer">📋 복사</button>
+      <button onclick="cpDownloadKioskHelp()" style="background:#0f1117;color:var(--b);border:1.5px solid var(--b);border-radius:7px;font-weight:800;padding:.6rem 1rem;cursor:pointer">⬇ txt 다운로드</button>
+      <button class="confirm" onclick="cpCloseKioskHelp()">닫기</button>
+    </span>
+  </div>
+</div>
+
 <!-- 인쇄 영역 — 평소 안 보임, 인쇄 시에만 보임 -->
 <div class="print-area print-only" id="printArea"></div>
 
@@ -2839,33 +2864,88 @@ function cpIsKioskPrinting(){
   try { return localStorage.getItem('cp.kioskPrinting.ack') === '1'; } catch(e){ return false; }
 }
 
-/* 무인 인쇄 설정 안내 */
-function cpShowKioskHelp(){
+/* 무인 인쇄 설정 안내 텍스트 (복사·다운로드용 본문) */
+function cpKioskHelpText(){
   var url = location.origin + location.pathname;
-  var msg =
-    '【 미리보기 없이 바로 인쇄(무인 인쇄) 설정 】\n\n' +
-    '웹 브라우저는 보안상 기본적으로 인쇄 시 미리보기 창을 띄웁니다.\n' +
-    '크롬/엣지를 "--kiosk-printing" 옵션으로 실행하면, 스캔 즉시 기본 프린터로 바로 출력됩니다.\n\n' +
-    '──────────────────────────────\n' +
-    '■ 가장 쉬운 방법 (바탕화면 바로가기)\n' +
-    '1) 바탕화면 빈 곳 우클릭 → 새로 만들기 → 바로가기\n' +
-    '2) "항목 위치" 에 아래를 붙여넣기 (크롬 기준):\n\n' +
-    '   chrome.exe --kiosk-printing --new-window "' + url + '"\n\n' +
-    '   (엣지면 chrome.exe 대신  msedge.exe )\n' +
-    '3) 이름은 "덧방 무인인쇄" 등으로 저장\n' +
-    '4) 앞으로 이 바로가기로 페이지를 열고 작업하세요.\n\n' +
-    '■ 프린터 준비\n' +
-    '- Windows 설정 → 프린터에서 라벨 프린터를 "기본 프린터"로 지정\n' +
-    '- 라벨 용지 크기를 80 x 40 mm (상품라벨)로 맞춰 두기\n' +
-    '- "Windows에서 기본 프린터를 관리" 체크 해제 (기본 프린터 고정)\n\n' +
-    '■ 참고\n' +
-    '- 이 모드에서는 이 페이지의 모든 인쇄가 대화상자 없이 바로 출력됩니다.\n' +
-    '- 저장소(repo)의  main/relabel-kiosk-print.bat  파일을 더블클릭해도 동일하게 실행됩니다.\n\n' +
-    '설정을 완료하셨으면 [확인] 을 누르세요. (안내 꼬리표가 숨겨집니다)';
-  if (confirm(msg)) {
-    try { localStorage.setItem('cp.kioskPrinting.ack','1'); } catch(e){}
-    cpFlash('ok','✓ 무인 인쇄 설정 완료로 표시했습니다. 이제 덧방 스캔 시 안내 꼬리표가 숨겨집니다.');
+  return [
+    '【 미리보기 없이 바로 인쇄(무인 인쇄) 설정 】',
+    '',
+    '웹 브라우저는 보안상 기본적으로 인쇄 시 미리보기 창을 띄웁니다.',
+    '크롬/엣지를 "--kiosk-printing" 옵션으로 실행하면,',
+    '스캔 즉시 기본 프린터로 바로 출력됩니다.',
+    '',
+    '──────────────────────────────',
+    '■ 가장 쉬운 방법 (바탕화면 바로가기 만들기)',
+    '',
+    '1) 바탕화면 빈 곳 우클릭 → 새로 만들기 → 바로가기',
+    '2) "항목 위치" 칸에 아래 한 줄을 붙여넣기 (크롬 기준):',
+    '',
+    '   chrome.exe --kiosk-printing --new-window "' + url + '"',
+    '',
+    '   ※ 엣지를 쓰면 chrome.exe 대신  msedge.exe  로 바꾸세요.',
+    '3) 다음 → 이름을 "덧방 무인인쇄" 등으로 저장',
+    '4) 앞으로 이 바로가기로 페이지를 열고 작업하세요.',
+    '',
+    '──────────────────────────────',
+    '■ 프린터 준비 (한 번만)',
+    '',
+    '- Windows 설정 → Bluetooth 및 장치 → 프린터 및 스캐너',
+    '  에서 라벨 프린터를 "기본값으로 설정"',
+    '- "Windows에서 기본 프린터를 관리" 체크 해제 (기본 프린터 고정)',
+    '- 라벨 용지 크기를 80 x 40 mm (상품라벨)로 맞추기',
+    '- 인쇄 여백 = 없음, 배율 = 100%(페이지에 맞춤 끄기)',
+    '',
+    '──────────────────────────────',
+    '■ 참고',
+    '',
+    '- 이 모드에서는 이 페이지의 모든 인쇄가 대화상자 없이 바로 출력됩니다.',
+    '- 저장소(repo)의  main/relabel-kiosk-print.bat  파일을 더블클릭해도',
+    '  동일하게 실행됩니다. (그 파일 안의 주소를 위 주소로 맞춰두세요)',
+    '- 설정을 마쳤으면 [✓ 설정 완료로 표시] 를 누르세요.',
+    '  → 덧방 스캔 시 화면 하단 안내 꼬리표가 숨겨집니다.',
+    '',
+    '(현재 페이지 주소: ' + url + ')'
+  ].join('\n');
+}
+/* 무인 인쇄 설정 안내 — 복사/다운로드 가능한 모달 */
+function cpShowKioskHelp(){
+  var ta = document.getElementById('cpKioskText');
+  if (ta) ta.value = cpKioskHelpText();
+  var msg = document.getElementById('cpKioskCopyMsg');
+  if (msg) msg.style.display = 'none';
+  document.getElementById('cpKioskBack').classList.add('open');
+  document.getElementById('cpKioskBox').classList.add('open');
+}
+function cpCloseKioskHelp(){
+  document.getElementById('cpKioskBack').classList.remove('open');
+  document.getElementById('cpKioskBox').classList.remove('open');
+  var inp = document.getElementById('cpScanInp');
+  if (inp) inp.focus();
+}
+function cpCopyKioskHelp(){
+  var ta = document.getElementById('cpKioskText');
+  var msg = document.getElementById('cpKioskCopyMsg');
+  if (!ta) return;
+  var done = function(){ if (msg){ msg.style.display=''; setTimeout(function(){ msg.style.display='none'; }, 2500); } };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(done, function(){ ta.select(); document.execCommand('copy'); done(); });
+  } else {
+    ta.select(); try{ document.execCommand('copy'); }catch(e){} done();
   }
+}
+function cpDownloadKioskHelp(){
+  var text = cpKioskHelpText();
+  var blob = new Blob(['﻿'+text], {type:'text/plain;charset=utf-8'});  /* BOM — 메모장 한글 깨짐 방지 */
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '무인인쇄_설정안내.txt';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function cpAckKiosk(){
+  try { localStorage.setItem('cp.kioskPrinting.ack','1'); } catch(e){}
+  cpCloseKioskHelp();
+  cpFlash('ok','✓ 무인 인쇄 설정 완료로 표시했습니다. 이제 덧방 스캔 시 안내 꼬리표가 숨겨집니다.');
 }
 
 /* ═══════════ 명령 바코드 (스캔 시 즉시 동작) + 인쇄 ═══════════
