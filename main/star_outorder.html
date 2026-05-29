@@ -666,6 +666,39 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   body.printing-shiplist .prod-label-area{display:none!important}
   /* duplex 인쇄 시 page 안 .ship-page 의 page-break 해제 */
   body.printing-shiplist .ship-duplex-sheet .ship-page{page-break-after:auto!important}
+  /* ─── 흑백 강제 — 모든 텍스트/테두리 100% 검정 (흑백 레이저 가독성 최우선) ─── */
+  body.printing-shiplist .ship-list-area,
+  body.printing-shiplist .ship-list-area *,
+  body.printing-shiplist .ship-list-area h1,
+  body.printing-shiplist .ship-list-area .subnote,
+  body.printing-shiplist .ship-list-area .rule-note,
+  body.printing-shiplist .ship-list-area .rule-note .rn-label,
+  body.printing-shiplist .ship-list-area .rule-note .rn-sep,
+  body.printing-shiplist .ship-list-area .ship-section-title,
+  body.printing-shiplist .ship-list-area .ship-info-table th,
+  body.printing-shiplist .ship-list-area .ship-info-table td,
+  body.printing-shiplist .ship-list-area .ship-info-table td.val-accent,
+  body.printing-shiplist .ship-list-area .ship-sku-table td,
+  body.printing-shiplist .ship-list-area .ship-sku-table td.num-emph,
+  body.printing-shiplist .ship-list-area .ship-sku-table td.remark-emph,
+  body.printing-shiplist .ship-list-area .ship-foot{
+    color:#000!important;
+  }
+  /* 표 thead 는 검정 배경 + 흰 글자 (대비 유지 — 회색으로 인쇄돼도 명확) */
+  body.printing-shiplist .ship-list-area .ship-sku-table th{
+    color:#fff!important;
+    background:#000!important;
+  }
+  /* 테두리도 검정 100% */
+  body.printing-shiplist .ship-list-area .ship-info-table,
+  body.printing-shiplist .ship-list-area .ship-info-table th,
+  body.printing-shiplist .ship-list-area .ship-info-table td,
+  body.printing-shiplist .ship-list-area .ship-sku-table,
+  body.printing-shiplist .ship-list-area .ship-sku-table th,
+  body.printing-shiplist .ship-list-area .ship-sku-table td,
+  body.printing-shiplist .ship-list-area .ship-section-title{
+    border-color:#000!important;
+  }
 }
 
 /* ─── 입고 대기 패널 (박스 스캔 후 사용자 확정 전) ─── */
@@ -2592,7 +2625,8 @@ function cpIdleAutoFocus(){
   var inp = document.getElementById('cpScanInp');
   if (!inp) return;
   if (document.activeElement === inp) return; /* 이미 포커스 */
-  if (cpScanMode !== 'box') cpSetScanMode('box');
+  /* 모드 변경 없이 현재 모드(직전 모드)의 입력칸으로만 포커스 복귀.
+   * 상품 모드 작업 중 다른 곳 만지다 돌아와도 상품 모드 유지. */
   inp.focus();
   if (inp.value) inp.select();
 }
@@ -2762,7 +2796,7 @@ function cpProcessBoxScan(raw){
   var dupInPending = (workSession.pending||[]).some(function(p){ return p.srcBoxBarcode === boxId; });
   if (dupInScans || dupInStaging || dupInPending) {
     cpFlash('er','❌ <b>중복 박스</b>: '+escH(boxId)+'<span class="sub">이미 처리되었거나 대기 중입니다. 박스바코드는 중복 불가합니다.</span>');
-    cpSpeak('중복 박스');
+    cpSpeak('중복');
     return;
   }
   var contents = boxIndex[boxId];
@@ -2853,7 +2887,7 @@ function cpProcessBoxScan(raw){
     var kind = (unmatchedSku.length || isMix || hasOverflow) ? 'warn' : 'ok';
     cpFlash(kind,
       '📥 <b>박스 '+escH(boxId)+'</b> → 입고 대기 추가 ('+newStaging.length+' SKU · '+totalQty+'개). 검토 후 <b>[✓ 일괄 입고]</b>.'+extra);
-    cpSpeak(unmatchedSku.length ? '잔류 포함' : (isMix ? '혼적 대기' : '대기 추가'));
+    cpSpeak(unmatchedSku.length ? '잔류' : (isMix ? '혼적' : '출고'));
     cpUpdateDisplay({ type:'box', input:boxId, scans:[], staging:newStaging, unmatched:unmatchedSku, isMix:isMix, allUnmatched:!matchedItems.length });
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
@@ -2931,7 +2965,7 @@ function cpProcessItemScan(raw){
   }).reduce(function(s,x){return s+(+x.qty||0);},0);
   if (prog.shipped + stageAddForSrc + 1 > prog.need) {
     cpFlash('er','❌ <b>발주수량 초과 차단</b><span class="sub">'+escH(row.skuName||'')+' — 필요 '+prog.need+', 현재 입고+대기 '+(prog.shipped+stageAddForSrc)+'</span>');
-    cpSpeak('초과 차단');
+    cpSpeak('초과');
     return;
   }
   /* staging 에 같은 srcIdx 항목 있으면 qty +1, 없으면 새로 — 상품 모드 카드 하나에 누적 */
@@ -2972,7 +3006,7 @@ function cpProcessItemScan(raw){
     var altBadge = matchedVia==='alt' ? ' <span style="color:var(--p);font-weight:800">[ALT]</span>' : '';
     var totalForSrc = stageAddForSrc + 1;
     cpFlash('ok','📥 <b>'+escH(name||row.poBarcode)+'</b>'+altBadge+' → 입고 대기 (+1, 누적 '+totalForSrc+' · 필요 '+prog.need+')');
-    cpSpeak('대기 추가');
+    cpBeepBeep();  /* 상품 단건 대기 추가 — 짧은 부저 (TTS 보다 빠름) */
     cpUpdateDisplay({ type:'item', input:raw, scans:[], staging:[stagedItem], unmatched:[] });
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
@@ -3361,11 +3395,37 @@ function cpSpeak(text){
     window.speechSynthesis.cancel();
     var u = new SpeechSynthesisUtterance(text);
     u.lang = 'ko-KR';
-    u.rate = 1.05;
+    u.rate = 1.15;  /* 빠른 발화 — 스캔 지연 최소화 */
     u.pitch = 1.0;
     u.volume = 1.0;
     window.speechSynthesis.speak(u);
   } catch(e){}
+}
+/* 짧은 부저음 — 상품모드 대기 추가용 (TTS 보다 훨씬 짧음) */
+var _cpAudioCtx = null;
+function cpBeep(){
+  if (!cpTtsEnabled) return;
+  try {
+    if (!_cpAudioCtx) _cpAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var ctx = _cpAudioCtx;
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'square';
+    osc.frequency.value = 1100;
+    var t0 = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+    osc.start(t0);
+    osc.stop(t0 + 0.09);
+  } catch(e){}
+}
+/* "삐삐" — 짧은 부저 2회 (상품 단건 대기 추가 시) */
+function cpBeepBeep(){
+  cpBeep();
+  setTimeout(cpBeep, 110);
 }
 function cpToggleTts(){
   cpTtsEnabled = !cpTtsEnabled;
