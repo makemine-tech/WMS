@@ -290,6 +290,21 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-scan-inp{width:100%;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:8px;padding:.85rem 1rem;font-size:1.2rem;font-family:var(--mo);outline:none;letter-spacing:.02em}
 .cp-scan-inp:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(74,240,168,.18)}
 .cp-scan-hint{margin-top:.45rem;font-size:.74rem;color:var(--mu);font-family:var(--mo)}
+/* 박스 스캔 아래 — PO 바탕 센터별 진행 요약 한 줄 (예: 인천1 = 1P - 300(50/250) | 인천2 = ...) */
+.cp-center-summary{margin-top:.55rem;padding:.45rem .65rem;background:#0a0d13;border:1px solid var(--br);border-radius:6px;font-family:var(--mo);font-size:.78rem;white-space:nowrap;overflow-x:auto;display:flex;align-items:center;gap:0;flex-wrap:nowrap;scrollbar-width:thin}
+.cp-center-summary::-webkit-scrollbar{height:6px}
+.cp-center-summary::-webkit-scrollbar-thumb{background:var(--br);border-radius:3px}
+.cp-center-summary .cs-item{padding:0 .45rem;color:var(--tx);flex-shrink:0;letter-spacing:-.005em}
+.cp-center-summary .cs-item b{color:var(--y);font-weight:900;margin-right:.25rem;letter-spacing:.01em}
+.cp-center-summary .cs-pal{color:var(--b);font-weight:800;margin:0 .18rem}
+.cp-center-summary .cs-need{color:var(--tx);font-weight:800}
+.cp-center-summary .cs-prog{color:var(--mu);font-weight:700;margin-left:.15rem}
+.cp-center-summary .cs-prog .pr{color:var(--g)}
+.cp-center-summary .cs-prog .rm{color:var(--y)}
+.cp-center-summary .cs-sep{color:var(--br);flex-shrink:0;padding:0 .15rem;font-weight:700}
+.cp-center-summary .cs-item.done b,
+.cp-center-summary .cs-item.done .cs-prog .pr{color:var(--g)}
+.cp-center-summary .cs-item.done .cs-prog .rm{color:var(--g)}
 .cp-scan-side{display:flex;flex-direction:column;gap:.65rem}
 .cp-panel{background:var(--s1);border:1px solid var(--br);border-radius:9px;padding:.75rem .9rem}
 .cp-panel-title{font-size:.7rem;color:var(--mu);font-family:var(--mo);letter-spacing:.06em;margin-bottom:.5rem;font-weight:800}
@@ -1180,6 +1195,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)">
         <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄 출고</div>
         <div id="cpScanFlash" style="display:none"></div>
+        <div class="cp-center-summary" id="cpCenterSummary" style="display:none"></div>
       </div>
 
       <!-- 메인 스테이지: 좌(입고 대기 카드 — 옛 디스플레이 자리) + 우(파렛트 세로) -->
@@ -4897,6 +4913,58 @@ function cpRefreshScanUI(){
   cpRefreshStaging();
   cpRefreshDonePool();
   cpRefreshPending();
+  cpRefreshCenterSummary();
+}
+
+/* ═══════════ 센터별 한 줄 요약 (박스바코드 스캔칸 아래) ═══════════
+ * PO rows 의 센터별 그룹화 → 누적파렛수P - 총출고수량(진행/잔여)
+ * 예: 인천1 = 1P - 300(50/250) | 인천2 = 1P - 300(50/250) | 인천3 = 1P - 300(50/250)
+ *   1P    = 그 센터의 distinct palletNo 개수 (작업한 파렛트 수)
+ *   300   = 그 센터의 PO 총 출고대상 수량 (canShip 합)
+ *   50/250 = (현재까지 출고된 누적 / 남은 수량) */
+function cpRefreshCenterSummary(){
+  var el = document.getElementById('cpCenterSummary');
+  if (!el) return;
+  if (!workSession){ el.style.display='none'; el.innerHTML=''; return; }
+  var rows = workSession.rows || [];
+  var scans = (workSession.scans||[]).filter(function(s){return !s.undone;});
+  if (!rows.length){ el.style.display='none'; el.innerHTML=''; return; }
+  /* 센터별 집계 */
+  var byCenter = {};
+  var order = [];
+  rows.forEach(function(r){
+    var c = r.center || '(미지정)';
+    if (!byCenter[c]){
+      byCenter[c] = { need: 0, shipped: 0, pallets: {} };
+      order.push(c);
+    }
+    byCenter[c].need += (+r.canShip || +r.qty || 0);
+  });
+  scans.forEach(function(s){
+    var r = rows[s.srcIdx] || {};
+    var c = s.palletCenter || r.center || '(미지정)';
+    if (!byCenter[c]){
+      byCenter[c] = { need: 0, shipped: 0, pallets: {} };
+      order.push(c);
+    }
+    byCenter[c].shipped += (+s.qty || 0);
+    var pn = +s.palletNo;
+    if (pn > 0) byCenter[c].pallets[pn] = true;
+  });
+  if (!order.length){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display = '';
+  el.innerHTML = order.map(function(c){
+    var sum = byCenter[c];
+    var palCount = Object.keys(sum.pallets).length;
+    var rem = Math.max(0, sum.need - sum.shipped);
+    var done = sum.need > 0 && sum.shipped >= sum.need;
+    return '<span class="cs-item'+(done?' done':'')+'">'+
+      '<b>'+escH(c)+'</b>= '+
+      '<span class="cs-pal">'+palCount+'P</span> - '+
+      '<span class="cs-need">'+sum.need+'</span>'+
+      '<span class="cs-prog">(<span class="pr">'+sum.shipped+'</span>/<span class="rm">'+rem+'</span>)</span>'+
+    '</span>';
+  }).join('<span class="cs-sep">|</span>');
 }
 
 /* ═══════════ 입고 대기 (staging) ═══════════
