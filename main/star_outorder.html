@@ -388,6 +388,16 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-tbl tbody td{padding:.42rem .55rem;border-bottom:1px solid rgba(37,43,59,.5);font-family:var(--mo);font-size:.8rem;white-space:nowrap;vertical-align:middle}
 .cp-done-tbl tbody tr:first-child td{background:rgba(74,240,168,.06)}  /* 가장 최근 행 강조 */
 .cp-done-tbl tbody tr.undone td{opacity:.35;text-decoration:line-through}
+/* 완료풀 inline edit input (출고수량/파렛/박스수) */
+.cp-done-tbl .c-edit-inp{width:44px;background:#0a0d13;color:var(--g);border:1px solid var(--br);border-radius:3px;padding:.12rem .2rem;font-family:var(--mo);font-weight:900;font-size:.78rem;text-align:right;outline:none;-moz-appearance:textfield}
+.cp-done-tbl .c-edit-inp::-webkit-outer-spin-button,
+.cp-done-tbl .c-edit-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.cp-done-tbl .c-edit-inp:focus{border-color:var(--g);box-shadow:0 0 0 2px rgba(74,240,168,.18)}
+.cp-done-tbl .c-edit-inp.narrow{width:34px}
+.cp-done-tbl .c-pal-cell{display:flex;align-items:center;gap:.2rem;justify-content:center;font-family:var(--mo);font-size:.7rem;color:var(--mu);font-weight:700;flex-wrap:nowrap}
+/* 헤더 [수정저장] 버튼 */
+.bak-btn.save-edit{background:var(--g);color:#0f1117;border:1px solid var(--g);font-weight:900}
+.bak-btn.save-edit:hover{filter:brightness(1.08)}
 /* 완료풀 개별 삭제 버튼 */
 .cp-done-del{background:transparent;border:1px solid rgba(240,88,88,.5);color:var(--r);font-size:.72rem;font-weight:800;width:24px;height:24px;border-radius:4px;cursor:pointer;padding:0;line-height:1;font-family:inherit}
 .cp-done-del:hover{background:rgba(240,88,88,.18)}
@@ -1230,6 +1240,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <button class="bak-btn restore" title="엑셀 백업 파일 업로드 → 그 시점으로 복원">⬆ 복원
               <input type="file" accept=".xlsx,.xls" onchange="cpUploadDoneExcel(this.files[0]);this.value='';">
             </button>
+            <button class="bak-btn save-edit" onclick="cpDoneSaveAllEdits()" title="완료풀의 inline 수정값을 즉시 Firebase 에 다시 한 번 저장 (자동저장 백업)">💾 수정저장</button>
           </span>
         </div>
         <div class="cp-done-wrap">
@@ -1242,11 +1253,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
               <th>품번</th>
               <th>사이즈</th>
               <th style="text-align:right">입고예정</th>
-              <th style="text-align:right">출고</th>
+              <th style="text-align:right" title="출고 수량 (수정 가능 — 변경 즉시 저장)">출고 ✎</th>
               <th style="text-align:right">잔여</th>
               <th>입고일</th>
               <th>센터</th>
-              <th style="text-align:center">파렛</th>
+              <th style="text-align:center" title="파렛트 번호 + 박스수 (수정 가능 — 변경 즉시 저장)">파렛/박스 ✎</th>
               <th style="text-align:center" title="이 출고 항목 개별 삭제">✕</th>
             </tr></thead>
             <tbody id="cpDoneBody">
@@ -2182,6 +2193,7 @@ function cpStartScan(){
     shipBoxes: [],
     palletCounters: {},   /* (입고일+센터)별 현재 파렛트 번호 {'2026-06-01|인천4':1, ...} */
     pallets: [],          /* 마감 기록 [{key, eta, center, no, closedAt, by, boxCount}] */
+    palletBoxOverride: {},/* 사용자가 수동 수정한 박스수 {'eta|center|palletNo': boxCount} */
     holdPool: []          /* (deprecated — 호환 위해 유지, 자동 진입 안 함) */
   };
   var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sid);
@@ -3574,8 +3586,29 @@ function cpRefreshDonePool(){
         ? '<span style="color:var(--p);font-weight:900" title="라벨 인쇄 시 사용: '+escH(altBc)+'">'+escH(altBc)+'</span>'
         : '<span style="color:var(--mu)">-</span>';
       /* 개별 삭제 버튼 — ts+barcode+srcBoxBarcode 조합으로 식별 */
+      var keyArgs = (+s.ts||0)+',\''+escAttrLocal(s.barcode||'')+'\',\''+escAttrLocal(s.srcBoxBarcode||'')+'\'';
       var delBtn = s.undone ? '' :
-        '<button type="button" class="cp-done-del" title="이 출고 항목 삭제 (취소)" onclick="cpDeleteScanByKey('+(+s.ts||0)+',\''+escAttrLocal(s.barcode||'')+'\',\''+escAttrLocal(s.srcBoxBarcode||'')+'\')">✕</button>';
+        '<button type="button" class="cp-done-del" title="이 출고 항목 삭제 (취소)" onclick="cpDeleteScanByKey('+keyArgs+')">✕</button>';
+      /* 출고수량 inline 수정 */
+      var qtyCell = s.undone
+        ? '+' + s.qty
+        : '+<input type="number" min="0" class="c-edit-inp" value="'+(+s.qty||0)+'" onchange="cpDoneUpdateScan('+keyArgs+',\'qty\',this.value,this)" onclick="this.select()" title="출고수량 수정">';
+      /* 파렛/박스수 inline 수정 — 그룹(eta·center·palletNo) 기준 박스수 자동계산 또는 override */
+      var sEta = s.palletEta || r.eta || '';
+      var sCtr = s.palletCenter || r.center || '';
+      var sPn  = +s.palletNo || 1;
+      var palCell;
+      if (s.undone) {
+        palCell = (s.palletNo||'-');
+      } else {
+        var boxCount = cpResolveBoxCountForPallet(sEta, sCtr, sPn);
+        palCell = '<div class="c-pal-cell">'+
+          '<input type="number" min="1" class="c-edit-inp narrow" value="'+sPn+'" onchange="cpDoneUpdateScan('+keyArgs+',\'palletNo\',this.value,this)" onclick="this.select()" title="파렛트 번호 수정">'+
+          '<span>파렛</span>'+
+          '<input type="number" min="0" class="c-edit-inp narrow" value="'+boxCount+'" onchange="cpDoneUpdateBoxCount(\''+escAttrLocal(sEta)+'\',\''+escAttrLocal(sCtr)+'\','+sPn+',this.value,this)" onclick="this.select()" title="박스수 수정 (이 파렛트에 속한 박스 개수)">'+
+          '<span>박스</span>'+
+        '</div>';
+      }
       html += '<tr class="'+rowCls+'">'+
         groupCells +
         '<td class="c-bc">'  + escH(s.barcode) + '</td>'+
@@ -3583,11 +3616,11 @@ function cpRefreshDonePool(){
         '<td class="c-code">'+ escH(code) + '</td>'+
         '<td class="c-size">'+ escH(size) + '</td>'+
         '<td class="c-need">'+ need + '</td>'+
-        '<td class="c-ship">+'+ s.qty + '</td>'+
+        '<td class="c-ship">'+ qtyCell + '</td>'+
         '<td class="'+remCls+'">'+ rem + '</td>'+
         '<td class="c-eta">' + escH(r.eta||'-') + '</td>'+
         '<td class="c-ctr">' + escH(r.center||'-') + '</td>'+
-        '<td class="c-pal">' + (s.palletNo||'-') + '</td>'+
+        '<td class="c-pal">' + palCell + '</td>'+
         '<td style="text-align:center">' + delBtn + '</td>'+
       '</tr>';
     });
@@ -4629,6 +4662,107 @@ function cpAppendScans(newScans, onDone){
     if (onDone) onDone();
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err)+'<span class="sub">네트워크 확인 후 다시 시도하세요. 로컬에는 보존됨.</span>');
+  });
+}
+
+/* ═══════════ 완료풀 inline 수정 — 출고수량/파렛/박스수 ═══════════
+ * input change 마다 즉시 Firebase 에 저장 (자동저장). [💾 수정저장] 버튼은 명시 재저장 백업. */
+
+/* 박스수 자동 계산 — 같은 (eta, center, palletNo) 그룹의 distinct shipBoxNo 개수 */
+function cpAutoBoxCountForPallet(eta, center, palletNo){
+  if (!workSession) return 0;
+  var seen = {};
+  (workSession.scans||[]).forEach(function(s){
+    if (s.undone) return;
+    var sEta = s.palletEta || ((workSession.rows||[])[s.srcIdx]||{}).eta || '';
+    var sCtr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
+    var sPn  = +s.palletNo || 1;
+    if (sEta !== eta || sCtr !== center || sPn !== +palletNo) return;
+    var k = s.shipBoxNo || s.srcBoxBarcode;
+    if (k) seen[k] = true;
+  });
+  return Object.keys(seen).length;
+}
+/* 박스수 표시값 — override 있으면 그것, 없으면 자동계산 */
+function cpResolveBoxCountForPallet(eta, center, palletNo){
+  var key = eta + '|' + center + '|' + palletNo;
+  var override = (workSession && workSession.palletBoxOverride) || {};
+  if (override[key] !== undefined && override[key] !== null) return +override[key];
+  return cpAutoBoxCountForPallet(eta, center, palletNo);
+}
+/* scan 단일 필드 inline 수정 — 'qty' 또는 'palletNo' */
+function cpDoneUpdateScan(ts, barcode, srcBox, field, value, inputEl){
+  if (!workSessionRef || !workSession) return;
+  var scans = (workSession.scans||[]).slice();
+  var idx = -1;
+  for (var i=0; i<scans.length; i++){
+    var s = scans[i];
+    if (s.undone) continue;
+    if (+s.ts === +ts && String(s.barcode||'') === String(barcode||'') && String(s.srcBoxBarcode||'') === String(srcBox||'')) {
+      idx = i; break;
+    }
+  }
+  if (idx < 0) {
+    cpFlash('warn','⚠️ 항목을 찾을 수 없음');
+    return;
+  }
+  var n = parseInt(value, 10);
+  if (isNaN(n) || n < 0 || (field === 'palletNo' && n < 1)) {
+    if (inputEl) inputEl.value = scans[idx][field] || (field==='palletNo'?1:0);
+    cpFlash('warn','⚠️ 잘못된 값 — 원래 값 복구');
+    return;
+  }
+  var orig = scans[idx][field];
+  if (+orig === n) return; /* 변경 없음 */
+  scans[idx] = Object.assign({}, scans[idx]);
+  scans[idx][field] = n;
+  workSessionRef.update({ scans: scans, updatedAt: Date.now() }).then(function(){
+    workSession.scans = scans;
+    cpRefreshScanUI();
+    var fieldLabel = field === 'qty' ? '출고수량' : '파렛트';
+    cpFlash('ok','✓ '+fieldLabel+' 수정 저장: '+n);
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
+    if (inputEl) inputEl.value = orig;
+  });
+}
+/* 파렛트 박스수 override 저장 */
+function cpDoneUpdateBoxCount(eta, center, palletNo, value, inputEl){
+  if (!workSessionRef || !workSession) return;
+  var n = parseInt(value, 10);
+  if (isNaN(n) || n < 0) {
+    if (inputEl) inputEl.value = cpResolveBoxCountForPallet(eta, center, palletNo);
+    cpFlash('warn','⚠️ 0 이상 숫자만');
+    return;
+  }
+  var key = eta + '|' + center + '|' + palletNo;
+  var auto = cpAutoBoxCountForPallet(eta, center, palletNo);
+  var override = Object.assign({}, workSession.palletBoxOverride || {});
+  if (n === auto) {
+    /* 자동값과 같으면 override 제거 (불필요한 데이터) */
+    delete override[key];
+  } else {
+    override[key] = n;
+  }
+  workSessionRef.update({ palletBoxOverride: override, updatedAt: Date.now() }).then(function(){
+    workSession.palletBoxOverride = override;
+    cpRefreshScanUI();
+    cpFlash('ok','✓ 파렛트 박스수 저장: '+n+(n===auto?' (자동값과 동일)':' (강제 수정)'));
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
+  });
+}
+/* [💾 수정저장] — 자동저장의 백업. 현재 화면 input 값을 모두 한 번 더 Firebase 에 commit */
+function cpDoneSaveAllEdits(){
+  if (!workSessionRef || !workSession) { cpFlash('warn','⚠️ 세션 없음'); return; }
+  workSessionRef.update({
+    scans: workSession.scans || [],
+    palletBoxOverride: workSession.palletBoxOverride || {},
+    updatedAt: Date.now()
+  }).then(function(){
+    cpFlash('ok','✓ 완료풀 수정값 다시 저장 (백업 commit)');
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
   });
 }
 
