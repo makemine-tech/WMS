@@ -750,6 +750,28 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-box-head .commit-one{margin-left:auto;background:rgba(74,240,168,.16);color:var(--g);border:1px solid var(--g);font-size:.7rem;font-weight:800;padding:.28rem .6rem;border-radius:5px;cursor:pointer}
 .cp-staging-box-head .commit-one:hover{background:rgba(74,240,168,.28)}
 .cp-staging-box-head .commit-one:active{transform:scale(.96)}
+/* 상품 모드 카드 — 누적 총수량 큰 디지털 카운터 (빠른 스캔 시 한눈에 확인용) */
+.cp-staging-box-head .big-qty{
+  font-size:2.6rem;font-weight:900;font-family:var(--mo);color:var(--g);
+  letter-spacing:-.02em;line-height:1;
+  background:rgba(74,240,168,.14);
+  padding:.18rem .8rem;border-radius:9px;
+  border:2px solid rgba(74,240,168,.55);
+  display:inline-flex;align-items:baseline;gap:.25rem;
+  box-shadow:0 0 0 4px rgba(74,240,168,.05);
+  text-shadow:0 0 14px rgba(74,240,168,.35);
+  min-width:64px;justify-content:center;
+}
+.cp-staging-box-head .big-qty small{
+  font-size:.85rem;font-weight:800;opacity:.75;letter-spacing:.04em;
+}
+/* 카운터 변경 시 0.4초 펄스 (사용자가 변화를 인지하게) */
+@keyframes bigQtyPulse{
+  0%{transform:scale(1);box-shadow:0 0 0 4px rgba(74,240,168,.05)}
+  35%{transform:scale(1.12);box-shadow:0 0 0 10px rgba(74,240,168,.18)}
+  100%{transform:scale(1);box-shadow:0 0 0 4px rgba(74,240,168,.05)}
+}
+.cp-staging-box-head .big-qty.pulse{animation:bigQtyPulse .45s ease-out}
 .cp-staging-item{display:flex;align-items:center;gap:.5rem;padding:.4rem .55rem;background:var(--s2);border:1px solid var(--br);border-radius:6px;margin-top:.32rem;font-size:.78rem;flex-wrap:wrap}
 .cp-staging-item .nm{flex:1;min-width:120px;color:var(--tx);font-weight:700}
 .cp-staging-item .nm small{display:block;color:var(--mu);font-size:.66rem;font-family:var(--mo);font-weight:600;margin-top:.1rem;letter-spacing:.02em}
@@ -4998,16 +5020,34 @@ function cpRefreshStaging(){
       : '<span style="margin-left:auto;font-size:.66rem;color:var(--mu);font-family:var(--mo)">매칭 SKU 없음 — 잔류 처리 필요</span>';
     var isItemBatch = first.type === 'item';
     var headerLabel = isItemBatch ? '🏷️ 상품 모드' : ('📦 ' + escH(boxId));
+    /* 상품 모드: 큰 누적 카운터 + 작은 SKU 수 / 박스 모드: 기존 sum 그대로 */
+    var sumOrBig = isItemBatch
+      ? '<span class="big-qty" data-qty="'+totalQty+'">'+totalQty+'<small>개</small></span>'+
+        '<span class="sum">'+items.length+' SKU</span>'
+      : '<span class="sum">'+items.length+' SKU · '+totalQty+'개</span>';
     return '<div class="'+boxCls+'">'+
       '<div class="cp-staging-box-head">'+
         '<span class="bx">'+headerLabel+'</span>'+
-        '<span class="sum">'+items.length+' SKU · '+totalQty+'개</span>'+
+        sumOrBig+
         badge+
         labelButtons+
       '</div>'+
       itemsHtml +
     '</div>';
   }).join('');
+  /* 상품 모드 카운터 펄스 — 직전 렌더의 qty 와 다르면 0.45s 펄스 */
+  var bigEl = list.querySelector('.cp-staging-box.item-mode .big-qty, .cp-staging-box-head .big-qty');
+  if (bigEl){
+    var newQty = bigEl.getAttribute('data-qty');
+    if (cpRefreshStaging._lastItemQty !== newQty){
+      cpRefreshStaging._lastItemQty = newQty;
+      bigEl.classList.remove('pulse');
+      void bigEl.offsetWidth; /* reflow 강제 — 애니메이션 재시작 */
+      bigEl.classList.add('pulse');
+    }
+  } else {
+    cpRefreshStaging._lastItemQty = null;
+  }
 }
 
 /* staging 항목들을 scans 로 commit — 박스 단위 묶음 보장.
