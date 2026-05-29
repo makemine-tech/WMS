@@ -489,11 +489,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   body.printing-cmd-label .print-area{display:none!important}
 }
 
-/* ─── 상품 라벨 (80x40mm 가로 인쇄 전용) — 사장님 이미지 기반 재설계 ─── */
+/* ─── 상품 라벨 (80x40mm 가로 인쇄 전용) — 상품명 상단 2줄 + 품번/사이즈/제조국/색상/재질 + 우측 바코드 ─── */
 .prod-label-area{display:none}
 .prod-label{
   width:80mm;height:40mm;
-  padding:1.8mm 6mm 1.8mm 2mm;   /* 우측만 6mm — 바코드/내용 모두 좌측으로 4mm 당김 */
+  padding:1.6mm 3mm;
   box-sizing:border-box;
   background:#fff;color:#000;
   font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;
@@ -501,20 +501,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   page-break-after:always;
 }
 .prod-label:last-child{page-break-after:auto}
-/* 상단 본문: 좌측 정보 (48mm) + 우측 바코드 (28mm) */
-.prod-label .pl-main{
-  display:grid;
-  grid-template-columns:1fr 31mm;
-  gap:1.5mm;
-  flex:1;
-  min-height:0;
-}
-.prod-label .pl-left{
-  display:flex;flex-direction:column;
-  gap:.4mm;
-  min-width:0;
-  font-size:7.5pt;line-height:1.15;
-}
+/* 공통 키/값 행 */
 .prod-label .pl-row{
   display:flex;gap:1.5mm;align-items:baseline;
   min-width:0;
@@ -522,7 +509,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .prod-label .pl-key{
   font-weight:900;color:#000;
   letter-spacing:-.5pt;
-  min-width:10mm;
+  width:11.5mm;min-width:11.5mm;
   flex-shrink:0;
   font-size:8pt;
 }
@@ -531,46 +518,71 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   flex:1;min-width:0;
   overflow:hidden;white-space:nowrap;
 }
-/* 상품명: 3줄까지 wrap 허용 (잘리지 않고 자동 폰트 축소) */
+/* ① 상단 상품명 띠 — 전체폭, 2줄까지, 길면 자동 폰트 축소(잘림 X) */
+.prod-label .pl-name-band{
+  display:flex;gap:1.5mm;align-items:flex-start;
+  flex-shrink:0;min-width:0;
+  margin-bottom:.5mm;
+}
+.prod-label .pl-name-band .pl-key{padding-top:.3mm}
 .prod-label .pl-val.name{
-  font-size:7.5pt;font-weight:700;
-  white-space:normal;line-height:1.18;
+  flex:1;min-width:0;
+  font-size:9.5pt;font-weight:800;
+  white-space:normal;line-height:1.14;
+  letter-spacing:-.3pt;
+  word-break:break-all;          /* 영문·숫자 섞인 긴 상품명도 줄바꿈 */
   overflow:hidden;
-  letter-spacing:-.2pt;
-  word-break:keep-all;
-  max-height:8mm;
+  max-height:7.8mm;              /* 약 2줄 — 넘치면 cpFitLabelText 가 폰트 축소 */
 }
-/* 사이즈/품번: 가장 크게 강조 */
+/* ② 본문 — 좌측 필드 + 우측 바코드 */
+.prod-label .pl-body{
+  display:grid;
+  grid-template-columns:1fr 33mm;
+  gap:1.5mm;
+  flex:1;min-height:0;
+  align-items:center;
+  overflow:hidden;          /* 좌측열이 넘쳐도 하단 안내문과 겹치지 않게 */
+}
+.prod-label .pl-left{
+  display:flex;flex-direction:column;
+  justify-content:center;
+  gap:.3mm;
+  min-width:0;
+}
+/* 품번·사이즈 — 가장 크게 강조 */
 .prod-label .pl-val.big{
-  font-size:15pt;font-weight:900;
-  letter-spacing:-.5pt;line-height:1;
-  margin-top:.2mm;
+  font-size:14pt;font-weight:900;
+  letter-spacing:-.5pt;line-height:1.0;
 }
-.prod-label .pl-row.big-row{margin:.4mm 0}
-/* 작은 정보 (재질·색상·제조국) */
+.prod-label .pl-row.big-row{margin:0}
+/* 제조국·색상·재질 — 2줄까지 wrap, 길면 폰트 자동 축소(잘림 X) */
+.prod-label .pl-row.sm-row{align-items:flex-start}
 .prod-label .pl-val.small{
-  font-size:6.8pt;font-weight:500;
+  font-size:8pt;font-weight:600;
   letter-spacing:-.2pt;
+  white-space:normal;line-height:1.06;
+  word-break:break-all;
+  overflow:hidden;
+  max-height:6mm;
 }
 /* 우측 바코드 */
 .prod-label .pl-right{
   display:flex;flex-direction:column;
   align-items:center;justify-content:center;
-  gap:.4mm;
+  gap:.5mm;
   min-width:0;
 }
 .prod-label .pl-right svg{
-  width:31mm;height:17mm;
+  width:33mm;height:16mm;
   display:block;
 }
 .prod-label .pl-bc-num{
   font-family:'Courier New',monospace;
-  font-size:7.8pt;font-weight:800;
+  font-size:8.2pt;font-weight:800;
   letter-spacing:.3pt;
   white-space:nowrap;
 }
-/* 대체바코드 사내 규약 마커 — '[ -B ]' / '[ A- ]' 형식.
- * 받는 쪽엔 의미 모호하지만 사장님 작업자만 인지 가능. 라벨 우상단 작게. */
+/* 대체바코드 사내 규약 마커 — '[ -B ]' / '[ A- ]' 형식. 라벨 우상단 작게. */
 .prod-label .pl-alt-marker{
   font-size:6pt;font-weight:900;
   color:#000;
@@ -580,14 +592,14 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   line-height:1;
   padding:0;
 }
-/* 하단 안내 띠 — 1줄, 1pt 작게(4.6pt), 구분선 1pt 가늘게, 3pt 아래로 내림 */
+/* ③ 하단 — 1pt 가는선(겹침 방지) + 소비자주의문 + 주소 */
 .prod-label .pl-bottom{
   flex-shrink:0;
-  font-size:4.6pt;line-height:1.3;
+  font-size:5pt;line-height:1.28;
   color:#222;
-  border-top:1pt solid #555;
+  border-top:.75pt solid #555;
   padding-top:.7mm;
-  margin-top:calc(.6mm + 3pt);
+  margin-top:.7mm;
   letter-spacing:-.1pt;
 }
 .prod-label .pl-bottom div{
@@ -3465,14 +3477,19 @@ function cpPrintLabelsFromItems(items){
     for (var i=0; i<qty; i++) {
       labels.push(
         '<div class="prod-label">'+
-          '<div class="pl-main">'+
+          /* ① 상단: 상품명 전체폭 2줄 */
+          '<div class="pl-name-band">'+
+            '<span class="pl-key">상품명:</span>'+
+            '<span class="pl-val name">'+escH(name)+'</span>'+
+          '</div>'+
+          /* ② 본문: 좌측 필드(품번→사이즈→제조국→색상→재질) + 우측 바코드 */
+          '<div class="pl-body">'+
             '<div class="pl-left">'+
-              '<div class="pl-row"><span class="pl-key">상품명:</span><span class="pl-val name">'+escH(name)+'</span></div>'+
-              '<div class="pl-row big-row"><span class="pl-key">사이즈:</span><span class="pl-val big">'+escH(size)+'</span></div>'+
               '<div class="pl-row big-row"><span class="pl-key">품 번:</span><span class="pl-val big">'+escH(code)+'</span></div>'+
-              '<div class="pl-row"><span class="pl-key">재 질:</span><span class="pl-val small">'+escH(material||'-')+'</span></div>'+
-              '<div class="pl-row"><span class="pl-key">색 상:</span><span class="pl-val small">'+escH(color||'-')+'</span></div>'+
-              '<div class="pl-row"><span class="pl-key">제조국:</span><span class="pl-val small">'+escH(origin||'-')+'</span></div>'+
+              '<div class="pl-row big-row"><span class="pl-key">사이즈:</span><span class="pl-val big">'+escH(size)+'</span></div>'+
+              '<div class="pl-row sm-row"><span class="pl-key">제조국:</span><span class="pl-val small">'+escH(origin||'-')+'</span></div>'+
+              '<div class="pl-row sm-row"><span class="pl-key">색 상:</span><span class="pl-val small">'+escH(color||'-')+'</span></div>'+
+              '<div class="pl-row sm-row"><span class="pl-key">재 질:</span><span class="pl-val small">'+escH(material||'-')+'</span></div>'+
             '</div>'+
             '<div class="pl-right">'+
               altMarkerHtml +
@@ -3541,16 +3558,21 @@ function cpPrintLabelsFromItems(items){
 }
 
 /* 라벨 안 각 값 셀의 폰트를 컨테이너 너비/높이에 맞게 자동 축소
- * .pl-val (nowrap), .pl-val.name (3줄 wrap), .pl-bc-num (단일 줄) 등 */
+ * .pl-val.big (품번/사이즈, 1줄), .pl-val.small (제조국/색상/재질, 2줄 wrap),
+ * .pl-val.name (상품명 2줄 wrap), .pl-bc-num (단일 줄) */
 function cpFitLabelText(rootEl){
   if (!rootEl) return;
-  /* 우선 일반 값 셀 (nowrap) — 가로 폭 기준 */
-  rootEl.querySelectorAll('.pl-val:not(.name)').forEach(function(el){
+  /* 품번·사이즈 (nowrap) — 가로 폭 기준 */
+  rootEl.querySelectorAll('.pl-val.big').forEach(function(el){
     cpShrinkToFit(el, /*wrap*/false, /*minRatio*/0.45);
   });
-  /* 상품명 (wrap) — 가로폭 + 최대 높이 기준 (CSS max-height:8mm) */
+  /* 제조국·색상·재질 (wrap) — 2줄까지, 길면 폰트 축소 (잘림 X) */
+  rootEl.querySelectorAll('.pl-val.small').forEach(function(el){
+    cpShrinkToFit(el, /*wrap*/true, /*minRatio*/0.5);
+  });
+  /* 상품명 (wrap) — 가로폭 + 최대 높이 기준 (CSS max-height) */
   rootEl.querySelectorAll('.pl-val.name').forEach(function(el){
-    cpShrinkToFit(el, /*wrap*/true, /*minRatio*/0.55);
+    cpShrinkToFit(el, /*wrap*/true, /*minRatio*/0.5);
   });
   /* 바코드 번호 */
   rootEl.querySelectorAll('.pl-bc-num').forEach(function(el){
@@ -3558,8 +3580,26 @@ function cpFitLabelText(rootEl){
   });
   /* 하단 안내 (1줄 강제) — 안내문/주소 각각 자동 폰트 축소 */
   rootEl.querySelectorAll('.pl-bottom > div').forEach(function(el){
-    cpShrinkToFit(el, /*wrap*/false, /*minRatio*/0.55);
+    cpShrinkToFit(el, /*wrap*/false, /*minRatio*/0.5);
   });
+  /* 좌측 정보열 전체가 본문 높이를 넘치면 작은 필드들을 함께 더 축소 → 하단과 겹침 방지 */
+  cpFitLeftColumn(rootEl);
+}
+/* 좌측 정보열(품번~재질)이 본문(pl-body) 높이를 넘으면, 작은 필드(제조국/색상/재질)
+ * 폰트를 0.5px 씩 함께 줄여 넘침/겹침을 제거 (최소 4.5px) */
+function cpFitLeftColumn(rootEl){
+  var body = rootEl.querySelector('.pl-body');
+  var left = rootEl.querySelector('.pl-left');
+  if (!body || !left) return;
+  for (var g=0; g<40 && left.scrollHeight > body.clientHeight + 0.5; g++){
+    var smalls = left.querySelectorAll('.pl-val.small');
+    var changed = false;
+    smalls.forEach(function(el){
+      var fs = parseFloat(window.getComputedStyle(el).fontSize);
+      if (fs > 4.5){ el.style.fontSize = (fs - 0.5) + 'px'; changed = true; }
+    });
+    if (!changed) break;
+  }
 }
 function cpShrinkToFit(el, wrap, minRatio){
   if (!el) return;
