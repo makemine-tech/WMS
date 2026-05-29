@@ -282,7 +282,20 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-scan-input-wrap{background:linear-gradient(135deg,#1c2331,#161b26);border:2px solid var(--br);border-radius:11px;padding:1rem 1.1rem;margin-bottom:.85rem;transition:border-color .15s}
 .cp-scan-input-wrap.box{border-color:var(--b);box-shadow:0 0 0 4px rgba(91,156,246,.08)}
 .cp-scan-input-wrap.item{border-color:var(--g);box-shadow:0 0 0 4px rgba(74,240,168,.08)}
-.cp-mode-toggle{display:flex;gap:.4rem;margin-bottom:.65rem}
+/* 덧방(라벨 전용) 모드 — 주황 강조. box/item 색보다 우선 */
+.cp-scan-input-wrap.relabel{border-color:var(--o)!important;box-shadow:0 0 0 4px rgba(255,140,90,.16)!important;background:linear-gradient(135deg,#2a2017,#1d1812)}
+.cp-mode-toggle{display:flex;gap:.4rem;margin-bottom:.65rem;flex-wrap:wrap;align-items:stretch}
+/* 바코드 덧방 토글 (체크박스형 버튼) */
+.cp-relabel-toggle{flex:0 0 auto;display:flex;align-items:center;gap:.4rem;padding:.55rem .8rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:7px;font-size:.84rem;font-weight:800;cursor:pointer;transition:all .15s;user-select:none}
+.cp-relabel-toggle:hover{color:var(--tx);border-color:var(--mu)}
+.cp-relabel-toggle input{width:16px;height:16px;accent-color:var(--o);cursor:pointer;margin:0}
+.cp-relabel-toggle.on{border-color:var(--o);background:rgba(255,140,90,.18);color:var(--o);box-shadow:0 0 0 2px rgba(255,140,90,.12)}
+.cp-relabel-banner{display:none;margin:.1rem 0 .6rem;padding:.55rem .75rem;border:1.5px dashed var(--o);border-radius:8px;background:rgba(255,140,90,.10);color:var(--o);font-size:.8rem;font-weight:800;line-height:1.45}
+.cp-relabel-banner b{color:#ffd9c2}
+.cp-relabel-banner .sub{display:block;color:var(--mu);font-weight:700;font-size:.72rem;margin-top:.2rem}
+.cp-scan-input-wrap.relabel .cp-relabel-banner{display:block}
+.cp-kiosk-help-btn{flex:0 0 auto;padding:.55rem .7rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:7px;font-size:.78rem;font-weight:800;cursor:pointer;transition:all .15s}
+.cp-kiosk-help-btn:hover{color:var(--o);border-color:var(--o)}
 .cp-mode-btn{flex:1;padding:.55rem .8rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:7px;font-size:.84rem;font-weight:800;cursor:pointer;transition:all .15s}
 .cp-mode-btn.on.box{border-color:var(--b);background:rgba(91,156,246,.16);color:var(--b)}
 .cp-mode-btn.on.item{border-color:var(--g);background:rgba(74,240,168,.16);color:var(--g)}
@@ -1190,7 +1203,16 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div class="cp-mode-toggle">
           <button class="cp-mode-btn box on" id="cpModeBox" onclick="cpSetScanMode('box')">📦 박스 모드 (일괄)</button>
           <button class="cp-mode-btn item" id="cpModeItem" onclick="cpSetScanMode('item')">🏷️ 상품 모드 (단건)</button>
+          <label class="cp-relabel-toggle" id="cpRelabelToggle" title="바코드 덧방 라벨 모드 — 켜면 스캔해도 출고/세션에 반영하지 않고, 한글표시 라벨만 즉시(미리보기 없이) 인쇄합니다. 작업자가 영문 라벨 위에 덧방용.">
+            <input type="checkbox" id="cpRelabelChk" onchange="cpSetRelabelMode(this.checked)">
+            <span>🏷️ 바코드 덧방</span>
+          </label>
           <button class="cp-mode-btn" onclick="cpPrintCommandLabels()" title="명령 바코드 4종 라벨 일괄 인쇄 (50x30mm) — 작업대에 붙여 빠른 모드 전환·라벨 출력 트리거" style="flex:0 0 auto;padding:.55rem .75rem">🖨 명령라벨</button>
+          <button class="cp-kiosk-help-btn" onclick="cpShowKioskHelp()" title="미리보기 없이 바로 인쇄(무인 인쇄) 설정 방법">❓ 무인인쇄 설정</button>
+        </div>
+        <div class="cp-relabel-banner" id="cpRelabelBanner">
+          🏷️ <b>바코드 덧방 모드 ON</b> — 스캔하면 <b>출고·세션에 반영하지 않고</b> 한글표시 라벨만 즉시 인쇄됩니다.
+          <span class="sub">📦 박스모드: 박스바코드 → 그 박스 내품 한글라벨 전량(수량만큼) 인쇄 · 🏷️ 상품모드: 상품바코드 → 1장 인쇄 · 미리보기 없이 바로 인쇄하려면 [❓ 무인인쇄 설정] 참고</span>
         </div>
         <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)">
         <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄 출고</div>
@@ -1628,6 +1650,8 @@ var cpFilter = 'all';  /* 'all'|'fit'|'short'|'zero' — 카운터 카드 클릭
 var workSession = null;          /* 현재 활성 세션 객체 (Firebase 값과 동기) */
 var workSessionRef = null;       /* coupangSessions/{id} ref */
 var cpScanMode = 'box';          /* 'box'|'item' */
+var cpRelabelMode = false;       /* 바코드 덧방 라벨 모드 — true 면 스캔 시 출고/세션 미반영, 한글라벨만 즉시 인쇄 */
+var cpRelabelLock = 0;           /* 덧방 연속 스캔 중복 인쇄 방지용 타임스탬프 락 */
 var cpScanSubView = 'po';        /* 'po'|'scan' — 쿠팡 탭 sub-view */
 function cpSessLsKey(){ return 'star_outorder.coupang.activeSessionId.' + (groupId||'_'); }
 function cpNewSessionId(){
@@ -2590,19 +2614,55 @@ function cpSetScanMode(m){
   cpScanMode = (m === 'item') ? 'item' : 'box';
   var box = document.getElementById('cpModeBox');
   var item = document.getElementById('cpModeItem');
+  if (box && item) { box.classList.toggle('on', cpScanMode==='box'); item.classList.toggle('on', cpScanMode==='item'); }
+  cpApplyScanModeUI();
+}
+
+/* 박스/상품 + 덧방 상태를 종합해 입력칸 색·placeholder·힌트를 갱신 */
+function cpApplyScanModeUI(){
   var wrap = document.getElementById('cpScanInputWrap');
   var inp = document.getElementById('cpScanInp');
   var hint = document.getElementById('cpScanHintText');
-  if (box && item) { box.classList.toggle('on', cpScanMode==='box'); item.classList.toggle('on', cpScanMode==='item'); }
-  if (wrap) { wrap.classList.toggle('box', cpScanMode==='box'); wrap.classList.toggle('item', cpScanMode==='item'); }
+  if (wrap) {
+    wrap.classList.toggle('box', cpScanMode==='box' && !cpRelabelMode);
+    wrap.classList.toggle('item', cpScanMode==='item' && !cpRelabelMode);
+    wrap.classList.toggle('relabel', cpRelabelMode);
+  }
   if (inp) {
-    inp.placeholder = cpScanMode==='box' ? '📦 박스바코드 스캔/입력' : '🏷️ 상품바코드 스캔/입력';
+    if (cpRelabelMode) {
+      inp.placeholder = cpScanMode==='box'
+        ? '🏷️📦 [덧방] 박스바코드 스캔 → 내품 한글라벨 즉시 인쇄'
+        : '🏷️ [덧방] 상품바코드 스캔 → 한글라벨 1장 즉시 인쇄';
+    } else {
+      inp.placeholder = cpScanMode==='box' ? '📦 박스바코드 스캔/입력' : '🏷️ 상품바코드 스캔/입력';
+    }
     inp.focus();
   }
   if (hint) {
-    hint.textContent = cpScanMode==='box'
-      ? '박스 모드: 박스바코드 1회 스캔 → 그 박스 안 모든 SKU 일괄 현재 파렛트로 (Step 2-B 에서 동작)'
-      : '상품 모드: 상품바코드 1회 스캔 = 1개 출고 (Step 2-B 에서 동작)';
+    if (cpRelabelMode) {
+      hint.textContent = cpScanMode==='box'
+        ? '덧방 모드(박스): 박스바코드 스캔 → 그 박스 내품 한글라벨 전량 즉시 인쇄 · 출고/세션 미반영'
+        : '덧방 모드(상품): 상품바코드 스캔 → 한글라벨 1장 즉시 인쇄 · 출고/세션 미반영';
+    } else {
+      hint.textContent = cpScanMode==='box'
+        ? '박스 모드: 박스바코드 1회 스캔 → 그 박스 안 모든 SKU 일괄 현재 파렛트로 (Step 2-B 에서 동작)'
+        : '상품 모드: 상품바코드 1회 스캔 = 1개 출고 (Step 2-B 에서 동작)';
+    }
+  }
+}
+
+/* 바코드 덧방 라벨 모드 토글 — 켜면 스캔이 출고에 반영되지 않고 한글라벨만 즉시 인쇄 */
+function cpSetRelabelMode(on){
+  cpRelabelMode = !!on;
+  var chk = document.getElementById('cpRelabelChk');
+  var tog = document.getElementById('cpRelabelToggle');
+  if (chk) chk.checked = cpRelabelMode;
+  if (tog) tog.classList.toggle('on', cpRelabelMode);
+  cpApplyScanModeUI();
+  if (cpRelabelMode) {
+    cpFlash('ok','🏷️ <b>바코드 덧방 모드 ON</b><span class="sub">스캔해도 출고에 반영되지 않습니다. 한글표시 라벨만 인쇄됩니다.</span>');
+  } else {
+    cpFlash('ok','✓ 덧방 모드 해제 — 일반 출고 스캔으로 복귀');
   }
 }
 
@@ -2694,9 +2754,106 @@ function cpFlash(kind, html){
 function cpHandleScan(raw){
   /* 명령 바코드 우선 처리 — 세션 무관하게 모드 전환은 동작, 인쇄는 데이터 체크는 각 함수가 */
   if (cpHandleCommandBarcode(raw)) return;
+  /* 바코드 덧방 모드 — 출고/세션과 무관, 한글라벨만 즉시 인쇄 (세션 없어도 동작) */
+  if (cpRelabelMode) return cpProcessRelabelScan(raw);
   if (!cpHasActiveSession()) { cpFlash('er','❌ 활성 세션이 없습니다 — 다시 스캔 시작하세요'); return; }
   if (cpScanMode === 'box') return cpProcessBoxScan(raw);
   return cpProcessItemScan(raw);
+}
+
+/* ═══════════ 바코드 덧방 라벨 인쇄 전용 스캔 처리 ═══════════
+ * 출고/세션과 완전히 분리. PO/입고 등록 데이터(boxIndex, stockMeta) 기반으로
+ * 한글표시 라벨만 인쇄한다. (작업자가 영문 라벨 위에 덧방용)
+ *  - 박스 모드: 박스바코드 → boxIndex 의 내품 전체를 수량만큼 인쇄
+ *  - 상품 모드: 상품바코드 → 1장 인쇄 (alt 바코드도 매칭)
+ * 미리보기 없이 바로 인쇄하려면 Chrome/Edge 를 --kiosk-printing 으로 실행 (❓ 무인인쇄 설정). */
+function cpProcessRelabelScan(raw){
+  /* 스캐너가 Enter 를 두 번 보내거나 동일 코드를 순간 중복 전송하는 경우 방지 (350ms 락) */
+  var now = (window.performance && performance.now) ? performance.now() : (+new Date());
+  if (now - cpRelabelLock < 350) return;
+  cpRelabelLock = now;
+
+  if (cpScanMode === 'box') {
+    var boxId = normBoxId(raw);
+    if (!boxId) return;
+    var contents = boxIndex[boxId];
+    if (!contents || !Object.keys(contents).length) {
+      cpFlash('er','❌ <b>박스ID 못 찾음</b>: '+escH(boxId)+'<span class="sub">입고 등록에 이 박스ID로 된 내품이 없습니다. (덧방 인쇄 불가)</span>');
+      cpSpeak('오류');
+      return;
+    }
+    var items = [], total = 0;
+    Object.keys(contents).forEach(function(bc){
+      var q = +contents[bc] || 0;
+      if (q <= 0) return;
+      items.push({ barcode: bc, qty: q, srcIdx: -1 });
+      total += q;
+    });
+    if (!items.length) {
+      cpFlash('er','❌ 인쇄할 내품 수량이 없습니다: '+escH(boxId));
+      cpSpeak('오류');
+      return;
+    }
+    cpPrintLabelsFromItems(items);
+    cpFlash('ok','🏷️ <b>덧방 인쇄</b> — 박스 '+escH(boxId)+' 내품 '+items.length+'종 / 총 '+total+'장 인쇄'+(cpKioskNoteHtml()));
+    cpSpeak('인쇄');
+    return;
+  }
+
+  /* 상품 모드 — 1장 */
+  var bc = normBarcode(raw);
+  if (!bc) return;
+  var resolved = bc;
+  var viaAlt = false;
+  if (!stockMeta[bc] && stockByAlt[bc]) { resolved = stockByAlt[bc]; viaAlt = true; }
+  var meta = stockMeta[resolved];
+  if (!meta) {
+    /* 메타(한글표시)가 아예 없으면 라벨 내용이 비므로 경고하되, 바코드만으로 인쇄는 진행 */
+    cpFlash('warn','⚠️ <b>한글표시 미등록</b>: '+escH(raw)+'<span class="sub">재고관리에 이 바코드의 한글표시사항이 없습니다. 바코드만 인쇄됩니다.</span>');
+    cpSpeak('미등록');
+  }
+  cpPrintLabelsFromItems([{ barcode: resolved, qty: 1, srcIdx: -1 }]);
+  var nm = (meta && meta.name) ? meta.name : resolved;
+  cpFlash('ok','🏷️ <b>덧방 인쇄</b> — '+escH(nm)+(viaAlt?' <span style="color:var(--p);font-weight:800">[ALT]</span>':'')+' 1장 인쇄'+(cpKioskNoteHtml()));
+  cpSpeak('인쇄');
+}
+
+/* 무인 인쇄(kiosk-printing) 미적용 시 안내 꼬리표 — 한 번만 떠도 충분하지만 매번 짧게 */
+function cpKioskNoteHtml(){
+  return cpIsKioskPrinting() ? '' : '<span class="sub">※ 인쇄 대화상자가 뜨면 [❓ 무인인쇄 설정] 으로 미리보기 없이 바로 인쇄하도록 설정하세요.</span>';
+}
+/* kiosk-printing 여부는 JS 로 직접 알 수 없음 → 사용자가 한 번 "설정 완료" 누르면 로컬에 기억 */
+function cpIsKioskPrinting(){
+  try { return localStorage.getItem('cp.kioskPrinting.ack') === '1'; } catch(e){ return false; }
+}
+
+/* 무인 인쇄 설정 안내 */
+function cpShowKioskHelp(){
+  var url = location.origin + location.pathname;
+  var msg =
+    '【 미리보기 없이 바로 인쇄(무인 인쇄) 설정 】\n\n' +
+    '웹 브라우저는 보안상 기본적으로 인쇄 시 미리보기 창을 띄웁니다.\n' +
+    '크롬/엣지를 "--kiosk-printing" 옵션으로 실행하면, 스캔 즉시 기본 프린터로 바로 출력됩니다.\n\n' +
+    '──────────────────────────────\n' +
+    '■ 가장 쉬운 방법 (바탕화면 바로가기)\n' +
+    '1) 바탕화면 빈 곳 우클릭 → 새로 만들기 → 바로가기\n' +
+    '2) "항목 위치" 에 아래를 붙여넣기 (크롬 기준):\n\n' +
+    '   chrome.exe --kiosk-printing --new-window "' + url + '"\n\n' +
+    '   (엣지면 chrome.exe 대신  msedge.exe )\n' +
+    '3) 이름은 "덧방 무인인쇄" 등으로 저장\n' +
+    '4) 앞으로 이 바로가기로 페이지를 열고 작업하세요.\n\n' +
+    '■ 프린터 준비\n' +
+    '- Windows 설정 → 프린터에서 라벨 프린터를 "기본 프린터"로 지정\n' +
+    '- 라벨 용지 크기를 80 x 40 mm (상품라벨)로 맞춰 두기\n' +
+    '- "Windows에서 기본 프린터를 관리" 체크 해제 (기본 프린터 고정)\n\n' +
+    '■ 참고\n' +
+    '- 이 모드에서는 이 페이지의 모든 인쇄가 대화상자 없이 바로 출력됩니다.\n' +
+    '- 저장소(repo)의  main/relabel-kiosk-print.bat  파일을 더블클릭해도 동일하게 실행됩니다.\n\n' +
+    '설정을 완료하셨으면 [확인] 을 누르세요. (안내 꼬리표가 숨겨집니다)';
+  if (confirm(msg)) {
+    try { localStorage.setItem('cp.kioskPrinting.ack','1'); } catch(e){}
+    cpFlash('ok','✓ 무인 인쇄 설정 완료로 표시했습니다. 이제 덧방 스캔 시 안내 꼬리표가 숨겨집니다.');
+  }
 }
 
 /* ═══════════ 명령 바코드 (스캔 시 즉시 동작) + 인쇄 ═══════════
