@@ -968,6 +968,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-pallet .pl-row .close-btn{background:linear-gradient(180deg,#EAC74A 0%,#E8B82C 100%);color:#1F5F1F;border:2px solid #c89519;border-radius:9px;font-size:1.1rem;font-weight:900;padding:.8rem 1rem;cursor:pointer;white-space:nowrap;letter-spacing:-.01em;box-shadow:0 4px 12px rgba(232,184,44,.4),inset 0 -2px 0 rgba(120,80,0,.2),inset 0 2px 0 rgba(255,255,255,.3);text-shadow:0 1px 0 rgba(255,255,255,.3)}
 .cp-pallet .pl-row .close-btn:hover{background:linear-gradient(180deg,#F0D165 0%,#EAC03A 100%);transform:translateY(-1px);box-shadow:0 6px 16px rgba(232,184,44,.5),inset 0 -2px 0 rgba(120,80,0,.2),inset 0 2px 0 rgba(255,255,255,.35)}
 .cp-pallet .pl-row .close-btn:active{transform:translateY(0)}
+/* 마감 버튼 묶음 (되돌리기 + 마감 세로 배치) */
+.cp-pallet .pl-row .pl-acts{display:flex;flex-direction:column;gap:.4rem;flex-shrink:0;align-items:stretch}
+/* 되돌리기 버튼 — 보조(어두운 바탕, 노랑 글씨) */
+.cp-pallet .pl-row .undo-btn{background:#231d10;color:#E8B82C;border:1.5px solid #8a6a18;border-radius:8px;font-size:.82rem;font-weight:800;padding:.42rem .7rem;cursor:pointer;white-space:nowrap;letter-spacing:-.01em}
+.cp-pallet .pl-row .undo-btn:hover{background:#332912;color:#FFE682;border-color:#c89519}
+.cp-pallet .pl-row .undo-btn:active{transform:translateY(1px)}
 .cp-pallet .pl-row.empty-grp{opacity:.55}
 .pl-history{font-size:.78rem;color:rgba(241,236,226,.7);font-family:var(--mo);border-top:1px dashed rgba(241,236,226,.3);padding-top:.55rem;max-height:90px;overflow:auto}
 .pl-history .pl-history-title{font-size:.74rem;color:#F1ECE2;font-weight:900;letter-spacing:.06em;margin-bottom:.38rem}
@@ -4951,7 +4957,10 @@ function cpRefreshPallet(){
         '<div class="label">'+escH(cpPalletShort(g.eta, g.center))+' <span class="pn">'+cur+'번</span></div>'+
         '<div class="meta"><span class="bx-num">'+boxCount+'</span> 박스 적재'+(itemCount?' · 단품 '+itemCount+'개':'')+'</div>'+
       '</div>'+
-      '<button class="close-btn" onclick="cpNextPalletFor(\''+keyEsc+'\')" title="이 입고일+센터의 '+cur+'번 마감 → '+(cur+1)+'번으로">▶ 마감→'+(cur+1)+'번</button>'+
+      '<div class="pl-acts">'+
+        (cur>1 ? '<button class="undo-btn" onclick="cpUndoLastPalletClose(\''+keyEsc+'\')" title="직전 마감을 취소 — '+cur+'번을 '+(cur-1)+'번으로 되돌립니다 (실수 마감 복구)">↩ '+(cur-1)+'번으로 되돌리기</button>' : '')+
+        '<button class="close-btn" onclick="cpNextPalletFor(\''+keyEsc+'\')" title="이 입고일+센터의 '+cur+'번 마감 → '+(cur+1)+'번으로">▶ 마감→'+(cur+1)+'번</button>'+
+      '</div>'+
     '</div>';
   }).join('');
   cpRefreshPalletHistory();
@@ -5012,6 +5021,76 @@ function cpNextPalletFor(key){
     cpRefreshScanUI();
     cpFlash('ok','✓ '+label+' '+cur+'번 파렛트 마감 ('+boxCount+'박스) → '+(cur+1)+'번 시작');
     cpSpeak(label + ' '+(cur+1)+'번 파렛트');
+  });
+}
+
+/* 직전 마감 되돌리기 — (eta,center) 그룹의 현재 cur 번을 cur-1 번으로 복귀.
+ * 실수로 [마감]을 눌렀을 때 복구용. 현재 번호로 이미 스캔된 박스가 있으면
+ * 그 박스들을 이전 번호로 합쳐서 되돌린다. */
+function cpUndoLastPalletClose(key){
+  if (!workSession || !workSessionRef) return;
+  var groups = cpListPalletGroups();
+  var g = groups.find(function(x){return x.key===key;});
+  if (!g) {
+    var parts = String(key).split('|');
+    g = { key:key, eta:parts[0]||'', center:parts[1]||'' };
+  }
+  var cur = cpCurPallet(g.eta, g.center);
+  if (cur <= 1) { cpFlash('warn','되돌릴 마감이 없습니다 — 이미 1번 파렛트입니다'); return; }
+  var prevNo = cur - 1;
+  var label = cpPalletShort(g.eta, g.center);
+
+  /* 현재(cur) 파렛트에 이미 스캔된 박스 수 — 있으면 prevNo 로 합쳐짐 */
+  var curBoxes = {};
+  (workSession.scans||[]).forEach(function(s){
+    if (s.undone) return;
+    var eta = s.palletEta || ((workSession.rows||[])[s.srcIdx]||{}).eta || '';
+    var ctr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
+    if (eta !== g.eta || ctr !== g.center) return;
+    if ((s.palletNo||1) !== cur) return;
+    var k = s.shipBoxNo || s.srcBoxBarcode;
+    if (k) curBoxes[k] = true;
+  });
+  var curBoxCount = Object.keys(curBoxes).length;
+
+  var msg = label+' '+cur+'번 마감을 취소하고 '+prevNo+'번으로 되돌릴까요?';
+  if (curBoxCount > 0) msg += '\n\n⚠️ 현재 '+cur+'번에 적재된 '+curBoxCount+'박스는 '+prevNo+'번으로 합쳐집니다.';
+  if (!confirm(msg)) return;
+
+  /* pallets[] 에서 이 그룹의 no===prevNo 인 마지막 마감 기록 제거 */
+  var pallets = (workSession.pallets||[]).slice();
+  for (var i=pallets.length-1; i>=0; i--){
+    if (pallets[i].key === g.key && (pallets[i].no||0) === prevNo){ pallets.splice(i,1); break; }
+  }
+
+  var pc = Object.assign({}, workSession.palletCounters||{});
+  pc[g.key] = prevNo;
+
+  var upd = { pallets: pallets, palletCounters: pc, updatedAt: Date.now() };
+
+  /* 현재 cur 로 스캔된 라인이 있으면 prevNo 로 재배치해 합친다 (없으면 scans 미변경) */
+  var scans = null;
+  if (curBoxCount > 0) {
+    scans = (workSession.scans||[]).map(function(s){
+      var eta = s.palletEta || ((workSession.rows||[])[s.srcIdx]||{}).eta || '';
+      var ctr = s.palletCenter || ((workSession.rows||[])[s.srcIdx]||{}).center || '';
+      if (!s.undone && eta===g.eta && ctr===g.center && (s.palletNo||1)===cur){
+        var c = Object.assign({}, s);
+        c.palletNo = prevNo;
+        return c;
+      }
+      return s;
+    });
+    upd.scans = scans;
+  }
+
+  workSessionRef.update(upd).then(function(){
+    workSession.pallets = pallets;
+    workSession.palletCounters = pc;
+    if (scans) workSession.scans = scans;
+    cpRefreshScanUI();
+    cpFlash('ok','↩ '+label+' 마감 취소 — '+cur+'번 → '+prevNo+'번으로 되돌렸습니다'+(curBoxCount?' ('+curBoxCount+'박스 합침)':''));
+    cpSpeak(label+' '+prevNo+'번으로 되돌림');
   });
 }
 
