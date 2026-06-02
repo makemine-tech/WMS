@@ -1827,18 +1827,19 @@ function renderHead() {
     '<th style="text-align:right">잔여</th>';
   /* 처리 완료: 박스 × SKU 단위 — 박스 ID + 시간 + 박스 내 수량 */
   var headDone =
-    '<th>박스</th>'+
-    '<th>시간</th>'+
+    '<th title="스캔한 박스 바코드">박스바코드</th>'+
+    '<th title="박스를 시작(처음 스캔)한 시각">시간</th>'+
     '<th>품번</th>'+
-    '<th>바코드</th>'+
+    '<th title="제품 바코드">바코드</th>'+
     '<th>품명</th>'+
     '<th>컬러</th>'+
     '<th>사이즈</th>'+
     '<th>원산지</th>'+
-    '<th style="text-align:right">박스 내</th>'+
-    '<th style="text-align:right">SKU 누적</th>'+
-    '<th style="text-align:right">예정 Q</th>'+
-    '<th style="text-align:right">상태</th>';
+    '<th style="text-align:right" title="이 박스에 담은 수량 — 숫자를 직접 고칠 수 있습니다">입고수량 ✎</th>'+
+    '<th style="text-align:right" title="이 제품(SKU)을 모든 박스에서 받은 합계">총입고</th>'+
+    '<th style="text-align:right" title="입고 예정(목표) 수량">예정수량</th>'+
+    '<th style="text-align:center">상태</th>'+
+    '<th style="text-align:center" title="이 줄(박스×제품 기록)을 삭제">관리</th>';
   var a = document.getElementById('tblHeadA');
   var d = document.getElementById('tblHeadD');
   if (a) a.innerHTML = headActive;
@@ -1979,6 +1980,7 @@ function renderTable() {
       var isActiveBox = currentBox && currentBox.id === box.id;
       var boxLabel = escH(box.id) + (isActiveBox ? ' <span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.25rem">진행</span>' : '');
 
+      var boxJs = jsStr(box.id);
       doneHtml +=
         '<tr class="'+rowCls+'">'+
           '<td><span style="font-family:var(--mo);color:var(--y);font-weight:700">'+boxLabel+'</span></td>'+
@@ -1989,17 +1991,18 @@ function renderTable() {
           '<td>'+escH(r.vals[COL.COLOR])+'</td>'+
           '<td>'+escH(r.vals[COL.SIZE])+'</td>'+
           '<td>'+escH(r.vals[COL.ORIGIN])+'</td>'+
-          '<td class="cell-num recv">'+it.count+'</td>'+
+          '<td style="text-align:right"><input type="number" min="0" class="cell-edit recv" style="text-align:right;max-width:72px;color:var(--g);font-weight:700" value="'+it.count+'" onchange="updateDoneCount('+boxJs+','+it.rowIdx+',this.value)" onfocus="this.select()" title="이 박스 입고수량 — 수정 가능"></td>'+
           '<td class="cell-num" style="color:var(--mu)">'+skuRecv+'</td>'+
           '<td class="cell-num exp">'+(exp||'')+'</td>'+
-          '<td class="cell-num '+(skuRecv>target?'over':(skuRecv===target?'recv':'rem'))+'" style="text-align:right;font-family:var(--mo);font-size:.74rem">'+statusTxt+'</td>'+
+          '<td class="cell-num '+(skuRecv>target?'over':(skuRecv===target?'recv':'rem'))+'" style="text-align:center;font-family:var(--mo);font-size:.74rem">'+statusTxt+'</td>'+
+          '<td style="text-align:center"><button onclick="deleteDoneItem('+boxJs+','+it.rowIdx+')" title="이 줄 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.5);color:var(--r);border-radius:4px;cursor:pointer;font-size:.82rem;font-weight:700;padding:.12rem .5rem;line-height:1.2">✕</button></td>'+
         '</tr>';
       doneCnt++;
     });
   });
 
   ta.innerHTML = activeHtml || '<tr><td colspan="12" class="empty-row">작업 중인 행 없음 — 모두 처리되었거나 필터 조건에 맞는 행 없음</td></tr>';
-  td.innerHTML = doneHtml || '<tr><td colspan="12" class="empty-row">아직 박스 입고 기록 없음</td></tr>';
+  td.innerHTML = doneHtml || '<tr><td colspan="13" class="empty-row">아직 박스 입고 기록 없음</td></tr>';
   var cA = document.getElementById('cntActive');
   var cD = document.getElementById('cntDone');
   if (cA) cA.textContent = activeCnt + '건';
@@ -2026,6 +2029,45 @@ function updateOrigin(idx, val) {
   r.originMod = (nv !== orig);
   saveSession();
   renderTable();
+}
+
+/* 문자열을 onclick/onchange 인라인 핸들러용 JS 문자열 리터럴로 안전 변환 */
+function jsStr(s) {
+  return "'" + String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'") + "'";
+}
+
+/* 처리 완료 영역 — 한 줄(박스×제품)의 입고수량 직접 수정.
+   박스 items의 count를 갱신하고 row.qtyReceived를 재계산. 0 입력 시 그 줄 삭제. */
+function updateDoneCount(boxId, rowIdx, val) {
+  var box = boxes.find(function(b){ return b.id === boxId; });
+  if (!box) return;
+  var it = box.items.find(function(x){ return x.rowIdx === rowIdx; });
+  if (!it) return;
+  var n = parseInt(val, 10);
+  if (isNaN(n) || n < 0) n = 0;
+  if (n === 0) {
+    box.items = box.items.filter(function(x){ return x !== it; });
+  } else {
+    it.count = n;
+  }
+  recalcRowQtys();
+  saveSession();
+  renderAll();
+}
+
+/* 처리 완료 영역 — 잘못 입력된 한 줄(박스×제품) 삭제 */
+function deleteDoneItem(boxId, rowIdx) {
+  var box = boxes.find(function(b){ return b.id === boxId; });
+  if (!box) return;
+  var it = box.items.find(function(x){ return x.rowIdx === rowIdx; });
+  if (!it) return;
+  var r = rows[rowIdx];
+  var nm = r ? (r.vals[COL.NAME] || r.vals[COL.BARCODE] || '') : '';
+  if (!confirm('이 줄을 삭제합니다.\n\n박스: '+boxId+'\n수량: '+it.count+'개'+(nm?'\n품명: '+nm:'')+'\n\n삭제하시겠습니까?')) return;
+  box.items = box.items.filter(function(x){ return x !== it; });
+  recalcRowQtys();
+  saveSession();
+  renderAll();
 }
 
 /* ─────────────── 박스 목록 ─────────────── */
