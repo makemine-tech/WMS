@@ -291,7 +291,7 @@ h1 em{color:var(--g);font-style:normal}
       <div class="dl-head">
         <div class="dl-h-num">① CURRENT</div>
         <div class="dl-h-title">현재고 수량</div>
-        <div class="dl-h-desc">지금 시점의 실재고 잔량 (박스·바코드 기준)</div>
+        <div class="dl-h-desc">검색 기준, 바코드별 실제 남은 수량</div>
       </div>
       <div class="dl-controls"><span style="font-size:.7rem;color:var(--mu);font-family:var(--mo)">설정 없음</span></div>
       <button class="dl-btn btn-g" onclick="dlStockCurrent()">📦 현재고 다운로드</button>
@@ -326,7 +326,7 @@ h1 em{color:var(--g);font-style:normal}
       <div class="dl-head">
         <div class="dl-h-num">③ CLOSING</div>
         <div class="dl-h-title">마감일자 기준 재고</div>
-        <div class="dl-h-desc">선택일 종료 시점의 재고 스냅샷</div>
+        <div class="dl-h-desc">선택일 기준, 바코드별 실제 남은 수량</div>
       </div>
       <div class="dl-controls">
         <span class="cal-wrap">
@@ -879,23 +879,24 @@ function aggregateStock(asOfTs){
   }).sort(function(a,b){ return String(a.barcode)<String(b.barcode)?-1:1; });
 }
 
-/* ① 현재고수량 다운로드 — (박스바코드, 바코드) 쌍 단위. 검색 중이면 그 결과만. */
+/* ① 현재고수량 다운로드 — 바코드 단위(같은 바코드는 1행으로 합산). 검색 중이면 그 결과만.
+   ※ 입출고 누적은 ② 입출고 내역에서 확인. 여기선 순수 잔량(현재고)만 표기. */
 function dlStockCurrent(){
   if (!logs.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'); return; }
-  var snap = aggregateStockByBox(null);
+  var snap = aggregateStock(null);
   var fset = getFilteredBcSet();
   if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
   if (!snap.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'+(fset?' (검색 결과 일치 0)':'')); return; }
-  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','누적입고','누적출고','현재고','비고']];
+  var rows = [['바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','비고']];
   snap.forEach(function(g){
     var m = g.meta || {};
-    rows.push([g.box, g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
-               g.inQty, g.outQty, g.stock, g.lastNote||'']);
+    rows.push([g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
+               g.stock, g.lastNote||'']);
   });
-  var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:10},{wch:10},{wch:24}];
+  var cols = [{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:24}];
   var fname = '현재고수량_'+ymd(Date.now())+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '현재고', cols);
-  setMsg('m0','ok','✅ 현재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (박스·바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
+  setMsg('m0','ok','✅ 현재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
 }
 
 /* ② 입출고 내역 다운로드 (기간 + 입고/출고/전체) */
@@ -933,26 +934,27 @@ function dlLogHistory(){
   setMsg('m0','ok','✅ '+label+' 내역 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+filtered.length+'행 (입고 '+totIn+'개 / 출고 '+totOut+'개)');
 }
 
-/* ③ 마감일자 기준 재고 다운로드 — (박스바코드, 바코드) 쌍 단위 */
+/* ③ 마감일자 기준 재고 다운로드 — 바코드 단위(같은 바코드는 1행으로 합산).
+   해당일 종료 시점에 실제로 남은 잔량만 표기 (누적 입출고는 ② 내역 참조). */
 function dlStockAtDate(){
   var dStr = document.getElementById('dlClosingDate').value;
   if (!dStr) { setMsg('m0','warn','⚠️ 마감일자를 선택하세요'); return; }
   var endTs = endOfDayTs(dStr);
-  var snap = aggregateStockByBox(endTs);
+  var snap = aggregateStock(endTs);
   var fset = getFilteredBcSet();
   if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
   if (!snap.length) { setMsg('m0','warn','⚠️ 해당 일자 이전 입출고 기록이 없습니다'+(fset?' (검색 결과 적용)':'')); return; }
-  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지',
-               '누적입고('+dStr+'까지)','누적출고('+dStr+'까지)','마감재고('+dStr+')','비고']];
+  var rows = [['바코드','품명','브랜드','품번','컬러','사이즈','원산지',
+               '마감재고('+dStr+')','비고']];
   snap.forEach(function(g){
     var m = g.meta || {};
-    rows.push([g.box, g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
-               g.inQty, g.outQty, g.stock, g.lastNote||'']);
+    rows.push([g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
+               g.stock, g.lastNote||'']);
   });
-  var cols=[{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:14},{wch:14},{wch:14},{wch:24}];
+  var cols=[{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:14},{wch:24}];
   var fname = '마감재고_'+dStr+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '마감재고_'+dStr, cols);
-  setMsg('m0','ok','✅ '+dStr+' 마감재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (박스·바코드 기준), 마감재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
+  setMsg('m0','ok','✅ '+dStr+' 마감재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 기준), 마감재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
 }
 
 /* 업로드 양식(.xlsx) 다운로드 — 002 양식 헤더 + 예시 1행 */
