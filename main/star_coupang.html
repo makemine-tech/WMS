@@ -2912,21 +2912,87 @@ function psUpdateSummary(){
   if (btn) btn.disabled = (read+interp+manual) === 0;
 }
 /* 썸네일 클릭 → 원본 확대 오버레이 */
-function psZoom(url, caption){
+var psZoomNav = [];   // 편집 모드 네비게이션용 photo idx 목록
+var psZoomAt = -1;
+function _psEnsureOverlay(){
   var ov = document.getElementById('psZoomOverlay');
   if (!ov){
     ov = document.createElement('div');
     ov.id = 'psZoomOverlay';
-    ov.style.cssText = 'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.93);display:none;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out;padding:18px;gap:10px';
-    ov.onclick = function(){ ov.style.display = 'none'; var im=document.getElementById('psZoomImg'); if(im) im.src=''; };
-    ov.innerHTML = '<img id="psZoomImg" style="max-width:100%;max-height:88%;object-fit:contain;border-radius:6px">'+
-      '<div id="psZoomCap" style="color:#fff;font-family:var(--mo);font-size:.8rem;text-align:center"></div>'+
-      '<div style="color:rgba(255,255,255,.5);font-size:.7rem">아무 곳이나 클릭하면 닫힙니다</div>';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.94);display:none;flex-direction:column;padding:10px;gap:8px';
     document.body.appendChild(ov);
   }
-  document.getElementById('psZoomImg').src = url;
-  document.getElementById('psZoomCap').textContent = caption || '';
+  return ov;
+}
+function _psZoomKey(e){ if (e.key === 'Escape'){ psZoomClose(); e.preventDefault(); } }
+function psZoomClose(){
+  var ov = document.getElementById('psZoomOverlay');
+  if (ov){ ov.style.display = 'none'; ov.innerHTML = ''; ov.onclick = null; }
+  document.removeEventListener('keydown', _psZoomKey);
+  var wasEdit = psZoomAt >= 0;
+  psZoomAt = -1; psZoomNav = [];
+  if (wasEdit) renderPhotoSortPreview();   /* 확대창에서 편집한 내용 목록 동기화 */
+}
+/* 단순 보기 (편집 없음) — 직독성공/미리보기 썸네일용 */
+function psZoom(url, caption){
+  var ov = _psEnsureOverlay();
+  psZoomNav = []; psZoomAt = -1;
+  ov.innerHTML =
+    '<div style="display:flex;justify-content:flex-end"><button onclick="psZoomClose()" style="background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .7rem;border-radius:5px;cursor:pointer">✕ 닫기</button></div>'+
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;min-height:0"><img src="'+escAttr(url)+'" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px"></div>'+
+    '<div style="color:#fff;font-family:var(--mo);font-size:.78rem;text-align:center">'+escH(caption||'')+'</div>';
+  ov.onclick = function(e){ if (e.target === ov) psZoomClose(); };
   ov.style.display = 'flex';
+  document.removeEventListener('keydown', _psZoomKey);
+  document.addEventListener('keydown', _psZoomKey);
+}
+/* 편집 모드 — 확대하면서 바로 바코드 입력 (확인필요 목록 썸네일용) */
+function psZoomEdit(idx){
+  var ov = _psEnsureOverlay();
+  psZoomNav = [];
+  psPhotos.forEach(function(ph, i){ if (ph.excluded || ph.src !== 'read') psZoomNav.push(i); });
+  psZoomAt = psZoomNav.indexOf(idx);
+  if (psZoomAt < 0){ psZoomNav = [idx]; psZoomAt = 0; }
+  ov.onclick = null;   /* 편집 모드는 배경 클릭으로 닫지 않음(오타 방지) */
+  ov.style.display = 'flex';
+  document.removeEventListener('keydown', _psZoomKey);
+  document.addEventListener('keydown', _psZoomKey);
+  _psZoomRender();
+}
+function _psZoomRender(){
+  var ov = document.getElementById('psZoomOverlay');
+  if (!ov || psZoomAt < 0) return;
+  var idx = psZoomNav[psZoomAt];
+  var ph = psPhotos[idx];
+  var tag = ph.excluded ? '🚫 제외' : ph.src==='interp' ? '🔮 보간추정' : ph.src==='manual' ? '✍️ 수동' : '❓ 미해결';
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;color:#fff;font-family:var(--mo);font-size:.78rem">'+
+      '<span>'+(psZoomAt+1)+' / '+psZoomNav.length+' · '+escH(tag)+' · '+_psFmtTs(ph.mtime)+'</span>'+
+      '<button onclick="psZoomClose()" style="background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .7rem;border-radius:5px;cursor:pointer">✕ 닫기</button>'+
+    '</div>'+
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;min-height:0"><img src="'+escAttr(ph.blobUrl)+'" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px"></div>'+
+    '<div style="display:flex;gap:.5rem;align-items:center;justify-content:center;flex-wrap:wrap;padding:.3rem 0">'+
+      '<button onclick="psZoomStep(-1)" '+(psZoomAt<=0?'disabled':'')+' style="background:#222;border:1px solid #555;color:#fff;padding:.55rem .8rem;border-radius:6px;cursor:pointer;font-size:.9rem'+(psZoomAt<=0?';opacity:.4':'')+'">◀ 이전</button>'+
+      '<input id="psZoomInput" type="text" value="'+escAttr(ph.barcode)+'" placeholder="바코드 입력 후 Enter" '+
+        'oninput="psZoomInput(this.value)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();psZoomStep(1);}" '+
+        'style="width:min(60vw,360px);background:#0a0d13;color:#fff;border:2px solid #c084fc;border-radius:8px;padding:.6rem .8rem;font-size:1.2rem;font-family:var(--mo);text-align:center;outline:none">'+
+      '<button onclick="psZoomStep(1)" style="background:#222;border:1px solid #555;color:#fff;padding:.55rem .8rem;border-radius:6px;cursor:pointer;font-size:.9rem">'+(psZoomAt>=psZoomNav.length-1?'완료 ✓':'다음 ▶')+'</button>'+
+      '<label style="color:#fff;font-size:.8rem;display:flex;align-items:center;gap:.3rem;cursor:pointer"><input type="checkbox" '+(ph.excluded?'checked':'')+' onchange="psExclude('+idx+',this.checked);_psZoomRender()"> 제외</label>'+
+    '</div>'+
+    '<div style="color:rgba(255,255,255,.4);font-size:.7rem;text-align:center">Enter = 저장하고 다음 · Esc = 닫기</div>';
+  var inp = document.getElementById('psZoomInput');
+  if (inp){ inp.focus(); var v = inp.value; inp.value = ''; inp.value = v; }  /* 커서 끝으로 */
+}
+function psZoomInput(val){
+  if (psZoomAt < 0) return;
+  psSetBarcode(psZoomNav[psZoomAt], val);   /* ph.barcode/src 갱신 + 요약 갱신 */
+}
+function psZoomStep(d){
+  var n = psZoomAt + d;
+  if (n >= psZoomNav.length){ psZoomClose(); return; }   /* 마지막에서 다음 → 닫기 */
+  if (n < 0) return;
+  psZoomAt = n;
+  _psZoomRender();
 }
 
 var _psFmtTs = function(ts){
@@ -2998,7 +3064,7 @@ function renderPhotoSortPreview(){
         : ph.src==='manual' ? '<span style="color:var(--b)">✍️ 수동</span>'
         : '<span style="color:var(--r)">❓ 미해결</span>';
       html += '<div style="display:flex;gap:.6rem;align-items:center;border:1px solid var(--br);border-radius:7px;padding:.45rem .55rem;margin-bottom:.4rem'+(ph.excluded?';opacity:.5':'')+'">'+
-        '<img src="'+escAttr(ph.blobUrl)+'" onclick="psZoom(this.src,\''+cap+'\')" title="클릭하면 확대" style="width:88px;height:88px;object-fit:cover;border-radius:5px;border:1px solid var(--br);cursor:zoom-in;flex-shrink:0">'+
+        '<img src="'+escAttr(ph.blobUrl)+'" onclick="psZoomEdit('+idx+')" title="클릭하면 확대 + 바코드 입력" style="width:88px;height:88px;object-fit:cover;border-radius:5px;border:1px solid var(--br);cursor:zoom-in;flex-shrink:0">'+
         '<div style="flex:1;min-width:0">'+
           '<div style="font-size:.64rem;color:var(--mu);font-family:var(--mo);margin-bottom:.25rem">'+_psFmtTs(ph.mtime)+' · '+tag+'</div>'+
           '<input type="text" value="'+escAttr(ph.barcode)+'" placeholder="바코드 입력 (확대해서 보고 입력)" oninput="psSetBarcode('+idx+',this.value)" style="width:100%;max-width:300px;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.42rem .6rem;font-size:.92rem;font-family:var(--mo);outline:none">'+
