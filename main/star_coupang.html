@@ -1298,8 +1298,12 @@ function restoreSession() {
   document.getElementById('restoreBanner').style.display = 'none';
   goTo(1);
   renderAll();
-  /* 다운로드 위해 원본 파일 재선택 안내 */
-  setMsg('m1','warn','↩ 세션 복원 완료. 결과 다운로드하려면 같은 .xlsx 파일을 다시 업로드하세요. (작업 내용은 보존됨)');
+  /* 모드별 안내 — 자료없이 시작은 재업로드 불필요 */
+  if (startedEmpty) {
+    setMsg('m1','ok','↩ 진행 중 작업을 복원했습니다 — 이어서 스캔하세요. (자료 없이 시작 모드 · 작업 내용 보존됨)');
+  } else {
+    setMsg('m1','warn','↩ 진행 중 작업을 복원했습니다 — 이어서 스캔하세요. 결과 다운로드 시에만 같은 .xlsx를 다시 업로드하면 됩니다. (작업 내용 보존됨)');
+  }
 }
 
 function dismissBanner() { document.getElementById('restoreBanner').style.display='none'; }
@@ -1344,10 +1348,15 @@ function finishWorkAndClear() {
   });
 }
 
-/* 페이지 로드 시 세션 확인 */
+/* 페이지 로드 시 세션 확인 — 진행 중 작업이 있으면 자동으로 STEP 2(입고 작업)로 복원해
+   사용자가 STEP 1에서 헤매지 않게. 복원 중 오류가 나면 「↩ 복원」 배너로 폴백. */
 (function checkSavedSession(){
   var data = loadSessionData();
   if (!data || !data.rowsLite || !data.rowsLite.length) return;
+  try {
+    restoreSession();   /* goTo(1) + 전체 렌더 + 메시지까지 처리 */
+    return;
+  } catch(e){ console.warn('자동 복원 실패 — 배너로 폴백:', e); }
   var banner = document.getElementById('restoreBanner');
   var d = new Date(data.ts);
   var timeStr = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+
@@ -1355,7 +1364,7 @@ function finishWorkAndClear() {
   var totalRecv = (data.rowsLite||[]).reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
   document.getElementById('restoreInfo').textContent =
     timeStr+' · '+(data.fileName||'(이름 없음)')+' · '+data.rowsLite.length+'행 · 실입고 '+totalRecv+'개 · 박스 '+(data.boxes||[]).length+'개';
-  banner.style.display = 'flex';
+  if (banner) banner.style.display = 'flex';
 })();
 
 /* Firebase 동기화 초기화 — wms.html 인증 흐름 (그룹 공유 모드) */
