@@ -617,9 +617,9 @@ h1 em{color:var(--g);font-style:normal}
     <div class="modal-h">📷 신규 SKU 촬영 사진 일괄 정리</div>
     <div class="modal-b">
       <div style="font-size:.82rem;color:var(--mu);line-height:1.65;margin-bottom:.85rem;padding:.6rem .8rem;background:rgba(192,132,252,.06);border:1px solid rgba(192,132,252,.25);border-radius:6px">
-        💡 <strong style="color:var(--p)">원리</strong> &mdash; 촬영 알림이 뜬 <strong>시간 순서</strong>가 휴대폰 촬영 순서와 일치합니다.
-        업로드한 사진들을 <strong>촬영 시간순(파일 mtime)</strong>으로 정렬한 뒤, 촬영 로그의 N번째 바코드와 N번째 사진을 짝지어 파일명을 변경합니다.
-        <strong style="color:var(--g)">스캐너로 들어온 바코드는 100% 정확</strong>하므로 OCR 환각이 원천 차단됩니다.
+        💡 <strong style="color:var(--p)">원리</strong> &mdash; 사진 <strong>촬영시각(mtime)</strong>과 알림 <strong>로그시각</strong>을 <strong>시간순 정렬(DTW)</strong>로 짝지어 바코드 파일명을 부여합니다.
+        한 바코드에 사진이 <strong>여러 장이면 재촬영(중복)</strong>으로 묶어 사용할 사진만 고르게 하므로, <strong style="color:var(--y)">중복 1장이 그 뒤 전체를 밀던 오류</strong>가 사라집니다.
+        폰↔PC 시계 오차는 자동 보정. <strong style="color:var(--g)">스캐너 바코드는 100% 정확</strong>하므로 OCR 환각이 원천 차단됩니다.
       </div>
       <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.85rem;flex-wrap:wrap">
         <span style="font-size:.78rem;color:var(--g);font-weight:700">📊 촬영 로그: <span id="psLogCnt" style="font-family:var(--mo)">0</span>건</span>
@@ -900,7 +900,9 @@ var _audioCtx = null;              // Web Audio Context 재사용
    휴대폰 촬영은 알림 직후에 일어나고, 이 순서가 사진 정렬 순서와 일치하므로
    나중에 사진을 시간순 정렬 → 인덱스로 짝지어 바코드 파일명으로 일괄 변경 가능. */
 var photoLog = [];                 // [{ts, barcode, scanNo, box, styleCode, name}]
-var psPhotos = [];                 // 일괄 정리 모달의 업로드된 사진 (시간순 정렬)
+var psPhotos = [];                 // 일괄 정리 모달의 업로드된 사진 (시간순 정렬, blobUrl 포함)
+var psMatch = null;                // 시간기반 정렬 결과 {off, assign[], residual[], logToPhotos{}, status[], missing[]}
+var psResolve = {};                // 중복 묶음 keeper 선택 { logIdx: keeperPhotoIdx | 'all' }
 /* 포커스 이동 특수 바코드 — 작업장에 인쇄해 두고 스캔하면 input 포커스 이동 */
 var FOCUS_BOX_CODE  = '#BOX#';
 var FOCUS_PROD_CODE = '#PROD#';
@@ -2721,7 +2723,9 @@ function closePhotoSortModal(){
 
 /* 사진 파일 선택 → 촬영 시간순 정렬 */
 function onPhotoSortFiles(fileList){
-  psPhotos = [];
+  /* 이전 썸네일 URL 해제 */
+  psPhotos.forEach(function(p){ if (p.blobUrl) try{ URL.revokeObjectURL(p.blobUrl); }catch(e){} });
+  psPhotos = []; psResolve = {}; psMatch = null;
   if (!fileList || !fileList.length) { renderPhotoSortPreview(); return; }
   for (var i=0; i<fileList.length; i++) {
     var f = fileList[i];
@@ -2732,7 +2736,8 @@ function onPhotoSortFiles(fileList){
       file: f,
       name: f.name,
       ext: m ? m[1].toLowerCase() : 'jpg',
-      mtime: f.lastModified || 0
+      mtime: f.lastModified || 0,
+      blobUrl: URL.createObjectURL(f)
     });
   }
   /* mtime 오름차순 — 촬영 시간순. EXIF DateTimeOriginal 이 더 정확하지만
@@ -2745,63 +2750,231 @@ function onPhotoSortFiles(fileList){
   renderPhotoSortPreview();
 }
 
-/* 매칭 미리보기 테이블 */
+/* ─── 시간기반 정렬 엔진 ───
+   문제: 기존엔 사진[i]=로그[i] 위치 매칭이라, 중복 사진 1장이 그 뒤 전부를 한 칸씩 밀어버림.
+   해결: 사진 촬영시각(mtime) 과 알림 로그시각(ts) 을 DTW 정렬해 '순서를 보존하며' 짝지음.
+        - 폰↔PC 시계 오차는 offset 을 반복 추정해 흡수
+        - 한 로그에 사진 여러 장 = 재촬영(중복) → 묶음으로 분리 (밀림이 전역으로 번지지 않음)
+        - 사진 없는 로그 = 촬영 누락으로 표시 */
+function _psMedian(arr){
+  if (!arr.length) return 0;
+  var s = arr.slice().sort(function(x,y){ return x-y; });
+  var k = s.length;
+  return k % 2 ? s[(k-1)/2] : (s[k/2-1] + s[k/2]) / 2;
+}
+/* 인과성 — 사진은 알림보다 먼저 찍힐 수 없음. 시계 jitter 만큼(TOL)만 앞섬 허용,
+   그 이상 앞서면 큰 페널티. 이게 '한 칸 밀린' 해(解)로 빠지는 DTW 퇴행을 막는다. */
+var PS_CAUSAL_TOL = 3000;     // ms
+var PS_ACAUSAL_PEN = 1e9;     // 인과성 위반 페널티(유한값 — 경로 단절 방지)
+/* DTW — 각 사진을 정확히 하나의 로그에 (순서 보존, 인과성 적용). 한 로그에 여러 사진 허용,
+   로그 1개까지 건너뜀 허용(촬영 누락). bts=로그시각, off=폰-PC 시계오차. assign[photoIdx]=logIdx. */
+function _psDtwAssign(a, bts, off){
+  var n = a.length, m = bts.length, INF = 1e18, i, j;
+  if (!n || !m) return a.map(function(){ return -1; });
+  function cost(i, j){ var lag = a[i] - bts[j] - off; var c = Math.abs(lag); return lag < -PS_CAUSAL_TOL ? c + PS_ACAUSAL_PEN : c; }
+  var D = [], P = [];
+  for (i=0;i<n;i++){ D.push(new Float64Array(m)); P.push(new Int32Array(m)); for(j=0;j<m;j++){ D[i][j]=INF; P[i][j]=-1; } }
+  for (j=0;j<m;j++){ D[0][j] = cost(0, j); P[0][j] = -2; }  /* 첫 사진은 어느 로그에서도 시작 가능 (앞 로그는 누락) */
+  for (i=1;i<n;i++){
+    for (j=0;j<m;j++){
+      var best = INF, bp = -1;
+      if (D[i-1][j]   < best){ best = D[i-1][j];   bp = j;   }    /* 직전 사진도 같은 로그 = 중복 */
+      if (j>=1 && D[i-1][j-1] < best){ best = D[i-1][j-1]; bp = j-1; } /* 한 칸 전진 */
+      if (j>=2 && D[i-1][j-2] < best){ best = D[i-1][j-2]; bp = j-2; } /* 로그 1개 건너뜀(촬영 누락) */
+      if (best < INF){ D[i][j] = best + cost(i, j); P[i][j] = bp; }
+    }
+  }
+  var jb = 0, bv = INF;
+  for (j=0;j<m;j++){ if (D[n-1][j] < bv){ bv = D[n-1][j]; jb = j; } }
+  var assign = new Array(n), cj = jb;
+  for (i=n-1;i>=0;i--){ assign[i] = cj; var pv = P[i][cj]; if (pv === -2 || pv < 0) cj = jb; else cj = pv; }
+  return assign;
+}
+function psComputeMatch(){
+  psMatch = null;
+  var logs = photoLog, photos = psPhotos;
+  if (!photos.length || !logs.length) return;
+  var a = photos.map(function(p){ return p.mtime; });
+  var bts = logs.map(function(l){ return l.ts; });
+  /* 초기 offset = 첫 사진-첫 로그 lag (첫 SKU엔 선행 중복이 없어 신뢰 가능).
+     이후 off = 매칭쌍 최소 lag 로 수렴 → 모든 lag≥0(인과적)·tight. */
+  var off = a[0] - bts[0], assign = [];
+  for (var it=0; it<6; it++){
+    assign = _psDtwAssign(a, bts, off);
+    var mn = Infinity;
+    for (var k=0;k<assign.length;k++){ if (assign[k] >= 0){ var lg = a[k] - bts[assign[k]]; if (lg < mn) mn = lg; } }
+    if (!isFinite(mn)) break;
+    if (Math.abs(mn - off) < 200) { off = mn; break; }
+    off = mn;
+  }
+  var logToPhotos = {}, residual = [];
+  for (var p=0;p<assign.length;p++){
+    var j = assign[p];
+    residual[p] = j >= 0 ? Math.abs(a[p] - (bts[j] + off)) : Infinity;
+    if (j >= 0) (logToPhotos[j] = logToPhotos[j] || []).push(p);
+  }
+  var medR = _psMedian(residual.filter(function(r){ return isFinite(r); }));
+  var uncThresh = Math.max(medR * 4, 45000);  /* 정상 편차의 4배 또는 45초 중 큰 값 */
+  var status = [];
+  for (var q=0;q<assign.length;q++){
+    var jj = assign[q];
+    if (jj < 0) { status[q] = 'unmatched'; continue; }
+    var cl = logToPhotos[jj];
+    if (cl.length >= 2) status[q] = 'dup';
+    else status[q] = residual[q] > uncThresh ? 'uncertain' : 'ok';
+  }
+  /* 중복 묶음 기본 keeper = 묶음 내 마지막 사진(보통 재촬영본이 양호) */
+  Object.keys(logToPhotos).forEach(function(j){
+    var cl = logToPhotos[j];
+    if (cl.length >= 2 && psResolve[j] === undefined) psResolve[j] = cl[cl.length-1];
+  });
+  var missing = [];
+  for (var jm=0; jm<logs.length; jm++) if (!logToPhotos[jm]) missing.push(jm);
+  psMatch = { off:off, assign:assign, residual:residual, logToPhotos:logToPhotos, status:status, missing:missing, medR:medR, uncThresh:uncThresh };
+}
+/* 중복 묶음에서 keeper 선택 (라디오) */
+function psSetKeeper(logIdx, val){
+  psResolve[logIdx] = (val === 'all') ? 'all' : parseInt(val, 10);
+}
+
+var _psFmtTs = function(ts){
+  var d = new Date(ts);
+  return (d.getMonth()+1) + '/' + d.getDate() + ' ' +
+    String(d.getHours()).padStart(2,'0') + ':' +
+    String(d.getMinutes()).padStart(2,'0') + ':' +
+    String(d.getSeconds()).padStart(2,'0');
+};
+function _psBc(lg){ return String((lg && lg.barcode) || 'NOBC').replace(/[^A-Za-z0-9_\-]/g,''); }
+
+/* 매칭 미리보기 — 시간기반 정렬 결과를 요약 + 중복/누락/의심 항목만 검수 카드로 */
 function renderPhotoSortPreview(){
   var el = document.getElementById('psPreview');
   if (!el) return;
-  if (!psPhotos.length && !photoLog.length) { el.innerHTML = ''; return; }
-  var n = Math.max(psPhotos.length, photoLog.length);
-  var fmtTs = function(ts){
-    var d = new Date(ts);
-    return d.getMonth()+1 + '/' + d.getDate() + ' ' +
-      String(d.getHours()).padStart(2,'0') + ':' +
-      String(d.getMinutes()).padStart(2,'0') + ':' +
-      String(d.getSeconds()).padStart(2,'0');
-  };
+  if (!psPhotos.length) {
+    el.innerHTML = photoLog.length
+      ? '<div style="padding:.7rem;color:var(--mu);font-size:.78rem;text-align:center">📁 사진을 선택하면 시간기반 매칭 결과가 표시됩니다.</div>'
+      : '';
+    return;
+  }
+  if (!photoLog.length) {
+    el.innerHTML = '<div style="background:rgba(240,196,74,.1);border:1px solid var(--y);color:var(--y);padding:.5rem .8rem;border-radius:5px;font-size:.76rem">⚠️ 촬영 로그가 없습니다. 바코드를 알 수 없어 매칭할 수 없습니다.</div>';
+    return;
+  }
+  psComputeMatch();
+  var m = psMatch;
+  var logs = photoLog;
+
+  var dupLogs = Object.keys(m.logToPhotos).map(Number).filter(function(j){ return m.logToPhotos[j].length >= 2; }).sort(function(x,y){ return x-y; });
+  var dupPhotoCount = dupLogs.reduce(function(s,j){ return s + m.logToPhotos[j].length; }, 0);
+  var uncertain = [];
+  for (var q=0;q<m.status.length;q++) if (m.status[q] === 'uncertain') uncertain.push(q);
+  var okCount = m.status.filter(function(s){ return s === 'ok'; }).length;
+
+  /* 시계 오차 안내 */
+  var offSec = Math.round(m.off/1000);
+  var offTxt = Math.abs(offSec) < 5 ? '거의 일치'
+    : (offSec > 0 ? '사진 시계가 PC보다 '+Math.abs(offSec)+'초 빠름' : '사진 시계가 PC보다 '+Math.abs(offSec)+'초 느림');
+
+  var html = '';
+  /* 요약 */
+  html += '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem;font-size:.74rem">'+
+    '<span style="background:rgba(74,240,168,.12);border:1px solid var(--g);color:var(--g);padding:.3rem .6rem;border-radius:5px;font-weight:700">✅ 확실 '+okCount+'</span>'+
+    '<span style="background:rgba(240,196,74,.12);border:1px solid var(--y);color:var(--y);padding:.3rem .6rem;border-radius:5px;font-weight:700">⚠️ 중복묶음 '+dupLogs.length+' ('+dupPhotoCount+'장)</span>'+
+    '<span style="background:rgba(91,156,246,.12);border:1px solid var(--b);color:var(--b);padding:.3rem .6rem;border-radius:5px;font-weight:700">❓ 의심 '+uncertain.length+'</span>'+
+    '<span style="background:rgba(240,88,88,.12);border:1px solid var(--r);color:var(--r);padding:.3rem .6rem;border-radius:5px;font-weight:700">📭 사진없는 로그 '+m.missing.length+'</span>'+
+    '<span style="color:var(--mu);font-family:var(--mo);padding:.3rem .4rem">🕑 '+offTxt+'</span>'+
+    '</div>';
+
+  if (psPhotos.length !== logs.length) {
+    html += '<div style="background:rgba(91,156,246,.08);border:1px solid rgba(91,156,246,.35);color:var(--b);padding:.42rem .7rem;border-radius:5px;font-size:.72rem;margin-bottom:.6rem">'+
+      'ℹ️ 사진 '+psPhotos.length+'장 · 로그 '+logs.length+'건 — 갯수가 달라도 시간순으로 정렬해 자동 짝짓습니다. 여분 사진은 중복으로, 빠진 건 사진없는 로그로 분류됩니다.</div>';
+  }
+
+  /* 중복 묶음 검수 카드 */
+  if (dupLogs.length) {
+    html += '<div style="font-size:.76rem;font-weight:800;color:var(--y);margin:.6rem 0 .35rem">⚠️ 중복 묶음 — 사용할 사진을 고르세요 (기본: 마지막 = 재촬영본)</div>';
+    dupLogs.forEach(function(j){
+      var lg = logs[j], cl = m.logToPhotos[j], bc = _psBc(lg);
+      var keep = psResolve[j]; if (keep === undefined) keep = cl[cl.length-1];
+      html += '<div style="border:1px solid var(--y);border-radius:7px;padding:.55rem .65rem;margin-bottom:.5rem;background:rgba(240,196,74,.04)">'+
+        '<div style="font-size:.74rem;margin-bottom:.45rem"><b style="color:var(--y);font-family:var(--mo)">'+escH(lg.barcode)+'</b>'+
+        (lg.name ? ' <span style="color:var(--mu)">· '+escH(lg.name)+'</span>' : '')+
+        ' <span style="color:var(--mu);font-family:var(--mo)">— '+cl.length+'장</span></div>'+
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-start">';
+      cl.forEach(function(pi){
+        var ph = psPhotos[pi];
+        var checked = (keep === pi) ? 'checked' : '';
+        html += '<label style="display:flex;flex-direction:column;align-items:center;gap:.2rem;cursor:pointer;font-size:.64rem;font-family:var(--mo);color:var(--mu)">'+
+          '<img src="'+escH(ph.blobUrl)+'" style="width:96px;height:96px;object-fit:cover;border-radius:5px;border:2px solid '+(keep===pi?'var(--g)':'var(--br)')+'">'+
+          '<span>'+_psFmtTs(ph.mtime)+'</span>'+
+          '<span><input type="radio" name="dup_'+j+'" value="'+pi+'" '+checked+' onchange="psSetKeeper('+j+',this.value);renderPhotoSortPreview()"> 사용</span>'+
+        '</label>';
+      });
+      var allCk = (keep === 'all') ? 'checked' : '';
+      html += '<label style="display:flex;align-items:center;gap:.25rem;font-size:.66rem;color:var(--mu);align-self:center"><input type="radio" name="dup_'+j+'" value="all" '+allCk+' onchange="psSetKeeper('+j+',this.value);renderPhotoSortPreview()"> 모두 보관 (_01·_02…)</label>';
+      html += '</div></div>';
+    });
+  }
+
+  /* 의심 항목 (편차 큰 단일 매칭) */
+  if (uncertain.length) {
+    html += '<div style="font-size:.76rem;font-weight:800;color:var(--b);margin:.7rem 0 .35rem">❓ 의심 — 시간 편차가 커서 확인 권장</div>'+
+      '<div style="display:flex;gap:.55rem;flex-wrap:wrap">';
+    uncertain.forEach(function(pi){
+      var ph = psPhotos[pi], j = m.assign[pi], lg = logs[j];
+      html += '<div style="border:1px solid var(--b);border-radius:6px;padding:.4rem;text-align:center;font-size:.62rem;font-family:var(--mo);color:var(--mu)">'+
+        '<img src="'+escH(ph.blobUrl)+'" style="width:84px;height:84px;object-fit:cover;border-radius:4px"><br>'+
+        '<b style="color:var(--y)">'+escH(lg ? lg.barcode : '?')+'</b><br>'+
+        '편차 '+Math.round(m.residual[pi]/1000)+'초</div>';
+    });
+    html += '</div>';
+  }
+
+  /* 사진없는 로그 (촬영 누락) */
+  if (m.missing.length) {
+    html += '<div style="font-size:.76rem;font-weight:800;color:var(--r);margin:.7rem 0 .35rem">📭 사진없는 로그 — 촬영 누락 가능 (ZIP에 미포함)</div>'+
+      '<div style="max-height:120px;overflow:auto;border:1px solid rgba(240,88,88,.3);border-radius:5px;padding:.4rem .55rem;font-size:.7rem;font-family:var(--mo);color:var(--mu)">'+
+      m.missing.map(function(j){ var lg=logs[j]; return escH(lg.barcode)+(lg.name?' · '+escH(lg.name):''); }).join('<br>')+
+      '</div>';
+  }
+
+  /* 전체 매칭 표 (접이식) */
   var rows = '';
-  for (var i=0; i<n; i++) {
-    var ph = psPhotos[i];
-    var lg = photoLog[i];
-    var ext = ph ? ph.ext : 'jpg';
-    var newName = lg ? buildPhotoSortName(lg, ext) : '—';
+  for (var i=0;i<psPhotos.length;i++){
+    var ph = psPhotos[i], j2 = m.assign[i], lg2 = (j2>=0)?logs[j2]:null;
+    var st = m.status[i];
+    var stTxt = st==='ok'?'<span style="color:var(--g)">확실</span>':st==='dup'?'<span style="color:var(--y)">중복</span>':st==='uncertain'?'<span style="color:var(--b)">의심</span>':'<span style="color:var(--r)">미매칭</span>';
     rows += '<tr style="border-bottom:1px solid var(--br)">'+
-      '<td style="padding:.3rem .4rem;color:var(--mu);font-family:var(--mo)">'+(i+1)+'</td>'+
-      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem">'+
-        (ph ? fmtTs(ph.mtime) : '<span style="color:var(--r)">사진 없음</span>')+'</td>'+
-      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem;color:var(--mu);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(ph?escH(ph.name):'')+'">'+
-        (ph ? escH(ph.name) : '—')+'</td>'+
-      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem">'+
-        (lg ? fmtTs(lg.ts) : '<span style="color:var(--r)">로그 없음</span>')+'</td>'+
-      '<td style="padding:.3rem .4rem;font-family:var(--mo);color:var(--y);font-weight:700">'+
-        (lg ? escH(lg.barcode) : '—')+'</td>'+
-      '<td style="padding:.3rem .4rem;font-family:var(--mo);font-size:.7rem;color:var(--g)">'+
-        (ph && lg ? escH(newName) : '—')+'</td>'+
+      '<td style="padding:.25rem .4rem;color:var(--mu);font-family:var(--mo)">'+(i+1)+'</td>'+
+      '<td style="padding:.25rem .4rem;font-family:var(--mo);font-size:.68rem">'+_psFmtTs(ph.mtime)+'</td>'+
+      '<td style="padding:.25rem .4rem;font-family:var(--mo);font-size:.68rem;color:var(--mu);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+escH(ph.name)+'">'+escH(ph.name)+'</td>'+
+      '<td style="padding:.25rem .4rem;font-family:var(--mo);color:var(--y);font-weight:700">'+escH(lg2?lg2.barcode:'—')+'</td>'+
+      '<td style="padding:.25rem .4rem;font-size:.68rem">'+stTxt+'</td>'+
     '</tr>';
   }
-  var mismatch = psPhotos.length !== photoLog.length;
-  el.innerHTML =
-    (mismatch ? '<div style="background:rgba(240,196,74,.1);border:1px solid var(--y);color:var(--y);padding:.42rem .7rem;border-radius:5px;font-size:.74rem;margin-bottom:.55rem">⚠️ 사진 '+psPhotos.length+'장 ≠ 로그 '+photoLog.length+'건 — 갯수 불일치. 짝 못 찾은 항목은 unmatched 폴더로 분리됩니다.</div>' : '')+
-    '<div style="max-height:340px;overflow:auto;border:1px solid var(--br);border-radius:6px">'+
-    '<table style="width:100%;font-size:.74rem;border-collapse:collapse">'+
+  html += '<details style="margin-top:.7rem"><summary style="cursor:pointer;font-size:.74rem;color:var(--mu)">📋 전체 매칭 표 ('+psPhotos.length+'장) 펼치기</summary>'+
+    '<div style="max-height:300px;overflow:auto;border:1px solid var(--br);border-radius:6px;margin-top:.4rem">'+
+    '<table style="width:100%;font-size:.72rem;border-collapse:collapse">'+
     '<thead style="position:sticky;top:0;background:var(--s2);z-index:1"><tr>'+
-    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">#</th>'+
-    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">사진 시간</th>'+
-    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">원본 파일명</th>'+
-    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">로그 시간</th>'+
-    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">바코드</th>'+
-    '<th style="padding:.4rem;text-align:left;font-size:.66rem;color:var(--mu);font-family:var(--mo)">새 파일명</th>'+
-    '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+    '<th style="padding:.35rem;text-align:left;font-size:.64rem;color:var(--mu);font-family:var(--mo)">#</th>'+
+    '<th style="padding:.35rem;text-align:left;font-size:.64rem;color:var(--mu);font-family:var(--mo)">사진 시간</th>'+
+    '<th style="padding:.35rem;text-align:left;font-size:.64rem;color:var(--mu);font-family:var(--mo)">원본 파일명</th>'+
+    '<th style="padding:.35rem;text-align:left;font-size:.64rem;color:var(--mu);font-family:var(--mo)">바코드</th>'+
+    '<th style="padding:.35rem;text-align:left;font-size:.64rem;color:var(--mu);font-family:var(--mo)">판정</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></details>';
+
+  el.innerHTML = html;
 }
 
-function buildPhotoSortName(lg, ext){
-  var bc = String(lg.barcode || 'NOBC').replace(/[^A-Za-z0-9_\-]/g,'');
-  return bc + '.' + (ext || 'jpg');
-}
-
-/* ZIP 생성 */
+/* ZIP 생성 — 시간기반 매칭 + 중복 keeper 선택 반영 */
 function generatePhotoSortZip(){
   if (typeof JSZip === 'undefined') { setMsg('m1','er','❌ JSZip 라이브러리 미로드 — 새로고침 후 재시도'); return; }
   if (!psPhotos.length) { setMsg('m1','warn','⚠️ 사진을 먼저 선택하세요'); return; }
+  if (!photoLog.length) { setMsg('m1','warn','⚠️ 촬영 로그가 없어 바코드를 알 수 없습니다'); return; }
+  psComputeMatch();
+  var m = psMatch, logs = photoLog;
+  if (!m) { setMsg('m1','er','❌ 매칭 계산 실패'); return; }
+
   var btn = document.getElementById('psZipBtn');
   btn.disabled = true;
   var prev = btn.textContent;
@@ -2809,51 +2982,73 @@ function generatePhotoSortZip(){
 
   var zip = new JSZip();
   var renamed = zip.folder('renamed');
+  var dupFolder = zip.folder('중복(미사용)');
   var unmatched = zip.folder('unmatched');
-  var nameCount = {};
-  var manifestRows = [['seq','photo_time','photo_orig','log_time','barcode','box','style_code','new_name','status']];
-
+  var nameCount = {}, dupCount = {};
+  var manifestRows = [['seq','status','barcode','name','box','style_code','photo_time','photo_orig','log_time','residual_s','new_name']];
   var promises = [];
-  for (var i=0; i<psPhotos.length; i++) {
-    (function(idx){
-      var ph = psPhotos[idx];
-      var lg = photoLog[idx];
-      var status, newName, target;
-      if (lg) {
-        var bc = String(lg.barcode || 'NOBC').replace(/[^A-Za-z0-9_\-]/g,'');
-        newName = bc + '.' + ph.ext;
-        /* 같은 바코드가 여러 번 등장 시 _01, _02 ... 부여 */
-        var c = (nameCount[bc] = (nameCount[bc]||0) + 1);
-        if (c > 1) newName = bc + '_' + String(c).padStart(2,'0') + '.' + ph.ext;
-        target = renamed; status = 'matched';
-      } else {
-        newName = ph.name;
-        target = unmatched; status = 'unmatched_photo';
-      }
-      promises.push(ph.file.arrayBuffer().then(function(buf){
-        target.file(newName, buf);
-      }));
-      manifestRows.push([
-        idx+1,
-        new Date(ph.mtime).toLocaleString('ko-KR'),
-        ph.name,
-        lg ? new Date(lg.ts).toLocaleString('ko-KR') : '',
-        lg ? lg.barcode : '',
-        lg ? (lg.box||'') : '',
-        lg ? (lg.styleCode||'') : '',
-        newName,
-        status
-      ]);
-    })(i);
-  }
-  /* 로그가 더 많은 경우 — 매칭 안 된 로그 행 표시 */
-  for (var j=psPhotos.length; j<photoLog.length; j++) {
-    var lg = photoLog[j];
+  var keptN = 0, dupN = 0, unmatchedN = 0;
+
+  function addRow(ph, lg, status, newName, residMs){
     manifestRows.push([
-      j+1, '', '', new Date(lg.ts).toLocaleString('ko-KR'),
-      lg.barcode, lg.box||'', lg.styleCode||'', '', 'unmatched_log'
+      manifestRows.length,
+      status,
+      lg ? lg.barcode : '',
+      lg ? (lg.name||'') : '',
+      lg ? (lg.box||'') : '',
+      lg ? (lg.styleCode||'') : '',
+      new Date(ph.mtime).toLocaleString('ko-KR'),
+      ph.name,
+      lg ? new Date(lg.ts).toLocaleString('ko-KR') : '',
+      isFinite(residMs) ? (residMs/1000).toFixed(1) : '',
+      newName
     ]);
   }
+
+  /* 로그(바코드) 순서대로 묶음 처리 */
+  Object.keys(m.logToPhotos).map(Number).sort(function(x,y){ return x-y; }).forEach(function(j){
+    var cl = m.logToPhotos[j], lg = logs[j];
+    var bc = _psBc(lg);
+    var keep = psResolve[j];
+    if (keep === undefined) keep = (cl.length >= 2) ? cl[cl.length-1] : cl[0];
+    cl.forEach(function(pi){
+      var ph = psPhotos[pi];
+      var isKeeper = (keep === 'all') || (pi === keep) || (cl.length === 1);
+      var status, newName, target;
+      if (isKeeper) {
+        var c = (nameCount[bc] = (nameCount[bc]||0) + 1);
+        newName = (c > 1) ? bc + '_' + String(c).padStart(2,'0') + '.' + ph.ext : bc + '.' + ph.ext;
+        target = renamed;
+        status = cl.length >= 2 ? (keep==='all' ? 'matched_all' : 'matched_keeper')
+               : (m.status[pi] === 'uncertain' ? 'matched_uncertain' : 'matched');
+        keptN++;
+      } else {
+        var dc = (dupCount[bc] = (dupCount[bc]||0) + 1);
+        newName = bc + '_dup' + String(dc).padStart(2,'0') + '.' + ph.ext;
+        target = dupFolder;
+        status = 'dropped_dup';
+        dupN++;
+      }
+      promises.push(ph.file.arrayBuffer().then(function(buf){ target.file(newName, buf); }));
+      addRow(ph, lg, status, newName, m.residual[pi]);
+    });
+  });
+
+  /* 어떤 로그에도 못 붙은 사진 (로그보다 앞선 사진 등) */
+  for (var i=0;i<psPhotos.length;i++){
+    if (m.assign[i] >= 0) continue;
+    (function(ph){
+      promises.push(ph.file.arrayBuffer().then(function(b){ unmatched.file(ph.name, b); }));
+      addRow(ph, null, 'unmatched_photo', ph.name, Infinity);
+      unmatchedN++;
+    })(psPhotos[i]);
+  }
+
+  /* 사진없는 로그 (촬영 누락) */
+  m.missing.forEach(function(j){
+    var lg = logs[j];
+    manifestRows.push([ manifestRows.length, 'missing_photo', lg.barcode, lg.name||'', lg.box||'', lg.styleCode||'', '', '', new Date(lg.ts).toLocaleString('ko-KR'), '', '' ]);
+  });
 
   var csv = manifestRows.map(function(r){
     return r.map(function(v){
@@ -2863,14 +3058,18 @@ function generatePhotoSortZip(){
   }).join('\r\n');
   zip.file('manifest.csv', '﻿' + csv);
 
+  var offSec = Math.round(m.off/1000);
   zip.file('README.txt',
-    '신규 SKU 촬영 사진 일괄 정리 결과\n' +
+    '신규 SKU 촬영 사진 일괄 정리 결과 (시간기반 매칭)\n' +
     '생성: ' + new Date().toLocaleString('ko-KR') + '\n\n' +
-    'renamed/    바코드명으로 변경된 사진 (시간순 매칭)\n' +
-    'unmatched/  로그와 짝을 못 찾은 여분 사진\n' +
-    'manifest.csv 전체 매칭 결과 (UTF-8 BOM)\n\n' +
-    '원리 — 촬영 알림이 뜬 시간 순서 = 휴대폰 촬영 순서.\n' +
-    '         사진을 mtime(촬영시간) 오름차순으로 정렬하면 로그와 1:1 매칭.\n');
+    'renamed/        바코드명으로 변경된 사진 (사용 채택분)\n' +
+    '중복(미사용)/   같은 바코드의 재촬영분 중 미채택 사진\n' +
+    'unmatched/      로그보다 앞서 짝을 못 찾은 사진\n' +
+    'manifest.csv    전체 매칭 결과 (UTF-8 BOM, residual_s=시간편차 초)\n\n' +
+    '원리 — 사진 촬영시각(mtime)과 알림 로그시각(ts)을 DTW로 순서보존 정렬.\n' +
+    '         한 바코드에 사진 여러 장 = 재촬영(중복) → keeper만 채택.\n' +
+    '         추정 시계오차(사진-PC): ' + offSec + '초 (자동 보정됨).\n' +
+    '         중복 1장이 그 뒤 전체를 밀던 위치매칭 오류가 제거됨.\n');
 
   Promise.all(promises).then(function(){
     return zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } });
@@ -2885,8 +3084,8 @@ function generatePhotoSortZip(){
     setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 500);
     btn.disabled = false;
     btn.textContent = prev;
-    setMsg('m1','ok','✅ ZIP 다운로드 완료 — renamed '+Math.min(psPhotos.length, photoLog.length)+'장 · 사진/로그 짝 없는 '+
-      (Math.abs(psPhotos.length - photoLog.length))+'건');
+    setMsg('m1','ok','✅ ZIP 완료 — 채택 '+keptN+'장 · 미사용중복 '+dupN+'장'+
+      (unmatchedN?' · 미매칭 '+unmatchedN+'장':'')+(m.missing.length?' · 사진없는로그 '+m.missing.length+'건':''));
   }).catch(function(err){
     btn.disabled = false; btn.textContent = prev;
     setMsg('m1','er','❌ ZIP 생성 실패: '+(err && err.message || err));
