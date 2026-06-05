@@ -2888,7 +2888,7 @@ function cpProcessRelabelScan(raw){
       cpSpeak('오류');
       return;
     }
-    cpPrintLabelsFromItems(items);
+    cpPrintLabelsDirect(items);
     cpFlash('ok','🏷️ <b>덧방 인쇄</b> — 박스 '+escH(boxId)+' 내품 '+items.length+'종 / 총 '+total+'장 인쇄'+(cpKioskNoteHtml()));
     cpSpeak('인쇄');
     return;
@@ -2911,7 +2911,7 @@ function cpProcessRelabelScan(raw){
     cpCollectAdd(resolved, meta, viaAlt);
     return;
   }
-  cpPrintLabelsFromItems([{ barcode: resolved, qty: 1, srcIdx: -1 }]);
+  cpPrintLabelsDirect([{ barcode: resolved, qty: 1, srcIdx: -1 }]);
   var nm = (meta && meta.name) ? meta.name : resolved;
   cpFlash('ok','🏷️ <b>덧방 인쇄</b> — '+escH(nm)+(viaAlt?' <span style="color:var(--p);font-weight:800">[ALT]</span>':'')+' 1장 인쇄'+(cpKioskNoteHtml()));
   cpSpeak('인쇄');
@@ -3690,12 +3690,11 @@ function cpCenterAbbr(center){
   return s.charAt(0) + (m ? m[1] : '');
 }
 
-/* 라벨 인쇄 공통 — items: [{barcode, qty, srcIdx}, ...] */
-function cpPrintLabelsFromItems(items){
-  if (!items || !items.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+/* 라벨 HTML 배열 생성 — items: [{barcode, qty, srcIdx}, ...] (인쇄 함수들이 공유) */
+function cpBuildProdLabels(items){
   var rows = (workSession && workSession.rows) || [];
   var labels = [];
-  items.forEach(function(it){
+  (items||[]).forEach(function(it){
     var meta = stockMeta[normBarcode(it.barcode)] || {};
     var r = rows[it.srcIdx] || {};
     var name = meta.name || r.skuName || '';
@@ -3750,6 +3749,13 @@ function cpPrintLabelsFromItems(items){
       );
     }
   });
+  return labels;
+}
+
+/* 라벨 인쇄 (전체 페이지 인쇄 — 일괄 버튼용) — items: [{barcode, qty, srcIdx}, ...] */
+function cpPrintLabelsFromItems(items){
+  if (!items || !items.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  var labels = cpBuildProdLabels(items);
   if (!labels.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
   var area = document.getElementById('prodLabelArea');
   if (!area){ cpFlash('er','라벨 영역 없음'); return; }
@@ -3798,6 +3804,63 @@ function cpPrintLabelsFromItems(items){
     }, 80);
   });
   cpFlash('ok','✓ 상품 라벨 '+labels.length+'장 인쇄 시작');
+}
+
+/* ═══════════ 덧방 즉시 인쇄 (iframe — 라벨만 인쇄, 빠름) ═══════════
+ * 무거운 본문 페이지를 인쇄용으로 다시 그리지 않고, 라벨만 담은 작은 iframe 을 인쇄한다.
+ * 바코드는 부모(이미 JsBarcode 로딩)에서 렌더해 SVG 채로 주입 → iframe 은 외부 의존 0(즉시 로드).
+ * 폰트 자동축소는 부모 함수 소스를 iframe 안에서 실행(단일 출처). --kiosk-printing 이면 대화상자 없이 즉시 출력. */
+var _cpDirectIfr = null;
+function cpPrintLabelsDirect(items){
+  var labels = cpBuildProdLabels(items);
+  if (!labels.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+
+  /* 1) 바코드를 부모에서 렌더 (오프스크린) → SVG 가 그려진 상태로 직렬화 */
+  var tmp = document.createElement('div');
+  tmp.style.cssText = 'position:fixed;left:-99999px;top:0;width:80mm';
+  tmp.innerHTML = labels.join('');
+  document.body.appendChild(tmp);
+  if (typeof JsBarcode !== 'undefined') {
+    tmp.querySelectorAll('svg[data-bc]').forEach(function(svg){
+      try {
+        JsBarcode(svg, svg.getAttribute('data-bc')||'', {format:'CODE128',displayValue:false,width:2.2,height:64,margin:0,background:'#ffffff',lineColor:'#000000'});
+        svg.removeAttribute('width'); svg.removeAttribute('height'); svg.setAttribute('preserveAspectRatio','none');
+      } catch(e){}
+    });
+  }
+  var bodyHtml = tmp.innerHTML;
+  tmp.remove();
+
+  /* 2) 페이지의 모든 <style> 을 모아 iframe 에 그대로 (prod-label CSS 포함) */
+  var css = '';
+  document.querySelectorAll('style').forEach(function(s){ css += s.textContent + '\n'; });
+  css += '@page{size:80mm 40mm;margin:0}html,body{margin:0;padding:0;background:#fff}';
+
+  /* 3) 폰트 자동축소 함수 소스 (부모와 단일 출처) */
+  var fitSrc = cpShrinkToFit.toString() + '\n' + cpFitLeftColumn.toString() + '\n' + cpFitLabelText.toString();
+
+  var doc =
+    '<!doctype html><html><head><meta charset="utf-8"><style>'+css+'</style></head><body>'+
+    bodyHtml +
+    '<scr'+'ipt>'+ fitSrc +
+    'document.querySelectorAll(".prod-label").forEach(function(l){try{cpFitLabelText(l);}catch(e){}});'+
+    'setTimeout(function(){try{window.focus();window.print();}catch(e){}},30);'+
+    '<\/scr'+'ipt></body></html>';
+
+  /* 4) 숨김 iframe → srcdoc 로 즉시 로드 → (iframe 내부 스크립트가) 인쇄 → 정리 */
+  if (_cpDirectIfr) { try{ _cpDirectIfr.remove(); }catch(e){} _cpDirectIfr = null; }
+  var ifr = document.createElement('iframe');
+  ifr.setAttribute('aria-hidden','true');
+  ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:90mm;height:50mm;border:0;opacity:0;pointer-events:none;z-index:-1';
+  ifr.onload = function(){
+    var cleaned = false;
+    var clean = function(){ if(cleaned) return; cleaned=true; setTimeout(function(){ try{ifr.remove();}catch(e){} if(_cpDirectIfr===ifr) _cpDirectIfr=null; }, 300); };
+    try { ifr.contentWindow.addEventListener('afterprint', clean); } catch(e){}
+    setTimeout(clean, 5000);  /* afterprint 안 와도 안전 정리 */
+  };
+  ifr.srcdoc = doc;
+  document.body.appendChild(ifr);
+  _cpDirectIfr = ifr;
 }
 
 /* 라벨 안 각 값 셀의 폰트를 컨테이너 너비/높이에 맞게 자동 축소
@@ -4069,11 +4132,13 @@ function cpRefreshDonePool(){
       if (s.undone) {
         palCell = (s.palletNo||'-');
       } else {
-        var boxCount = cpResolveBoxCountForPallet(sEta, sCtr, sPn);
+        /* 박스수는 상품줄(scan) 단위 — s.boxCount 가 있으면 그 값, 없으면 파렛트 자동계산을 기본값으로 표시.
+           수정 시 해당 줄만 바뀜(같은 파렛트의 다른 줄에 영향 없음). */
+        var boxCount = (s.boxCount !== undefined && s.boxCount !== null) ? (+s.boxCount) : cpResolveBoxCountForPallet(sEta, sCtr, sPn);
         palCell = '<div class="c-pal-cell">'+
           '<input type="number" min="1" class="c-edit-inp narrow" value="'+sPn+'" onchange="cpDoneUpdateScan('+keyArgs+',\'palletNo\',this.value,this)" onclick="this.select()" title="파렛트 번호 수정">'+
           '<span>파렛</span>'+
-          '<input type="number" min="0" class="c-edit-inp narrow" value="'+boxCount+'" onchange="cpDoneUpdateBoxCount(\''+escAttrLocal(sEta)+'\',\''+escAttrLocal(sCtr)+'\','+sPn+',this.value,this)" onclick="this.select()" title="박스수 수정 (이 파렛트에 속한 박스 개수)">'+
+          '<input type="number" min="0" class="c-edit-inp narrow" value="'+boxCount+'" onchange="cpDoneUpdateScan('+keyArgs+',\'boxCount\',this.value,this)" onclick="this.select()" title="박스수 수정 (이 상품줄의 박스 개수 — 같은 파렛트라도 줄마다 따로 적용)">'+
           '<span>박스</span>'+
         '</div>';
       }
@@ -5260,7 +5325,7 @@ function cpDoneUpdateScan(ts, barcode, srcBox, field, value, inputEl){
   workSessionRef.update({ scans: scans, updatedAt: Date.now() }).then(function(){
     workSession.scans = scans;
     cpRefreshScanUI();
-    var fieldLabel = field === 'qty' ? '출고수량' : '파렛트';
+    var fieldLabel = field === 'qty' ? '출고수량' : (field === 'boxCount' ? '박스수' : '파렛트');
     cpFlash('ok','✓ '+fieldLabel+' 수정 저장: '+n);
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
