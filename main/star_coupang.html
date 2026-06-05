@@ -364,8 +364,11 @@ h1 em{color:var(--g);font-style:normal}
     <button class="btn btn-s" onclick="loadSampleNotice()" style="font-size:.74rem;padding:.4rem .9rem">📋 양식 안내</button>
     <button class="btn btn-g" onclick="downloadCoupangTemplate()" style="font-size:.74rem;padding:.4rem .9rem">📥 기본 양식 다운로드</button>
     <button class="btn btn-y" onclick="startEmptySession()" style="font-size:.74rem;padding:.4rem .9rem" title="입고 예정 자료 없이 스캔만으로 작업 시작 — 모든 바코드를 신규로 자동 등록">⚡ 자료 없이 시작</button>
+    <button class="btn btn-s" onclick="importSessionJson()" style="font-size:.74rem;padding:.4rem .9rem" title="이전에 백업한 세션(.json) 파일을 불러와 이어서 작업합니다">📂 세션 가져오기(JSON)</button>
   </div>
 </div>
+<!-- 세션 JSON 가져오기용 (숨김) -->
+<input type="file" id="sessionImport" accept=".json,application/json" style="display:none">
 
 <!-- STEP 2 : 입고 작업 -->
 <div class="pg" id="pg1">
@@ -532,6 +535,7 @@ h1 em{color:var(--g);font-style:normal}
   <div class="brow" style="margin-top:1rem">
     <button class="btn btn-g" onclick="downloadAll()" id="downloadAllBtn" title="모든 행 포함 (입고된 것 + 미입고) · 원본 양식 유지 + A열 박스ID + 수정 셀 표시">📥 전체 엑셀 다운로드</button>
     <button class="btn btn-y" onclick="downloadDone()" id="downloadDoneBtn" title="박스 × SKU 단위로 펼침 — 같은 SKU가 박스 2개에 분산되면 2행으로">📥 완료건 엑셀 다운로드</button>
+    <button class="btn btn-s" onclick="exportSessionJson()" id="exportJsonBtn" title="현재 작업 전체를 .json 으로 백업 — 나중에 '세션 가져오기'로 100% 복원 가능 (엑셀보다 안전)">💾 세션 백업(JSON)</button>
     <button class="btn" id="btnPhotoSort" onclick="openPhotoSortModal()" style="display:none;background:var(--p);color:#0f1117;font-weight:800" title="휴대폰으로 찍은 신규 SKU 사진들을 촬영 시간순으로 정렬 → 로그와 매칭 → 바코드명으로 일괄 변경 ZIP 다운로드">📷 신규 사진 일괄 정리</button>
     <button class="btn btn-s" onclick="goTo(0)">← 새 파일 업로드</button>
     <button class="btn btn-r" onclick="finishWorkAndClear()" id="finishBtn" title="모든 작업이 끝났을 때 — 로컬과 클라우드의 세션을 모두 정리. 다음 작업이 깨끗하게 시작됩니다." style="margin-left:auto">🏁 작업 종료 + 세션 정리</button>
@@ -1217,9 +1221,19 @@ function buildSessionData() {
    (스캔마다 push하면 mergeBoxes를 거치지 않아 다른 PC 작업을 덮어쓰는 버그)
    클라우드 push는 오직 syncWithCloud() 의 pull→병합→push 3단계로만. */
 function saveSession() {
+  var data;
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionData()));
+    data = buildSessionData();
+    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
   } catch(e) { console.warn('세션 저장 실패:', e); }
+  /* 자료 없이 시작/가져온 세션은 PC마다 고유 파일키라 병합 충돌이 없음 →
+     스캔할 때마다 클라우드에도 자동 반영 (박스 미마감 상태에서도 유실 방지).
+     원본 업로드 세션은 다중 PC 병합이 필요하므로 기존대로 syncWithCloud()에서만 push. */
+  try {
+    if (data && startedEmpty && window.WMSync && WMSync.hasGroup && WMSync.hasGroup() && WMSync.getFileKey && WMSync.getFileKey()) {
+      WMSync.push(data);
+    }
+  } catch(e) { console.warn('클라우드 자동 저장 실패:', e); }
 }
 
 function loadSessionData() {
@@ -2192,6 +2206,11 @@ function promptOriginalUpload(kind) {
 
 function downloadAll() {
   if (!workbookRaw) {
+    /* 자료 없이 시작 — 원본 양식이 애초에 없음. 기록된 내용 그대로 저장. */
+    if (startedEmpty) {
+      downloadFallback('all');
+      return;
+    }
     /* 클라우드에서 원본 워크북 자동 로드 후 재시도 */
     if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
       setMsg('m1','inf','<span class="sp"></span> 클라우드에서 원본 양식 불러오는 중...');
@@ -2278,7 +2297,9 @@ function downloadAll() {
    원본 양식의 헤더는 유지, 데이터는 박스마다 행 복제. */
 function downloadDone() {
   if (!workbookRaw) {
-    if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+    /* 완료건 = 화면에 기록된 내용 그대로. 원본 양식이 없어도 무조건 다운로드.
+       원본 양식이 클라우드에 있으면 더 예쁜 양식으로, 없으면 기록 데이터만으로 저장. */
+    if (!startedEmpty && window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
       setMsg('m1','inf','<span class="sp"></span> 클라우드에서 원본 양식 불러오는 중...');
       WMSync.loadWorkbook().then(function(b64){
         if (b64) {
@@ -2286,14 +2307,16 @@ function downloadDone() {
           hideMsg('m1');
           downloadDone();
         } else {
-          promptOriginalUpload('done');
+          hideMsg('m1');
+          downloadFallback('done'); /* 원본 없음 → 기록된 내용 그대로 */
         }
       }).catch(function(){
-        promptOriginalUpload('done');
+        downloadFallback('done');
       });
       return;
     }
-    promptOriginalUpload('done');
+    /* 자료 없이 시작했거나 비로그인 — 기록된 내용 그대로 저장 (원본 불필요) */
+    downloadFallback('done');
     return;
   }
   try {
@@ -2421,10 +2444,67 @@ function downloadFallback(kind) {
   setMsg('m1','warn','⚠️ 원본 양식 없이 단순 표로 저장됨');
 }
 
+/* ─────────────── 세션 JSON 백업 / 가져오기 ───────────────
+   엑셀 백업은 '읽기용'이라 시스템으로 되돌릴 수 없지만, JSON 백업은 작업 상태
+   전체(행·박스·수량)를 그대로 담아 '가져오기'로 100% 복원됩니다. */
+function exportSessionJson() {
+  try {
+    var data = buildSessionData();
+    var blob = new Blob([JSON.stringify(data)], { type:'application/json' });
+    var d = new Date();
+    var pad = function(n){ return String(n).padStart(2,'0'); };
+    var ts = d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes());
+    var base = (workbookFile && workbookFile.name ? workbookFile.name.replace(/\.xlsx?$/i,'') : '입고세션');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = base+'_세션백업_'+ts+'.json';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+    setMsg('m1','ok','💾 세션 백업(JSON) 저장 완료 — 이 파일은 [📂 세션 가져오기]로 그대로 복원됩니다 (행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+')');
+  } catch(err) {
+    console.error(err);
+    setMsg('m1','er','❌ 세션 백업 실패: '+err.message);
+  }
+}
+
+function importSessionJson() {
+  var inp = document.getElementById('sessionImport');
+  if (!inp) return;
+  inp.value = '';
+  inp.onchange = function(){
+    var f = inp.files && inp.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var data;
+      try { data = JSON.parse(e.target.result); }
+      catch(err){ setMsg('m1','er','❌ JSON 파일을 읽지 못했습니다 (형식 오류)'); return; }
+      if (!data || !data.rowsLite) { setMsg('m1','er','❌ 입고 세션 JSON이 아닙니다'); return; }
+      var rcv = (data.rowsLite||[]).reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
+      if (rows && rows.length && !confirm('현재 진행 중인 작업이 있습니다.\n가져오는 세션으로 덮어쓸까요?\n\n가져올 내용: 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개\n\n(현재 작업을 잃고 싶지 않으면 취소 후 먼저 [💾 세션 백업]을 받으세요)')) return;
+      try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(normalizeSession(data)));
+      } catch(err){ setMsg('m1','er','❌ 저장 실패(용량): '+err.message); return; }
+      /* 같은 파일명으로 클라우드 ref 부착 — 이후 박스 종료 시 자동 동기화 */
+      if (data.fileName && window.WMSync && WMSync.hasGroup()) {
+        try { WMSync.setFileKey(data.fileName); workbookFile = { name: data.fileName }; } catch(e){}
+      }
+      restoreSession();
+      setMsg('m1','ok','✅ 세션 가져오기 완료 — 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개. 이어서 스캔하세요.');
+    };
+    reader.onerror = function(){ setMsg('m1','er','❌ 파일 읽기 실패'); };
+    reader.readAsText(f);
+  };
+  inp.click();
+}
+
 /* ─────────────── 자료 없이 시작 (no-data mode) ─────────────── */
 function startEmptySession(){
   if (rows && rows.length > 0) {
-    if (!confirm('현재 진행 중인 작업 데이터가 있습니다.\n모두 비우고 빈 세션으로 시작할까요? (되돌릴 수 없습니다)')) return;
+    var rcv0 = rows.reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
+    if (!confirm('⚠️ 현재 진행 중인 작업이 있습니다 (행 '+rows.length+' · 실입고 '+rcv0+'개).\n\n새로 시작하면 이 작업은 사라집니다.\n안전을 위해 [확인]을 누르면 먼저 JSON 백업 파일을 자동으로 내려받은 뒤 시작합니다.\n\n계속할까요?')) return;
+    /* 덮어쓰기 전 자동 백업 — 이번 같은 데이터 유실 사고 방지 */
+    try { exportSessionJson(); } catch(e){ console.warn('자동 백업 실패:', e); }
   }
   workbookFile = null;
   workbookRaw = null;
