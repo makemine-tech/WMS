@@ -4273,57 +4273,53 @@ function cpBuildShipListGroups(){
     var pageKey = eta + '|' + ctr + '|' + pno;
     if (!byPage[pageKey]) byPage[pageKey] = {
       key: pageKey, eta:eta, center:ctr, palletNo:pno,
-      pos: {}, boxes: {}, byBox: {}, totalQty:0
+      pos: {}, items: {}, totalQty:0, boxTotal:0
     };
     var pg = byPage[pageKey];
     if (r.po) pg.pos[r.po] = true;
-    var boxNo = s.shipBoxNo || s.srcBoxBarcode || '(미배정)';
-    pg.boxes[boxNo] = true;
-    if (!pg.byBox[boxNo]) pg.byBox[boxNo] = { boxNo: boxNo, items: {}, totalQty: 0 };
-    var box = pg.byBox[boxNo];
-    /* 박스 안 SKU 합산 (barcode 키) */
+    /* 완료풀 데이터 기준 — 박스번호 없이도 동작.
+       줄(scan)마다의 박스수(s.boxCount)와 출고수량을 SKU(barcode) 단위로 합산.
+       박스수 미지정 줄은 완료풀에 보이는 값(파렛트 자동계산)과 동일하게 처리. */
     var bk = s.barcode || '';
-    if (!box.items[bk]) box.items[bk] = {
-      barcode: bk, qty: 0, skuId: r.skuId||'', skuName: r.skuName||''
+    if (!pg.items[bk]) pg.items[bk] = {
+      barcode: bk, qty: 0, boxCount: 0, skuId: r.skuId||'', skuName: r.skuName||''
     };
-    box.items[bk].qty += (+s.qty||0);
-    box.totalQty += (+s.qty||0);
+    var lineBox = (s.boxCount !== undefined && s.boxCount !== null && s.boxCount !== '')
+      ? (+s.boxCount || 0)
+      : cpResolveBoxCountForPallet(eta, ctr, pno);
+    pg.items[bk].qty += (+s.qty||0);
+    pg.items[bk].boxCount += lineBox;
     pg.totalQty += (+s.qty||0);
+    pg.boxTotal += lineBox;
   });
   /* 객체 → 배열 + 정렬 */
   var groups = Object.keys(byPage).map(function(k){
     var g = byPage[k];
-    /* 박스 배열 — 박스번호 정렬 */
-    var boxArr = Object.keys(g.byBox).sort().map(function(boxNo){
-      var box = g.byBox[boxNo];
-      var items = Object.keys(box.items).map(function(bk){
-        var it = box.items[bk];
-        var meta = stockMeta[normBarcode(bk)] || {};
-        return {
-          barcode: bk,
-          altBarcode: (meta.altBarcode||'').trim(),
-          skuId: it.skuId || '',
-          skuName: it.skuName || meta.name || '',
-          code: meta.code || '',
-          size: meta.size || '',
-          qty: it.qty,
-          expiry: '',
-          status: ''
-        };
-      });
-      return { boxNo: boxNo, items: items, totalQty: box.totalQty };
+    /* SKU(바코드) 단위 행 — 바코드 정렬 */
+    var items = Object.keys(g.items).sort().map(function(bk){
+      var it = g.items[bk];
+      var meta = stockMeta[normBarcode(bk)] || {};
+      return {
+        barcode: bk,
+        altBarcode: (meta.altBarcode||'').trim(),
+        skuId: it.skuId || '',
+        skuName: it.skuName || meta.name || '',
+        code: meta.code || '',
+        size: meta.size || '',
+        qty: it.qty,
+        boxCount: it.boxCount,
+        expiry: '',
+        status: ''
+      };
     });
-    /* 전체 SKU 종 수 (페이지 내) — 중복 제외 */
-    var allBcSet = {};
-    boxArr.forEach(function(b){ b.items.forEach(function(it){ allBcSet[it.barcode]=true; }); });
     return {
       key: g.key, eta: g.eta, center: g.center, palletNo: g.palletNo,
       palletTotal: palCountByGrp[(g.eta||'')+'|'+(g.center||'')] || g.palletNo,
       pos: Object.keys(g.pos),
-      boxSum: Object.keys(g.boxes).length,
+      boxSum: g.boxTotal,            /* 완료풀 박스수 합계 */
       totalQty: g.totalQty,
-      skuCount: Object.keys(allBcSet).length,
-      boxes: boxArr
+      skuCount: items.length,
+      items: items
     };
   });
   /* 정렬: 입고일 → 센터 → 파렛트번호 */
@@ -4342,30 +4338,25 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
   /* 박스 단위 행 — 컬럼 순서: # / SKU ID / 상품명·바코드 / 박스번호(rowspan) / 박스수(rowspan) / 수량 / 비고
    * 박스마다 별도 <tbody> 로 묶어 page-break-inside:avoid 적용 → 박스가 페이지 경계에서 잘리지 않음 */
   var rowCounter = 0;
-  var skuTbodies = (g.boxes||[]).map(function(box){
-    var span = box.items.length || 1;
-    var rows = box.items.map(function(it, j){
-      rowCounter++;
-      var nameCell = '<div style="font-weight:700">'+escH(it.skuName||'')+'</div>'+
-        '<div style="font-size:8.5pt;color:#475569;margin-top:1mm">'+
-          escH(it.barcode) + (it.altBarcode && it.altBarcode !== it.barcode ? ' → '+escH(it.altBarcode) : '') +
-          (it.code ? '  · 품번 '+escH(it.code) : '') + (it.size ? '  · '+escH(it.size) : '') +
-        '</div>';
-      var boxCells = (j === 0)
-        ? '<td rowspan="'+span+'" style="font-family:monospace;font-weight:800;vertical-align:middle">'+escH(box.boxNo)+'</td>'+
-          '<td class="num-emph" rowspan="'+span+'" style="vertical-align:middle">1</td>'
-        : '';
-      var remarkText = it.status || it.expiry || '';
-      return '<tr>'+
-        '<td>'+rowCounter+'</td>'+
-        '<td style="font-family:monospace">'+escH(it.skuId||'-')+'</td>'+
-        '<td style="text-align:left">'+nameCell+'</td>'+
-        boxCells +
-        '<td class="num-emph">'+it.qty+'</td>'+
-        '<td>'+escH(remarkText)+'</td>'+
-      '</tr>';
-    }).join('');
-    return '<tbody>' + rows + '</tbody>';
+  /* SKU(상품줄) 단위 — 박스번호 없이 작업하므로 박스번호 칸은 '-', 박스수는 완료풀에서 합산한 값.
+     각 줄을 별도 <tbody> 로 묶어 page-break-inside:avoid 적용. */
+  var skuTbodies = (g.items||[]).map(function(it){
+    rowCounter++;
+    var nameCell = '<div style="font-weight:700">'+escH(it.skuName||'')+'</div>'+
+      '<div style="font-size:8.5pt;color:#475569;margin-top:1mm">'+
+        escH(it.barcode) + (it.altBarcode && it.altBarcode !== it.barcode ? ' → '+escH(it.altBarcode) : '') +
+        (it.code ? '  · 품번 '+escH(it.code) : '') + (it.size ? '  · '+escH(it.size) : '') +
+      '</div>';
+    var remarkText = it.status || it.expiry || '';
+    return '<tbody><tr>'+
+      '<td>'+rowCounter+'</td>'+
+      '<td style="font-family:monospace">'+escH(it.skuId||'-')+'</td>'+
+      '<td style="text-align:left">'+nameCell+'</td>'+
+      '<td style="text-align:center">-</td>'+
+      '<td class="num-emph">'+(it.boxCount||0)+'</td>'+
+      '<td class="num-emph">'+it.qty+'</td>'+
+      '<td>'+escH(remarkText)+'</td>'+
+    '</tr></tbody>';
   }).join('');
 
   return '<section class="ship-page">'+
