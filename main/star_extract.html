@@ -787,6 +787,12 @@ function buildItem(photo, row, key){
       if (saved.fields[k]) fields[k] = saved.fields[k];
     });
   }
+  /* 2.5) 바코드가 비어 있으면 — 사진 파일명이 곧 상품 바코드 (촬영 파이프라인 규칙).
+     중복 접미사(_02 등)는 떼고, 영숫자·하이픈 6자 이상일 때만 채움. */
+  if (photo && !fields.barcode) {
+    var bnBc = String(photo.baseName||'').replace(/_\d+$/, '').trim();
+    if (/^[A-Za-z0-9\-]{6,}$/.test(bnBc)) fields.barcode = bnBc;
+  }
   /* 3) 메타 — 정보 파일에서 핵심 필드 외 컬럼 + 파일 정보 */
   var meta = {};
   if (photo) {
@@ -820,9 +826,12 @@ function updateSum(){
   document.getElementById('sumLine').innerHTML = html;
 }
 function isItemFilled(it){
-  /* 핵심 필드 중 최소 1개 이상 채워졌으면 '작성됨'으로 카운트 */
+  /* '작성됨' 판단 — 바코드는 파일명에서 자동 채워지므로 제외하고,
+     OCR/수기로 채우는 나머지 필드(품번/품명/색상/재질/제조국) 중 1개 이상이면 작성됨. */
   for (var i=0; i<KEY_FIELDS.length; i++) {
-    if ((it.fields[KEY_FIELDS[i].key]||'').trim()) return true;
+    var k = KEY_FIELDS[i].key;
+    if (k === 'barcode') continue;
+    if ((it.fields[k]||'').trim()) return true;
   }
   return false;
 }
