@@ -249,15 +249,16 @@ h1 em{color:var(--g);font-style:normal}
   <div id="scanFb" class="scan-fb">대기 중 — 모드 선택 후 바코드 스캔</div>
 </div>
 
-<!-- 검색 (바코드만 — 다중) -->
+<!-- 검색 (바코드 + 박스, 부분일치, 다중) -->
 <div class="search-box">
   <div class="search-fld">
-    <label>🏷️ 바코드 검색 (줄바꿈으로 여러 개)</label>
-    <textarea id="qBarcode" placeholder="4570158735506&#10;4570158735476"></textarea>
+    <label>🏷️ 바코드 · 박스 검색 — 부분일치 (줄바꿈으로 여러 개)</label>
+    <textarea id="qBarcode" placeholder="4570158735506&#10;ST260604  ← 이렇게 앞부분만 넣으면 ST260604001~500 모두 검색"></textarea>
   </div>
   <div class="search-actions">
     <button class="btn btn-g" onclick="doSearch()">🔍 검색</button>
     <button class="btn btn-s" onclick="clearSearch()">🔄 검색 해제</button>
+    <button class="btn btn-y" onclick="openEditModal()">🔧 조회·수정</button>
     <span id="searchMsg" style="font-size:.74rem;color:var(--mu);font-family:var(--mo)"></span>
   </div>
 </div>
@@ -340,6 +341,43 @@ h1 em{color:var(--g);font-style:normal}
   </div>
 </div>
 
+<!-- 재고 조회·수정 모달 -->
+<div id="editModal" style="position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.72);display:none;align-items:flex-start;justify-content:center;padding:1rem;overflow:auto" onclick="if(event.target===this)closeEditModal()">
+  <div style="background:var(--s1);border:1px solid var(--br);border-radius:12px;max-width:920px;width:100%;margin:2vh auto;padding:1.1rem 1.25rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+      <h2 style="font-size:1.05rem;font-weight:900;color:var(--y)">🔧 재고 조회·수정</h2>
+      <button class="btn btn-s" onclick="closeEditModal()" style="padding:.3rem .6rem">✕</button>
+    </div>
+    <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">
+      바코드·박스번호로 <strong>부분 검색</strong> → 각 행에서 <strong>재고수량·비고</strong>를 고치면 <strong style="color:var(--g)">조정 이력으로 안전하게 기록</strong>됩니다(원본 로그는 보존). 박스번호 자체를 바꾸려면 아래 「박스번호 일괄 변경」을 쓰세요.
+    </p>
+
+    <!-- 박스번호 일괄 변경 -->
+    <div style="background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.6rem .75rem;margin-bottom:.75rem">
+      <div style="font-size:.8rem;font-weight:800;color:var(--b);margin-bottom:.45rem">📦 박스번호 일괄 변경 — 잘못 찍힌 박스번호를 통째로 교체</div>
+      <div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap">
+        <input id="boxRenameOld" type="text" placeholder="기존 박스번호" style="flex:1;min-width:150px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:6px;padding:.45rem .6rem;font-size:.85rem;font-family:var(--mo)">
+        <span style="color:var(--mu)">→</span>
+        <input id="boxRenameNew" type="text" placeholder="새 박스번호" style="flex:1;min-width:150px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:6px;padding:.45rem .6rem;font-size:.85rem;font-family:var(--mo)">
+        <button class="btn btn-b" onclick="renameBox()" style="padding:.45rem .9rem">변경</button>
+      </div>
+      <div id="boxRenameMsg" style="font-size:.72rem;color:var(--mu);font-family:var(--mo);margin-top:.4rem"></div>
+    </div>
+
+    <!-- 검색 -->
+    <div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem">
+      <input id="editSearchInp" type="text" placeholder="바코드 또는 박스번호 (부분일치). 비우면 전체" oninput="renderEditResults()" style="flex:1;min-width:220px;background:#0a0d13;color:var(--tx);border:1px solid var(--g);border-radius:6px;padding:.5rem .7rem;font-size:.88rem;font-family:var(--mo)">
+      <button class="btn btn-g" onclick="renderEditResults()" style="padding:.45rem .9rem">🔍 조회</button>
+      <span id="editSearchMsg" style="font-size:.72rem;color:var(--mu);font-family:var(--mo)"></span>
+    </div>
+
+    <!-- 결과 (편집) -->
+    <div style="max-height:52vh;overflow:auto;border:1px solid var(--br);border-radius:8px" id="editResultsWrap">
+      <div id="editResults"></div>
+    </div>
+  </div>
+</div>
+
 <!-- 로그 -->
 <div class="log-toggle" onclick="toggleLog()">
   <span id="logArrow">▶</span>
@@ -404,7 +442,7 @@ var scanMode = 'in';    /* 'in' | 'out' */
 var groupId = null;
 var isAdmin = false;    /* superadmin 만 — 로그 삭제 / 마감 처리 권한 */
 var dbRef = null;       /* star_instock/logs ref */
-var lastFilter = null;  /* {barcodes:[]} 또는 null */
+var lastFilter = null;  /* {tokens:[]} (부분일치 · 바코드/박스) 또는 null */
 var viewMode = 'recent';     /* 'recent' (이번 세션 작업분) | 'all' (전체) — 검색이 있으면 무관 */
 var sessionBarcodes = {};    /* { bcNorm: ts } — 이번 세션에서 스캔/엑셀로 건드린 바코드만 */
 var RENDER_LIMIT = 1500;     /* 안전 렌더 한도 — 초과 시 안내 표시 */
@@ -471,6 +509,12 @@ function attachStockRef(){
     }).sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
     hideMsg('m0');
     rebuildAndRender();
+    /* 조회·수정 모달이 열려 있으면 같이 갱신 — 단, 입력 중인 칸(eq_/en_)은 건드리지 않음 */
+    if (isEditModalOpen()) {
+      var ae = document.activeElement;
+      var typing = ae && ae.tagName === 'INPUT' && /^(eq_|en_)/.test(ae.id || '');
+      if (!typing) renderEditResults();
+    }
   }, function(err){
     setMsg('m0','er','❌ 데이터 읽기 실패: ' + (err && err.message || err));
   });
@@ -1035,14 +1079,14 @@ function parseMulti(text){
   return (text||'').split(/[\n,;]+/).map(function(s){ return s.trim(); }).filter(Boolean);
 }
 function doSearch(){
-  var bcs = parseMulti(document.getElementById('qBarcode').value).map(normBarcode);
-  if (!bcs.length) { clearSearch(); return; }
-  lastFilter = { barcodes: bcs };
+  var toks = parseMulti(document.getElementById('qBarcode').value).map(normBarcode).filter(Boolean);
+  if (!toks.length) { clearSearch(); return; }
+  lastFilter = { tokens: toks };
   renderStock();
   refreshDlSearchInfo();
   var n = stockGroups.filter(matchFilter).length;
   document.getElementById('searchMsg').textContent =
-    '검색: 바코드 '+bcs.length+'개 → '+n+'종 일치 · 아래 다운로드는 검색 결과만 받습니다';
+    '검색: '+toks.length+'개(부분일치 · 바코드·박스) → '+n+'종 일치 · 아래 다운로드는 검색 결과만 받습니다';
 }
 function clearSearch(){
   lastFilter = null;
@@ -1051,17 +1095,23 @@ function clearSearch(){
   renderStock();
   refreshDlSearchInfo();
 }
+/* 부분일치 — 토큰이 바코드 또는 그 바코드가 담긴 박스번호 중 하나에 '포함'되면 일치 (OR) */
 function matchFilter(g){
-  if (!lastFilter || !lastFilter.barcodes || !lastFilter.barcodes.length) return true;
-  return lastFilter.barcodes.indexOf(normBarcode(g.barcode)) !== -1;
+  if (!lastFilter || !lastFilter.tokens || !lastFilter.tokens.length) return true;
+  var bc = normBarcode(g.barcode);
+  var boxes = (g.boxList||[]).map(normBarcode);
+  return lastFilter.tokens.some(function(t){
+    if (bc.indexOf(t) >= 0) return true;
+    return boxes.some(function(b){ return b.indexOf(t) >= 0; });
+  });
 }
 
 /* 다운로드 패널에 검색 적용 안내 표시 */
 function refreshDlSearchInfo(){
   var el = document.getElementById('dlSearchInfo');
   if (!el) return;
-  if (lastFilter && lastFilter.barcodes && lastFilter.barcodes.length) {
-    el.textContent = '🔍 검색이 적용된 상태입니다 — 아래 다운로드는 검색 결과 바코드 ' + lastFilter.barcodes.length + '개에 해당하는 내역만 받습니다';
+  if (lastFilter && lastFilter.tokens && lastFilter.tokens.length) {
+    el.textContent = '🔍 검색이 적용된 상태입니다 — 아래 다운로드는 검색(부분일치)에 해당하는 바코드 내역만 받습니다';
     el.classList.add('on');
   } else {
     el.classList.remove('on');
@@ -1069,12 +1119,130 @@ function refreshDlSearchInfo(){
   }
 }
 
-/* 다운로드용 — 검색 중이면 해당 바코드 집합 반환, 아니면 null */
+/* 다운로드용 — 검색 중이면 매칭되는 바코드 집합 반환, 아니면 null */
 function getFilteredBcSet(){
-  if (!lastFilter || !lastFilter.barcodes || !lastFilter.barcodes.length) return null;
+  if (!lastFilter || !lastFilter.tokens || !lastFilter.tokens.length) return null;
   var s = {};
-  lastFilter.barcodes.forEach(function(b){ s[b] = 1; });
+  stockGroups.forEach(function(g){ if (matchFilter(g)) s[normBarcode(g.barcode)] = 1; });
   return s;
+}
+
+/* ─────────────── 재고 조회·수정 모달 ─────────────── */
+var editRows = [];
+function isEditModalOpen(){
+  var m = document.getElementById('editModal');
+  return !!(m && m.style.display === 'flex');
+}
+function openEditModal(){
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  document.getElementById('editModal').style.display = 'flex';
+  /* 메인 검색 첫 토큰을 기본값으로 */
+  var first = parseMulti(document.getElementById('qBarcode').value)[0] || '';
+  document.getElementById('editSearchInp').value = first.trim();
+  document.getElementById('boxRenameMsg').textContent = '';
+  renderEditResults();
+  setTimeout(function(){ document.getElementById('editSearchInp').focus(); }, 50);
+}
+function closeEditModal(){
+  var m = document.getElementById('editModal'); if (m) m.style.display = 'none';
+}
+/* (박스,바코드) 단위 결과 — 검색(부분일치)으로 필터, 각 행 편집 가능 */
+function renderEditResults(){
+  var box = document.getElementById('editResults');
+  if (!box) return;
+  var toks = parseMulti(document.getElementById('editSearchInp').value).map(normBarcode).filter(Boolean);
+  var all = aggregateStockByBox(null);
+  var rows = !toks.length ? all : all.filter(function(g){
+    var bc = normBarcode(g.barcode), bx = normBarcode(g.box);
+    return toks.some(function(t){ return bc.indexOf(t)>=0 || bx.indexOf(t)>=0; });
+  });
+  document.getElementById('editSearchMsg').textContent =
+    rows.length + '행' + (toks.length ? ' (검색 일치)' : ' (전체)') + (rows.length>300?' · 상위 300행만 표시':'');
+  editRows = rows.slice(0, 300);
+  if (!editRows.length) {
+    box.innerHTML = '<div style="padding:1.2rem;text-align:center;color:var(--mu);font-size:.85rem">결과 없음</div>';
+    return;
+  }
+  var head = '<table class="tbl" style="font-size:.8rem"><thead><tr>'+
+    '<th>박스번호</th><th>바코드</th><th>품명</th><th style="text-align:right">현재고</th>'+
+    '<th style="width:96px">재고수정</th><th style="width:150px">비고(메모)</th><th style="width:56px"></th>'+
+    '</tr></thead><tbody>';
+  var body = editRows.map(function(g, i){
+    var m = g.meta || {};
+    var boxShow = g.box === '(미지정)'
+      ? '<span style="color:var(--mu)">(미지정)</span>'
+      : '<span style="cursor:pointer;text-decoration:underline dotted" title="클릭 → 박스번호 변경칸에 입력" onclick="fillBoxRename('+i+')">'+escH(g.box)+'</span>';
+    return '<tr>'+
+      '<td class="cell-box">'+boxShow+'</td>'+
+      '<td class="cell-bc">'+escH(g.barcode)+'</td>'+
+      '<td class="cell-name" title="'+escH(m.name||'')+'">'+escH(m.name||'')+'</td>'+
+      '<td class="cell-stock" style="text-align:right">'+g.stock+'</td>'+
+      '<td><input id="eq_'+i+'" type="number" placeholder="'+g.stock+'" style="width:82px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.3rem .4rem;font-size:.82rem;font-family:var(--mo);text-align:right"></td>'+
+      '<td><input id="en_'+i+'" type="text" placeholder="메모" style="width:140px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.3rem .4rem;font-size:.8rem"></td>'+
+      '<td><button class="btn btn-g" onclick="saveRowEdit('+i+')" style="padding:.28rem .55rem;font-size:.74rem">저장</button></td>'+
+    '</tr>';
+  }).join('');
+  box.innerHTML = head + body + '</tbody></table>';
+}
+/* 행 저장 — 재고수량 변경은 조정 로그(delta), 비고만이면 메모 로그(qty 0) */
+function saveRowEdit(i){
+  var g = editRows[i]; if (!g) return;
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  var qEl = document.getElementById('eq_'+i), nEl = document.getElementById('en_'+i);
+  var note = nEl ? String(nEl.value||'').trim() : '';
+  var hasQty = qEl && String(qEl.value).trim() !== '';
+  var target = hasQty ? parseInt(qEl.value, 10) : null;
+  if (hasQty && isNaN(target)) { setMsg('m0','er','❌ 재고수정 값이 숫자가 아닙니다'); return; }
+  var delta = hasQty ? (target - g.stock) : 0;
+  if (delta === 0 && !note) { setMsg('m0','warn','⚠️ 변경할 재고수량 또는 비고를 입력하세요'); return; }
+  var box = g.box === '(미지정)' ? '' : g.box;
+  var m = g.meta || {};
+  var base = {
+    box: box, barcode: g.barcode,
+    brand: m.brand||'', code: m.code||'', altBarcode: m.altBarcode||'',
+    name: m.name||'', material: m.material||'',
+    color: m.color||'', size: m.size||'', origin: m.origin||''
+  };
+  var cmsg = '✏️ 재고 수정\n\n• 박스: '+(box||'(미지정)')+'\n• 바코드: '+g.barcode+'\n';
+  if (delta !== 0) cmsg += '• 재고: '+g.stock+' → '+target+' ('+(delta>0?'+':'')+delta+' 조정)\n';
+  if (note) cmsg += '• 비고: '+note+'\n';
+  cmsg += '\n조정 이력으로 기록됩니다. 진행할까요?';
+  if (!confirm(cmsg)) return;
+  var entry = (delta !== 0)
+    ? Object.assign({}, base, { type: delta>0?'in':'out', source:'adjust', qty: Math.abs(delta), note: note || '재고 수정 (조정)' })
+    : Object.assign({}, base, { type:'in', source:'memo', qty:0, note: note });
+  pushLog(entry).then(function(){
+    setMsg('m0','ok','✅ 저장됨 — '+g.barcode+(delta!==0?(' 재고 '+g.stock+'→'+target):'')+(note?' · 비고 기록':''));
+    if (isEditModalOpen()) renderEditResults();
+  }).catch(function(err){
+    setMsg('m0','er','❌ 저장 실패: '+(err&&err.message||err));
+  });
+}
+/* 결과의 박스번호 클릭 → 박스번호 변경 '기존' 칸에 채움 */
+function fillBoxRename(i){
+  var g = editRows[i]; if (!g || g.box === '(미지정)') return;
+  var el = document.getElementById('boxRenameOld');
+  if (el) { el.value = g.box; el.focus(); }
+  var nm = document.getElementById('boxRenameNew'); if (nm) nm.focus();
+}
+/* 박스번호 일괄 변경 — 해당 박스의 모든 로그(box 필드)를 새 번호로 교체 */
+function renameBox(){
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  var oldB = String(document.getElementById('boxRenameOld').value||'').trim();
+  var newB = String(document.getElementById('boxRenameNew').value||'').trim();
+  var msgEl = document.getElementById('boxRenameMsg');
+  function say(t){ if (msgEl) msgEl.textContent = t; }
+  if (!oldB || !newB) { say('⚠️ 기존/새 박스번호를 모두 입력하세요'); return; }
+  if (normBarcode(oldB) === normBarcode(newB)) { say('⚠️ 두 박스번호가 같습니다'); return; }
+  var targets = logs.filter(function(lg){ return normBarcode(lg.box) === normBarcode(oldB); });
+  if (!targets.length) { say('⚠️ "'+oldB+'" 박스로 기록된 항목이 없습니다'); return; }
+  if (!confirm('📦 박스번호 일괄 변경\n\n'+oldB+' → '+newB+'\n\n해당 박스의 로그 '+targets.length+'건의 박스번호를 모두 변경합니다.\n진행할까요?')) return;
+  say('변경 중...');
+  Promise.all(targets.map(function(lg){ return dbRef.child(lg.key).update({ box: newB }); })).then(function(){
+    say('✅ '+targets.length+'건 변경 완료 — '+oldB+' → '+newB);
+    setMsg('m0','ok','✅ 박스번호 변경: '+oldB+' → '+newB+' ('+targets.length+'건)');
+    document.getElementById('boxRenameOld').value=''; document.getElementById('boxRenameNew').value='';
+  }).catch(function(err){ say('❌ 실패: '+(err&&err.message||err)); });
 }
 
 /* 보기 모드 전환 (최근 작업 / 전체) */
