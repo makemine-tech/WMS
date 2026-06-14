@@ -163,6 +163,7 @@ h1 em{color:var(--g);font-style:normal}
 .dl-btn.btn-g{background:var(--g);color:#0f1117}
 .dl-btn.btn-b{background:var(--b);color:#fff}
 .dl-btn.btn-y{background:var(--y);color:#0f1117}
+.dl-btn.btn-p{background:var(--p);color:#0f1117}
 .dl-btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
 
 /* 헤더 */
@@ -292,10 +293,11 @@ h1 em{color:var(--g);font-style:normal}
       <div class="dl-head">
         <div class="dl-h-num">① CURRENT</div>
         <div class="dl-h-title">현재고 수량</div>
-        <div class="dl-h-desc">검색 기준, 바코드별 실제 남은 수량</div>
+        <div class="dl-h-desc">바코드별(박스 합산) 또는 박스별 분리</div>
       </div>
       <div class="dl-controls"><span style="font-size:.7rem;color:var(--mu);font-family:var(--mo)">설정 없음</span></div>
       <button class="dl-btn btn-g" onclick="dlStockCurrent()">📦 현재고 다운로드</button>
+      <button class="dl-btn btn-p" onclick="dlStockByBoxCurrent()">📦 박스별 재고 다운로드</button>
     </div>
     <div class="dl-cell">
       <div class="dl-head">
@@ -941,6 +943,27 @@ function dlStockCurrent(){
   var fname = '현재고수량_'+ymd(Date.now())+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '현재고', cols);
   setMsg('m0','ok','✅ 현재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
+}
+
+/* ①-B 박스별 현재고 다운로드 — (박스, 바코드) 쌍 단위 1행. 검색 중이면 그 결과만.
+   같은 바코드라도 박스가 다르면 별도 행으로 분리. 박스 미지정은 '(미지정)'. */
+function dlStockByBoxCurrent(){
+  if (!logs.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'); return; }
+  var snap = aggregateStockByBox(null);
+  var fset = getFilteredBcSet();
+  if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
+  snap = snap.filter(function(g){ return g.stock !== 0; });
+  if (!snap.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'+(fset?' (검색 결과 일치 0)':'')); return; }
+  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','비고']];
+  snap.forEach(function(g){
+    var m = g.meta || {};
+    rows.push([g.box, g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
+               g.stock, g.lastNote||'']);
+  });
+  var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:24}];
+  var fname = '박스별현재고_'+ymd(Date.now())+(fset?'_검색결과':'');
+  saveXlsx(rows, fname, '박스별현재고', cols);
+  setMsg('m0','ok','✅ 박스별 재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (박스×바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
 }
 
 /* ② 입출고 내역 다운로드 (기간 + 입고/출고/전체) */
