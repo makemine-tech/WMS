@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>스타로케이션 피킹 시스템 · 송장 정렬기</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700;900&family=Space+Mono:wght@400;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0f14;
+    --surface: #151820;
+    --surface2: #1b1f29;
+    --border: #2a2f3d;
+    --accent: #4af0a8;
+    --accent2: #f0a84a;
+    --text: #e8eaf0;
+    --muted: #6b7280;
+    --red: #f05050;
+  }
+
+  body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1.2rem 4rem;
+  }
+
+  .container { width: 100%; max-width: 680px; }
+
+  .header { text-align: center; margin-bottom: 2.2rem; }
+
+  .badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 0.2rem 0.7rem;
+    border-radius: 2px;
+    display: inline-block;
+    margin-bottom: 1rem;
+    letter-spacing: 0.1em;
+  }
+
+  h1 { font-size: 2rem; font-weight: 900; line-height: 1.2; margin-bottom: 0.5rem; }
+  h1 span { color: var(--accent); }
+
+  .subtitle { color: var(--muted); font-size: 0.9rem; font-weight: 300; }
+
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface);
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(74, 240, 168, 0.05);
+  }
+  .drop-zone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .drop-icon { font-size: 3rem; margin-bottom: 1rem; }
+  .drop-text { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.4rem; }
+  .drop-sub { font-size: 0.8rem; color: var(--muted); font-family: 'Space Mono', monospace; }
+
+  .file-selected {
+    margin-top: 1rem;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--accent2);
+    text-align: center;
+  }
+
+  .rules {
+    margin: 1.5rem 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem 1.5rem;
+  }
+  .rules-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--accent2);
+    letter-spacing: 0.1em;
+    margin-bottom: 0.8rem;
+  }
+  .rule {
+    display: flex; align-items: flex-start; gap: 0.8rem;
+    font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem;
+  }
+  .rule:last-child { margin-bottom: 0; }
+  .rule-num {
+    background: var(--accent2); color: #0d0f14;
+    font-family: 'Space Mono', monospace; font-size: 0.65rem; font-weight: 700;
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+
+  .btn {
+    width: 100%; padding: 1rem;
+    background: var(--accent); color: #0d0f14;
+    border: none; border-radius: 8px;
+    font-family: 'Noto Sans KR', sans-serif; font-size: 1rem; font-weight: 700;
+    cursor: pointer; transition: all 0.2s; margin-top: 1rem;
+  }
+  .btn:hover:not(:disabled) { background: #6affc0; transform: translateY(-1px); }
+  .btn:disabled { background: var(--border); color: var(--muted); transform: none; cursor: not-allowed; }
+
+  .btn-ghost {
+    width: 100%; padding: 0.7rem;
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px;
+    font-family: 'Space Mono', monospace; font-size: 0.78rem;
+    cursor: pointer; transition: all 0.2s; margin-top: 0.6rem;
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+  .status {
+    margin-top: 1.5rem; padding: 1rem 1.5rem; border-radius: 8px;
+    font-size: 0.9rem; display: none;
+  }
+  .status.loading { display: block; background: rgba(74,240,168,.1); border: 1px solid var(--accent); color: var(--accent); }
+  .status.error   { display: block; background: rgba(240,80,80,.1); border: 1px solid var(--red); color: var(--red); }
+  .status.success { display: block; background: rgba(74,240,168,.1); border: 1px solid var(--accent); color: var(--accent); }
+
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid transparent; border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 0.5rem; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── RESULT ── */
+  .result { display: none; margin-top: 1.6rem; }
+  .stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin-bottom: 1.2rem;
+  }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.9rem; }
+  .stat-l { font-size: 0.6rem; color: var(--muted); font-family: 'Space Mono', monospace; letter-spacing: .04em; margin-bottom: 0.2rem; }
+  .stat-v { font-size: 1.45rem; font-weight: 900; }
+  .stat-v small { font-size: 0.7rem; color: var(--muted); font-weight: 400; }
+
+  .preview {
+    border: 1px solid var(--border); border-radius: 9px; overflow: hidden; margin-bottom: 1rem;
+  }
+  .preview-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 1rem; background: var(--surface2);
+    font-size: 0.78rem; font-family: 'Space Mono', monospace; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .preview-list { max-height: 340px; overflow-y: auto; }
+  .prow {
+    display: grid; grid-template-columns: 34px 1fr auto;
+    align-items: center; gap: 0.7rem;
+    padding: 0.55rem 1rem; border-bottom: 1px solid rgba(42,47,61,.5);
+    font-size: 0.85rem;
+  }
+  .prow:last-child { border-bottom: none; }
+  .prow.multi { background: rgba(240,168,74,.04); }
+  .prow-idx { font-family: 'Space Mono', monospace; font-size: 0.7rem; color: var(--muted); }
+  .prow-loc { font-weight: 700; }
+  .prow-loc .inv { color: var(--muted); font-weight: 400; font-size: 0.75rem; font-family: 'Space Mono', monospace; margin-left: .4rem; }
+  .qtag { font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 3px; white-space: nowrap; }
+  .qtag.m { background: rgba(240,168,74,.18); color: var(--accent2); }
+  .qtag.s { background: rgba(42,47,61,.9); color: var(--muted); }
+
+  /* ── INTEGRITY ── */
+  .intg { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; margin: 1.4rem 0 1rem; }
+  .intg-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.75rem 1rem; background: var(--surface2);
+    font-size: 0.82rem; font-weight: 700; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .intg-state { font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700; }
+  .intg-state.ok { color: var(--accent); }
+  .intg-state.bad { color: var(--red); }
+  .intg-body { padding: 1rem; }
+  .intg-desc { font-size: 0.8rem; color: var(--muted); line-height: 1.6; margin-bottom: 0.9rem; }
+  .intg-desc b { color: var(--text); }
+  .xls-dz { padding: 1.4rem !important; }
+  .verdict { border-radius: 8px; padding: 1rem 1.2rem; margin-top: 1rem; font-size: 0.9rem; line-height: 1.5; }
+  .verdict.ok { background: rgba(74,240,168,.1); border: 1px solid var(--accent); color: var(--accent); }
+  .verdict.bad { background: rgba(240,80,80,.1); border: 1px solid var(--red); color: var(--red); }
+  .verdict-big { font-size: 1.15rem; font-weight: 900; margin-bottom: 0.4rem; }
+  .igrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 1rem; }
+  .icell { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.9rem; }
+  .icell-l { font-size: 0.6rem; color: var(--muted); font-family: 'Space Mono', monospace; margin-bottom: 0.2rem; }
+  .icell-v { font-size: 1.05rem; font-weight: 900; }
+  .icell-v.eq { color: var(--accent); }
+  .icell-v.ne { color: var(--red); }
+  .mism { margin-top: 1rem; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .mism-h { padding: 0.55rem 0.9rem; background: rgba(240,80,80,.08); color: var(--red); font-size: 0.72rem; font-family: 'Space Mono', monospace; font-weight: 700; border-bottom: 1px solid var(--border); }
+  .mism-list { max-height: 240px; overflow-y: auto; }
+  .mrow { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.45rem 0.9rem; font-size: 0.76rem; border-bottom: 1px solid rgba(42,47,61,.5); font-family: 'Space Mono', monospace; }
+  .mrow:last-child { border-bottom: none; }
+  .mrow .mk { color: var(--text); word-break: break-all; }
+  .mrow .mv { color: var(--muted); white-space: nowrap; }
+
+  .footer-note {
+    margin-top: 2rem; text-align: center;
+    font-family: 'Space Mono', monospace; font-size: 0.62rem; color: #3a3f4d; line-height: 1.9;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="badge">STAR LOCATION PICKING · v1.0</div>
+    <h1>스타로케이션 <span>피킹</span><br>송장 자동 정렬기</h1>
+    <p class="subtitle">합포 우선 · ▶[로케이션] 알파벳순 피킹 최적화 (웹 버전)</p>
+  </div>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".pdf">
+    <div class="drop-icon">📦</div>
+    <div class="drop-text">PDF 송장 파일을 여기에 드래그하거나 클릭</div>
+    <div class="drop-sub">.pdf 파일만 지원 · 브라우저 내에서만 처리 (업로드 없음)</div>
+  </div>
+
+  <div class="file-selected" id="fileSelected"></div>
+
+  <div class="rules">
+    <div class="rules-title">정렬 기준 SORT RULES</div>
+    <div class="rule">
+      <div class="rule-num">1</div>
+      <span><b style="color:var(--text)">수량 2개 이상(합포)</b> 먼저 출력 — 많은 순(5→4→3→2)</span>
+    </div>
+    <div class="rule">
+      <div class="rule-num">2</div>
+      <span>같은 수량 내에서 <b style="color:var(--text)">▶[코드] 알파벳 A→Z</b> 순</span>
+    </div>
+    <div class="rule">
+      <div class="rule-num">3</div>
+      <span>수량 1개(단포)는 그 뒤 <b style="color:var(--text)">알파벳순</b> 정렬</span>
+    </div>
+  </div>
+
+  <button class="btn" id="processBtn" disabled onclick="processFile()">
+    정렬된 PDF 생성하기
+  </button>
+
+  <div class="status" id="status"></div>
+
+  <!-- 결과 -->
+  <div class="result" id="result">
+    <div class="stats">
+      <div class="stat"><div class="stat-l">인식 송장</div><div class="stat-v" id="stTotal">0<small>건</small></div></div>
+      <div class="stat"><div class="stat-l">합포(2+)</div><div class="stat-v" id="stMulti" style="color:var(--accent2)">0<small>건</small></div></div>
+      <div class="stat"><div class="stat-l">단포(1)</div><div class="stat-v" id="stSingle">0<small>건</small></div></div>
+    </div>
+
+    <div class="preview">
+      <div class="preview-head">
+        <span>정렬 순서 미리보기</span>
+        <span id="pvCount"></span>
+      </div>
+      <div class="preview-list" id="pvList"></div>
+    </div>
+
+    <button class="btn" id="dlBtn" onclick="downloadSorted()">정렬된 PDF 다시 다운로드</button>
+
+    <!-- ── 무결성 검증 (할당리스트 대조) ── -->
+    <div class="intg">
+      <div class="intg-head">
+        <span>📋 할당리스트 대조 · 무결성 검증</span>
+        <span class="intg-state" id="intgState"></span>
+      </div>
+      <div class="intg-body">
+        <p class="intg-desc">출고 할당리스트 엑셀을 올리면 송장의 실제 피킹수량과 <b>바코드(절대값) 기준</b>으로 100% 일치하는지 검증합니다.</p>
+        <div class="drop-zone xls-dz" id="xlsDrop">
+          <input type="file" id="xlsInput" accept=".xls,.xlsx,.csv">
+          <div class="drop-text" style="font-size:.98rem;">📑 할당리스트 엑셀(.xls / .xlsx) 드래그 또는 클릭</div>
+          <div class="drop-sub">로케이션 · 바코드 · 할당수량 자동 인식</div>
+        </div>
+        <div class="file-selected" id="xlsSelected"></div>
+        <div id="intgReport"></div>
+      </div>
+    </div>
+
+    <button class="btn-ghost" onclick="resetAll()">새 파일 정렬하기</button>
+  </div>
+
+  <div class="footer-note">
+    POPPLER · PYPDF FREE · 100% CLIENT-SIDE<br>
+    PDF.JS 2.16 + PDF-LIB 1.17 · NO SERVER UPLOAD
+  </div>
+
+</div>
+
+<script>
+/* ─────────────── 라이브러리 로더 ─────────────── */
+var pdfjsOk = false, pdfjsQ = [];
+function loadPdfjs(cb) {
+  if (pdfjsOk) { cb(); return; }
+  pdfjsQ.push(cb); if (pdfjsQ.length > 1) return;
+  var s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+  s.onload = function() {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    pdfjsOk = true; pdfjsQ.forEach(function(f){ f(); }); pdfjsQ = [];
+  };
+  s.onerror = function(){ setStatus('error', '❌ PDF.js 로딩 실패 — 인터넷 연결을 확인하세요'); };
+  document.head.appendChild(s);
+}
+var pdfLibOk = false, pdfLibQ = [];
+function loadPdfLib(cb) {
+  if (pdfLibOk) { cb(); return; }
+  pdfLibQ.push(cb); if (pdfLibQ.length > 1) return;
+  var s = document.createElement('script');
+  s.src = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+  s.onload = function(){ pdfLibOk = true; pdfLibQ.forEach(function(f){ f(); }); pdfLibQ = []; };
+  s.onerror = function(){ setStatus('error', '❌ PDF-Lib 로딩 실패 — 인터넷 연결을 확인하세요'); };
+  document.head.appendChild(s);
+}
+var xlsxOk = false, xlsxQ = [];
+function loadXlsx(cb) {
+  if (xlsxOk) { cb(); return; }
+  xlsxQ.push(cb); if (xlsxQ.length > 1) return;
+  var s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload = function(){ xlsxOk = true; xlsxQ.forEach(function(f){ f(); }); xlsxQ = []; };
+  s.onerror = function(){ setIntg('bad', '엑셀 라이브러리 로딩 실패'); };
+  document.head.appendChild(s);
+}
+
+/* ─────────────── DOM ─────────────── */
+var fileInput   = document.getElementById('fileInput');
+var dropZone    = document.getElementById('dropZone');
+var processBtn  = document.getElementById('processBtn');
+var fileSelected= document.getElementById('fileSelected');
+var statusEl    = document.getElementById('status');
+var resultEl    = document.getElementById('result');
+
+var rawBuffer    = null;   // 원본 PDF ArrayBuffer
+var lastSorted   = null;   // 마지막 생성된 PDF (Uint8Array)
+var lastName     = 'Invoice.pdf';
+var lastPageTexts= null;   // 송장 페이지별 추출 텍스트 (무결성 검증용)
+
+function setStatus(cls, html){ statusEl.className = 'status ' + cls; statusEl.innerHTML = html; }
+
+fileInput.addEventListener('change', function(){
+  if (fileInput.files[0]) selectFile(fileInput.files[0]);
+});
+dropZone.addEventListener('dragover', function(e){ e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', function(){ dropZone.classList.remove('drag-over'); });
+dropZone.addEventListener('drop', function(e){
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  var file = e.dataTransfer.files[0];
+  if (file && file.name.toLowerCase().endsWith('.pdf')) {
+    var dt = new DataTransfer(); dt.items.add(file); fileInput.files = dt.files;
+    selectFile(file);
+  }
+});
+function selectFile(file){
+  lastName = file.name;
+  fileSelected.textContent = '✓ ' + file.name;
+  processBtn.disabled = false;
+  resultEl.style.display = 'none';
+  statusEl.style.display = 'none';
+}
+
+/* ─────────────────────────────────────────────
+   pdftotext -layout 대체 : 텍스트 항목 → 줄 재구성
+   · 회전 PDF 대응 : 텍스트 행렬 각도를 감지해 가로로 펴서 행 묶음
+     (우체국 송장은 page.rotate=90 회전 레이아웃)
+   · 같은 행끼리 묶고, 글자 간격이 벌어지면 공백 삽입
+──────────────────────────────────────────────*/
+function pageToLines(items){
+  // 1) 지배적 텍스트 각도 산출 (0/90/180/270)
+  var angCount = {};
+  for (var a=0;a<items.length;a++){
+    var t0 = items[a].transform; if (!t0) continue;
+    var deg = Math.round(Math.atan2(t0[1], t0[0]) / (Math.PI/2)) * 90;
+    deg = ((deg % 360) + 360) % 360;
+    angCount[deg] = (angCount[deg] || 0) + 1;
+  }
+  var theta = 0, best = -1;
+  for (var key in angCount){ if (angCount[key] > best){ best = angCount[key]; theta = +key; } }
+  var rad = theta * Math.PI / 180;
+  var cos = Math.round(Math.cos(rad)), sin = Math.round(Math.sin(rad));
+
+  // 2) 각 항목을 -theta 회전시켜 가로 좌표(nx,ny)로 변환
+  var arr = [];
+  for (var i=0;i<items.length;i++){
+    var it = items[i];
+    if (it.str == null) continue;
+    var t = it.transform || [0,0,0,0,0,0];
+    var e = +t[4]||0, f = +t[5]||0;
+    var nx =  e*cos + f*sin;   // 읽기 방향(가로) 좌표
+    var ny = -e*sin + f*cos;   // 행(세로) 좌표
+    arr.push({ s: it.str, x: nx, y: ny, w: +it.width||0, h: +it.height || 8 });
+  }
+  // ny 내림차순(위→아래), nx 오름차순
+  arr.sort(function(a,b){ if (a.y !== b.y) return b.y - a.y; return a.x - b.x; });
+
+  var lines = [], cur = null, curY = null;
+  for (var k=0;k<arr.length;k++){
+    var o = arr[k];
+    var tol = Math.max(2, (o.h || 10) * 0.5);
+    if (cur === null || Math.abs(o.y - curY) > tol){
+      cur = []; lines.push(cur); curY = o.y;
+    }
+    cur.push(o);
+  }
+  // 각 줄을 x순 정렬 후 간격 기반 공백으로 합치기
+  return lines.map(function(L){
+    L.sort(function(a,b){ return a.x - b.x; });
+    var str = '', prev = null;
+    for (var j=0;j<L.length;j++){
+      var o = L[j];
+      if (prev){
+        var gap = o.x - (prev.x + prev.w);
+        var charW = prev.w / Math.max(prev.s.length, 1);
+        if (gap > charW * 0.3) str += ' ';
+      }
+      str += o.s;
+      prev = o;
+    }
+    return str;
+  });
+}
+
+/* ─────────────────────────────────────────────
+   파서 + 정렬 : 파이썬 invoice_sorter 로직 그대로 이식
+──────────────────────────────────────────────*/
+var RE_QTY  = /총수량\s*:\s*(\d+)/;
+var RE_INV  = /(\d+)번/;
+var RE_LOC  = /▶\[([^\]→]+)/;   // ▶[  ...  까지, ] 또는 → 직전까지
+
+function parsePages(pageTexts){
+  // 페이지별 정보 추출
+  var pageInfo = [];
+  for (var i=0;i<pageTexts.length;i++){
+    var lines = pageTexts[i].split('\n');
+    var qty = null, invNum = null, loc = null;
+    for (var L=0; L<lines.length; L++){
+      var line = lines[L];
+      if (line.indexOf('총수량') !== -1){
+        var m = line.match(RE_QTY); if (m) qty = parseInt(m[1], 10);
+        var m2 = line.match(RE_INV); if (m2) invNum = parseInt(m2[1], 10);
+      }
+      if (line.indexOf('▶[') !== -1 && loc === null){
+        var m3 = line.match(RE_LOC); if (m3) loc = m3[1].trim();
+      }
+    }
+    pageInfo.push({ pdfPage: i, invNum: invNum, qty: qty, loc: loc });
+  }
+
+  // 송장 묶기 — "번호(N번) 있는 페이지" = 새 송장 시작(=한 장),
+  // 번호·수량 모두 없는 페이지(=합포 송장의 연속장)는 직전 송장에 추가.
+  // ※ 번호를 키로 묶지 않음 : 차수가 바뀌면 번호가 1부터 다시 시작하므로
+  //    (예: 1차 1번 / 2차 1번) 번호 기준으로 묶으면 송장이 덮어써져 누락됨.
+  var list = [], lastInv = null;
+  for (var p=0;p<pageInfo.length;p++){
+    var info = pageInfo[p];
+    if (info.invNum !== null){
+      lastInv = { pages: [p], qty: info.qty, loc: info.loc, invNum: info.invNum };
+      list.push(lastInv);
+    } else if (lastInv !== null && info.qty === null){
+      lastInv.pages.push(p);
+    }
+  }
+  return list;
+}
+
+function sortKey(inv){
+  var qty = inv.qty || 0;
+  var loc = inv.loc || '';
+  var first = loc ? loc.charAt(0).toUpperCase() : '~';
+  if (qty >= 2) return [0, -qty, first, loc];
+  return [1, 0, first, loc];
+}
+function cmpInv(a, b){
+  var ka = sortKey(a), kb = sortKey(b);
+  for (var i=0;i<ka.length;i++){
+    if (ka[i] < kb[i]) return -1;
+    if (ka[i] > kb[i]) return 1;
+  }
+  return 0;
+}
+
+/* ─────────────── 메인 처리 ─────────────── */
+function processFile(){
+  var file = fileInput.files[0];
+  if (!file){ return; }
+  processBtn.disabled = true;
+  resultEl.style.display = 'none';
+  setStatus('loading', '<span class="spinner"></span> 송장 분석 및 정렬 중...');
+
+  loadPdfjs(function(){
+    loadPdfLib(function(){
+      var reader = new FileReader();
+      reader.onload = function(e){
+        rawBuffer = e.target.result;
+        var bytes = new Uint8Array(rawBuffer.slice(0));
+        pdfjsLib.getDocument({ data: bytes }).promise.then(function(doc){
+          extractAllPages(doc);
+        }).catch(function(err){
+          setStatus('error', '❌ PDF 열기 실패: ' + err.message);
+          processBtn.disabled = false;
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  });
+}
+
+function extractAllPages(doc){
+  var total = doc.numPages;
+  var pageTexts = new Array(total);
+  var chain = Promise.resolve();
+
+  for (var i=1;i<=total;i++){
+    (function(pn){
+      chain = chain.then(function(){
+        setStatus('loading', '<span class="spinner"></span> 페이지 분석 중... (' + pn + '/' + total + ')');
+        return doc.getPage(pn).then(function(pg){ return pg.getTextContent(); }).then(function(tc){
+          pageTexts[pn-1] = pageToLines(tc.items).join('\n');
+        });
+      });
+    })(i);
+  }
+
+  chain.then(function(){
+    lastPageTexts = pageTexts;   // 무결성 검증용 캐시
+    var invoices = parsePages(pageTexts);
+    if (invoices.length === 0){
+      setStatus('error', '❌ 송장을 인식하지 못했습니다. 송장 양식(총수량 / ▶[코드])을 확인하세요.');
+      processBtn.disabled = false;
+      return;
+    }
+    var sorted = invoices.slice().sort(cmpInv);   // 안정 정렬
+    buildSortedPdf(sorted, total);
+  }).catch(function(err){
+    setStatus('error', '❌ ' + err.message);
+    processBtn.disabled = false;
+    console.error(err);
+  });
+}
+
+function buildSortedPdf(sorted, totalPages){
+  // 출력 페이지 순서 계산 (중복 제거 + 누락 페이지는 뒤에 원본 순서로)
+  var added = {}, order = [];
+  for (var s=0;s<sorted.length;s++){
+    var pages = sorted[s].pages;
+    for (var p=0;p<pages.length;p++){
+      var idx = pages[p];
+      if (idx < totalPages && !added[idx]){ order.push(idx); added[idx] = true; }
+    }
+  }
+  for (var i=0;i<totalPages;i++){ if (!added[i]){ order.push(i); added[i] = true; } }
+
+  PDFLib.PDFDocument.load(rawBuffer.slice(0)).then(function(src){
+    return PDFLib.PDFDocument.create().then(function(out){
+      return out.copyPages(src, order).then(function(copied){
+        for (var c=0;c<copied.length;c++) out.addPage(copied[c]);
+        return out.save();
+      });
+    });
+  }).then(function(outBytes){
+    lastSorted = outBytes;
+    renderResult(sorted);
+    downloadSorted();
+    processBtn.disabled = false;
+  }).catch(function(err){
+    setStatus('error', '❌ PDF 생성 실패: ' + err.message);
+    processBtn.disabled = false;
+    console.error(err);
+  });
+}
+
+/* ─────────────── 결과 렌더 ─────────────── */
+function renderResult(sorted){
+  var multi  = sorted.filter(function(v){ return (v.qty || 0) >= 2; });
+  var single = sorted.length - multi.length;
+
+  document.getElementById('stTotal').innerHTML  = sorted.length + '<small>건</small>';
+  document.getElementById('stMulti').innerHTML  = multi.length + '<small>건</small>';
+  document.getElementById('stSingle').innerHTML = single + '<small>건</small>';
+  document.getElementById('pvCount').textContent = '총 ' + sorted.length + '건';
+
+  var html = '';
+  for (var i=0;i<sorted.length;i++){
+    var v = sorted[i];
+    var q = v.qty || 0;
+    var isMulti = q >= 2;
+    var loc = v.loc || '(코드 없음)';
+    var invTxt = (v.invNum != null) ? ('#' + v.invNum) : '';
+    var tagCls = isMulti ? 'm' : 's';
+    var tagTxt = isMulti ? (q + '개') : '1개';
+    html += '<div class="prow' + (isMulti ? ' multi' : '') + '">'
+          +   '<span class="prow-idx">' + (i+1) + '</span>'
+          +   '<span class="prow-loc">' + escapeHtml(loc) + '<span class="inv">' + invTxt + '</span></span>'
+          +   '<span class="qtag ' + tagCls + '">' + tagTxt + '</span>'
+          + '</div>';
+  }
+  document.getElementById('pvList').innerHTML = html;
+
+  setStatus('success', '✅ 완료! 총 ' + sorted.length + '개 송장 · 합포 ' + multi.length + '건 우선 출력 — 다운로드가 시작됩니다.');
+  resultEl.style.display = 'block';
+}
+
+/* ═══════════════════════════════════════════════════
+   무결성 검증 : 송장 PDF ↔ 출고 할당리스트(엑셀) 대조
+   · 바코드(절대값) 기준으로 피킹수량 = 할당수량 100% 확인
+═══════════════════════════════════════════════════ */
+function setIntg(cls, txt){
+  var el = document.getElementById('intgState');
+  el.className = 'intg-state ' + (cls||'');
+  el.textContent = txt || '';
+}
+
+/* PDF 페이지 텍스트 → 피킹 아이템 집계
+   포맷: ▶[로케이션→ →(N개)]  ▶상품명  ▶바코드
+   · 한 괄호에 로케이션 여러개(같은 바코드)도 처리
+   · 알파벳 포함 바코드(예: NBMD...) 처리
+   · "내용품 :" 중복 괄호는 첫 괄호만 사용해 제외 */
+function extractPickItems(texts){
+  var tokens = texts.join('\n').split('▶');
+  var byBar = {}, byLocBar = {}, total = 0, items = 0, pending = null;
+  var reBar = /^\s*([0-9A-Z][0-9A-Z\-]{5,})/;
+  for (var t=0;t<tokens.length;t++){
+    var tok = tokens[t];
+    if (tok.charAt(0) === '['){
+      var mb = tok.match(/^\[([^\]]*)\]/);   // 첫 괄호만
+      if (mb){
+        var pairs = [];
+        mb[1].split(',').forEach(function(seg){
+          var m = seg.match(/(.+?)→.*?\((\d+)개\)/);
+          if (m) pairs.push({ loc: m[1].replace(/\s+/g,'').trim(), qty: parseInt(m[2],10) });
+        });
+        if (pairs.length) pending = pairs;
+      }
+      continue;
+    }
+    var mB = tok.match(reBar);
+    if (mB && pending){
+      var bar = mB[1];
+      pending.forEach(function(pr){
+        byBar[bar] = (byBar[bar]||0) + pr.qty;
+        var k = pr.loc + '|' + bar;
+        byLocBar[k] = (byLocBar[k]||0) + pr.qty;
+        total += pr.qty; items++;
+      });
+      pending = null;
+    }
+  }
+  return { byBar: byBar, byLocBar: byLocBar, total: total, items: items };
+}
+
+/* 엑셀 할당리스트 → 집계. 컬럼은 헤더/내용으로 자동 인식 */
+function parseAllocXls(arrayBuffer){
+  var wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+  var ws = wb.Sheets[wb.SheetNames[0]];
+  var rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  if (!rows.length) throw new Error('빈 엑셀');
+  var header = rows[0].map(function(h){ return String(h).trim(); });
+  var data = rows.slice(1).filter(function(r){ return r.some(function(c){ return String(c).trim(); }); });
+
+  // 컬럼 인덱스 자동 인식
+  function findCol(names){
+    for (var i=0;i<header.length;i++){ for (var n=0;n<names.length;n++){ if (header[i].indexOf(names[n])!==-1) return i; } }
+    return -1;
+  }
+  var locCol   = findCol(['로케이션','로케이숀','location','LOC']);
+  var allocCol = findCol(['할당수량','할당','출고수량']);
+  if (locCol   < 0) locCol = 0;
+  // 바코드 컬럼 : 라벨 우선, 비어있으면 '바코드 패턴'이 가장 많은 컬럼 선택
+  var barCol = findCol(['바코드']);
+  var isBar = function(s){ return /^[0-9A-Z][0-9A-Z\-]{9,}$/.test(String(s).trim()); };
+  function barCount(ci){ var c=0; for (var r=0;r<data.length;r++){ if (isBar(data[r][ci])) c++; } return c; }
+  if (barCol < 0 || barCount(barCol) < data.length*0.5){
+    var bestC=-1, bestN=-1;
+    for (var ci=0; ci<header.length; ci++){
+      if (ci===locCol) continue;
+      var n = barCount(ci);
+      if (n > bestN){ bestN = n; bestC = ci; }
+    }
+    barCol = bestC;
+  }
+  if (allocCol < 0) throw new Error('할당수량 컬럼을 찾지 못했습니다');
+  if (barCol  < 0) throw new Error('바코드 컬럼을 찾지 못했습니다');
+
+  var byBar = {}, byLocBar = {}, total = 0, lines = 0;
+  data.forEach(function(r){
+    var loc = String(r[locCol]||'').replace(/\s+/g,'').trim();
+    var bar = String(r[barCol]||'').trim();
+    var alloc = parseInt(String(r[allocCol]).replace(/[^0-9-]/g,''),10);
+    if (!bar || isNaN(alloc)) return;
+    byBar[bar] = (byBar[bar]||0) + alloc;
+    byLocBar[loc+'|'+bar] = (byLocBar[loc+'|'+bar]||0) + alloc;
+    total += alloc; lines++;
+  });
+  return { byBar: byBar, byLocBar: byLocBar, total: total, lines: lines,
+           cols: { loc: header[locCol]||'?', bar: header[barCol]||'(자동인식)', alloc: header[allocCol]||'?' } };
+}
+
+/* 두 집계 비교 → {match, onlyXl, onlyPdf, diff} */
+function diffAgg(pdf, xl){
+  var onlyXl = [], onlyPdf = [], diff = [];
+  Object.keys(xl).forEach(function(k){
+    if (!(k in pdf)) onlyXl.push({ k: k, xl: xl[k] });
+    else if (pdf[k] !== xl[k]) diff.push({ k: k, xl: xl[k], pdf: pdf[k] });
+  });
+  Object.keys(pdf).forEach(function(k){ if (!(k in xl)) onlyPdf.push({ k: k, pdf: pdf[k] }); });
+  return { onlyXl: onlyXl, onlyPdf: onlyPdf, diff: diff,
+           ok: onlyXl.length===0 && onlyPdf.length===0 && diff.length===0 };
+}
+
+function runIntegrity(arrayBuffer){
+  var report = document.getElementById('intgReport');
+  if (!lastPageTexts){
+    setIntg('bad', '먼저 PDF 정렬을 실행하세요');
+    report.innerHTML = '<div class="verdict bad">❗ 송장 PDF를 먼저 업로드·정렬한 뒤 할당리스트를 올려주세요.</div>';
+    return;
+  }
+  setIntg('', '대조 중...');
+  loadXlsx(function(){
+    var pdf, xl;
+    try {
+      pdf = extractPickItems(lastPageTexts);
+      xl  = parseAllocXls(arrayBuffer);
+    } catch(e){
+      setIntg('bad', '오류');
+      report.innerHTML = '<div class="verdict bad">❌ 엑셀 분석 실패: ' + escapeHtml(e.message) + '</div>';
+      return;
+    }
+    var dBar = diffAgg(pdf.byBar, xl.byBar);     // 바코드(절대값) 기준 — 핵심
+    var dLoc = diffAgg(pdf.byLocBar, xl.byLocBar); // 로케이션+바코드 기준 — 참고
+    var totalEq = pdf.total === xl.total;
+    var passed = dBar.ok && totalEq;
+
+    setIntg(passed ? 'ok' : 'bad', passed ? '✓ 100% 일치' : '✗ 불일치');
+
+    var html = '';
+    html += '<div class="verdict ' + (passed?'ok':'bad') + '">'
+          +   '<div class="verdict-big">' + (passed ? '✅ 무결성 100% 일치' : '⚠️ 무결성 불일치 발견') + '</div>'
+          +   (passed
+                ? '송장의 실제 피킹수량과 할당리스트가 바코드 기준으로 완전히 일치합니다.'
+                : '아래 차이를 확인하세요. 송장과 할당리스트가 어긋났습니다.')
+          + '</div>';
+
+    html += '<div class="igrid">'
+          + icell('피킹수량 합계 (송장)', pdf.total, totalEq)
+          + icell('할당수량 합계 (엑셀)', xl.total, totalEq)
+          + icell('바코드 종류 (송장)', Object.keys(pdf.byBar).length, dBar.ok)
+          + icell('바코드 종류 (엑셀)', Object.keys(xl.byBar).length, dBar.ok)
+          + '</div>';
+
+    // 바코드 기준 불일치 상세
+    html += mismBlock('바코드 기준 — 엑셀에만 있음 (피킹 누락 의심)', dBar.onlyXl, '엑셀', 'xl');
+    html += mismBlock('바코드 기준 — 송장에만 있음 (할당 누락 의심)', dBar.onlyPdf, '송장', 'pdf');
+    html += mismDiffBlock('바코드 기준 — 수량 불일치', dBar.diff);
+
+    // 로케이션+바코드 참고 (바코드는 맞는데 로케이션만 어긋난 경우)
+    var locExtra = dLoc.onlyXl.length + dLoc.onlyPdf.length + dLoc.diff.length;
+    if (dBar.ok && locExtra > 0){
+      html += '<div class="verdict" style="background:rgba(240,168,74,.08);border:1px solid var(--accent2);color:var(--accent2);margin-top:.8rem;font-size:.82rem;">'
+            + 'ℹ️ 바코드·수량은 100% 일치하나, 로케이션+바코드 조합 기준으로 ' + locExtra + '건 표기 차이가 있습니다. (대개 회전 PDF의 로케이션 라벨 추출 차이로, 수량 무결성에는 영향 없음)</div>';
+    }
+
+    html += '<div style="margin-top:.8rem;font-family:\'Space Mono\',monospace;font-size:.62rem;color:var(--muted);">'
+          + '인식 컬럼 — 로케이션:' + escapeHtml(xl.cols.loc) + ' · 바코드:' + escapeHtml(xl.cols.bar) + ' · 할당수량:' + escapeHtml(xl.cols.alloc)
+          + ' · 엑셀 ' + xl.lines + '행 / 송장 피킹 ' + pdf.items + '건</div>';
+
+    report.innerHTML = html;
+  });
+}
+
+function icell(label, val, eq){
+  return '<div class="icell"><div class="icell-l">' + label + '</div>'
+       + '<div class="icell-v ' + (eq?'eq':'ne') + '">' + val + '</div></div>';
+}
+function mismBlock(title, arr, side, key){
+  if (!arr.length) return '';
+  var rows = arr.slice(0,200).map(function(o){
+    return '<div class="mrow"><span class="mk">' + escapeHtml(o.k) + '</span><span class="mv">' + side + ' ' + o[key] + '개</span></div>';
+  }).join('');
+  var more = arr.length>200 ? '<div class="mrow"><span class="mv">… 외 '+(arr.length-200)+'건</span></div>' : '';
+  return '<div class="mism"><div class="mism-h">' + title + ' (' + arr.length + '건)</div><div class="mism-list">' + rows + more + '</div></div>';
+}
+function mismDiffBlock(title, arr){
+  if (!arr.length) return '';
+  var rows = arr.slice(0,200).map(function(o){
+    return '<div class="mrow"><span class="mk">' + escapeHtml(o.k) + '</span><span class="mv">엑셀 ' + o.xl + ' / 송장 ' + o.pdf + '</span></div>';
+  }).join('');
+  return '<div class="mism"><div class="mism-h">' + title + ' (' + arr.length + '건)</div><div class="mism-list">' + rows + '</div></div>';
+}
+
+/* 엑셀 드롭존 */
+(function(){
+  var dz = document.getElementById('xlsDrop');
+  var inp = document.getElementById('xlsInput');
+  if (!dz) return;
+  function handle(file){
+    document.getElementById('xlsSelected').textContent = '✓ ' + file.name;
+    var reader = new FileReader();
+    reader.onload = function(e){ runIntegrity(e.target.result); };
+    reader.readAsArrayBuffer(file);
+  }
+  inp.addEventListener('change', function(){ if (inp.files[0]) handle(inp.files[0]); });
+  dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', function(){ dz.classList.remove('drag-over'); });
+  dz.addEventListener('drop', function(e){
+    e.preventDefault(); dz.classList.remove('drag-over');
+    var f = e.dataTransfer.files[0];
+    if (f && /\.(xls|xlsx|csv)$/i.test(f.name)){
+      var dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files;
+      handle(f);
+    }
+  });
+})();
+
+function downloadSorted(){
+  if (!lastSorted) return;
+  var blob = new Blob([lastSorted], { type: 'application/pdf' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'Sorted_' + lastName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+}
+
+function resetAll(){
+  rawBuffer = null; lastSorted = null; lastName = 'Invoice.pdf'; lastPageTexts = null;
+  fileInput.value = '';
+  fileSelected.textContent = '';
+  processBtn.disabled = true;
+  resultEl.style.display = 'none';
+  statusEl.style.display = 'none';
+  var xi = document.getElementById('xlsInput'); if (xi) xi.value = '';
+  document.getElementById('xlsSelected').textContent = '';
+  document.getElementById('intgReport').innerHTML = '';
+  setIntg('', '');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+  });
+}
+</script>
+</body>
+</html>
