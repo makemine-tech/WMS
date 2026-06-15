@@ -248,7 +248,8 @@
   table.ps-tbl td { padding: 1px 6px; border: 1px solid #d4d4d4; color: #111; vertical-align: middle; white-space: nowrap; line-height: 1.25; }
   table.ps-tbl tr.co td { background: #fff7ec; }
   table.ps-tbl tr.sec td { background: #eef0f3; font-weight: 700; color: #333; }
-  table.ps-tbl tr.grp td { border-top: 3px solid #000; }
+  /* 첫글자 변경 굵은 구분선 — 단일 칸으로 한 줄 전체 연속 (격자선에 안 끊김) */
+  table.ps-tbl tr.grpline td { padding: 0; height: 3px; line-height: 0; font-size: 0; border: none; background: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .ps-chk { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #555; border-radius: 2px; }
   .ps-loc { font-family: 'Space Mono', monospace; font-weight: 700; }
   .ps-bc { font-family: 'Courier New', monospace; white-space: nowrap; letter-spacing: .01em; }
@@ -276,7 +277,7 @@
     .ps-copick { font-size: 7.5pt; padding: 3px 5px; margin: 3px 0 5px; line-height: 1.35; page-break-inside: avoid; }
     table.ps-tbl { font-size: 7.6pt; }
     table.ps-tbl th, table.ps-tbl td { padding: 0.6px 4px; line-height: 1.12; white-space: nowrap; }
-    table.ps-tbl tr.grp td { border-top: 2px solid #000; }
+    table.ps-tbl tr.grpline td { padding: 0; height: 2.6px; }
     .ps-bc4 { font-size: 1.18em; }
     .ps-chk { width: 10px; height: 10px; }
     thead { display: table-header-group; }           /* 페이지마다 헤더 반복 */
@@ -1143,14 +1144,16 @@ function buildSheetHtml(mode, rows, agg){
     n++;
     var co = lt[e.loc] || { d:0, h:0 };
     var isCo = co.d>0 && co.h>0;
-    // 로케이션 첫 글자가 바뀌면 굵은 구분선 (입고 구간 제외)
+    // 로케이션 첫 글자가 바뀌면 굵은 구분선 (입고 구간 제외) — 단일 칸 행으로 연속 출력
     var fc = isSpecialLoc(e.loc) ? '0' : firstChar(e.loc);
-    var grp = (prevFc !== null && fc !== prevFc && !isSpecialLoc(e.loc));
+    if (prevFc !== null && fc !== prevFc && !isSpecialLoc(e.loc)){
+      html += '<tr class="grpline"><td colspan="'+span+'"></td></tr>';
+    }
     prevFc = fc;
     var gubun = isCo
       ? '<span class="ps-co star">★동시픽</span>'
       : (e.h>0 ? '<span class="ps-tag h">합포</span>' : '<span class="ps-tag d">단포</span>');
-    var tr = '<tr class="' + (isCo?'co ':'') + (grp?'grp':'') + '">';
+    var tr = '<tr class="' + (isCo?'co':'') + '">';
     tr += '<td><span class="ps-chk"></span></td>';
     tr += '<td>' + n + '</td>';
     tr += '<td class="ps-loc">' + escapeHtml(e.loc) + '</td>';
