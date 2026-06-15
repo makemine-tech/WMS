@@ -1164,6 +1164,7 @@ function downloadPickExcel(){
 
 function buildSheetHtml(mode, rows, agg, title){
   var lt = agg.locTot;
+  var ref = agg.refLocTot;   // 스캔분이면 전체 출고분 locTot (동시픽 판정 기준)
   var label = title || (mode==='hapo' ? '합포 픽킹리스트'
             : mode==='danpo'? '단포 픽킹리스트'
             : '전체 픽킹리스트 (로케이션순)');
@@ -1190,17 +1191,26 @@ function buildSheetHtml(mode, rows, agg, title){
       html += '<tr class="sec"><td colspan="'+span+'">── 입고 / 미지정 위치 (00000_in 등) ──</td></tr>';
     }
     n++;
-    var co = lt[e.loc] || { d:0, h:0 };
-    var isCo = co.d>0 && co.h>0;
+    // 동시픽 판정: 스캔분은 전체 출고분(ref) 기준, 메인은 자기 집계(lt) 기준
+    var refCo = ref ? (ref[e.loc] || { d:0, h:0 }) : (lt[e.loc] || { d:0, h:0 });
+    var isCo = refCo.d>0 && refCo.h>0;
     // 로케이션 첫 글자가 바뀌면 굵은 구분선 (입고 구간 제외) — 단일 칸 행으로 연속 출력
     var fc = isSpecialLoc(e.loc) ? '0' : firstChar(e.loc);
     if (prevFc !== null && fc !== prevFc && !isSpecialLoc(e.loc)){
       html += '<tr class="grpline"><td colspan="'+span+'"></td></tr>';
     }
     prevFc = fc;
-    var gubun = isCo
-      ? '<span class="ps-co star">★동시픽</span>'
-      : (e.h>0 ? '<span class="ps-tag h">합포</span>' : '<span class="ps-tag d">단포</span>');
+    var gubun;
+    if (isCo){
+      if (ref){   // 스캔분 — 같은 로케이션에 그날 나갈 반대유형 수량을 구분 칸에 함께
+        var otherTxt = (e.h>0) ? ('단포 '+refCo.d+'개') : ('합포 '+refCo.h+'개');
+        gubun = '<span class="ps-co star">★동시픽 · ' + otherTxt + '</span>';
+      } else {
+        gubun = '<span class="ps-co star">★동시픽</span>';
+      }
+    } else {
+      gubun = e.h>0 ? '<span class="ps-tag h">합포</span>' : '<span class="ps-tag d">단포</span>';
+    }
     var tr = '<tr class="' + (isCo?'co':'') + '">';
     tr += '<td><span class="ps-chk"></span></td>';
     tr += '<td>' + n + '</td>';
@@ -1306,8 +1316,11 @@ function buildScanAgg(){
       lt[rec.tag] += it.qty;
     });
   });
-  var copick = Object.keys(locTot).filter(function(l){ return locTot[l].d>0 && locTot[l].h>0; });
-  return { keys:keys, locTot:locTot, copick:copick };
+  // 동시픽 판정은 "전체 출고분"(그날 나갈 단포·합포) 기준 — 스캔 안 한 단포도 알려주기 위함
+  var full = getDisplayAgg();
+  var refLocTot = (full && full.locTot) ? full.locTot : locTot;
+  var copick = Object.keys(locTot).filter(function(l){ var r=refLocTot[l]||{d:0,h:0}; return r.d>0 && r.h>0; });
+  return { keys:keys, locTot:locTot, copick:copick, refLocTot:refLocTot };
 }
 function openScanPickList(){
   if (!scanOrder.length){ scanFeedback('bad', '스캔된 송장이 없습니다'); return; }
