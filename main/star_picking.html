@@ -246,6 +246,7 @@
   table.ps-tbl td { padding: 0.45rem 0.55rem; border: 1px solid #d4d4d4; color: #111; vertical-align: top; }
   table.ps-tbl tr.co td { background: #fff7ec; }
   table.ps-tbl tr.sec td { background: #eef0f3; font-weight: 700; color: #333; }
+  table.ps-tbl tr.grp td { border-top: 3px solid #000; }
   .ps-chk { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #555; border-radius: 2px; }
   .ps-loc { font-family: 'Space Mono', monospace; font-weight: 700; }
   .ps-bc { font-family: 'Courier New', monospace; white-space: nowrap; letter-spacing: .01em; }
@@ -437,8 +438,9 @@ var rawBuffer    = null;   // 원본 PDF ArrayBuffer
 var lastSorted   = null;   // 마지막 생성된 PDF (Uint8Array)
 var lastName     = 'Invoice.pdf';
 var lastPageTexts= null;   // 송장 페이지별 추출 텍스트 (무결성 검증용)
-var pickAgg      = null;   // 픽킹 집계 {keys, locTot, copick} — 단포/합포 분리
+var pickAgg      = null;   // 송장(PDF) 기준 단포/합포 분리 집계 {keys, locTot, copick}
 var xlInfo       = {};     // 바코드 → {sang, opt, box, bigo} (엑셀 보강용)
+var xlRows       = null;   // 엑셀 원본 행 [{loc,bar,qty,sang,opt}] — 픽킹리스트 정확 소스
 
 function setStatus(cls, html){ statusEl.className = 'status ' + cls; statusEl.innerHTML = html; }
 
@@ -711,8 +713,9 @@ function renderCopickSummary(){
   var box = document.getElementById('copickSummary');
   var note = document.getElementById('plNote');
   if (!pickAgg){ box.innerHTML=''; return; }
-  var cp = pickAgg.copick.slice().sort();
-  var lt = pickAgg.locTot;
+  var agg = getDisplayAgg();
+  var cp = agg.copick.slice().sort();
+  var lt = agg.locTot;
   document.getElementById('copickState').className = 'intg-state ' + (cp.length?'':'ok');
   document.getElementById('copickState').textContent = cp.length ? ('★ 동시픽 '+cp.length+'곳') : '동시픽 없음';
   if (cp.length){
@@ -723,9 +726,9 @@ function renderCopickSummary(){
   } else {
     box.innerHTML = '<div class="copick-box" style="background:rgba(74,240,168,.07);border-color:var(--accent);"><div class="copick-t" style="color:var(--accent);">✓ 단포·합포가 겹치는 로케이션이 없습니다 — 중복방문 위험 없음</div></div>';
   }
-  note.innerHTML = xlInfo && Object.keys(xlInfo).length
-    ? '✓ 엑셀 검증 완료 — 상품명·옵션·박스수가 리스트에 보강됩니다.'
-    : '※ 엑셀(할당리스트)을 위에서 올리면 상품명·옵션·박스수가 함께 표기됩니다. (지금은 송장 기준)';
+  note.innerHTML = (xlRows && xlRows.length)
+    ? '✓ 엑셀 기준 — 로케이션·바코드·상품명·수량을 엑셀에서 정확히 가져오고, 단포/합포 구분만 송장에서 적용합니다.'
+    : '※ 엑셀(할당리스트)을 위에서 올리면 로케이션·상품명이 정확해집니다. (지금은 송장 스크랩 기준이라 회전PDF 글자 누락 가능)';
 }
 
 /* ═══════════════════════════════════════════════════
@@ -847,23 +850,26 @@ function parseAllocXls(arrayBuffer){
   var boxCol  = findCol(['박스수','박스']);
   var bigoCol = findCol(['비고']);
 
-  var byBar = {}, byLocBar = {}, info = {}, total = 0, lines = 0;
+  var byBar = {}, byLocBar = {}, info = {}, rows = [], total = 0, lines = 0;
   data.forEach(function(r){
     var loc = String(r[locCol]||'').replace(/\s+/g,'').trim();
     var bar = String(r[barCol]||'').trim();
     var alloc = parseInt(String(r[allocCol]).replace(/[^0-9-]/g,''),10);
     if (!bar || isNaN(alloc)) return;
+    var sang = sangCol>=0 ? String(r[sangCol]||'').trim() : '';
+    var opt  = optCol >=0 ? String(r[optCol] ||'').trim() : '';
     byBar[bar] = (byBar[bar]||0) + alloc;
     byLocBar[loc+'|'+bar] = (byLocBar[loc+'|'+bar]||0) + alloc;
     total += alloc; lines++;
+    // 엑셀 원본 순서·내용 그대로 보관 (픽킹리스트 정확도 ↑)
+    rows.push({ loc: loc, bar: bar, qty: alloc, sang: sang, opt: opt });
     if (!info[bar]) info[bar] = {
-      sang: sangCol>=0 ? String(r[sangCol]||'').trim() : '',
-      opt:  optCol >=0 ? String(r[optCol] ||'').trim() : '',
+      sang: sang, opt: opt,
       box:  boxCol >=0 ? String(r[boxCol] ||'').trim() : '',
       bigo: bigoCol>=0 ? String(r[bigoCol]||'').trim() : ''
     };
   });
-  return { byBar: byBar, byLocBar: byLocBar, info: info, total: total, lines: lines,
+  return { byBar: byBar, byLocBar: byLocBar, info: info, rows: rows, total: total, lines: lines,
            cols: { loc: header[locCol]||'?', bar: header[barCol]||'(자동인식)', alloc: header[allocCol]||'?' } };
 }
 
@@ -898,6 +904,7 @@ function runIntegrity(arrayBuffer){
       return;
     }
     xlInfo = xl.info || {};                       // 픽킹리스트 상품명 보강
+    xlRows = xl.rows || null;                      // 엑셀 = 픽킹리스트 정확 소스
     renderCopickSummary();                        // 보강 안내 갱신
     var dBar = diffAgg(pdf.byBar, xl.byBar);     // 바코드(절대값) 기준 — 핵심
     var dLoc = diffAgg(pdf.byLocBar, xl.byLocBar); // 로케이션+바코드 기준 — 참고
@@ -996,9 +1003,52 @@ function lastBarDigit(bar){
   return /[0-9]/.test(c) ? +c : 99;
 }
 function dispName(e){
+  if (e.name) return e.name;                       // 엑셀 소스 행
   var inf = xlInfo[e.bar];
   if (inf && (inf.sang || inf.opt)) return (inf.sang||'') + (inf.opt ? ' / ' + inf.opt : '');
   return e.prod || '(상품명 없음)';
+}
+
+/* 픽킹리스트 소스 결정
+   · 엑셀이 있으면 = 엑셀(로케이션·바코드·상품명·수량 정확) + PDF의 단포/합포 구분
+   · 없으면 = PDF 단독(송장 스크랩, 회전PDF 글자깨짐 가능) */
+function getDisplayAgg(){
+  if (xlRows && xlRows.length && pickAgg) return buildExcelAgg();
+  return pickAgg;
+}
+
+function buildExcelAgg(){
+  var pdfKeys = pickAgg.keys;                       // loc|bar -> {d,h}
+  var byBar = {};
+  Object.keys(pdfKeys).forEach(function(k){ var e=pdfKeys[k]; (byBar[e.bar]=byBar[e.bar]||[]).push(k); });
+  var consumed = {}, keys = {}, locTot = {}, pending = [];
+
+  function add(r, d, h){
+    var k = r.loc + '|' + r.bar;
+    var nm = (r.sang||'') + (r.opt ? ' / ' + r.opt : '');
+    keys[k] = { loc: r.loc, bar: r.bar, d: d, h: h, name: nm };
+    var lt = locTot[r.loc] || (locTot[r.loc] = { d:0, h:0 });
+    lt.d += d; lt.h += h;
+  }
+  // 1차: (로케이션|바코드) 정확 매칭
+  xlRows.forEach(function(r){
+    var k = r.loc + '|' + r.bar;
+    if (pdfKeys[k] && !consumed[k]){ consumed[k]=true; add(r, pdfKeys[k].d, pdfKeys[k].h); }
+    else pending.push(r);
+  });
+  // 2차: 회전PDF로 로케이션이 깨진 행 — 바코드+접미사/수량으로 매칭
+  pending.forEach(function(r){
+    var cands = (byBar[r.bar]||[]).filter(function(k){ return !consumed[k]; });
+    var pick = null, i;
+    for (i=0;i<cands.length;i++){ var e=pdfKeys[cands[i]];
+      if (r.loc===e.loc || r.loc.indexOf(e.loc)>=0 || e.loc.indexOf(r.loc)>=0){ pick=cands[i]; break; } }
+    if (!pick) for (i=0;i<cands.length;i++){ var e2=pdfKeys[cands[i]]; if ((e2.d+e2.h)===r.qty){ pick=cands[i]; break; } }
+    if (!pick && cands.length) pick = cands[0];
+    if (pick){ consumed[pick]=true; add(r, pdfKeys[pick].d, pdfKeys[pick].h); }
+    else add(r, 0, 0);
+  });
+  var copick = Object.keys(locTot).filter(function(l){ return locTot[l].d>0 && locTot[l].h>0; });
+  return { keys: keys, locTot: locTot, copick: copick };
 }
 /* 바코드(관리명) — 뒤 4자리를 크게 볼드 강조 */
 function fmtBarcode(bar){
@@ -1009,10 +1059,15 @@ function fmtBarcode(bar){
        + '<b class="ps-bc4">' + escapeHtml(bar.slice(-4)) + '</b>';
 }
 
+/* 로케이션 정렬 키 — 대소문자 무시(i=I), 영문 → 한글 순 */
+function locUp(loc){ return String(loc||'').toUpperCase(); }
+function firstChar(loc){ return locUp(loc).charAt(0); }
+
 function openPickList(mode){
-  if (!pickAgg){ return; }
+  var agg = getDisplayAgg();
+  if (!agg){ return; }
   var keys = [];
-  for (var k in pickAgg.keys) keys.push(pickAgg.keys[k]);
+  for (var k in agg.keys) keys.push(agg.keys[k]);
   var rows = keys.filter(function(e){
     if (mode==='hapo')  return e.h > 0;
     if (mode==='danpo') return e.d > 0;
@@ -1027,18 +1082,19 @@ function openPickList(mode){
       if (da!==db) return da-db;
       return a.bar<b.bar?-1:a.bar>b.bar?1:0;
     }
-    // 일반 구간 : 로케이션 순 → 상품명
-    if (a.loc<b.loc) return -1; if (a.loc>b.loc) return 1;
+    // 일반 구간 : 로케이션 순(대소문자 무시) → 상품명
+    var la=locUp(a.loc), lb=locUp(b.loc);
+    if (la<lb) return -1; if (la>lb) return 1;
     var na=dispName(a), nb=dispName(b);
     return na<nb?-1:na>nb?1:0;
   });
-  document.getElementById('pvSheet').innerHTML = buildSheetHtml(mode, rows);
+  document.getElementById('pvSheet').innerHTML = buildSheetHtml(mode, rows, agg);
   var pv = document.getElementById('printView');
   pv.classList.add('open'); pv.scrollTop = 0;
 }
 
-function buildSheetHtml(mode, rows){
-  var lt = pickAgg.locTot;
+function buildSheetHtml(mode, rows, agg){
+  var lt = agg.locTot;
   var label = mode==='hapo' ? '합포 픽킹리스트'
             : mode==='danpo'? '단포 픽킹리스트'
             : '전체 픽킹리스트 (로케이션순)';
@@ -1051,7 +1107,7 @@ function buildSheetHtml(mode, rows){
   html += '<div class="ps-sub">' + ds + ' · ' + rows.length + '행 · 총 ' + totalQty + '개'
         + (lastName ? (' · ' + escapeHtml(lastName)) : '') + '</div>';
 
-  var cp = pickAgg.copick.slice().sort();
+  var cp = agg.copick.slice().sort();
   if (cp.length){
     var other = mode==='hapo'?'단포':mode==='danpo'?'합포':'단포·합포';
     var lead = mode==='all'
@@ -1067,17 +1123,21 @@ function buildSheetHtml(mode, rows){
   var span = (mode==='all') ? 8 : 7;
   html += '<table class="ps-tbl"><thead><tr>' + th + '</tr></thead><tbody>';
 
-  var n=0, specialOpened=false;
+  var n=0, specialOpened=false, prevFc=null;
   rows.forEach(function(e){
     if (isSpecialLoc(e.loc) && !specialOpened){
-      specialOpened = true;
+      specialOpened = true; prevFc = null;
       html += '<tr class="sec"><td colspan="'+span+'">── 입고 / 미지정 위치 (00000_in 등) ──</td></tr>';
     }
     n++;
     var name = dispName(e);
     var co = lt[e.loc] || { d:0, h:0 };
     var isCo = co.d>0 && co.h>0;
-    var tr = '<tr class="' + (isCo?'co':'') + '">';
+    // 로케이션 첫 글자가 바뀌면 굵은 구분선 (입고 구간 제외)
+    var fc = isSpecialLoc(e.loc) ? '0' : firstChar(e.loc);
+    var grp = (prevFc !== null && fc !== prevFc && !isSpecialLoc(e.loc));
+    prevFc = fc;
+    var tr = '<tr class="' + (isCo?'co ':'') + (grp?'grp':'') + '">';
     tr += '<td><span class="ps-chk"></span></td>';
     tr += '<td>' + n + '</td>';
     tr += '<td class="ps-loc">' + escapeHtml(e.loc) + '</td>';
@@ -1117,7 +1177,7 @@ function downloadSorted(){
 
 function resetAll(){
   rawBuffer = null; lastSorted = null; lastName = 'Invoice.pdf'; lastPageTexts = null;
-  pickAgg = null; xlInfo = {};
+  pickAgg = null; xlInfo = {}; xlRows = null;
   fileInput.value = '';
   fileSelected.textContent = '';
   processBtn.disabled = true;
