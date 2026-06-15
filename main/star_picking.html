@@ -990,6 +990,11 @@ function mismDiffBlock(title, arr){
 ═══════════════════════════════════════════════════ */
 function pad2(n){ return (n<10?'0':'') + n; }
 function locSortKey(loc){ return isSpecialLoc(loc) ? ('￿' + loc) : loc; }
+/* 바코드 맨뒷자리(숫자) — 입고/미지정 구간 정렬용. 숫자 아니면 맨 뒤로(99) */
+function lastBarDigit(bar){
+  var c = String(bar||'').slice(-1);
+  return /[0-9]/.test(c) ? +c : 99;
+}
 function dispName(e){
   var inf = xlInfo[e.bar];
   if (inf && (inf.sang || inf.opt)) return (inf.sang||'') + (inf.opt ? ' / ' + inf.opt : '');
@@ -1014,8 +1019,16 @@ function openPickList(mode){
     return (e.d>0 || e.h>0);
   });
   rows.sort(function(a,b){
-    var ka=locSortKey(a.loc), kb=locSortKey(b.loc);
-    if (ka<kb) return -1; if (ka>kb) return 1;
+    var sa=isSpecialLoc(a.loc), sb=isSpecialLoc(b.loc);
+    if (sa!==sb) return sa?1:-1;             // 입고/미지정은 항상 맨 뒤
+    if (sa){
+      // 입고/미지정 구간 : 바코드 맨뒷자리(1,2,3,4…) 순 → 바코드 전체
+      var da=lastBarDigit(a.bar), db=lastBarDigit(b.bar);
+      if (da!==db) return da-db;
+      return a.bar<b.bar?-1:a.bar>b.bar?1:0;
+    }
+    // 일반 구간 : 로케이션 순 → 상품명
+    if (a.loc<b.loc) return -1; if (a.loc>b.loc) return 1;
     var na=dispName(a), nb=dispName(b);
     return na<nb?-1:na>nb?1:0;
   });
