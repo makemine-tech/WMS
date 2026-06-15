@@ -254,6 +254,8 @@
   .ps-bc { font-family: 'Courier New', monospace; white-space: nowrap; letter-spacing: .01em; }
   .ps-bc-head { color: #000; font-size: 0.92em; font-weight: 600; }
   .ps-bc4 { font-weight: 900; font-size: 1.25em; color: #000; }
+  .ps-sang { font-size: 0.92em; color: #000; }
+  .ps-opt { font-size: 1.25em; font-weight: 900; color: #000; }
   .ps-qty { font-weight: 900; text-align: center; }
   .ps-co { font-size: 0.76rem; font-weight: 700; }
   .ps-co.star { color: #c0392b; }
@@ -1015,7 +1017,7 @@ function buildExcelAgg(){
   function add(r, d, h){
     var k = r.loc + '|' + r.bar;
     var nm = (r.sang||'') + (r.opt ? ' / ' + r.opt : '');
-    keys[k] = { loc: r.loc, bar: r.bar, d: d, h: h, name: nm };
+    keys[k] = { loc: r.loc, bar: r.bar, d: d, h: h, name: nm, sang: r.sang||'', opt: r.opt||'' };
     var lt = locTot[r.loc] || (locTot[r.loc] = { d:0, h:0 });
     lt.d += d; lt.h += h;
   }
@@ -1089,20 +1091,12 @@ function downloadPickExcel(){
   loadXlsx(function(){
     var mode = currentPick.mode, rows = currentPick.rows, lt = currentPick.agg.locTot;
     var modeLabel = mode==='hapo'?'합포':mode==='danpo'?'단포':'전체';
-    var aoa = [];
-    if (mode==='all') aoa.push(['로케이션','바코드(관리명)','상품(옵션)','단포','합포','구분']);
-    else aoa.push(['로케이션','바코드(관리명)','상품(옵션)', mode==='hapo'?'합포':'단포', '동시픽']);
+    // 순서: 로케이션 / 바코드(관리명) / 단포 / 합포 / 구분 / 상품(옵션)
+    var aoa = [['로케이션','바코드(관리명)','단포','합포','구분','상품(옵션)']];
     rows.forEach(function(e){
-      var name = dispName(e);
       var co = lt[e.loc] || { d:0, h:0 };
-      var isCo = co.d>0 && co.h>0;
-      if (mode==='all'){
-        aoa.push([e.loc, e.bar, name, e.d||'', e.h||'', isCo?'동시픽':(e.h>0?'합포':'단포')]);
-      } else if (mode==='hapo'){
-        aoa.push([e.loc, e.bar, name, e.h, co.d>0 ? ('단포 '+co.d+'개 함께') : '']);
-      } else {
-        aoa.push([e.loc, e.bar, name, e.d, co.h>0 ? ('합포 '+co.h+'개 함께') : '']);
-      }
+      var gubun = (co.d>0 && co.h>0) ? '동시픽' : (e.h>0 ? '합포' : '단포');
+      aoa.push([e.loc, e.bar, e.d||'', e.h||'', gubun, dispName(e)]);
     });
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     // 바코드 열(B)을 텍스트로 고정 (지수표기·앞자리 손실 방지)
@@ -1110,9 +1104,7 @@ function downloadPickExcel(){
       var cell = ws['B'+(r+1)];
       if (cell){ cell.t = 's'; cell.v = String(cell.v); }
     }
-    ws['!cols'] = (mode==='all')
-      ? [{wch:16},{wch:20},{wch:30},{wch:6},{wch:6},{wch:8}]
-      : [{wch:16},{wch:20},{wch:30},{wch:6},{wch:16}];
+    ws['!cols'] = [{wch:16},{wch:20},{wch:6},{wch:6},{wch:8},{wch:32}];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, modeLabel + ' 픽킹');
     var d = new Date();
@@ -1131,24 +1123,15 @@ function buildSheetHtml(mode, rows, agg){
   var d = new Date();
   var ds = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());
 
+  var cpN = agg.copick.length;
   var html = '<div class="ps-title">' + label + '</div>';
   html += '<div class="ps-sub">' + ds + ' · ' + rows.length + '행 · 총 ' + totalQty + '개'
+        + (cpN ? (' · 동시픽 ' + cpN + '곳') : '')
         + (lastName ? (' · ' + escapeHtml(lastName)) : '') + '</div>';
 
-  var cp = agg.copick.slice().sort();
-  if (cp.length){
-    var other = mode==='hapo'?'단포':mode==='danpo'?'합포':'단포·합포';
-    var lead = mode==='all'
-      ? '단포·합포가 같은 로케이션 — 표에서 ★동시픽으로 강조됩니다.'
-      : '같은 로케이션에 ' + other + '도 함께 있습니다. 한 번에 집어 중복방문을 막으세요.';
-    html += '<div class="ps-copick">★ <b>동시픽 ' + cp.length + '곳</b> — ' + lead + '<br>'
-          + cp.map(function(l){ return escapeHtml(l)+' (단'+lt[l].d+'/합'+lt[l].h+')'; }).join(' · ') + '</div>';
-  }
-
-  var th = (mode==='all')
-    ? '<th>✓</th><th>#</th><th>로케이션</th><th>바코드 (관리명)</th><th>상품 (옵션)</th><th>단포</th><th>합포</th><th>구분</th>'
-    : '<th>✓</th><th>#</th><th>로케이션</th><th>바코드 (관리명)</th><th>상품 (옵션)</th><th>'+(mode==='hapo'?'합포':'단포')+'</th><th>동시픽</th>';
-  var span = (mode==='all') ? 8 : 7;
+  // 순서: 로케이션 / 바코드(관리명) / 단포 / 합포 / 구분 / 상품(옵션)
+  var th = '<th>✓</th><th>#</th><th>로케이션</th><th>바코드 (관리명)</th><th>단포</th><th>합포</th><th>구분</th><th>상품 (옵션)</th>';
+  var span = 8;
   html += '<table class="ps-tbl"><thead><tr>' + th + '</tr></thead><tbody>';
 
   var n=0, specialOpened=false, prevFc=null;
@@ -1158,36 +1141,39 @@ function buildSheetHtml(mode, rows, agg){
       html += '<tr class="sec"><td colspan="'+span+'">── 입고 / 미지정 위치 (00000_in 등) ──</td></tr>';
     }
     n++;
-    var name = dispName(e);
     var co = lt[e.loc] || { d:0, h:0 };
     var isCo = co.d>0 && co.h>0;
     // 로케이션 첫 글자가 바뀌면 굵은 구분선 (입고 구간 제외)
     var fc = isSpecialLoc(e.loc) ? '0' : firstChar(e.loc);
     var grp = (prevFc !== null && fc !== prevFc && !isSpecialLoc(e.loc));
     prevFc = fc;
+    var gubun = isCo
+      ? '<span class="ps-co star">★동시픽</span>'
+      : (e.h>0 ? '<span class="ps-tag h">합포</span>' : '<span class="ps-tag d">단포</span>');
     var tr = '<tr class="' + (isCo?'co ':'') + (grp?'grp':'') + '">';
     tr += '<td><span class="ps-chk"></span></td>';
     tr += '<td>' + n + '</td>';
     tr += '<td class="ps-loc">' + escapeHtml(e.loc) + '</td>';
     tr += '<td class="ps-bc">' + fmtBarcode(e.bar) + '</td>';
-    tr += '<td>' + escapeHtml(name) + '</td>';
-    if (mode==='all'){
-      tr += '<td class="ps-qty">' + (e.d||'') + '</td>';
-      tr += '<td class="ps-qty">' + (e.h||'') + '</td>';
-      tr += '<td>' + (isCo
-              ? '<span class="ps-co star">★동시픽</span>'
-              : (e.h>0 ? '<span class="ps-tag h">합포</span>' : '<span class="ps-tag d">단포</span>')) + '</td>';
-    } else {
-      tr += '<td class="ps-qty">' + qtyOf(e) + '</td>';
-      if (mode==='hapo' && co.d>0)       tr += '<td><span class="ps-co star">★ 단포 ' + co.d + '개 함께</span></td>';
-      else if (mode==='danpo' && co.h>0) tr += '<td><span class="ps-co warn">⚠ 합포 ' + co.h + '개 함께</span></td>';
-      else                               tr += '<td></td>';
-    }
+    tr += '<td class="ps-qty">' + (e.d||'') + '</td>';
+    tr += '<td class="ps-qty">' + (e.h||'') + '</td>';
+    tr += '<td>' + gubun + '</td>';
+    tr += '<td>' + fmtProduct(e) + '</td>';
     tr += '</tr>';
     html += tr;
   });
   html += '</tbody></table>';
   return html;
+}
+
+/* 상품(옵션) — 상품명은 바코드 앞자리 크기로 작게, 옵션은 바코드 뒤4자리처럼 크게 */
+function fmtProduct(e){
+  if (e.sang !== undefined && e.sang !== null){
+    var s = '<span class="ps-sang">' + escapeHtml(e.sang || '') + '</span>';
+    if (e.opt) s += ' <span class="ps-opt">' + escapeHtml(e.opt) + '</span>';
+    return s;
+  }
+  return '<span class="ps-sang">' + escapeHtml(dispName(e)) + '</span>';
 }
 
 function closePickList(){ document.getElementById('printView').classList.remove('open'); }
