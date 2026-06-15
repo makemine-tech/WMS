@@ -222,6 +222,24 @@
   .pl-all { background: var(--surface2); color: var(--text); border: 1px solid var(--border-hi, #3a4150); }
   .pl-all:hover:not(:disabled) { background: #262b39; }
   .pl-note { font-family: 'Space Mono', monospace; font-size: 0.64rem; color: var(--muted); margin-top: 0.6rem; line-height: 1.6; }
+  /* 스캔 픽킹 */
+  .scan-input { width: 100%; padding: 0.9rem 1rem; background: var(--bg); border: 2px solid var(--accent); border-radius: 8px; color: var(--text); font-family: 'Space Mono', monospace; font-size: 1.05rem; letter-spacing: 0.04em; outline: none; }
+  .scan-input:focus { border-color: #6affc0; box-shadow: 0 0 0 3px rgba(74,240,168,.15); }
+  .scan-fb { min-height: 1.2rem; margin-top: 0.55rem; font-size: 0.85rem; font-weight: 700; }
+  .scan-fb.ok { color: var(--accent); }
+  .scan-fb.warn { color: var(--accent2); }
+  .scan-fb.bad { color: var(--red); }
+  .scan-list { margin-top: 0.7rem; max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; display: none; }
+  .scan-list.show { display: block; }
+  .scan-row { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 0.6rem; padding: 0.4rem 0.8rem; border-bottom: 1px solid rgba(42,47,61,.5); font-size: 0.8rem; }
+  .scan-row:last-child { border-bottom: none; }
+  .scan-row .sr-idx { font-family: 'Space Mono', monospace; font-size: 0.68rem; color: var(--muted); }
+  .scan-row .sr-reg { font-family: 'Space Mono', monospace; color: var(--text); }
+  .scan-row .sr-tag { font-family: 'Space Mono', monospace; font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 3px; }
+  .scan-row .sr-tag.h { background: rgba(240,168,74,.18); color: var(--accent2); }
+  .scan-row .sr-tag.d { background: rgba(42,47,61,.9); color: var(--muted); }
+  .scan-row .sr-del { cursor: pointer; color: var(--red); font-weight: 700; opacity: 0.6; padding: 0 0.3rem; }
+  .scan-row .sr-del:hover { opacity: 1; }
   .copick-box { background: rgba(240,168,74,.08); border: 1px solid var(--accent2); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.9rem; }
   .copick-t { font-size: 0.8rem; font-weight: 700; color: var(--accent2); margin-bottom: 0.5rem; }
   .copick-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
@@ -378,6 +396,24 @@
       </div>
     </div>
 
+    <!-- ── 스캔 픽킹 (스캔한 송장만) ── -->
+    <div class="intg">
+      <div class="intg-head">
+        <span>📡 스캔 픽킹 · 스캔한 송장만 출력</span>
+        <span class="intg-state" id="scanState"></span>
+      </div>
+      <div class="intg-body">
+        <p class="intg-desc">송장 바코드를 <b>연속 스캔</b>하면 해당 송장들만 모아 픽킹리스트를 출력합니다. <b>등기번호</b> 기준으로 매칭합니다.</p>
+        <input type="text" id="scanInput" class="scan-input" placeholder="여기를 클릭한 뒤 송장 바코드를 스캔하세요 (연속 스캔)" autocomplete="off" spellcheck="false">
+        <div class="scan-fb" id="scanFb"></div>
+        <div class="scan-list" id="scanList"></div>
+        <div class="pl-btns" style="grid-template-columns:2fr 1fr;">
+          <button class="btn pl-b pl-all" onclick="openScanPickList()">스캔분 픽킹리스트 출력</button>
+          <button class="btn-ghost" style="margin-top:0;" onclick="clearScan()">스캔 초기화</button>
+        </div>
+      </div>
+    </div>
+
     <button class="btn-ghost" onclick="resetAll()">새 파일 정렬하기</button>
   </div>
 
@@ -451,6 +487,9 @@ var pickAgg      = null;   // 송장(PDF) 기준 단포/합포 분리 집계 {ke
 var xlInfo       = {};     // 바코드 → {sang, opt, box, bigo} (엑셀 보강용)
 var xlRows       = null;   // 엑셀 원본 행 [{loc,bar,qty,sang,opt}] — 픽킹리스트 정확 소스
 var currentPick  = null;   // 현재 열린 픽킹리스트 {mode, rows, agg} (인쇄/엑셀용)
+var xlByBar      = {};     // 바코드 → [{loc,sang,opt}] (스캔분 로케이션 보정용)
+var scanSet      = {};     // 스캔된 등기번호(digits) 집합
+var scanOrder    = [];     // 스캔 순서
 
 function setStatus(cls, html){ statusEl.className = 'status ' + cls; statusEl.innerHTML = html; }
 
@@ -784,11 +823,12 @@ function extractPickItems(texts){
 /* 송장 단위로 단포/합포 태깅해 (로케이션,바코드)별 집계
    반환 keys: {loc, bar, d:단포수량, h:합포수량, prod} */
 function buildPickAgg(pageTexts, invoices){
-  var keys = {}, locTot = {};
+  var keys = {}, locTot = {}, invIndex = [], regMap = {};
   invoices.forEach(function(inv){
     var tag = (inv.qty||0) >= 2 ? 'h' : 'd';
     var txt = inv.pages.map(function(p){ return pageTexts[p]; }).join('\n');
-    parseItems(txt).forEach(function(it){
+    var its = parseItems(txt);
+    its.forEach(function(it){
       var k = it.loc + '|' + it.bar;
       var e = keys[k] || (keys[k] = { loc: it.loc, bar: it.bar, d: 0, h: 0, prod: it.prod });
       e[tag] += it.qty;
@@ -796,10 +836,16 @@ function buildPickAgg(pageTexts, invoices){
       var lt = locTot[it.loc] || (locTot[it.loc] = { d: 0, h: 0 });
       lt[tag] += it.qty;
     });
+    // 송장 식별번호(등기번호) — 스캔 매칭용
+    var mR = txt.match(/등기번호\s*:\s*([0-9\-]+)/);
+    var reg = mR ? mR[1].replace(/[^0-9]/g,'') : null;
+    var rec = { reg: reg, raw: mR ? mR[1] : '', tag: tag, qty: inv.qty||0, items: its };
+    invIndex.push(rec);
+    if (reg) regMap[reg] = rec;
   });
   // 동시픽 로케이션 (단포+합포 둘 다)
   var copick = Object.keys(locTot).filter(function(l){ return locTot[l].d>0 && locTot[l].h>0; });
-  return { keys: keys, locTot: locTot, copick: copick };
+  return { keys: keys, locTot: locTot, copick: copick, invIndex: invIndex, regMap: regMap };
 }
 
 function isSpecialLoc(loc){ return /^0+(_|$)/.test(loc) || loc.indexOf('00000_in') !== -1; }
@@ -897,6 +943,8 @@ function runIntegrity(arrayBuffer){
     }
     xlInfo = xl.info || {};                       // 픽킹리스트 상품명 보강
     xlRows = xl.rows || null;                      // 엑셀 = 픽킹리스트 정확 소스
+    xlByBar = {};                                  // 스캔분 로케이션·상품명 보정용
+    (xlRows||[]).forEach(function(r){ (xlByBar[r.bar]=xlByBar[r.bar]||[]).push({loc:r.loc, sang:r.sang, opt:r.opt}); });
     renderCopickSummary();                        // 보강 안내 갱신
     var dBar = diffAgg(pdf.byBar, xl.byBar);     // 바코드(절대값) 기준 — 핵심
     var dLoc = diffAgg(pdf.byLocBar, xl.byLocBar); // 로케이션+바코드 기준 — 참고
@@ -1055,9 +1103,9 @@ function fmtBarcode(bar){
 function locUp(loc){ return String(loc||'').toUpperCase(); }
 function firstChar(loc){ return locUp(loc).charAt(0); }
 
-function openPickList(mode){
-  var agg = getDisplayAgg();
-  if (!agg){ return; }
+function openPickList(mode, srcAgg, title){
+  var agg = srcAgg || getDisplayAgg();
+  if (!agg || !agg.keys){ return; }
   var keys = [];
   for (var k in agg.keys) keys.push(agg.keys[k]);
   var rows = keys.filter(function(e){
@@ -1080,8 +1128,8 @@ function openPickList(mode){
     var na=dispName(a), nb=dispName(b);
     return na<nb?-1:na>nb?1:0;
   });
-  currentPick = { mode: mode, rows: rows, agg: agg };
-  document.getElementById('pvSheet').innerHTML = buildSheetHtml(mode, rows, agg);
+  currentPick = { mode: mode, rows: rows, agg: agg, title: title };
+  document.getElementById('pvSheet').innerHTML = buildSheetHtml(mode, rows, agg, title);
   var pv = document.getElementById('printView');
   pv.classList.add('open'); pv.scrollTop = 0;
 }
@@ -1114,11 +1162,11 @@ function downloadPickExcel(){
   });
 }
 
-function buildSheetHtml(mode, rows, agg){
+function buildSheetHtml(mode, rows, agg, title){
   var lt = agg.locTot;
-  var label = mode==='hapo' ? '합포 픽킹리스트'
+  var label = title || (mode==='hapo' ? '합포 픽킹리스트'
             : mode==='danpo'? '단포 픽킹리스트'
-            : '전체 픽킹리스트 (로케이션순)';
+            : '전체 픽킹리스트 (로케이션순)');
   var qtyOf = function(e){ return mode==='hapo'?e.h : mode==='danpo'?e.d : (e.d+e.h); };
   var totalQty = rows.reduce(function(a,e){ return a + qtyOf(e); }, 0);
   var d = new Date();
@@ -1171,15 +1219,114 @@ function buildSheetHtml(mode, rows, agg){
 
 /* 상품(옵션) — 상품명은 바코드 앞자리 크기로 작게, 옵션은 바코드 뒤4자리처럼 크게 */
 function fmtProduct(e){
-  if (e.sang !== undefined && e.sang !== null){
+  if (e.sang || e.opt){
     var s = '<span class="ps-sang">' + escapeHtml(e.sang || '') + '</span>';
     if (e.opt) s += ' <span class="ps-opt">' + escapeHtml(e.opt) + '</span>';
     return s;
   }
-  return '<span class="ps-sang">' + escapeHtml(dispName(e)) + '</span>';
+  return '<span class="ps-sang">' + escapeHtml(e.name || dispName(e)) + '</span>';
 }
 
 function closePickList(){ document.getElementById('printView').classList.remove('open'); }
+
+/* ═══════════════════════════════════════════════════
+   스캔 픽킹 : 송장 바코드(등기번호) 스캔 → 스캔한 송장만 픽킹리스트
+═══════════════════════════════════════════════════ */
+function scanFeedback(cls, msg){
+  var el = document.getElementById('scanFb');
+  el.className = 'scan-fb ' + (cls||'');
+  el.innerHTML = msg || '';
+}
+function onScan(raw){
+  if (!pickAgg || !pickAgg.regMap){ scanFeedback('bad', 'PDF를 먼저 처리하세요'); return; }
+  var digits = String(raw||'').replace(/[^0-9]/g,'');
+  if (!digits){ return; }
+  var rec = pickAgg.regMap[digits];
+  if (!rec){ scanFeedback('bad', '✗ 송장 없음: ' + escapeHtml(raw)); return; }
+  if (scanSet[digits]){ scanFeedback('warn', '⚠ 이미 스캔됨: ' + escapeHtml(rec.raw)); renderScanState(); return; }
+  scanSet[digits] = true; scanOrder.push(digits);
+  scanFeedback('ok', '✓ 인식: ' + escapeHtml(rec.raw) + ' · ' + (rec.tag==='h' ? ('합포 '+rec.qty+'개') : '단포'));
+  renderScanState();
+}
+function removeScan(digits){
+  if (scanSet[digits]){ delete scanSet[digits]; scanOrder = scanOrder.filter(function(d){ return d!==digits; }); renderScanState(); }
+}
+function renderScanState(){
+  var n = scanOrder.length;
+  var hN=0, dN=0;
+  scanOrder.forEach(function(d){ var r=pickAgg.regMap[d]; if(r){ if(r.tag==='h')hN++; else dN++; } });
+  var st = document.getElementById('scanState');
+  st.className = 'intg-state ' + (n?'ok':'');
+  st.textContent = n ? ('스캔 '+n+'건 · 합포 '+hN+' · 단포 '+dN) : '';
+  var list = document.getElementById('scanList');
+  if (!n){ list.className='scan-list'; list.innerHTML=''; return; }
+  list.className = 'scan-list show';
+  var html = '';
+  for (var i=scanOrder.length-1;i>=0;i--){   // 최근 스캔이 위로
+    var d = scanOrder[i], r = pickAgg.regMap[d];
+    if (!r) continue;
+    html += '<div class="scan-row">'
+          + '<span class="sr-idx">' + (i+1) + '</span>'
+          + '<span class="sr-reg">' + escapeHtml(r.raw) + '</span>'
+          + '<span class="sr-tag ' + r.tag + '">' + (r.tag==='h'?('합포'+r.qty):'단포') + '</span>'
+          + '<span class="sr-del" onclick="removeScan(\'' + d + '\')">✕</span>'
+          + '</div>';
+  }
+  list.innerHTML = html;
+}
+function clearScan(){ scanSet={}; scanOrder=[]; scanFeedback('',''); renderScanState(); focusScan(); }
+function focusScan(){ var el=document.getElementById('scanInput'); if(el) el.focus(); }
+
+/* 스캔분 로케이션·상품명 보정 (엑셀 기준) */
+function cleanItem(loc, bar){
+  var cands = xlByBar[bar];
+  if (cands && cands.length){
+    var c=null, i;
+    for (i=0;i<cands.length;i++){ if (cands[i].loc===loc){ c=cands[i]; break; } }
+    if (!c && cands.length===1) c=cands[0];
+    if (!c) for (i=0;i<cands.length;i++){ if (loc.indexOf(cands[i].loc)>=0 || cands[i].loc.indexOf(loc)>=0){ c=cands[i]; break; } }
+    if (!c) c=cands[0];
+    return { loc: c.loc, sang: c.sang, opt: c.opt };
+  }
+  var inf = xlInfo[bar];
+  return { loc: loc, sang: inf?inf.sang:'', opt: inf?inf.opt:'' };
+}
+/* 스캔한 송장들의 아이템 집계 (loc|bar → d/h) */
+function buildScanAgg(){
+  var keys={}, locTot={};
+  scanOrder.forEach(function(d){
+    var rec = pickAgg.regMap[d]; if (!rec) return;
+    rec.items.forEach(function(it){
+      var c = cleanItem(it.loc, it.bar);
+      var k = c.loc + '|' + it.bar;
+      var nm = (c.sang||c.opt) ? ((c.sang||'')+(c.opt?' / '+c.opt:'')) : (it.prod||'');
+      var e = keys[k] || (keys[k] = { loc:c.loc, bar:it.bar, d:0, h:0, name:nm, sang:c.sang||'', opt:c.opt||'' });
+      e[rec.tag] += it.qty;
+      var lt = locTot[c.loc] || (locTot[c.loc]={d:0,h:0});
+      lt[rec.tag] += it.qty;
+    });
+  });
+  var copick = Object.keys(locTot).filter(function(l){ return locTot[l].d>0 && locTot[l].h>0; });
+  return { keys:keys, locTot:locTot, copick:copick };
+}
+function openScanPickList(){
+  if (!scanOrder.length){ scanFeedback('bad', '스캔된 송장이 없습니다'); return; }
+  var agg = buildScanAgg();
+  openPickList('all', agg, '스캔분 픽킹리스트 · ' + scanOrder.length + '송장');
+}
+
+/* 스캔 입력창 — 바코드 스캐너는 값 입력 후 Enter 전송 */
+(function(){
+  var inp = document.getElementById('scanInput');
+  if (!inp) return;
+  inp.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' || e.keyCode === 13){
+      e.preventDefault();
+      var v = inp.value; inp.value='';
+      if (v.trim()) onScan(v);
+    }
+  });
+})();
 
 function downloadSorted(){
   if (!lastSorted) return;
@@ -1195,6 +1342,11 @@ function downloadSorted(){
 function resetAll(){
   rawBuffer = null; lastSorted = null; lastName = 'Invoice.pdf'; lastPageTexts = null;
   pickAgg = null; xlInfo = {}; xlRows = null; currentPick = null;
+  xlByBar = {}; scanSet = {}; scanOrder = [];
+  var si = document.getElementById('scanInput'); if (si) si.value = '';
+  var sf = document.getElementById('scanFb'); if (sf){ sf.className='scan-fb'; sf.innerHTML=''; }
+  var sl = document.getElementById('scanList'); if (sl){ sl.className='scan-list'; sl.innerHTML=''; }
+  var ss = document.getElementById('scanState'); if (ss){ ss.className='intg-state'; ss.textContent=''; }
   fileInput.value = '';
   fileSelected.textContent = '';
   processBtn.disabled = true;
