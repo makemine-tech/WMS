@@ -706,6 +706,43 @@
   <!-- 통합(적재리스트 + 라벨) 인쇄 전용 스테이지 -->
   <div class="print-stage" id="integratedStage" aria-hidden="true"></div>
 
+  <!-- 트럭 라벨 ↔ 파렛트 매칭 확인창 (같은 센터에 트럭이 여러 대라 자동 구분이 모호할 때만 표시) -->
+  <div class="truck-modal" id="truckModal" aria-hidden="true">
+    <div class="tm-box">
+      <div class="tm-head">
+        <h3>트럭 라벨 매칭 확인</h3>
+        <p>같은 센터에 트럭이 여러 대라 자동 구분이 어렵습니다. 각 출고건에 맞는 트럭을 골라주세요.</p>
+      </div>
+      <div class="tm-body" id="truckModalBody"></div>
+      <div class="tm-foot">
+        <button class="btn" onclick="truckModalCancel()">취소</button>
+        <button class="btn btn-primary" onclick="truckModalConfirm()">이대로 인쇄</button>
+      </div>
+    </div>
+  </div>
+  <style>
+    .truck-modal { display:none; position:fixed; inset:0; z-index:10000;
+      background:rgba(0,0,0,.62); align-items:center; justify-content:center; padding:24px; }
+    .truck-modal.show { display:flex; }
+    .truck-modal .tm-box { background:var(--surface,#151820); color:var(--text,#e8eaf0);
+      border:1px solid var(--border,#2a2f3d); border-radius:14px; width:min(640px,100%);
+      max-height:86vh; overflow:auto; box-shadow:0 18px 60px rgba(0,0,0,.5); }
+    .truck-modal .tm-head { padding:20px 22px 12px; border-bottom:1px solid var(--border,#2a2f3d); }
+    .truck-modal .tm-head h3 { margin:0 0 6px; font-size:17px; }
+    .truck-modal .tm-head p { margin:0; font-size:12.5px; color:var(--text-sub,#9aa3b2); line-height:1.6; }
+    .truck-modal .tm-body { padding:14px 22px; display:flex; flex-direction:column; gap:12px; }
+    .truck-modal .tm-row { display:flex; flex-direction:column; gap:6px;
+      padding:12px 14px; background:rgba(255,255,255,.03); border:1px solid var(--border,#2a2f3d); border-radius:10px; }
+    .truck-modal .tm-ship { font-size:13.5px; }
+    .truck-modal .tm-ship b { color:var(--accent,#4af0a8); }
+    .truck-modal .tm-sel { width:100%; padding:8px 10px; border-radius:8px;
+      background:var(--bg,#0d0f14); color:var(--text,#e8eaf0);
+      border:1px solid var(--border-strong,#3a4150); font-size:13px; }
+    .truck-modal .tm-foot { padding:14px 22px 20px; display:flex; gap:10px; justify-content:flex-end;
+      border-top:1px solid var(--border,#2a2f3d); position:sticky; bottom:0; background:var(--surface,#151820); }
+    @media print { .truck-modal { display:none !important; } }
+  </style>
+
   <!-- ── FOOTER (main/index.html 과 통일) ── -->
   <div class="site-footer">
     <span class="footer-brand">Makemine Design · PKW</span>
@@ -1879,42 +1916,172 @@ async function getLabelPagesForCenter(center) {
   return [];
 }
 
+/* =========================================================
+   트럭 라벨 ↔ 적재리스트 파렛트 매칭
+   - 트럭 파일 1개 = 트럭 1대 = 출고 1건. 파일의 라벨(홀수)페이지 수 = 그 트럭의 파렛트 수.
+   - 엑셀 출고건(센터+도착일+파렛트수)을 같은 센터에서 "파렛트 수가 일치하는" 트럭 파일에 자동 매칭.
+   - 같은 센터에 파렛트 수가 같은 트럭이 2대+ 이거나 수가 안 맞으면 → 확인창으로 작업자가 지정.
+========================================================= */
+let TRUCK_ASSIGN = null;       // { map: {shipKey -> summary}, byCenter: {cn -> [summary]} }
+let TRUCK_CANCELLED = false;   // 확인창에서 취소를 누르면 true
+
+/* 출고건 키 — (센터 + 도착예정일 + 총 파렛트수). 같은 출고건의 모든 파렛트가 같은 키. */
+function shipmentKey(g) {
+  return normCenter(g.center) + '::' + formatEta(g.eta, new Date().getFullYear()) + '::' + g.palletTotal;
+}
+
+/* 트럭 파일 1개 요약 — 센터/파렛트수/트럭번호/부킹번호 + 파렛트번호 오름차순 라벨페이지 */
+function truckFileSummary(item) {
+  const idxs = pickPagesForCategory(item);            // 홀수(라벨) 페이지 번호 오름차순
+  const labels = idxs.map(i => ({ pageIdx: i, page: item.pages[i - 1] }));
+  labels.sort((a, b) => {
+    const ap = a.page.palletNo, bp = b.page.palletNo;
+    if (ap != null && bp != null && ap !== bp) return ap - bp;
+    return a.pageIdx - b.pageIdx;
+  });
+  let centerNorm = '', truckNo = null, bookingNo = '';
+  for (const l of labels) {
+    if (!centerNorm && l.page.centerNorm) centerNorm = l.page.centerNorm;
+    if (truckNo == null && l.page.truckNo != null) truckNo = l.page.truckNo;
+    if (!bookingNo) { const m = String(l.page.text || '').match(/TBN0*(\d+)/i); if (m) bookingNo = m[1]; }
+  }
+  return { item, name: item.name, centerNorm, palletCount: labels.length, labels, truckNo, bookingNo };
+}
+
+/* 자동 매칭 + (모호 시) 확인창. 결과 { map, byCenter } 반환. 취소 시 null. */
+async function resolveTruckAssignments() {
+  TRUCK_CANCELLED = false;
+  const byCenter = {};
+  for (const it of pdfStore.truck) {
+    const s = truckFileSummary(it);
+    (byCenter[s.centerNorm] = byCenter[s.centerNorm] || []).push(s);
+  }
+  // 엑셀에서 트럭 라벨이 있는 센터의 출고건 추출 (키별 1건)
+  const shipments = {};
+  for (const g of GROUPS) {
+    const cn = normCenter(g.center);
+    if (!(byCenter[cn] && byCenter[cn].length)) continue;   // 트럭 라벨 있는 센터만
+    const key = shipmentKey(g);
+    if (!shipments[key]) shipments[key] = { key, cn, palletTotal: g.palletTotal, centerDisplay: g.center, eta: formatEta(g.eta, new Date().getFullYear()) };
+  }
+  const map = {};
+  const unresolved = [];
+  for (const key in shipments) {
+    const sh = shipments[key];
+    const cands = byCenter[sh.cn].filter(s => s.palletCount === sh.palletTotal);
+    if (cands.length === 1) {
+      map[key] = cands[0];                       // 파렛트 수가 유일하게 일치 → 자동
+    } else {
+      unresolved.push({ ...sh, candidates: byCenter[sh.cn].slice() });  // 0개 또는 2개+ → 확인 필요
+    }
+  }
+  if (unresolved.length) {
+    const chosen = await askTruckMapping(unresolved);
+    if (chosen === null) { TRUCK_CANCELLED = true; TRUCK_ASSIGN = null; return null; }
+    Object.assign(map, chosen);
+  }
+  TRUCK_ASSIGN = { map, byCenter };
+  return TRUCK_ASSIGN;
+}
+
+/* 확인창 — unresolved 각 출고건에 트럭 파일을 고르게 함. Promise<{shipKey -> summary} | null> */
+function askTruckMapping(unresolved) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('truckModal');
+    const body = document.getElementById('truckModalBody');
+    body.innerHTML = unresolved.map((sh, i) => {
+      const opts = sh.candidates.map((c, ci) => {
+        const sel = (c.palletCount === sh.palletTotal) ? 'selected' : '';
+        const tno = (c.truckNo != null) ? String(c.truckNo).padStart(3, '0') : '?';
+        return `<option value="${ci}" ${sel}>TRUCK_${tno} · 부킹 ${escapeHtml(c.bookingNo || '?')} · ${c.palletCount}파렛트</option>`;
+      }).join('');
+      const range = sh.palletTotal > 1 ? ('1~' + sh.palletTotal) : '1';
+      return `<div class="tm-row">
+        <div class="tm-ship"><b>${escapeHtml(sh.centerDisplay)}</b> · ${escapeHtml(sh.eta || '')} · ${sh.palletTotal}파렛트 (${range})</div>
+        <select class="tm-sel" data-key="${escapeHtml(sh.key)}" data-i="${i}">${opts}</select>
+      </div>`;
+    }).join('');
+    overlay._unresolved = unresolved;
+    overlay._resolve = resolve;
+    overlay.classList.add('show');
+  });
+}
+
+function truckModalConfirm() {
+  const overlay = document.getElementById('truckModal');
+  const chosen = {};
+  overlay.querySelectorAll('.tm-sel').forEach(sel => {
+    const i = +sel.getAttribute('data-i');
+    const ci = +sel.value;
+    const sh = overlay._unresolved[i];
+    chosen[sh.key] = sh.candidates[ci];
+  });
+  overlay.classList.remove('show');
+  const r = overlay._resolve; overlay._resolve = null;
+  if (r) r(chosen);
+}
+
+function truckModalCancel() {
+  const overlay = document.getElementById('truckModal');
+  overlay.classList.remove('show');
+  const r = overlay._resolve; overlay._resolve = null;
+  if (r) r(null);
+}
+
 async function buildIntegratedStage() {
   const stage = document.getElementById('integratedStage');
   stage.innerHTML = '';
   if (!GROUPS.length) return 0;
 
-  // 센터별 라벨 페이지 캐시 (한 센터당 1번만 렌더링)
-  const labelCache = {};
-  for (const g of GROUPS) {
-    const cn = normCenter(g.center);
-    if (!(cn in labelCache)) {
-      labelCache[cn] = await getLabelPagesForCenter(g.center);
-    }
+  // 트럭 라벨 매칭 해결 (자동 + 모호 시 확인창)
+  let assign = { map: {}, byCenter: {} };
+  if (pdfStore.truck.length) {
+    const r = await resolveTruckAssignments();
+    if (r === null) return 0;     // 작업자가 취소 (TRUCK_CANCELLED 로 호출부가 구분)
+    assign = r;
   }
 
   // 적재리스트 페이지를 그대로 복제하기 위해 미리보기에서 가져옴
   const palletPages = [...document.querySelectorAll('#previewStage > .page')];
 
-  // 센터별 팔레트 번호 카운터
-  const centerCounters = {};
+  // download(밀크런) 센터용 라벨 캐시 + 센터별 카운터 (기존 로직 유지)
+  const dlCache = {};
+  const dlCounter = {};
+  const shipCounter = {};   // 트럭: 출고건별 파렛트 진행 카운터 (fallback)
+
   let totalAdded = 0;
   for (let i = 0; i < GROUPS.length; i++) {
     const g = GROUPS[i];
     const cn = normCenter(g.center);
-    centerCounters[cn] = (centerCounters[cn] || 0) + 1;
-    const palletIdx = centerCounters[cn]; // 1, 2, 3...
 
     // 1) 적재리스트 페이지 복제
     if (palletPages[i]) {
       stage.appendChild(palletPages[i].cloneNode(true));
       totalAdded++;
     }
-    // 2) 매칭 라벨 페이지 (kind에 따라 회전/꽉채움 적용)
-    const items = labelCache[cn] || [];
-    const item = items[palletIdx - 1]; // N번째 팔레트
-    if (item) {
-      stage.appendChild(pdfImgPage(item.url, item.kind));
+
+    // 2) 매칭 라벨 페이지
+    let labelUrl = null, kind = null;
+    if ((assign.byCenter[cn] || []).length) {
+      // ── 트럭 센터: (센터+도착일+파렛트수)로 매칭된 트럭 파일에서 파렛트번호로 라벨 선택
+      const key = shipmentKey(g);
+      const sum = assign.map[key];
+      if (sum && sum.labels.length) {
+        shipCounter[key] = (shipCounter[key] || 0) + 1;
+        let li = (g.palletNo && g.palletNo >= 1 && g.palletNo <= sum.labels.length)
+                 ? g.palletNo - 1 : shipCounter[key] - 1;
+        const lab = sum.labels[li] || sum.labels[shipCounter[key] - 1];
+        if (lab) { labelUrl = await renderPdfPageToImg(sum.item.doc, lab.pageIdx); kind = 'truck'; }
+      }
+    } else {
+      // ── download(밀크런) 센터: 기존 방식(센터별 순서대로) 유지
+      if (!(cn in dlCache)) dlCache[cn] = await getLabelPagesForCenter(g.center);
+      dlCounter[cn] = (dlCounter[cn] || 0) + 1;
+      const it = dlCache[cn][dlCounter[cn] - 1];
+      if (it) { labelUrl = it.url; kind = it.kind; }
+    }
+    if (labelUrl) {
+      stage.appendChild(pdfImgPage(labelUrl, kind));
       totalAdded++;
     }
   }
@@ -1938,6 +2105,7 @@ async function enterDuplexMode() {
   if (hasLabels && GROUPS.length) {
     // 통합 시퀀스 임시 생성 → 그 안의 모든 페이지 노드를 가져와서 좌우 복제
     const built = await buildIntegratedStage();
+    if (TRUCK_CANCELLED) { SNAPSHOT_HTML = null; return false; }   // 취소 → 인쇄 중단
     if (built) {
       pages = [...document.querySelectorAll('#integratedStage > *')];
       // 임시 사용 끝, 비워둠 (실제 통합 인쇄는 다른 버튼이 처리)
@@ -1992,6 +2160,7 @@ document.getElementById("btnPrint").addEventListener("click", async () => {
     setPdfStatus('적재리스트 + 라벨 통합 페이지 생성 중...');
     try {
       const n = await buildIntegratedStage();
+      if (TRUCK_CANCELLED) { setPdfStatus('인쇄 취소됨 — 트럭 매칭을 확인 후 다시 인쇄하세요.', ''); btn.disabled = false; return; }
       if (!n) { setPdfStatus('통합할 페이지가 없습니다.', 'err'); btn.disabled = false; return; }
       document.body.classList.add('print-integrated');
       setPdfStatus(`통합 ${n}페이지 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
@@ -2015,6 +2184,7 @@ document.getElementById("btnPrint2").addEventListener("click", async () => {
   btn.disabled = true;
   try {
     const ok = await enterDuplexMode();
+    if (TRUCK_CANCELLED) { setPdfStatus('인쇄 취소됨 — 트럭 매칭을 확인 후 다시 인쇄하세요.', ''); btn.disabled = false; return; }
     if (!ok) { btn.disabled = false; return; }
     // 렌더 커밋 후 인쇄
     setTimeout(() => window.print(), 100);
