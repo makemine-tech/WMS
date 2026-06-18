@@ -735,6 +735,12 @@
       padding:12px 14px; background:rgba(255,255,255,.03); border:1px solid var(--border,#2a2f3d); border-radius:10px; }
     .truck-modal .tm-ship { font-size:13.5px; }
     .truck-modal .tm-ship b { color:var(--accent,#4af0a8); }
+    .truck-modal .tm-prods { display:flex; flex-direction:column; gap:3px; margin:2px 0 2px; }
+    .truck-modal .tm-prod { font-size:12.5px; color:var(--text,#e8eaf0); line-height:1.5;
+      padding-left:10px; border-left:2px solid var(--border-strong,#3a4150); }
+    .truck-modal .tm-prod b { color:var(--accent2,#f0a84a); }
+    .truck-modal .tm-note { color:var(--text-sub,#9aa3b2); font-size:11.5px; }
+    .truck-modal .tm-box { color:var(--text-sub,#9aa3b2); font-size:11.5px; }
     .truck-modal .tm-sel { width:100%; padding:8px 10px; border-radius:8px;
       background:var(--bg,#0d0f14); color:var(--text,#e8eaf0);
       border:1px solid var(--border-strong,#3a4150); font-size:13px; }
@@ -1962,7 +1968,8 @@ async function resolveTruckAssignments() {
     const cn = normCenter(g.center);
     if (!(byCenter[cn] && byCenter[cn].length)) continue;   // 트럭 라벨 있는 센터만
     const key = shipmentKey(g);
-    if (!shipments[key]) shipments[key] = { key, cn, palletTotal: g.palletTotal, centerDisplay: g.center, eta: formatEta(g.eta, new Date().getFullYear()) };
+    if (!shipments[key]) shipments[key] = { key, cn, palletTotal: g.palletTotal, centerDisplay: g.center, eta: formatEta(g.eta, new Date().getFullYear()), groups: [] };
+    shipments[key].groups.push(g);
   }
   const map = {};
   const unresolved = [];
@@ -1984,6 +1991,23 @@ async function resolveTruckAssignments() {
   return TRUCK_ASSIGN;
 }
 
+/* 출고건(여러 파렛트 묶음)의 상품 합산 — 상품명별 수량·박스·비고 */
+function shipmentProductLines(groups) {
+  const agg = {};
+  const order = [];
+  for (const g of (groups || [])) {
+    for (const it of (g.items || [])) {
+      const key = it.skuName || it.skuId || '';
+      if (!agg[key]) { agg[key] = { name: key, qty: 0, box: 0, status: '', expiry: '' }; order.push(key); }
+      agg[key].qty += Number(it.qty || 0);
+      agg[key].box += Number(it.box || 0);
+      if (!agg[key].status && it.status) agg[key].status = it.status;
+      if (!agg[key].expiry && it.expiry) agg[key].expiry = it.expiry;
+    }
+  }
+  return order.map(k => agg[k]);
+}
+
 /* 확인창 — unresolved 각 출고건에 트럭 파일을 고르게 함. Promise<{shipKey -> summary} | null> */
 function askTruckMapping(unresolved) {
   return new Promise((resolve) => {
@@ -1996,8 +2020,17 @@ function askTruckMapping(unresolved) {
         return `<option value="${ci}" ${sel}>TRUCK_${tno} · 부킹 ${escapeHtml(c.bookingNo || '?')} · ${c.palletCount}파렛트</option>`;
       }).join('');
       const range = sh.palletTotal > 1 ? ('1~' + sh.palletTotal) : '1';
+      const prods = shipmentProductLines(sh.groups);
+      const totQty = prods.reduce((s, p) => s + p.qty, 0);
+      const prodHtml = prods.map(p => {
+        const note = p.status ? ` <span class="tm-note">${escapeHtml(p.status)}</span>` : '';
+        const box = p.box ? ` <span class="tm-box">(${fmt(p.box)}박스)</span>` : '';
+        const exp = (!p.status && p.expiry) ? ` <span class="tm-note">${escapeHtml(formatExpiry(p.expiry))}</span>` : '';
+        return `<div class="tm-prod">${escapeHtml(p.name) || '(이름없음)'}${note}${exp} · <b>총 ${fmt(p.qty)}개</b>${box}</div>`;
+      }).join('');
       return `<div class="tm-row">
-        <div class="tm-ship"><b>${escapeHtml(sh.centerDisplay)}</b> · ${escapeHtml(sh.eta || '')} · ${sh.palletTotal}파렛트 (${range})</div>
+        <div class="tm-ship"><b>${escapeHtml(sh.centerDisplay)}</b> · ${escapeHtml(sh.eta || '')} · ${sh.palletTotal}파렛트 (${range}) · 총 ${fmt(totQty)}개</div>
+        <div class="tm-prods">${prodHtml || '<span class="tm-note">상품 정보 없음</span>'}</div>
         <select class="tm-sel" data-key="${escapeHtml(sh.key)}" data-i="${i}">${opts}</select>
       </div>`;
     }).join('');
