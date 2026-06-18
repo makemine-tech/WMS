@@ -614,8 +614,12 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative
     <div style="display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap">
       <button class="btn btn-s" onclick="forceSetupFCM()" style="flex:1;min-width:140px;padding:.6rem;font-size:.78rem">🔄 토큰 다시 등록</button>
       <button class="btn btn-b" onclick="sendTestPush()" style="flex:1;min-width:140px;padding:.6rem;font-size:.78rem">📤 본인에게 테스트 푸시</button>
+      <button class="btn btn-s" onclick="previewReminderMsg()" style="flex:1;min-width:140px;padding:.6rem;font-size:.78rem">📅 예약알림 미리보기</button>
     </div>
     <div id="tutTestResult" style="display:none;font-size:.74rem;padding:.55rem .7rem;border-radius:6px;background:rgba(91,156,246,.08);border:1px solid rgba(91,156,246,.4);color:var(--b);margin-bottom:1rem;line-height:1.6;font-family:var(--mo)"></div>
+    <div style="font-size:.7rem;color:var(--mu);margin:-.4rem 0 1rem;line-height:1.6">
+      💡 <b>예약알림</b>: 날짜가 지정된 작업을 <b>평일 저녁 7시</b>(다음 영업일 미리)·<b>당일 아침 9시 30분</b>에 그룹 전원에게 자동 알림합니다. 위 버튼으로 실제 문구를 미리 볼 수 있어요. (발송 안 함)
+    </div>
 
     <div class="tut-sec">
       <h4><span class="num">1</span> 휴대폰에 설치 (홈화면 추가)</h4>
@@ -2924,6 +2928,47 @@ function sendTestPush(){
   } catch(e) {
     console.error('[test-push] 실행 실패', e);
     toast('실행 실패: ' + (e.message||e), 'er');
+  }
+}
+
+/* 예약알림 미리보기 — 실제 데이터로 저녁/아침 멘트를 계산해 보여줌 (발송 안 함) */
+function previewReminderMsg(){
+  var resBox = document.getElementById('tutTestResult');
+  if (!groupId){ toast('그룹 미등록 — 로그인 대기 중','warn'); return; }
+  toast('미리보기 계산 중...','warn');
+  try {
+    var functions = firebase.app().functions('asia-southeast1');
+    var callable = functions.httpsCallable('previewReminder');
+    callable({}).then(function(result){
+      var d = (result && result.data) || {};
+      console.info('[reminder-preview] 결과', d);
+      if (!resBox) return;
+      resBox.style.display = '';
+      function block(label, m){
+        if (!m) return '';
+        var when = '('+ymdIntToShort(m.dateInt)+' '+escH(m.when||'')+')';
+        if (m.count > 0 && m.body){
+          return '<b style="color:var(--g)">'+label+'</b> '+when+'<br>“'+escH(m.body)+'”<br>';
+        }
+        return '<b>'+label+'</b> '+when+' — 대상 일정 없음<br>';
+      }
+      resBox.innerHTML =
+        '📅 예약알림 미리보기 <span style="color:var(--mu)">(실제 발송 아님)</span><br><br>'+
+        '🌙 저녁 7시 알림<br>'+block('', d.eve)+'<br>'+
+        '☀️ 아침 9시 30분 알림<br>'+block('', d.morn);
+      toast('✓ 미리보기 완료','ok');
+    }).catch(function(err){
+      console.error('[reminder-preview] 호출 실패', err);
+      if (resBox){
+        resBox.style.display = '';
+        resBox.innerHTML = '❌ 미리보기 실패: <b>'+escH(err.code||err.message||String(err))+'</b>'
+          + '<br><span style="color:var(--mu)">함수 배포 후 사용 가능합니다.</span>';
+      }
+      toast('호출 실패: '+(err.code||err.message),'er');
+    });
+  } catch(e){
+    console.error('[reminder-preview] 실행 실패', e);
+    toast('실행 실패: '+(e.message||e),'er');
   }
 }
 
