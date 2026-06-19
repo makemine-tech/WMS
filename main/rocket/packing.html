@@ -720,6 +720,21 @@
       </div>
     </div>
   </div>
+
+  <!-- 출고건 분리 확인창 (같은 센터·같은 파렛트수 출고건이 2건 이상 겹쳐 자동 병합 위험이 있을 때만 표시) -->
+  <div class="truck-modal" id="splitModal" aria-hidden="true">
+    <div class="tm-box">
+      <div class="tm-head">
+        <h3>출고건 분리 확인</h3>
+        <p>같은 센터·같은 파렛트수 출고건이 여러 건으로 보입니다. 파렛트번호(1~N)가 겹쳐 자칫 한 건으로 합쳐질 수 있어요. 각 묶음을 <b>몇 건으로</b> 처리할지 확인해주세요.</p>
+      </div>
+      <div class="tm-body" id="splitModalBody"></div>
+      <div class="tm-foot">
+        <button class="btn" onclick="splitModalCancel()">취소</button>
+        <button class="btn btn-primary" onclick="splitModalConfirm()">이대로 진행</button>
+      </div>
+    </div>
+  </div>
   <style>
     .truck-modal { display:none; position:fixed; inset:0; z-index:10000;
       background:rgba(0,0,0,.62); align-items:center; justify-content:center; padding:24px; }
@@ -1038,6 +1053,113 @@ function parseExcel(file) {
   });
 }
 
+/* ── 출고건(booking) 태깅 ──
+ * 같은 (센터+입고일+총파렛트수)에 출고건이 2건 겹치면 파렛트번호 1~N이 "각각 두 번씩" 나타난다.
+ * (한 출고건 안에선 각 파렛트가 1번씩 존재. 같은 파렛트에 SKU 여러 개면 그 번호만 더 나옴.)
+ * → 출고건 수 = 모든 파렛트번호 중 "최소 출현 횟수". 엑셀 정렬이 흐트러져도 안전(순서 무관).
+ *   예) 1~18이 각각 2번 = 2건 / 52파렛트가 각 1번 = 1건 / 15번에만 SKU 3개(나머지 1번) = 1건.
+ * 분리: 같은 파렛트번호의 k번째 출현을 k번째 출고건에 배정(K-1로 상한 → SKU 추가분이 가짜 출고건 안 만듦).
+ * 각 행에 r.__booking(0,1,2…) 부여. overrides[clusterKey]===1 이면 강제로 1건 병합.
+ * 반환: 클러스터별 [{key, center, eta, etaKey, palletT, count, rows}]. */
+function tagBookings(rows, overrides) {
+  const yearNow = new Date().getFullYear();
+  const order = [];
+  const byCluster = new Map();
+  for (const r of rows) {
+    const etaKey = formatEta(r.eta, yearNow) || '__noeta__';
+    const ck = `${r.center}::${etaKey}::${r.palletT}`;
+    if (!byCluster.has(ck)) { byCluster.set(ck, []); order.push(ck); }
+    byCluster.get(ck).push(r);
+  }
+  const info = [];
+  for (const ck of order) {
+    const rs = byCluster.get(ck);
+    const forceMerge = overrides && overrides[ck] === 1;
+    /* 파렛트번호별 출현 횟수 → 최소값 = 겹친 출고건 수 */
+    const occ = {};
+    for (const r of rs) occ[r.palletN] = (occ[r.palletN] || 0) + 1;
+    const counts = Object.values(occ);
+    const K = forceMerge ? 1 : (counts.length ? Math.min(...counts) : 1);
+    /* 같은 파렛트번호의 k번째 출현 → k번째 출고건 (K-1 상한) */
+    const seen = {};
+    for (const r of rs) {
+      if (forceMerge) { r.__booking = 0; continue; }
+      const k = seen[r.palletN] || 0;
+      r.__booking = Math.min(k, K - 1);
+      seen[r.palletN] = k + 1;
+    }
+    const first = rs[0];
+    info.push({
+      key: ck, center: first.center, eta: first.eta,
+      etaKey: formatEta(first.eta, yearNow), palletT: first.palletT,
+      count: K, rows: rs,
+    });
+  }
+  return info;
+}
+
+/* 행 묶음 → 상품명별 수량·박스 합산 (분리 확인창 표시용) */
+function rowsProductLines(rows) {
+  const agg = {}; const order = [];
+  for (const it of (rows || [])) {
+    const key = it.skuName || it.skuId || '';
+    if (!agg[key]) { agg[key] = { name: key, qty: 0, box: 0 }; order.push(key); }
+    agg[key].qty += Number(it.qty || 0);
+    agg[key].box += Number(it.box || 0);
+  }
+  return order.map(k => agg[k]);
+}
+
+/* 확인창 — 의심 클러스터마다 "N건 분리 / 1건 병합" 선택. Promise<overrides | null(취소)> */
+function askBookingSplit(suspicious) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('splitModal');
+    const body = document.getElementById('splitModalBody');
+    body.innerHTML = suspicious.map((sh, i) => {
+      /* 자동 태깅 결과(__booking)로 출고건별 미리보기 */
+      const byBk = {};
+      sh.rows.forEach(r => { (byBk[r.__booking] = byBk[r.__booking] || []).push(r); });
+      const bkLines = Object.keys(byBk).sort((a, b) => a - b).map(bk => {
+        const rs = byBk[bk];
+        const pns = [...new Set(rs.map(r => r.palletN))].sort((a, b) => a - b);
+        const prods = rowsProductLines(rs);
+        const totQty = prods.reduce((s, p) => s + p.qty, 0);
+        const range = pns.length ? `${pns[0]}~${pns[pns.length - 1]}` : '-';
+        return `<div class="tm-prod">출고건 ${+bk + 1} · 파렛트 ${range} (${pns.length}개) · 상품 ${prods.length}종 · <b>총 ${fmt(totQty)}개</b></div>`;
+      }).join('');
+      return `<div class="tm-row">
+        <div class="tm-ship"><b>${escapeHtml(sh.center)}</b> · ${escapeHtml(sh.etaKey || '')} · ${sh.palletT}파렛트 · <b style="color:var(--accent2,#f0a84a)">${sh.count}건 의심</b></div>
+        <div class="tm-prods">${bkLines}</div>
+        <select class="tm-sel" data-key="${escapeHtml(sh.key)}" data-i="${i}">
+          <option value="split" selected>${sh.count}건으로 분리 — 각 ${sh.palletT}파렛트 (권장)</option>
+          <option value="merge">1건으로 합치기 — ${sh.palletT}파렛트</option>
+        </select>
+      </div>`;
+    }).join('');
+    overlay._resolve = resolve;
+    overlay.classList.add('show');
+  });
+}
+
+function splitModalConfirm() {
+  const overlay = document.getElementById('splitModal');
+  const overrides = {};
+  overlay.querySelectorAll('.tm-sel').forEach(sel => {
+    if (sel.value === 'merge') overrides[sel.getAttribute('data-key')] = 1; // 1건 병합 강제
+    /* 'split' 은 override 없이 자동 감지(count>=2) 결과 그대로 사용 */
+  });
+  overlay.classList.remove('show');
+  const r = overlay._resolve; overlay._resolve = null;
+  if (r) r(overrides);
+}
+
+function splitModalCancel() {
+  const overlay = document.getElementById('splitModal');
+  overlay.classList.remove('show');
+  const r = overlay._resolve; overlay._resolve = null;
+  if (r) r(null);
+}
+
 /* (물류센터 + 입고예정일 + 파렛트수 + 파렛트번호) 그룹핑 = 1페이지.
  * eta 는 raw 값 그대로 비교하면 형식 차이로 안 묶일 수 있어 formatEta 정규화 후 비교. */
 function groupRows(rows) {
@@ -1045,7 +1167,8 @@ function groupRows(rows) {
   const yearNow = new Date().getFullYear();
   for (const r of rows) {
     const etaKey = formatEta(r.eta, yearNow) || '__noeta__';
-    const key = `${r.center}::${etaKey}::${r.palletT}::${r.palletN}`;
+    const bk = r.__booking || 0;   // 같은 센터·파렛트수 안에서 출고건 구분 (1로 리셋 감지)
+    const key = `${r.center}::${etaKey}::${r.palletT}::${bk}::${r.palletN}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(r);
   }
@@ -1056,6 +1179,7 @@ function groupRows(rows) {
       center: first.center,
       palletTotal: first.palletT,
       palletNo: first.palletN,
+      booking: first.__booking || 0,
       eta: first.eta,
       pos: [...new Set(items.map(i => i.po).filter(Boolean))],
       boxSum: items.reduce((s, i) => s + (i.box || 0), 0),
@@ -1078,6 +1202,7 @@ function groupRows(rows) {
     const c = a.center.localeCompare(b.center, "ko");
     if (c !== 0) return c;
     if (a.palletTotal !== b.palletTotal) return a.palletTotal - b.palletTotal;
+    if ((a.booking || 0) !== (b.booking || 0)) return (a.booking || 0) - (b.booking || 0); // 출고건1 전체 → 출고건2 전체
     return a.palletNo - b.palletNo;
   });
   return groups;
@@ -1323,8 +1448,24 @@ async function handleFile(f) {
   setStatus(`'${f.name}' 분석 중...`);
   try {
     RAW_ROWS = await parseExcel(f);
+    /* 출고건 자동 태깅 후, 같은 센터·파렛트수가 2건+ 겹친 묶음은 작업자에게 분리 여부 확인 */
+    const info = tagBookings(RAW_ROWS, null);
+    const suspicious = info.filter(x => x.count >= 2);
+    if (suspicious.length) {
+      const overrides = await askBookingSplit(suspicious);
+      if (overrides === null) {        // 취소 → 업로드 무효화
+        GROUPS = []; RAW_ROWS = [];
+        setStatus("취소됨 — 엑셀을 다시 업로드하세요.", "warn");
+        renderPreview([]);
+        document.getElementById("dzFile").textContent = "";
+        return;
+      }
+      tagBookings(RAW_ROWS, overrides); // 선택 반영해 재태깅
+    }
     GROUPS = groupRows(RAW_ROWS);
-    setStatus(`분석 완료 — 행 ${RAW_ROWS.length}개, 팔레트 ${GROUPS.length}개 감지.`, "ok");
+    const splitCnt = suspicious.length;
+    setStatus(`분석 완료 — 행 ${RAW_ROWS.length}개, 팔레트 ${GROUPS.length}개 감지.`
+      + (splitCnt ? ` (출고건 분리 확인 ${splitCnt}건 처리)` : ""), "ok");
     renderIfReady();
   } catch (err) {
     GROUPS = []; RAW_ROWS = [];
@@ -1931,9 +2072,10 @@ async function getLabelPagesForCenter(center) {
 let TRUCK_ASSIGN = null;       // { map: {shipKey -> summary}, byCenter: {cn -> [summary]} }
 let TRUCK_CANCELLED = false;   // 확인창에서 취소를 누르면 true
 
-/* 출고건 키 — (센터 + 도착예정일 + 총 파렛트수). 같은 출고건의 모든 파렛트가 같은 키. */
+/* 출고건 키 — (센터 + 도착예정일 + 총 파렛트수 + 출고건번호). 같은 출고건의 모든 파렛트가 같은 키.
+ * booking 포함: 같은 센터·파렛트수가 2건 겹쳐도 트럭 매칭 단계에서 따로 잡히도록. (일반 건은 booking=0 → 동작 동일) */
 function shipmentKey(g) {
-  return normCenter(g.center) + '::' + formatEta(g.eta, new Date().getFullYear()) + '::' + g.palletTotal;
+  return normCenter(g.center) + '::' + formatEta(g.eta, new Date().getFullYear()) + '::' + g.palletTotal + '::' + (g.booking || 0);
 }
 
 /* 트럭 파일 1개 요약 — 센터/파렛트수/트럭번호/부킹번호 + 파렛트번호 오름차순 라벨페이지 */
