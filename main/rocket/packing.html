@@ -2104,6 +2104,21 @@ async function resolveTruckAssignments() {
     const s = truckFileSummary(it);
     (byCenter[s.centerNorm] = byCenter[s.centerNorm] || []).push(s);
   }
+  /* 센터별 (연속)파렛트번호 → 라벨 페이지 직접 맵.
+     쿠팡 트럭 라벨의 PALLET_nnn 은 부킹 전체 통짜 일련번호(예 트럭1=1~18, 트럭2=19~36 …).
+     엑셀 파렛트번호도 같은 연속번호로 작성하면 1:1 직접 매칭 → 트럭 자동 구분(18 가정/추측 불필요). */
+  const byCenterPallet = {};
+  for (const cn in byCenter) {
+    byCenterPallet[cn] = {};
+    for (const s of byCenter[cn]) {
+      for (const lab of s.labels) {
+        const pn = lab.page && lab.page.palletNo;
+        if (pn != null && byCenterPallet[cn][pn] == null) {
+          byCenterPallet[cn][pn] = { item: s.item, pageIdx: lab.pageIdx, truckNo: s.truckNo, bookingNo: s.bookingNo };
+        }
+      }
+    }
+  }
   // 엑셀에서 트럭 라벨이 있는 센터의 출고건 추출 (키별 1건)
   const shipments = {};
   for (const g of GROUPS) {
@@ -2117,6 +2132,9 @@ async function resolveTruckAssignments() {
   const unresolved = [];
   for (const key in shipments) {
     const sh = shipments[key];
+    /* 모든 파렛트가 연속번호로 라벨에 직접 매칭되면 트럭파일 매칭/확인창 불필요 */
+    const allDirect = sh.groups.every(g => byCenterPallet[sh.cn] && byCenterPallet[sh.cn][g.palletNo] != null);
+    if (allDirect) continue;
     const cands = byCenter[sh.cn].filter(s => s.palletCount === sh.palletTotal);
     if (cands.length === 1) {
       map[key] = cands[0];                       // 파렛트 수가 유일하게 일치 → 자동
@@ -2129,7 +2147,7 @@ async function resolveTruckAssignments() {
     if (chosen === null) { TRUCK_CANCELLED = true; TRUCK_ASSIGN = null; return null; }
     Object.assign(map, chosen);
   }
-  TRUCK_ASSIGN = { map, byCenter };
+  TRUCK_ASSIGN = { map, byCenter, byCenterPallet };
   return TRUCK_ASSIGN;
 }
 
@@ -2238,15 +2256,21 @@ async function buildIntegratedStage() {
     // 2) 매칭 라벨 페이지
     let labelUrl = null, kind = null;
     if ((assign.byCenter[cn] || []).length) {
-      // ── 트럭 센터: (센터+도착일+파렛트수)로 매칭된 트럭 파일에서 파렛트번호로 라벨 선택
-      const key = shipmentKey(g);
-      const sum = assign.map[key];
-      if (sum && sum.labels.length) {
-        shipCounter[key] = (shipCounter[key] || 0) + 1;
-        let li = (g.palletNo && g.palletNo >= 1 && g.palletNo <= sum.labels.length)
-                 ? g.palletNo - 1 : shipCounter[key] - 1;
-        const lab = sum.labels[li] || sum.labels[shipCounter[key] - 1];
-        if (lab) { labelUrl = await renderPdfPageToImg(sum.item.doc, lab.pageIdx); kind = 'truck'; }
+      // ── 트럭 센터: ① 연속 파렛트번호 ↔ 라벨 PALLET 번호 직접 매칭 (우선)
+      const direct = assign.byCenterPallet && assign.byCenterPallet[cn] && assign.byCenterPallet[cn][g.palletNo];
+      if (direct) {
+        labelUrl = await renderPdfPageToImg(direct.item.doc, direct.pageIdx); kind = 'truck';
+      } else {
+        // ② 폴백: (센터+도착일+파렛트수)로 매칭된 트럭 파일에서 파렛트번호 인덱스로 라벨 선택
+        const key = shipmentKey(g);
+        const sum = assign.map[key];
+        if (sum && sum.labels.length) {
+          shipCounter[key] = (shipCounter[key] || 0) + 1;
+          let li = (g.palletNo && g.palletNo >= 1 && g.palletNo <= sum.labels.length)
+                   ? g.palletNo - 1 : shipCounter[key] - 1;
+          const lab = sum.labels[li] || sum.labels[shipCounter[key] - 1];
+          if (lab) { labelUrl = await renderPdfPageToImg(sum.item.doc, lab.pageIdx); kind = 'truck'; }
+        }
       }
     } else {
       // ── download(밀크런) 센터: 기존 방식(센터별 순서대로) 유지
