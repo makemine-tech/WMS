@@ -693,7 +693,7 @@
     <div class="summary" id="summary">업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.</div>
     <button class="btn" id="btnPrintInvoice" disabled title="booking_manifest 전체페이지 + supplier 홀수페이지 합본 (센터별 정렬)">📋 거래명세서인쇄</button>
     <button class="btn" id="btnPrint2" disabled title="A4 가로 한 장에 같은 페이지를 좌·우로 2번 인쇄">2부 인쇄 (가로 · 좌우 동일)</button>
-    <button class="btn" id="btnPrint2Seq" disabled title="A4 가로 · 앞 절반은 왼쪽, 뒤 절반은 오른쪽에 순차 배치 — 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 순서대로 정렬">순차적 2부 인쇄 (가로 · 좌우 순차)</button>
+    <button class="btn" id="btnPrint2Seq" disabled title="A4 가로 · 각 서류 2부씩 [1,1,2,2,…] 순차 배치 (앞 절반 좌측·뒤 절반 우측) — 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 파렛트당 2부가 연속 정렬">순차적 2부 인쇄 (가로 · 좌우 순차)</button>
     <button class="btn btn-primary" id="btnPrint" disabled title="PDF 업로드 시 적재리스트+매칭 라벨 자동 통합">PDF 저장 / 인쇄 (1부)</button>
   </div>
 
@@ -2344,25 +2344,29 @@ async function enterDuplexMode() {
   return true;
 }
 
-// 순차 2부: 앞 절반은 왼쪽 칸에, 뒤 절반은 오른쪽 칸에 순서대로 배치
-// → 인쇄 후 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 1→N 순서로 정렬
+// 순차 2부: 각 서류를 2부씩(연속 복제)한 [1,1,2,2,…,N,N] 시퀀스를
+//   앞 절반은 왼쪽 칸에, 뒤 절반은 오른쪽 칸에 순서대로 배치
+// → 인쇄 후 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면
+//   1,1,2,2,…,N,N 순서로 정렬 (파렛트당 2부가 연속해서 나옴)
 async function enterSequentialDuplexMode() {
   const stage = document.getElementById("previewStage");
   SNAPSHOT_HTML = stage.innerHTML;
 
-  const pages = await collectDuplexPagesHTML();
-  if (pages === null) { SNAPSHOT_HTML = null; return false; }   // 취소
-  if (!pages.length) return false;
+  const single = await collectDuplexPagesHTML();
+  if (single === null) { SNAPSHOT_HTML = null; return false; }   // 취소
+  if (!single.length) return false;
 
-  // 전체 N페이지를 앞(왼쪽) / 뒤(오른쪽) 두 묶음으로 분할
-  // 홀수면 왼쪽 묶음이 1장 더 많고, 마지막 시트의 오른쪽 칸은 빈칸
-  const half = Math.ceil(pages.length / 2);
-  const blank = '<div class="page" style="visibility:hidden"></div>';
+  // 각 서류를 2부씩 연속 복제 → [1,1,2,2,…,N,N] (총 2N장, 항상 짝수)
+  const pages = [];
+  for (const p of single) { pages.push(p, p); }
+
+  // 2N장을 앞(왼쪽) / 뒤(오른쪽) 두 묶음으로 정확히 반씩 분할
+  const half = pages.length / 2;   // = single.length
 
   let html = "";
   for (let i = 0; i < half; i++) {
     const left = pages[i];
-    const right = pages[i + half] || blank;
+    const right = pages[i + half];
     html += `<div class="duplex-sheet"><div class="duplex-half">${left}</div><div class="duplex-half">${right}</div></div>`;
   }
   stage.innerHTML = html;
