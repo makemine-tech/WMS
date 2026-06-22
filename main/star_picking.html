@@ -801,6 +801,26 @@ function setIntg(cls, txt){
   el.textContent = txt || '';
 }
 
+/* 로케이션명 정제 — PDF 텍스트 추출 시 긴 ▶[…] 내용이 여러 줄로 끊기면,
+   줄바꿈 지점의 y좌표에 걸친 다른 영역 텍스트(수취인 전화번호·등기번호 등)가
+   로케이션명 사이에 끼어들어 "나이키_신발0503-6355-****_P10_186" 처럼 오염된다.
+   로케이션은 항상 밑줄(_) 기반 토큰이라, 공백으로 토큰을 나눈 뒤
+   대시/콜론 포함·순수숫자·송장 필드라벨 토큰을 제거하고 다시 붙여 복원한다. */
+var INV_LABELS = {'등기번호':1,'주소':1,'받으시는분':1,'보내시는분':1,'받는':1,'보내는':1,
+                  '받으시는':1,'보내시는':1,'내용품':1,'총수량':1,'요금':1,'중량':1,'용적':1,'신규':1};
+function cleanLoc(s){
+  s = String(s||'').replace(/\s+/g, ' ').trim();
+  var toks = s.split(' ').filter(function(t){
+    if (!t) return false;
+    if (/[-:]/.test(t)) return false;     // 전화번호·등기번호 등 (대시/콜론)
+    if (/^\d+$/.test(t)) return false;    // 순수 숫자 조각
+    if (INV_LABELS[t]) return false;      // 송장 필드 라벨
+    return true;
+  });
+  var j = toks.join('');
+  return j || s.replace(/\s+/g, '');      // 전부 걸러지면 원본(공백제거)으로 폴백
+}
+
 /* PDF 텍스트 → 피킹 아이템 배열 [{loc, bar, qty, prod}]
    포맷: ▶[로케이션→ →(N개)]  ▶상품명  ▶바코드
    · 한 괄호에 로케이션 여러개(같은 바코드)도 처리
@@ -813,17 +833,18 @@ function parseItems(text){
   for (var t=0;t<tokens.length;t++){
     var tok = tokens[t];
     if (tok.charAt(0) === '['){
-      var mb = tok.match(/^\[([^\]]*)\]/);   // 첫 괄호만
+      var mb = tok.match(/^\[([^\]]*)\]/);   // 첫 괄호만 (줄바꿈 포함 가능)
       if (mb){
-        // PDF 텍스트 추출 시 긴 ▶[…] 내용이 여러 줄로 끊기면 둘째 이후 로케이션의
-        // 이름·수량이 줄바꿈으로 쪼개져 누락/깨짐 → 괄호 안 공백·줄바꿈을 모두 제거해
-        // 한 줄로 복원한 뒤 콤마로 분리한다. (로케이션은 한 제품이 여러 로케이션에서
-        // 피킹될 수 있으므로 콤마로 나뉜 모든 짝을 같은 바코드로 전부 수집)
-        var inner = mb[1].replace(/\s+/g, '');
+        // 한 제품이 여러 로케이션에서 피킹될 수 있으므로 콤마로 나뉜 모든 짝을
+        // 같은 바코드로 전부 수집한다. 각 짝은 "로케이션 → →(N개)" 구조이며,
+        // 로케이션명은 줄바꿈으로 끼어든 이물 텍스트를 cleanLoc()로 제거해 복원.
         var pairs = [];
-        inner.split(',').forEach(function(seg){
-          var m = seg.match(/(.+?)→.*?\((\d+)개\)/);
-          if (m) pairs.push({ loc: m[1].trim(), qty: parseInt(m[2],10) });
+        mb[1].split(',').forEach(function(seg){
+          var ai = seg.indexOf('→');
+          var qm = seg.match(/\((\d+)개\)/);
+          if (ai < 0 || !qm) return;       // "로케이션→...(N개)" 구조가 아니면 건너뜀
+          var loc = cleanLoc(seg.slice(0, ai));
+          if (loc) pairs.push({ loc: loc, qty: parseInt(qm[1],10) });
         });
         if (pairs.length){ pending = pairs; prod = null; }
       }
@@ -1096,6 +1117,19 @@ function getDisplayAgg(){
   return pickAgg;
 }
 
+/* PDF 로케이션 p 안에 엑셀 로케이션 e가 "양끝 그대로, 가운데만 이물" 형태로
+   들어있는지 — 줄바꿈 이물 끼임(예: 나이키_신발●●●_P10_186)에도 견고하게 매칭.
+   e의 앞부분과 뒷부분이 p의 앞·뒤에 붙어 e 전체 길이를 덮으면 동일 로케이션으로 본다. */
+function locCovers(p, e){
+  p = String(p||''); e = String(e||'');
+  if (!p || !e) return false;
+  if (p === e) return true;
+  if (p.length < e.length) return false;
+  var a=0; while (a<e.length && p.charAt(a)===e.charAt(a)) a++;
+  var b=0; while (b<e.length && p.charAt(p.length-1-b)===e.charAt(e.length-1-b)) b++;
+  return a + b >= e.length;
+}
+
 function buildExcelAgg(){
   var pdfKeys = pickAgg.keys;                       // loc|bar -> {d,h}
   var byBar = {};
@@ -1115,12 +1149,20 @@ function buildExcelAgg(){
     if (pdfKeys[k] && !consumed[k]){ consumed[k]=true; add(r, pdfKeys[k].d, pdfKeys[k].h); }
     else pending.push(r);
   });
-  // 2차: 회전PDF로 로케이션이 깨진 행 — 바코드+접미사/수량으로 매칭
+  // 2차: 로케이션이 깨진(이물 끼임) 행 — 엑셀 로케이션이 PDF 로케이션 양끝에
+  //      그대로 들어있으면 동일 로케이션으로 보고 매칭. 깨진 키가 여러 개면 합산.
   pending.forEach(function(r){
     var cands = (byBar[r.bar]||[]).filter(function(k){ return !consumed[k]; });
+    var covered = cands.filter(function(k){ return locCovers(pdfKeys[k].loc, r.loc); });
+    if (covered.length){
+      var d=0, h=0;
+      covered.forEach(function(k){ consumed[k]=true; d+=pdfKeys[k].d; h+=pdfKeys[k].h; });
+      add(r, d, h); return;
+    }
+    // 차선: 부분 포함 / 수량 일치 / 첫 후보
     var pick = null, i;
     for (i=0;i<cands.length;i++){ var e=pdfKeys[cands[i]];
-      if (r.loc===e.loc || r.loc.indexOf(e.loc)>=0 || e.loc.indexOf(r.loc)>=0){ pick=cands[i]; break; } }
+      if (r.loc.indexOf(e.loc)>=0 || e.loc.indexOf(r.loc)>=0){ pick=cands[i]; break; } }
     if (!pick) for (i=0;i<cands.length;i++){ var e2=pdfKeys[cands[i]]; if ((e2.d+e2.h)===r.qty){ pick=cands[i]; break; } }
     if (!pick && cands.length) pick = cands[0];
     if (pick){ consumed[pick]=true; add(r, pdfKeys[pick].d, pdfKeys[pick].h); }
