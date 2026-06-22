@@ -815,10 +815,15 @@ function parseItems(text){
     if (tok.charAt(0) === '['){
       var mb = tok.match(/^\[([^\]]*)\]/);   // 첫 괄호만
       if (mb){
+        // PDF 텍스트 추출 시 긴 ▶[…] 내용이 여러 줄로 끊기면 둘째 이후 로케이션의
+        // 이름·수량이 줄바꿈으로 쪼개져 누락/깨짐 → 괄호 안 공백·줄바꿈을 모두 제거해
+        // 한 줄로 복원한 뒤 콤마로 분리한다. (로케이션은 한 제품이 여러 로케이션에서
+        // 피킹될 수 있으므로 콤마로 나뉜 모든 짝을 같은 바코드로 전부 수집)
+        var inner = mb[1].replace(/\s+/g, '');
         var pairs = [];
-        mb[1].split(',').forEach(function(seg){
+        inner.split(',').forEach(function(seg){
           var m = seg.match(/(.+?)→.*?\((\d+)개\)/);
-          if (m) pairs.push({ loc: m[1].replace(/\s+/g,'').trim(), qty: parseInt(m[2],10) });
+          if (m) pairs.push({ loc: m[1].trim(), qty: parseInt(m[2],10) });
         });
         if (pairs.length){ pending = pairs; prod = null; }
       }
