@@ -693,6 +693,7 @@
     <div class="summary" id="summary">업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.</div>
     <button class="btn" id="btnPrintInvoice" disabled title="booking_manifest 전체페이지 + supplier 홀수페이지 합본 (센터별 정렬)">📋 거래명세서인쇄</button>
     <button class="btn" id="btnPrint2" disabled title="A4 가로 한 장에 같은 페이지를 좌·우로 2번 인쇄">2부 인쇄 (가로 · 좌우 동일)</button>
+    <button class="btn" id="btnPrint2Seq" disabled title="A4 가로 · 앞 절반은 왼쪽, 뒤 절반은 오른쪽에 순차 배치 — 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 순서대로 정렬">순차적 2부 인쇄 (가로 · 좌우 순차)</button>
     <button class="btn btn-primary" id="btnPrint" disabled title="PDF 업로드 시 적재리스트+매칭 라벨 자동 통합">PDF 저장 / 인쇄 (1부)</button>
   </div>
 
@@ -1325,6 +1326,7 @@ function renderPreview(groups) {
     stage.innerHTML = '<div class="preview-empty">업로드된 적재리스트가 여기에 A4 페이지로 표시됩니다.</div>';
     document.getElementById("btnPrint").disabled = true;
     document.getElementById("btnPrint2").disabled = true;
+    document.getElementById("btnPrint2Seq").disabled = true;
     document.getElementById("summary").textContent = "업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.";
     return;
   }
@@ -1334,6 +1336,7 @@ function renderPreview(groups) {
     stage.innerHTML = '<div class="preview-empty" style="color:#dc2626;">① 업체 정보를 먼저 등록/선택하세요.</div>';
     document.getElementById("btnPrint").disabled = true;
     document.getElementById("btnPrint2").disabled = true;
+    document.getElementById("btnPrint2Seq").disabled = true;
     return;
   }
 
@@ -1410,6 +1413,7 @@ function renderPreview(groups) {
   stage.innerHTML = html;
   document.getElementById("btnPrint").disabled = false;
   document.getElementById("btnPrint2").disabled = false;
+  document.getElementById("btnPrint2Seq").disabled = false;
   document.getElementById("summary").innerHTML =
     `업체 <b>${escapeHtml(vendor.name)}</b> · 총 <b>${groups.length}</b>개 팔레트 · ` +
     `물류센터 <b>${[...new Set(groups.map(g=>g.center))].length}</b>곳 · ` +
@@ -2292,43 +2296,78 @@ async function buildIntegratedStage() {
 ========================================================= */
 let SNAPSHOT_HTML = null;   // 2부 모드 진입 전 미리보기 HTML 백업
 
-async function enterDuplexMode() {
+/* 2부 모드용 페이지 outerHTML 배열 수집 (통합 시퀀스 우선, 없으면 적재리스트 .page)
+   반환: 페이지 outerHTML 문자열 배열, 취소 시 null */
+async function collectDuplexPagesHTML() {
   const stage = document.getElementById("previewStage");
-  SNAPSHOT_HTML = stage.innerHTML;
-
-  // PDF가 업로드되어 있으면 통합 시퀀스(적재→라벨→적재→라벨)를 좌우로 복제
-  // 그렇지 않으면 기존처럼 적재리스트 .page만 좌우로 복제
   const hasLabels = pdfStore.download.length || pdfStore.truck.length;
 
   let pages;
   if (hasLabels && GROUPS.length) {
-    // 통합 시퀀스 임시 생성 → 그 안의 모든 페이지 노드를 가져와서 좌우 복제
     const built = await buildIntegratedStage();
-    if (TRUCK_CANCELLED) { SNAPSHOT_HTML = null; return false; }   // 취소 → 인쇄 중단
+    if (TRUCK_CANCELLED) return null;   // 취소 → 인쇄 중단
     if (built) {
       pages = [...document.querySelectorAll('#integratedStage > *')];
-      // 임시 사용 끝, 비워둠 (실제 통합 인쇄는 다른 버튼이 처리)
-      document.getElementById('integratedStage').innerHTML = '';
+      document.getElementById('integratedStage').innerHTML = '';   // 임시 사용 끝
     } else {
       pages = [...stage.querySelectorAll(".page")];
     }
   } else {
     pages = [...stage.querySelectorAll(".page")];
   }
-  if (!pages.length) return false;
+  return pages.map(p => p.outerHTML);
+}
 
-  stage.innerHTML = pages.map(p => {
-    const inner = p.outerHTML;
-    return `<div class="duplex-sheet"><div class="duplex-half">${inner}</div><div class="duplex-half">${inner}</div></div>`;
-  }).join("");
-
+function applyDuplexPrintStyle() {
   // 기본 @page(세로)를 가로로 오버라이드
   const s = document.createElement("style");
   s.id = "print2up-override";
   s.textContent = "@page { size: A4 landscape; margin: 0; }";
   document.head.appendChild(s);
-
   document.body.classList.add("print-2up");
+}
+
+// 좌우 동일본: 각 페이지를 한 장에 좌·우 2번
+async function enterDuplexMode() {
+  const stage = document.getElementById("previewStage");
+  SNAPSHOT_HTML = stage.innerHTML;
+
+  const pages = await collectDuplexPagesHTML();
+  if (pages === null) { SNAPSHOT_HTML = null; return false; }   // 취소
+  if (!pages.length) return false;
+
+  stage.innerHTML = pages.map(inner =>
+    `<div class="duplex-sheet"><div class="duplex-half">${inner}</div><div class="duplex-half">${inner}</div></div>`
+  ).join("");
+
+  applyDuplexPrintStyle();
+  return true;
+}
+
+// 순차 2부: 앞 절반은 왼쪽 칸에, 뒤 절반은 오른쪽 칸에 순서대로 배치
+// → 인쇄 후 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 1→N 순서로 정렬
+async function enterSequentialDuplexMode() {
+  const stage = document.getElementById("previewStage");
+  SNAPSHOT_HTML = stage.innerHTML;
+
+  const pages = await collectDuplexPagesHTML();
+  if (pages === null) { SNAPSHOT_HTML = null; return false; }   // 취소
+  if (!pages.length) return false;
+
+  // 전체 N페이지를 앞(왼쪽) / 뒤(오른쪽) 두 묶음으로 분할
+  // 홀수면 왼쪽 묶음이 1장 더 많고, 마지막 시트의 오른쪽 칸은 빈칸
+  const half = Math.ceil(pages.length / 2);
+  const blank = '<div class="page" style="visibility:hidden"></div>';
+
+  let html = "";
+  for (let i = 0; i < half; i++) {
+    const left = pages[i];
+    const right = pages[i + half] || blank;
+    html += `<div class="duplex-sheet"><div class="duplex-half">${left}</div><div class="duplex-half">${right}</div></div>`;
+  }
+  stage.innerHTML = html;
+
+  applyDuplexPrintStyle();
   return true;
 }
 
@@ -2343,6 +2382,8 @@ function exitDuplexMode() {
   // 인쇄 다이얼로그 닫혔을 때 버튼 다시 활성
   const b2 = document.getElementById("btnPrint2");
   if (b2) b2.disabled = !GROUPS.length;
+  const b2s = document.getElementById("btnPrint2Seq");
+  if (b2s) b2s.disabled = !GROUPS.length;
 }
 
 document.getElementById("btnPrint").addEventListener("click", async () => {
@@ -2390,6 +2431,24 @@ document.getElementById("btnPrint2").addEventListener("click", async () => {
   } catch (e) {
     console.error(e);
     setPdfStatus('2부 인쇄 준비 실패: ' + e.message, 'err');
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("btnPrint2Seq").addEventListener("click", async () => {
+  exitInvoiceMode();
+  exitIntegratedMode();
+  const btn = document.getElementById("btnPrint2Seq");
+  btn.disabled = true;
+  try {
+    const ok = await enterSequentialDuplexMode();
+    if (TRUCK_CANCELLED) { setPdfStatus('인쇄 취소됨 — 트럭 매칭을 확인 후 다시 인쇄하세요.', ''); btn.disabled = false; return; }
+    if (!ok) { btn.disabled = false; return; }
+    // 렌더 커밋 후 인쇄
+    setTimeout(() => window.print(), 100);
+  } catch (e) {
+    console.error(e);
+    setPdfStatus('순차적 2부 인쇄 준비 실패: ' + e.message, 'err');
     btn.disabled = false;
   }
 });
