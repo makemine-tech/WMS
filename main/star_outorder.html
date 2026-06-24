@@ -4366,24 +4366,20 @@ function cpBuildShipListGroups(){
     var pageKey = eta + '|' + ctr + '|' + pno;
     if (!byPage[pageKey]) byPage[pageKey] = {
       key: pageKey, eta:eta, center:ctr, palletNo:pno,
-      pos: {}, items: {}, totalQty:0, boxTotal:0
+      pos: {}, items: {}, totalQty:0, boxSet:{}
     };
     var pg = byPage[pageKey];
     if (r.po) pg.pos[r.po] = true;
-    /* 완료풀 데이터 기준 — 박스번호 없이도 동작.
-       줄(scan)마다의 박스수(s.boxCount)와 출고수량을 SKU(barcode) 단위로 합산.
-       박스수 미지정 줄은 완료풀에 보이는 값(파렛트 자동계산)과 동일하게 처리. */
+    /* 박스수 = 그 파렛트의 distinct 박스(박스번호/박스바코드) 개수.
+       ⚠ 줄(scan)마다 파렛트 박스수를 더하면 12×SKU수=228 처럼 폭증 → distinct 집계로 수정. */
     var bk = s.barcode || '';
     if (!pg.items[bk]) pg.items[bk] = {
-      barcode: bk, qty: 0, boxCount: 0, skuId: r.skuId||'', skuName: r.skuName||''
+      barcode: bk, qty: 0, boxSet: {}, skuId: r.skuId||'', skuName: r.skuName||''
     };
-    var lineBox = (s.boxCount !== undefined && s.boxCount !== null && s.boxCount !== '')
-      ? (+s.boxCount || 0)
-      : cpResolveBoxCountForPallet(eta, ctr, pno);
+    var boxId = s.shipBoxNo || s.srcBoxBarcode || '';
     pg.items[bk].qty += (+s.qty||0);
-    pg.items[bk].boxCount += lineBox;
+    if (boxId) { pg.items[bk].boxSet[boxId] = true; pg.boxSet[boxId] = true; }
     pg.totalQty += (+s.qty||0);
-    pg.boxTotal += lineBox;
   });
   /* 객체 → 배열 + 정렬 */
   var groups = Object.keys(byPage).map(function(k){
@@ -4400,16 +4396,18 @@ function cpBuildShipListGroups(){
         code: meta.code || '',
         size: meta.size || '',
         qty: it.qty,
-        boxCount: it.boxCount,
+        boxCount: Object.keys(it.boxSet||{}).length,   /* 이 SKU가 들어있는 distinct 박스 수 */
         expiry: '',
         status: ''
       };
     });
+    var gk = (g.eta||'') + '|' + (g.center||'');
+    var fixedTotal = (workSession.palletTotals||{})[gk];   /* 사용자가 고정 입력한 센터별 총 파렛트수 */
     return {
       key: g.key, eta: g.eta, center: g.center, palletNo: g.palletNo,
-      palletTotal: palCountByGrp[(g.eta||'')+'|'+(g.center||'')] || g.palletNo,
+      palletTotal: fixedTotal || palCountByGrp[gk] || g.palletNo,
       pos: Object.keys(g.pos),
-      boxSum: g.boxTotal,            /* 완료풀 박스수 합계 */
+      boxSum: cpResolveBoxCountForPallet(g.eta, g.center, g.palletNo),  /* 파렛트당 distinct 박스수 (override 반영) */
       totalQty: g.totalQty,
       skuCount: items.length,
       items: items
@@ -4459,7 +4457,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
       '<div class="rule-note">'+
         '<span><span class="rn-label">센터</span>'+escH(g.center||'-')+'</span>'+
         '<span class="rn-sep">·</span>'+
-        '<span><span class="rn-label">파렛</span>'+(g.palletNo||1)+' / '+(g.palletTotal||g.palletNo||1)+'</span>'+
+        '<span><span class="rn-label">파렛</span>'+(g.palletTotal||g.palletNo||1)+'-'+(g.palletNo||1)+'</span>'+
         '<span class="rn-sep">·</span>'+
         '<span><span class="rn-label">박스</span>'+(g.boxSum||0)+'</span>'+
       '</div>'+
@@ -4476,7 +4474,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
       '<tr><th>요청 ID (발주번호)</th><td>'+escH(posStr)+'</td></tr>'+
       '<tr><th>물류센터</th><td class="val-accent">'+escH(g.center||'-')+'</td></tr>'+
       '<tr><th>물류센터 도착예정일</th><td class="val-accent">'+escH(g.eta||'-')+'</td></tr>'+
-      '<tr><th>파렛트번호</th><td class="val-accent">'+(g.palletNo||1)+' / '+(g.palletTotal||g.palletNo||1)+'</td></tr>'+
+      '<tr><th>파렛트번호</th><td class="val-accent">'+(g.palletTotal||g.palletNo||1)+'-'+(g.palletNo||1)+'</td></tr>'+
       '<tr><th>총 박스수</th><td class="val-accent">'+(g.boxSum||0)+'</td></tr>'+
     '</tbody></table>'+
 
@@ -4547,6 +4545,42 @@ function cpFitShipPageToA4(pageEl){
 /* 인쇄 트리거 — 항상 1부 A4 세로 (사장님이 프린터에서 부수 설정) */
 function cpPrintShipList(){
   if (!workSession) { cpFlash('warn','⚠️ 세션 없음'); return; }
+
+  /* ── 센터별 총 파렛트수 입력 (고정) — 파렛트번호를 '총수-순번'(예: 42-1) 으로 표기 ── */
+  var seenC = {}, centers = [];
+  (workSession.scans||[]).forEach(function(s){
+    if (s.undone) return;
+    var r = (workSession.rows||[])[s.srcIdx] || {};
+    var eta = s.palletEta || r.eta || '';
+    var ctr = s.palletCenter || r.center || '';
+    var key = eta + '|' + ctr;
+    if (!seenC[key]) {
+      seenC[key] = true;
+      /* 그 센터에서 실제 작업된 최대 파렛트번호 (프롬프트 기본값) */
+      var maxNo = 1;
+      (workSession.scans||[]).forEach(function(s2){
+        if (s2.undone) return;
+        var r2 = (workSession.rows||[])[s2.srcIdx] || {};
+        var e2 = s2.palletEta || r2.eta || '', c2 = s2.palletCenter || r2.center || '';
+        if (e2+'|'+c2 === key) maxNo = Math.max(maxNo, +s2.palletNo || 1);
+      });
+      centers.push({ eta:eta, center:ctr, key:key, maxNo:maxNo });
+    }
+  });
+  var totals = Object.assign({}, workSession.palletTotals || {});
+  for (var ci=0; ci<centers.length; ci++) {
+    var c = centers[ci];
+    var def = totals[c.key] || c.maxNo;
+    var ans = window.prompt('['+(c.center||'?')+'] 총 파렛트 수를 입력하세요.\n예) 42 입력 → 파렛트번호가 42-1, 42-2 … 42-42 로 표기됩니다.\n(현재 작업된 파렛트: '+c.maxNo+'개)', def);
+    if (ans === null) { cpFlash('warn','취소됨 — 적재리스트 인쇄 안 함'); return; }
+    var n = parseInt(ans, 10);
+    if (isNaN(n) || n < 1) { cpFlash('warn','⚠️ 1 이상의 숫자를 입력하세요'); return; }
+    if (n < c.maxNo) { cpFlash('warn','⚠️ 작업된 파렛트('+c.maxNo+')보다 작게 넣을 수 없습니다'); return; }
+    totals[c.key] = n;
+  }
+  workSession.palletTotals = totals;
+  if (workSessionRef) workSessionRef.update({ palletTotals: totals, updatedAt: Date.now() });
+
   var groups = cpBuildShipListGroups();
   if (!groups.length) { cpFlash('warn','⚠️ 적재된 데이터가 없습니다'); return; }
 
