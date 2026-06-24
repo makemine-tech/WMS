@@ -3737,6 +3737,30 @@ function cpCenterAbbr(center){
   return s.charAt(0) + (m ? m[1] : '');
 }
 
+/* 스캔한(원본) 바코드 → 그 상품의 PO 대체바코드(F열) 찾기.
+ * srcIdx 연결이 없는 인쇄 경로(덧방·박스스캔·모아뽑기)에서도 F열 대체바코드를 쓰도록,
+ * 현재 PO(세션 rows + 업로드 rows)에서 원본바코드(완전일치 또는 숫자코어 일치)로 역추적. */
+function cpResolveAltBarcode(bc){
+  bc = normBarcode(bc);
+  if (!bc) return '';
+  var core = barcodeCore(bc);
+  var pools = [];
+  if (workSession && workSession.rows) pools.push(workSession.rows);
+  if (cpState && cpState.rows) pools.push(cpState.rows);
+  for (var p=0; p<pools.length; p++){
+    var rows = pools[p];
+    for (var i=0; i<rows.length; i++){
+      var row = rows[i] || {};
+      var poBc = normBarcode(row.poBarcode || row.barcode);
+      if (!poBc) continue;
+      if (poBc === bc || (core && barcodeCore(poBc) === core)) {
+        var alt = (row.poAltBarcode || row.altBarcode || '').trim();
+        if (alt) return alt;
+      }
+    }
+  }
+  return '';
+}
 /* 라벨 HTML 배열 생성 — items: [{barcode, qty, srcIdx}, ...] (인쇄 함수들이 공유) */
 function cpBuildProdLabels(items){
   var rows = (workSession && workSession.rows) || [];
@@ -3755,8 +3779,8 @@ function cpBuildProdLabels(items){
     /* ⚠ 중요 — 출고 라벨 바코드 결정:
      * stockMeta.altBarcode 가 있으면 그 alt 로 인쇄해야 함 (잘못 인쇄 시 전량 회수).
      * 비어있으면 원바코드 사용. 사장님 정책: '공란은 원바코드를 alt 로 그대로'.
-     * 우선순위: PO F열 대체바코드 > 재고 메타 altBarcode > 원바코드. */
-    var altBc = (r.poAltBarcode || '').trim() || (meta.altBarcode || '').trim();
+     * 우선순위: PO F열 대체바코드(직접 연결 > 바코드 역추적) > 재고 메타 altBarcode > 원바코드. */
+    var altBc = (r.poAltBarcode || '').trim() || cpResolveAltBarcode(origBc) || (meta.altBarcode || '').trim();
     var labelBc = altBc || origBc;
     var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(origBc));
     var qty = +it.qty || 1;
