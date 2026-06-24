@@ -1809,13 +1809,29 @@ function cpHandleExcel(file){
       var rows = aoa.slice(1)
         .filter(function(r){ return r && r.some(function(c){ return c !== '' && c !== null; }); })
         .map(function(r){
+          var _bc = String(r[idx.barcode]||'').trim();
+          /* 대체바코드 결정:
+           * ① '대체바코드' 헤더 열이 있으면 그 값
+           * ② 없으면 — 행의 모든 열을 훑어 "원본과 숫자코어는 같은데 값은 다른"(=앞뒤 알파벳 래핑) 셀을 자동 채택.
+           *    헤더 이름·열 위치에 의존하지 않고 F열이든 어디든 잡음. */
+          var _alt = idx.altBarcode !== -1 ? String(r[idx.altBarcode]||'').trim() : '';
+          if (!_alt) {
+            var _oc = barcodeCore(_bc);
+            if (_oc) {
+              for (var _ci=0; _ci<r.length; _ci++){
+                var _cv = String(r[_ci]==null?'':r[_ci]).trim();
+                /* 대체바코드는 '원본 숫자 + 알파벳 래핑' → 알파벳이 들어있는 값만 채택 */
+                if (_cv && normBarcode(_cv) !== normBarcode(_bc) && barcodeCore(_cv) === _oc && /[A-Za-z]/.test(_cv)) { _alt = _cv; break; }
+              }
+            }
+          }
           return {
             po:       String(r[idx.po] || '').trim(),
             status:   idx.status !== -1 ? String(r[idx.status]||'').trim() : '',
             skuId:    String(r[idx.skuId]||'').trim(),
             skuName:  String(r[idx.skuName]||'').trim(),
-            barcode:  String(r[idx.barcode]||'').trim(),
-            altBarcode: idx.altBarcode !== -1 ? String(r[idx.altBarcode]||'').trim() : '',
+            barcode:  _bc,
+            altBarcode: _alt,
             center:   String(r[idx.center]||'').trim(),
             eta:      cpFmtEta(r[idx.eta]),
             qty:      +r[idx.qty] || 0,
