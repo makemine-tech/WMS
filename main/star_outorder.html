@@ -1734,7 +1734,8 @@ var CP_HEADER_ALIASES = {
   status:   ['발주현황'],
   skuId:    ['SKU ID', 'SKU'],
   skuName:  ['SKU 이름', 'SKU명', '상품명'],
-  barcode:  ['SKU Barcode', '바코드'],
+  barcode:  ['SKU Barcode', '바코드', '원본바코드', '원바코드'],
+  altBarcode: ['대체바코드', '대체 바코드', '출력바코드', '출고바코드', '대비바코드'],
   center:   ['물류센터'],
   eta:      ['입고예정일', '도착예정일', '입고일'],
   qty:      ['확정수량', '수량'],
@@ -1814,6 +1815,7 @@ function cpHandleExcel(file){
             skuId:    String(r[idx.skuId]||'').trim(),
             skuName:  String(r[idx.skuName]||'').trim(),
             barcode:  String(r[idx.barcode]||'').trim(),
+            altBarcode: idx.altBarcode !== -1 ? String(r[idx.altBarcode]||'').trim() : '',
             center:   String(r[idx.center]||'').trim(),
             eta:      cpFmtEta(r[idx.eta]),
             qty:      +r[idx.qty] || 0,
@@ -2263,7 +2265,8 @@ function cpCheckAltBarcodes(){
     if (!stockMeta[srcBc] && stockByCore[barcodeCore(bc)]) srcBc = stockByCore[barcodeCore(bc)];
     var meta = stockMeta[srcBc];
     if (!meta) { notFound.push({i:i, bc:r.barcode}); return; }
-    var alt = (meta.altBarcode||'').trim();
+    /* 우선순위: PO F열 대체바코드 > 재고 메타 altBarcode */
+    var alt = (r.altBarcode||'').trim() || (meta.altBarcode||'').trim();
     if (alt && normBarcode(alt) !== normBarcode(srcBc)) {
       withAlt.push({i:i, po:r.barcode, src:srcBc, alt:alt, name:r.skuName||meta.name||''});
     } else {
@@ -2327,6 +2330,7 @@ function cpStartScan(){
         srcIdx: i,
         po: r.po, skuId: r.skuId, skuName: r.skuName,
         poBarcode: r.barcode, srcBarcode: m.matchedBc,
+        poAltBarcode: r.altBarcode || '',   /* PO F열 대체바코드 — 라벨 출력용 */
         center: r.center, eta: r.eta,
         qty: r.qty,                  /* PO 요청 수량 */
         canShip: m.canShip,          /* 실제 출고가능 (fit=qty, asIs=have 만큼) */
@@ -2525,7 +2529,7 @@ function cpEndScan(){
   var orderItems = scans.map(function(s){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
-    var altBc = (meta.altBarcode||'').trim();
+    var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
     return {
       shipBoxNo: s.shipBoxNo || '',
       srcBoxBarcode: s.srcBoxBarcode || s.boxBarcode || '',
@@ -3750,8 +3754,9 @@ function cpBuildProdLabels(items){
     var origBc = it.barcode || '';
     /* ⚠ 중요 — 출고 라벨 바코드 결정:
      * stockMeta.altBarcode 가 있으면 그 alt 로 인쇄해야 함 (잘못 인쇄 시 전량 회수).
-     * 비어있으면 원바코드 사용. 사장님 정책: '공란은 원바코드를 alt 로 그대로'. */
-    var altBc = (meta.altBarcode || '').trim();
+     * 비어있으면 원바코드 사용. 사장님 정책: '공란은 원바코드를 alt 로 그대로'.
+     * 우선순위: PO F열 대체바코드 > 재고 메타 altBarcode > 원바코드. */
+    var altBc = (r.poAltBarcode || '').trim() || (meta.altBarcode || '').trim();
     var labelBc = altBc || origBc;
     var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(origBc));
     var qty = +it.qty || 1;
@@ -4154,7 +4159,7 @@ function cpRefreshDonePool(){
           '<td class="c-box grp-cell" rowspan="'+rowSpan+'" style="color:var(--mu)">' + escH(srcBcLabel) + '</td>';
       }
       /* 대체바코드 셀 — alt 있으면 보라색 강조, 없으면 회색 '-' */
-      var altBc = (meta.altBarcode||'').trim();
+      var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
       var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(s.barcode));
       var altHtml = hasAlt
         ? '<span style="color:var(--p);font-weight:900" title="라벨 인쇄 시 사용: '+escH(altBc)+'">'+escH(altBc)+'</span>'
@@ -4230,7 +4235,7 @@ function cpBuildMixLabelHtmlForBox(boxLabel, items, vendor, center){
       var qtySum = byBc[k].qty;
       var r = rows[it.srcIdx] || {};
       var meta = stockMeta[normBarcode(it.barcode)] || {};
-      var altBc = (meta.altBarcode||'').trim();
+      var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
       var labelBc = altBc || it.barcode;
       var codeOrId = meta.code || r.skuId || '-';
       return '<tr>'+
@@ -4556,7 +4561,7 @@ function cpDownloadDoneExcel(){
     var meta = stockMeta[normBarcode(s.barcode)] || {};
     var prog = progCache[s.srcIdx] || {shipped:0};
     var need = +r.qty || 0;
-    var altBc = (meta.altBarcode||'').trim();
+    var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
     var altCol = (altBc && normBarcode(altBc) !== normBarcode(s.barcode||'')) ? altBc : '';
     doneAoa.push([
       s.shipBoxNo || s.srcBoxBarcode || '',
