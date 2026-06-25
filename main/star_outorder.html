@@ -380,8 +380,13 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 
 /* ─── 큰 디스플레이 카드 (Step 2-CD 화면 재설계) ─── */
 /* 60% 좌(디스플레이) / 40% 우(파렛트 트래커) */
-.cp-stage{display:grid;grid-template-columns:5fr 3fr 4fr;gap:1rem;margin-top:.85rem}
-@media(max-width:1200px){.cp-stage{grid-template-columns:1fr 1fr;grid-auto-flow:row dense}.cp-stage .cp-status{grid-column:1 / -1;order:-1}}
+.cp-stage{display:grid;grid-template-columns:var(--c1,5fr) 8px var(--c2,3fr) 8px var(--c3,4fr);gap:.65rem;margin-top:.85rem;align-items:stretch}
+/* 드래그 분할바 — 좌/중/우 폭 조절 (더블클릭 초기화) */
+.cp-gutter{align-self:stretch;min-width:8px;cursor:col-resize;border-radius:6px;background:rgba(124,131,153,.16);display:flex;align-items:center;justify-content:center;transition:background .12s;touch-action:none}
+.cp-gutter::before{content:'';width:3px;height:48px;border-radius:3px;background:rgba(255,255,255,.34)}
+.cp-gutter:hover,.cp-gutter.dragging{background:rgba(91,156,246,.45)}
+.cp-gutter:hover::before,.cp-gutter.dragging::before{background:#fff}
+@media(max-width:1200px){.cp-stage{grid-template-columns:1fr 1fr;grid-auto-flow:row dense}.cp-stage .cp-gutter{display:none}.cp-stage .cp-status{grid-column:1 / -1;order:-1}}
 @media(max-width:980px){.cp-stage{grid-template-columns:1fr}}
 .cp-display{background:linear-gradient(135deg,#1d2533,#161b26);border:2px solid var(--br);border-radius:14px;padding:1.5rem 1.6rem;min-height:360px;display:flex;flex-direction:column;gap:.75rem;position:relative;overflow:hidden;transition:border-color .2s}
 .cp-display.active{border-color:var(--g);box-shadow:0 0 0 5px rgba(74,240,168,.06)}
@@ -1306,7 +1311,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       </div>
 
       <!-- 메인 스테이지: 좌(입고 대기 카드 — 옛 디스플레이 자리) + 우(파렛트 세로) -->
-      <div class="cp-stage">
+      <div class="cp-stage" id="cpStage">
         <!-- 좌: 입고 대기 패널 (구 cp-display 자리). 카드 없을 땐 빈 안내. -->
         <div class="cp-staging-panel" id="cpStagingPanel">
           <div class="cp-staging-title">
@@ -1324,11 +1329,13 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <div class="cp-staging-empty-big">📥 박스바코드 또는 상품바코드 스캔 대기 중...</div>
           </div>
         </div>
+        <div class="cp-gutter" data-left="0" title="드래그로 좌·중 폭 조절 · 더블클릭 시 기본 비율로 초기화"></div>
         <!-- 중: 스캔 상태 (출고/잔류/혼합/중복) — 멀리서도 보이게 흰 바탕 큰 글씨 -->
         <div class="cp-status idle" id="cpStatus">
           <div class="cp-status-word" id="cpStatusWord">대기</div>
           <div class="cp-status-sub" id="cpStatusSub">스캔을 기다리는 중…</div>
         </div>
+        <div class="cp-gutter" data-left="1" title="드래그로 중·우 폭 조절 · 더블클릭 시 기본 비율로 초기화"></div>
         <!-- 우: 파렛트 카드 (입고일+센터별 독립) -->
         <div class="cp-pallet">
           <div class="pl-hdr">🚛 현재 파렛트 — 입고일+센터별</div>
@@ -4190,6 +4197,67 @@ function cpShowStatus(kind, sub){
   /* 변화 인지용 짧은 펄스 — 재시작 강제 */
   box.classList.remove('flash'); void box.offsetWidth; box.classList.add('flash');
 }
+
+/* 입고대기 / 상태판 / 파렛트 3구역 좌우 폭 드래그 조절 (분할바). 비율은 localStorage 저장. */
+function cpInitStageResizers(){
+  var stage = document.getElementById('cpStage');
+  if (!stage || stage._resizersInit) return;
+  stage._resizersInit = true;
+  var DEF = [5,3,4];
+  var cols = DEF.slice();
+  try { var saved = JSON.parse(localStorage.getItem('cpStageCols')||'null');
+    if (Array.isArray(saved) && saved.length===3 && saved.every(function(n){return isFinite(n)&&n>0;})) cols = saved.map(Number);
+  } catch(e){}
+  function apply(){
+    stage.style.setProperty('--c1', cols[0]+'fr');
+    stage.style.setProperty('--c2', cols[1]+'fr');
+    stage.style.setProperty('--c3', cols[2]+'fr');
+  }
+  apply();
+  var guts = stage.querySelectorAll('.cp-gutter');
+  guts.forEach(function(g){
+    var li = +g.getAttribute('data-left') || 0;   /* 왼쪽 컬럼 인덱스 (0 또는 1) */
+    g.addEventListener('pointerdown', function(e){
+      e.preventDefault();
+      try { g.setPointerCapture(e.pointerId); } catch(_){}
+      var startX = e.clientX;
+      var frTotal = cols[0]+cols[1]+cols[2];
+      /* fr당 px — 실제 렌더된 3개 패널 폭 합 기준(분할바·gap 영향 제거, 커서와 1:1) */
+      var panels = stage.querySelectorAll(':scope > :not(.cp-gutter)');
+      var sumPx = 0; panels.forEach(function(p){ sumPx += p.offsetWidth; });
+      var pxPerFr = Math.max(1, sumPx / frTotal);
+      var sL = cols[li], sR = cols[li+1];
+      var minFr = frTotal * 0.10;   /* 한 칸 최소 10% */
+      g.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      function mv(ev){
+        var dFr = (ev.clientX - startX) / pxPerFr;
+        var nL = sL + dFr, nR = sR - dFr;
+        if (nL < minFr){ nR -= (minFr - nL); nL = minFr; }
+        if (nR < minFr){ nL -= (minFr - nR); nR = minFr; }
+        cols[li] = nL; cols[li+1] = nR; apply();
+      }
+      function up(){
+        g.removeEventListener('pointermove', mv);
+        g.removeEventListener('pointerup', up);
+        g.removeEventListener('pointercancel', up);
+        g.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        try { localStorage.setItem('cpStageCols', JSON.stringify(cols.map(function(v){return Math.round(v*1000)/1000;}))); } catch(_){}
+      }
+      g.addEventListener('pointermove', mv);
+      g.addEventListener('pointerup', up);
+      g.addEventListener('pointercancel', up);
+    });
+    g.addEventListener('dblclick', function(){
+      cols = DEF.slice(); apply();
+      try { localStorage.removeItem('cpStageCols'); } catch(_){}
+    });
+  });
+}
+if (document.readyState !== 'loading') cpInitStageResizers();
+else document.addEventListener('DOMContentLoaded', cpInitStageResizers);
+
 /* 짧은 부저음 — 상품모드 대기 추가용 (TTS 보다 훨씬 짧음) */
 var _cpAudioCtx = null;
 function cpBeep(){
