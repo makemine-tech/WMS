@@ -3337,6 +3337,43 @@ function cpFormatViolations(vs){
   }).join('<br>');
 }
 
+/* 한 바코드에 매칭되는 PO row 인덱스를 PO 순서대로 모두 반환.
+ * (같은 바코드가 여러 센터에 발주되면 row 가 여러 개 — 전부 모아 센터별 배분에 사용)
+ * 매칭 우선순위: 직접(srcBarcode/poBarcode) → alt(stockByAlt) → 숫자코어. 먼저 잡힌 단계만 사용.
+ * 반환 { idxs:[...], via:'direct'|'alt' } */
+function cpMatchingRowIdxs(bc){
+  var sessRows = (workSession && workSession.rows) || [];
+  var direct = [];
+  for (var i=0; i<sessRows.length; i++){
+    var r = sessRows[i];
+    if (normBarcode(r.srcBarcode) === bc || normBarcode(r.poBarcode) === bc) direct.push(i);
+  }
+  if (direct.length) return { idxs: direct, via: 'direct' };
+  if (stockByAlt[bc]) {
+    var src = stockByAlt[bc], alt = [];
+    for (var j=0; j<sessRows.length; j++){
+      if (normBarcode(sessRows[j].srcBarcode) === src) alt.push(j);
+    }
+    if (alt.length) return { idxs: alt, via: 'alt' };
+  }
+  var scCore = barcodeCore(bc), core = [];
+  if (scCore) {
+    for (var k=0; k<sessRows.length; k++){
+      if (barcodeCore(sessRows[k].srcBarcode) === scCore || barcodeCore(sessRows[k].poBarcode) === scCore) core.push(k);
+    }
+  }
+  return { idxs: core, via: 'alt' };
+}
+/* 특정 row(idx)의 잔여 = canShip(need) − 확정(shipped) − 현재 staging(매칭) − 이번 작업 예약분(reserve) */
+function cpRowRemaining(idx, reserve){
+  var prog = cpComputeRowProgress(idx);
+  var staged = ((workSession && workSession.staging) || []).reduce(function(s,x){
+    return s + ((!x.unmatched && x.srcIdx === idx) ? (+x.qty||0) : 0);
+  }, 0);
+  var res = (reserve && reserve[idx]) ? reserve[idx] : 0;
+  return Math.max(0, prog.need - prog.shipped - staged - res);
+}
+
 /* ── 박스 모드: 박스바코드 → 박스 안 SKU 처리
  *   - 단일·매칭 박스: 자동 적재 (같은 센터 open shipBox 에 묶거나 새로 생성)
  *   - 혼적·잔류 박스: 자동 적재 안 함, pending 으로 → [출고처리] 클릭 필요
@@ -3367,16 +3404,29 @@ function cpProcessBoxScan(raw){
   var sessRows = workSession.rows || [];
   var matchedItems = [];
   var unmatchedSku = [];
+  var reserve = {};   /* 이번 박스 내 idx별 누적 배분량 — 같은 row 중복 배분 방지 */
   Object.keys(contents).forEach(function(bc){
     var inQty = contents[bc] || 0;
     if (inQty <= 0) return;
-    var idx = -1;
-    for (var i=0; i<sessRows.length; i++){
-      var r = sessRows[i];
-      if (normBarcode(r.srcBarcode) === bc || normBarcode(r.poBarcode) === bc) { idx = i; break; }
+    var match = cpMatchingRowIdxs(bc);
+    if (!match.idxs.length) { unmatchedSku.push({bc:bc, qty:inQty}); return; }
+    /* 같은 바코드가 여러 센터에 발주된 경우 — PO 순서대로 각 센터 잔여(canShip)에 채워 분할 배분.
+     * 24개 박스가 인천28 12 / 이천4 12 처럼 센터별로 쪼개져 리스트업됨. */
+    var left = inQty;
+    match.idxs.forEach(function(idx){
+      if (left <= 0) return;
+      var cap = cpRowRemaining(idx, reserve);
+      if (cap <= 0) return;
+      var take = Math.min(left, cap);
+      matchedItems.push({ bc:bc, qty:take, srcIdx:idx, matchedVia:match.via });
+      reserve[idx] = (reserve[idx]||0) + take;
+      left -= take;
+    });
+    if (left > 0) {
+      /* 전 센터 발주수량 합을 초과하는 잔량 — 첫 센터에 초과분으로 적재(발주초과 배지로 경고). */
+      matchedItems.push({ bc:bc, qty:left, srcIdx:match.idxs[0], matchedVia:match.via });
+      reserve[match.idxs[0]] = (reserve[match.idxs[0]]||0) + left;
     }
-    if (idx < 0) { unmatchedSku.push({bc:bc, qty:inQty}); return; }
-    matchedItems.push({ bc:bc, qty:inQty, srcIdx:idx });
   });
 
   /* 박스 안에 SKU 가 하나도 없는 비정상 케이스 */
@@ -3512,48 +3562,40 @@ function cpProcessItemScan(raw){
   var bc = normBarcode(raw);
   if (!bc) return;
   var sessRows = workSession.rows || [];
-  var idx = -1, matchedVia = 'direct';
-  for (var i=0; i<sessRows.length; i++){
-    var r = sessRows[i];
-    if (normBarcode(r.srcBarcode) === bc) { idx = i; break; }
-    if (normBarcode(r.poBarcode) === bc) { idx = i; break; }
-  }
-  /* alt fallback */
-  if (idx < 0 && stockByAlt[bc]) {
-    var src = stockByAlt[bc];
-    for (var j=0; j<sessRows.length; j++){
-      if (normBarcode(sessRows[j].srcBarcode) === src) { idx = j; matchedVia = 'alt'; break; }
-    }
-  }
-  /* 숫자코어 fallback — 스캔한 대체바코드(앞뒤 알파벳)와 PO 원본바코드의 숫자가 같으면 매칭 */
-  if (idx < 0) {
-    var scCore = barcodeCore(bc);
-    if (scCore) {
-      for (var k=0; k<sessRows.length; k++){
-        if (barcodeCore(sessRows[k].srcBarcode) === scCore || barcodeCore(sessRows[k].poBarcode) === scCore) {
-          idx = k; matchedVia = 'alt'; break;
-        }
-      }
-    }
-  }
-  if (idx < 0) {
+  var match = cpMatchingRowIdxs(bc);
+  var matchedVia = match.via;
+  if (!match.idxs.length) {
     cpFlash('er','❌ <b>PO 에 없는 바코드</b>: '+escH(raw)+'<span class="sub">이 바코드는 현재 출고 대상에 없습니다.</span>');
     cpSpeak('오류');
     cpShowStatus('error', '바코드 '+raw+' — 출고 대상 아님');
     return;
   }
+  /* 같은 바코드가 여러 센터에 발주된 경우 — PO 순서대로 '잔여가 남은 첫 센터'에 +1.
+   * 한 센터가 다 차면 자동으로 다음 센터로 넘어간다. 모든 센터가 충족돼야 초과. */
+  var idx = -1;
+  for (var ci=0; ci<match.idxs.length; ci++){
+    if (cpRowRemaining(match.idxs[ci]) >= 1) { idx = match.idxs[ci]; break; }
+  }
+  if (idx < 0) {
+    /* 매칭되는 전(全) 센터 발주수량 충족 — 더 받을 곳 없음 */
+    var totNeed = 0, totHave = 0, ctrList = [];
+    match.idxs.forEach(function(ii){
+      var p = cpComputeRowProgress(ii);
+      var st = (workSession.staging||[]).reduce(function(s,x){return s+((!x.unmatched&&x.srcIdx===ii)?(+x.qty||0):0);},0);
+      totNeed += p.need; totHave += (p.shipped+st);
+      var c=(sessRows[ii]||{}).center; if(c) ctrList.push(c);
+    });
+    var nm0 = (sessRows[match.idxs[0]]||{}).skuName || raw;
+    cpFlash('er','❌ <b>발주수량 초과 차단</b><span class="sub">'+escH(nm0)+' — 전 센터('+escH(ctrList.join(', '))+') 발주 '+totNeed+' 모두 충족 (현재 '+totHave+')</span>');
+    cpSpeak('초과');
+    cpShowStatus('over', nm0+' — 전 센터('+ctrList.join(',')+') 발주 '+totNeed+' 충족');
+    return;
+  }
   var row = sessRows[idx];
-  /* 발주수량 초과 검사 — scans + staging 합도 같이 확인 */
   var prog = cpComputeRowProgress(idx);
   var stageAddForSrc = (workSession.staging || []).filter(function(x){
     return !x.unmatched && x.srcIdx === idx;
   }).reduce(function(s,x){return s+(+x.qty||0);},0);
-  if (prog.shipped + stageAddForSrc + 1 > prog.need) {
-    cpFlash('er','❌ <b>발주수량 초과 차단</b><span class="sub">'+escH(row.skuName||'')+' — 필요 '+prog.need+', 현재 입고+대기 '+(prog.shipped+stageAddForSrc)+'</span>');
-    cpSpeak('초과');
-    cpShowStatus('over', (row.skuName||row.poBarcode||'')+' — 필요 '+prog.need+' 초과');
-    return;
-  }
   /* staging 에 같은 srcIdx 항목 있으면 qty +1, 없으면 새로 — 상품 모드 카드 하나에 누적 */
   var sg = (workSession.staging || []).slice();
   var foundIdx = -1;
@@ -5926,7 +5968,9 @@ function cpStagingCommitItems(items, onDone){
       });
       return;
     }
-    /* 박스 모드 — 박스 단위 묶음. 단일 센터면 boxId 그대로, 혼적이면 센터-NNN */
+    /* 박스 모드 — 단일 센터면 원본 boxId 를 출고박스로 그대로 사용.
+     * 다중 센터(같은/다른 바코드가 여러 센터로 분할)면 각 센터별 출고박스로 라우팅 —
+     * 그래야 분할된 물량(예: 인천28 12 / 이천4 12)이 각자 센터 박스로 들어감. */
     var boxId = first.srcBoxBarcode;
     var centerSet = {};
     batch.forEach(function(it){
@@ -5934,17 +5978,14 @@ function cpStagingCommitItems(items, onDone){
       if (ctr) centerSet[ctr] = true;
     });
     var isMix = Object.keys(centerSet).length > 1;
-    var firstCenter = (sessRows[first.srcIdx]||{}).center || '';
-    var firstEta = (sessRows[first.srcIdx]||{}).eta || '';
-    var shipBoxNo;
-    if (isMix) {
-      shipBoxNo = cpEnsureShipBox(firstCenter, firstEta);
-    } else {
-      shipBoxNo = boxId;
-      cpRegisterShipBox(shipBoxNo, firstCenter, firstEta);
+    if (!isMix) {
+      var firstCenter = (sessRows[first.srcIdx]||{}).center || '';
+      var firstEta = (sessRows[first.srcIdx]||{}).eta || '';
+      cpRegisterShipBox(boxId, firstCenter, firstEta);
     }
     batch.forEach(function(it){
       var r = sessRows[it.srcIdx] || {};
+      var shipBoxNo = isMix ? cpEnsureShipBox(r.center || '', r.eta || '') : boxId;
       newScans.push({
         ts: Date.now(), by: getUserId(),
         type: 'box', input: boxId,
