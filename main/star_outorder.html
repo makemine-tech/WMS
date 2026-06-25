@@ -3337,32 +3337,54 @@ function cpFormatViolations(vs){
   }).join('<br>');
 }
 
-/* 한 바코드에 매칭되는 PO row 인덱스를 PO 순서대로 모두 반환.
- * (같은 바코드가 여러 센터에 발주되면 row 가 여러 개 — 전부 모아 센터별 배분에 사용)
+/* 센터별 전체 발주수량(canShip 합) 맵 — '소량 출고지 우선' 정렬 기준 */
+function cpCenterTotals(){
+  var sessRows = (workSession && workSession.rows) || [];
+  var tot = {};
+  sessRows.forEach(function(r){
+    var c = r.center || '';
+    tot[c] = (tot[c]||0) + (+r.canShip || 0);
+  });
+  return tot;
+}
+/* 한 바코드에 매칭되는 PO row 인덱스를 모두 반환 (같은 바코드가 여러 센터면 row 여러 개).
  * 매칭 우선순위: 직접(srcBarcode/poBarcode) → alt(stockByAlt) → 숫자코어. 먼저 잡힌 단계만 사용.
+ * 배분 순서: '소량 출고지 우선' — 센터 전체 발주수량(canShip 합) 오름차순.
+ *   (전체 출고가 적은 센터를 먼저 클리어. 대량 센터는 어차피 지속 출고하므로 후순위.)
+ *   동률이면 PO 등록 순서 유지.
  * 반환 { idxs:[...], via:'direct'|'alt' } */
 function cpMatchingRowIdxs(bc){
   var sessRows = (workSession && workSession.rows) || [];
-  var direct = [];
+  var idxs = [], via = 'direct';
   for (var i=0; i<sessRows.length; i++){
     var r = sessRows[i];
-    if (normBarcode(r.srcBarcode) === bc || normBarcode(r.poBarcode) === bc) direct.push(i);
+    if (normBarcode(r.srcBarcode) === bc || normBarcode(r.poBarcode) === bc) idxs.push(i);
   }
-  if (direct.length) return { idxs: direct, via: 'direct' };
-  if (stockByAlt[bc]) {
-    var src = stockByAlt[bc], alt = [];
+  if (!idxs.length && stockByAlt[bc]) {
+    var src = stockByAlt[bc];
     for (var j=0; j<sessRows.length; j++){
-      if (normBarcode(sessRows[j].srcBarcode) === src) alt.push(j);
+      if (normBarcode(sessRows[j].srcBarcode) === src) idxs.push(j);
     }
-    if (alt.length) return { idxs: alt, via: 'alt' };
+    if (idxs.length) via = 'alt';
   }
-  var scCore = barcodeCore(bc), core = [];
-  if (scCore) {
-    for (var k=0; k<sessRows.length; k++){
-      if (barcodeCore(sessRows[k].srcBarcode) === scCore || barcodeCore(sessRows[k].poBarcode) === scCore) core.push(k);
+  if (!idxs.length) {
+    var scCore = barcodeCore(bc);
+    if (scCore) {
+      for (var k=0; k<sessRows.length; k++){
+        if (barcodeCore(sessRows[k].srcBarcode) === scCore || barcodeCore(sessRows[k].poBarcode) === scCore) idxs.push(k);
+      }
     }
+    if (idxs.length) via = 'alt';
   }
-  return { idxs: core, via: 'alt' };
+  if (idxs.length > 1) {
+    var tot = cpCenterTotals();
+    idxs.sort(function(a,b){
+      var ta = tot[(sessRows[a]||{}).center||''] || 0;
+      var tb = tot[(sessRows[b]||{}).center||''] || 0;
+      return (ta - tb) || (a - b);   /* 소량 센터 우선, 동률이면 PO 순서 */
+    });
+  }
+  return { idxs: idxs, via: via };
 }
 /* 특정 row(idx)의 잔여 = canShip(need) − 확정(shipped) − 현재 staging(매칭) − 이번 작업 예약분(reserve) */
 function cpRowRemaining(idx, reserve){
