@@ -717,10 +717,9 @@
   <!-- ===================== 액션 바 ===================== -->
   <div class="action-bar">
     <div class="summary" id="summary">업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.</div>
-    <button class="btn" id="btnPrintInvoice" disabled title="booking_manifest 전체페이지 + supplier 홀수페이지 합본 (센터별 정렬)">📋 거래명세서인쇄</button>
-    <button class="btn" id="btnPrintWorkorder" disabled title="업로드된 적재리스트로 개괄 작업지시서(쿠팡 출고 체크리스트) 인쇄 — 입고처·주소·입고예약시각·상품별 파렛트수·비고·소비기한·수량">📝 작업지시서인쇄</button>
-    <button class="btn" id="btnPrint2" disabled title="A4 가로 한 장에 같은 페이지를 좌·우로 2번 인쇄">2부 인쇄 (가로 · 좌우 동일)</button>
-    <button class="btn" id="btnPrint2Seq" disabled title="A4 가로 · 각 서류 2부씩 [1,1,2,2,…] 순차 배치 (앞 절반 좌측·뒤 절반 우측) — 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 파렛트당 2부가 연속 정렬">순차적 2부 인쇄 (가로 · 좌우 순차)</button>
+    <button class="btn" id="btnPrintWorkInvoice" disabled title="작업지시서(쿠팡 출고 체크리스트) 1장을 먼저 인쇄하고, 이어서 거래명세서가 순차로 인쇄됩니다">📝 작업지시서·거래명세서 인쇄</button>
+    <button class="btn" id="btnPrintInvoice" disabled title="booking_manifest 전체페이지 + supplier 홀수페이지 합본 (센터별 정렬, 벡터 그대로)">📋 거래명세서 인쇄</button>
+    <button class="btn" id="btnPrintListLabel" disabled title="A4 가로 한 장에 좌=적재리스트, 우=짝이 되는 라벨(밀크런/쉽먼트)을 나란히 배치 — 자르지 않고 그대로 파렛트에 부착">📦 적재및라벨인쇄</button>
     <button class="btn btn-primary" id="btnPrint" disabled title="PDF 업로드 시 적재리스트+매칭 라벨 자동 통합">PDF 저장 / 인쇄 (1부)</button>
   </div>
 
@@ -1351,14 +1350,11 @@ function fitPagesToA4() {
 function renderPreview(groups) {
   const stage = document.getElementById("previewStage");
   stage.innerHTML = "";
-  // 작업지시서는 업체정보와 무관하게 적재리스트(엑셀)만 있으면 인쇄 가능
-  const woBtn = document.getElementById("btnPrintWorkorder");
-  if (woBtn) woBtn.disabled = !groups.length;
   if (!groups.length) {
     stage.innerHTML = '<div class="preview-empty">업로드된 적재리스트가 여기에 A4 페이지로 표시됩니다.</div>';
     document.getElementById("btnPrint").disabled = true;
-    document.getElementById("btnPrint2").disabled = true;
-    document.getElementById("btnPrint2Seq").disabled = true;
+    document.getElementById("btnPrintListLabel").disabled = true;
+    updatePrintButtonsState();   // 작업지시서·거래명세서 버튼은 PDF/엑셀 유무로 갱신
     document.getElementById("summary").textContent = "업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.";
     return;
   }
@@ -1367,8 +1363,8 @@ function renderPreview(groups) {
   if (!vendor.name || !vendor.code) {
     stage.innerHTML = '<div class="preview-empty" style="color:#dc2626;">① 업체 정보를 먼저 등록/선택하세요.</div>';
     document.getElementById("btnPrint").disabled = true;
-    document.getElementById("btnPrint2").disabled = true;
-    document.getElementById("btnPrint2Seq").disabled = true;
+    document.getElementById("btnPrintListLabel").disabled = true;
+    updatePrintButtonsState();   // 작업지시서는 업체정보 없이도 가능하므로 GROUPS 기준 갱신
     return;
   }
 
@@ -1444,8 +1440,8 @@ function renderPreview(groups) {
 
   stage.innerHTML = html;
   document.getElementById("btnPrint").disabled = false;
-  document.getElementById("btnPrint2").disabled = false;
-  document.getElementById("btnPrint2Seq").disabled = false;
+  document.getElementById("btnPrintListLabel").disabled = false;
+  updatePrintButtonsState();   // 작업지시서·거래명세서 버튼 갱신
   document.getElementById("summary").innerHTML =
     `업체 <b>${escapeHtml(vendor.name)}</b> · 총 <b>${groups.length}</b>개 팔레트 · ` +
     `물류센터 <b>${[...new Set(groups.map(g=>g.center))].length}</b>곳 · ` +
@@ -1804,7 +1800,10 @@ document.getElementById('pdfList').addEventListener('click', e => {
 function updatePrintButtonsState() {
   const hasInvoice = pdfStore.booking.length || pdfStore.supplier.length;
   const btnInvoice = document.getElementById('btnPrintInvoice');
-  btnInvoice.disabled = !hasInvoice;
+  if (btnInvoice) btnInvoice.disabled = !hasInvoice;
+  // 작업지시서·거래명세서: 작업지시서(엑셀) 또는 거래명세서(PDF) 중 하나라도 있으면 가능
+  const btnWI = document.getElementById('btnPrintWorkInvoice');
+  if (btnWI) btnWI.disabled = !(hasInvoice || GROUPS.length);
 }
 
 /* =========================================================
@@ -2453,38 +2452,58 @@ document.getElementById("btnPrint").addEventListener("click", async () => {
   window.print();
 });
 
-document.getElementById("btnPrint2").addEventListener("click", async () => {
-  exitInvoiceMode();
-  exitIntegratedMode();
-  const btn = document.getElementById("btnPrint2");
-  btn.disabled = true;
-  try {
-    const ok = await enterDuplexMode();
-    if (TRUCK_CANCELLED) { setPdfStatus('인쇄 취소됨 — 트럭 매칭을 확인 후 다시 인쇄하세요.', ''); btn.disabled = false; return; }
-    if (!ok) { btn.disabled = false; return; }
-    // 렌더 커밋 후 인쇄
-    setTimeout(() => window.print(), 100);
-  } catch (e) {
-    console.error(e);
-    setPdfStatus('2부 인쇄 준비 실패: ' + e.message, 'err');
-    btn.disabled = false;
+/* 적재및라벨인쇄 — A4 가로 한 장에 좌=적재리스트, 우=짝 라벨(밀크런/쉽먼트).
+   통합 페어링(buildIntegratedStage)이 만든 [리스트,라벨,…] 시퀀스를
+   파렛트별 좌·우 쌍으로 재배치(.duplex-sheet). 자르지 않고 그대로 부착. */
+async function enterListLabelMode() {
+  exitInvoiceMode(); exitWorkorderMode();
+  const built = await buildIntegratedStage();          // #integratedStage 채움 (트럭 모달 포함)
+  if (TRUCK_CANCELLED) return false;
+  const intg = document.getElementById('integratedStage');
+  let sheetsHtml = '';
+  if (!built || !intg.children.length) {
+    // 라벨이 없거나 통합 실패 → 적재리스트만 좌측에
+    const pages = [...document.querySelectorAll('#previewStage > .page')];
+    if (!pages.length) { setPdfStatus('인쇄할 적재리스트가 없습니다.', 'err'); return false; }
+    sheetsHtml = pages.map(p =>
+      `<div class="duplex-sheet"><div class="duplex-half">${p.outerHTML}</div><div class="duplex-half"></div></div>`).join('');
+  } else {
+    // 각 파렛트는 .page(적재리스트) 다음에 0~1개의 .pdf-page(라벨) → 쌍으로 묶음
+    const ch = [...intg.children];
+    const pairs = [];
+    for (let i = 0; i < ch.length; i++) {
+      const el = ch[i];
+      if (el.classList.contains('page')) {
+        let right = '';
+        if (ch[i + 1] && ch[i + 1].classList.contains('pdf-page')) { right = ch[i + 1].outerHTML; i++; }
+        pairs.push(`<div class="duplex-sheet"><div class="duplex-half">${el.outerHTML}</div><div class="duplex-half">${right}</div></div>`);
+      } else {
+        pairs.push(`<div class="duplex-sheet"><div class="duplex-half"></div><div class="duplex-half">${el.outerHTML}</div></div>`);
+      }
+    }
+    sheetsHtml = pairs.join('');
+    intg.innerHTML = '';   // 임시 사용 끝
   }
-});
+  const stage = document.getElementById("previewStage");
+  SNAPSHOT_HTML = stage.innerHTML;
+  stage.innerHTML = sheetsHtml;
+  applyDuplexPrintStyle();   // print-2up + @page landscape (exitDuplexMode 로 복원)
+  return true;
+}
 
-document.getElementById("btnPrint2Seq").addEventListener("click", async () => {
+document.getElementById("btnPrintListLabel").addEventListener("click", async () => {
   exitInvoiceMode();
   exitIntegratedMode();
-  const btn = document.getElementById("btnPrint2Seq");
+  const btn = document.getElementById("btnPrintListLabel");
   btn.disabled = true;
   try {
-    const ok = await enterSequentialDuplexMode();
+    const ok = await enterListLabelMode();
     if (TRUCK_CANCELLED) { setPdfStatus('인쇄 취소됨 — 트럭 매칭을 확인 후 다시 인쇄하세요.', ''); btn.disabled = false; return; }
     if (!ok) { btn.disabled = false; return; }
-    // 렌더 커밋 후 인쇄
     setTimeout(() => window.print(), 100);
   } catch (e) {
     console.error(e);
-    setPdfStatus('순차적 2부 인쇄 준비 실패: ' + e.message, 'err');
+    setPdfStatus('적재및라벨 인쇄 준비 실패: ' + e.message, 'err');
     btn.disabled = false;
   }
 });
@@ -2613,15 +2632,26 @@ function buildWorkOrderStage() {
   return entries.length;
 }
 
-function printWorkorder() {
+/* 작업지시서·거래명세서 순차 인쇄 — 작업지시서(HTML) 먼저, 닫으면 거래명세서(벡터 PDF) 이어서. */
+let PENDING_INVOICE_AFTER_WO = false;
+function printWorkAndInvoice() {
   exitDuplexMode(); exitInvoiceMode(); exitIntegratedMode();
+  const hasInvoice = pdfStore.booking.length || pdfStore.supplier.length;
   const n = buildWorkOrderStage();
-  if (!n) { setPdfStatus('작업지시서로 만들 적재리스트가 없습니다. 엑셀을 먼저 업로드하세요.', 'err'); return; }
+  if (!n) {
+    // 작업지시서(엑셀) 없음 → 거래명세서라도 인쇄
+    if (hasInvoice) { printInvoice(); }
+    else { setPdfStatus('인쇄할 작업지시서·거래명세서가 없습니다. 엑셀/PDF를 먼저 업로드하세요.', 'err'); }
+    return;
+  }
   let st = document.getElementById('wo-pagestyle');
   if (!st) { st = document.createElement('style'); st.id = 'wo-pagestyle'; document.head.appendChild(st); }
   st.textContent = '@media print { @page { size: A4 portrait; margin: 11mm 10mm; } }';
+  PENDING_INVOICE_AFTER_WO = !!hasInvoice;
   document.body.classList.add('print-workorder');
-  setPdfStatus(`작업지시서 ${n}개 입고처 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
+  setPdfStatus(hasInvoice
+    ? `작업지시서 ${n}개 입고처 인쇄 → 닫으면 이어서 거래명세서가 인쇄됩니다...`
+    : `작업지시서 ${n}개 입고처 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
   setTimeout(() => window.print(), 100);
 }
 function exitWorkorderMode() {
@@ -2629,7 +2659,7 @@ function exitWorkorderMode() {
   const st = document.getElementById('wo-pagestyle'); if (st) st.remove();
   const stage = document.getElementById('workorderStage'); if (stage) stage.innerHTML = '';
 }
-document.getElementById("btnPrintWorkorder").addEventListener("click", printWorkorder);
+document.getElementById("btnPrintWorkInvoice").addEventListener("click", printWorkAndInvoice);
 
 // 인쇄 대화상자 닫히면(저장/취소 무관) 원상 복구
 window.addEventListener("afterprint", () => {
@@ -2637,6 +2667,8 @@ window.addEventListener("afterprint", () => {
   exitInvoiceMode();
   exitIntegratedMode();
   exitWorkorderMode();
+  // 작업지시서 인쇄를 닫았으면 이어서 거래명세서 인쇄
+  if (PENDING_INVOICE_AFTER_WO) { PENDING_INVOICE_AFTER_WO = false; setTimeout(() => printInvoice(), 400); }
 });
 
 /* Import / Export 바인딩 */
