@@ -871,13 +871,18 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-box-head .mini:hover{background:rgba(255,255,255,.14);border-color:var(--mu)}
 .cp-staging-box-head .mini:active{transform:scale(.94)}
 .cp-staging-empty{color:var(--mu);font-size:.78rem;padding:.45rem .3rem;font-family:var(--mo)}
-/* 가장 최근 스캔 박스 — 강조 (현재 이것) */
-.cp-staging-box.current{box-shadow:0 0 0 3px rgba(74,240,168,.92),0 0 22px rgba(74,240,168,.30);animation:stgCurPulse .45s ease-out}
-@keyframes stgCurPulse{0%{box-shadow:0 0 0 8px rgba(74,240,168,.55),0 0 34px rgba(74,240,168,.55)}100%{box-shadow:0 0 0 3px rgba(74,240,168,.92),0 0 22px rgba(74,240,168,.30)}}
-.cp-staging-box-head .cur-badge{font-size:.62rem;font-weight:900;padding:.14rem .5rem;border-radius:4px;background:var(--g);color:#06160f;letter-spacing:.04em;font-family:var(--mo);line-height:1.3}
+/* 가장 최근 스캔 박스 — 보라 강조 (상태색 녹/황/적과 구분되는 '현재 이것') */
+.cp-staging-box.current{
+  background:linear-gradient(135deg,rgba(192,132,252,.22),rgba(192,132,252,.07))!important;
+  border:2.5px solid var(--p)!important;
+  box-shadow:0 0 0 3px rgba(192,132,252,.42),0 8px 28px rgba(192,132,252,.32);
+  animation:stgCurPulse .5s ease-out;
+}
+@keyframes stgCurPulse{0%{box-shadow:0 0 0 10px rgba(192,132,252,.65),0 0 40px rgba(192,132,252,.6)}100%{box-shadow:0 0 0 3px rgba(192,132,252,.42),0 8px 28px rgba(192,132,252,.32)}}
+.cp-staging-box-head .cur-badge{font-size:.66rem;font-weight:900;padding:.16rem .55rem;border-radius:4px;background:var(--p);color:#1a0a2e;letter-spacing:.04em;font-family:var(--mo);line-height:1.3}
 
 /* ─── 중앙 스캔 상태 표시 (화이트 바탕 · 멀리서도 보이게) ─── */
-.cp-status{background:#fff;border:4px solid #d4d8e0;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:1.2rem .8rem;min-height:360px;box-shadow:0 6px 24px rgba(0,0,0,.32);transition:border-color .12s}
+.cp-status{background:#fff;border:4px solid #d4d8e0;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;padding:1.6rem .8rem 1.2rem;min-height:360px;box-shadow:0 6px 24px rgba(0,0,0,.32);transition:border-color .12s}
 .cp-status-word{font-family:var(--mo);font-weight:900;color:#0a0d13;font-size:7rem;line-height:.95;letter-spacing:-.03em}
 .cp-status-sub{font-family:var(--mo);font-weight:800;color:#3a3f4a;font-size:1.05rem;margin-top:.85rem;line-height:1.4;word-break:keep-all;max-width:96%}
 /* 상태별 — 흰 바탕 유지, 두꺼운 테두리 색으로 카테고리 구분 (멀리서 색만 봐도 인지) */
@@ -5758,13 +5763,15 @@ function cpRefreshStaging(){
     if (!byBatch[k]) { byBatch[k] = []; order.push(k); }
     byBatch[k].push(it);
   });
-  /* 최근 스캔/갱신이 위로 오게 — 각 박스의 최신 ts 기준 내림차순 정렬.
-   * 가장 최신 박스(order[0])는 '현재 스캔'으로 강조해 한눈에 인지. */
+  /* 최근 스캔/갱신이 위로 오게 — 박스 단위 + 박스 내부 SKU 모두 최신 ts 내림차순.
+   * (상품 모드는 전부 'ITEM' 한 박스라 카드 내부 정렬이 핵심.)
+   * 가장 최신 박스(order[0])는 '현재 스캔'으로 보라 강조해 한눈에 인지. */
   var batchTs = {};
   order.forEach(function(k){
+    byBatch[k].sort(function(a,b){ return (+b.ts||0) - (+a.ts||0); });  /* 카드 내부: 최신 SKU 가 위 */
     batchTs[k] = byBatch[k].reduce(function(m,x){ return Math.max(m, +x.ts||0); }, 0);
   });
-  order.sort(function(a,b){ return batchTs[b] - batchTs[a]; });
+  order.sort(function(a,b){ return batchTs[b] - batchTs[a]; });          /* 박스끼리: 최신 박스가 위 */
   var latestKey = order[0];
   var rows = workSession.rows || [];
   list.innerHTML = order.map(function(k){
