@@ -465,12 +465,38 @@
     }
 
     /* 모드별 표시 전환: 기본은 preview-stage, 다른 모드일 땐 숨기고 해당 stage만 표시 */
-    body:not(.print-invoice):not(.print-integrated) .print-stage { display: none !important; }
+    body:not(.print-invoice):not(.print-integrated):not(.print-workorder) .print-stage { display: none !important; }
     body.print-invoice .preview-stage { display: none !important; }
     body.print-invoice #invoiceStage { display: block !important; }
     body.print-integrated .preview-stage { display: none !important; }
     body.print-integrated #integratedStage { display: block !important; }
+    body.print-workorder .preview-stage,
+    body.print-workorder #invoiceStage,
+    body.print-workorder #integratedStage { display: none !important; }
+    body.print-workorder #workorderStage { display: block !important; }
+    /* 작업지시서는 .page 고정높이(클립) 대신 표가 자연스럽게 페이지 넘김 */
+    #workorderStage .wo-table thead { display: table-header-group; }
+    #workorderStage .wo-table tr { break-inside: avoid; page-break-inside: avoid; }
   }
+
+  /* ── 작업지시서(쿠팡 출고 체크리스트) ── */
+  #workorderStage { display: none; }
+  .wo-doc { font-family: 'Pretendard','Malgun Gothic',sans-serif; color:#111; }
+  .wo-title { font-size: 21pt; font-weight: 800; text-align: center; letter-spacing:-.5px; margin: 0 0 2mm; }
+  .wo-sub { font-size: 9pt; color:#555; text-align:center; margin-bottom: 4mm; }
+  .wo-table { width: 100%; border-collapse: collapse; font-size: 11pt; table-layout: fixed; }
+  .wo-table th, .wo-table td { border: 1px solid #222; padding: 5px 6px; text-align: center; vertical-align: middle; word-break: keep-all; overflow-wrap: anywhere; }
+  .wo-table th { background:#eef0f3; font-weight: 800; font-size: 10pt; }
+  .wo-table td.wo-center { font-weight: 800; font-size: 12.5pt; }
+  .wo-table td.wo-center small { display:block; font-weight:600; font-size:8.5pt; color:#555; margin-top:1px; }
+  .wo-table td.wo-addr { font-size: 9.5pt; line-height: 1.3; }
+  .wo-table td.wo-time { font-size: 10.5pt; font-weight: 700; white-space: nowrap; }
+  .wo-table td.wo-pallet { font-weight: 800; }
+  .wo-table td.wo-remark { font-weight: 700; }
+  .wo-table td.wo-exp { font-size: 10pt; }
+  .wo-table td.wo-qty { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .wo-miss { color:#c0392b; font-weight:700; }
+  .wo-table tbody tr.wo-grp-first td { border-top: 2px solid #000; }
 
   /* ======================================================
      2부 인쇄 모드 (A4 가로 · 좌우 동일본)
@@ -692,6 +718,7 @@
   <div class="action-bar">
     <div class="summary" id="summary">업체 선택과 엑셀 업로드가 완료되면 미리보기가 자동으로 생성됩니다.</div>
     <button class="btn" id="btnPrintInvoice" disabled title="booking_manifest 전체페이지 + supplier 홀수페이지 합본 (센터별 정렬)">📋 거래명세서인쇄</button>
+    <button class="btn" id="btnPrintWorkorder" disabled title="업로드된 적재리스트로 개괄 작업지시서(쿠팡 출고 체크리스트) 인쇄 — 입고처·주소·입고예약시각·상품별 파렛트수·비고·소비기한·수량">📝 작업지시서인쇄</button>
     <button class="btn" id="btnPrint2" disabled title="A4 가로 한 장에 같은 페이지를 좌·우로 2번 인쇄">2부 인쇄 (가로 · 좌우 동일)</button>
     <button class="btn" id="btnPrint2Seq" disabled title="A4 가로 · 각 서류 2부씩 [1,1,2,2,…] 순차 배치 (앞 절반 좌측·뒤 절반 우측) — 반으로 잘라 오른쪽 묶음을 왼쪽 묶음 밑에 끼우면 파렛트당 2부가 연속 정렬">순차적 2부 인쇄 (가로 · 좌우 순차)</button>
     <button class="btn btn-primary" id="btnPrint" disabled title="PDF 업로드 시 적재리스트+매칭 라벨 자동 통합">PDF 저장 / 인쇄 (1부)</button>
@@ -706,6 +733,8 @@
   <div class="print-stage" id="invoiceStage" aria-hidden="true"></div>
   <!-- 통합(적재리스트 + 라벨) 인쇄 전용 스테이지 -->
   <div class="print-stage" id="integratedStage" aria-hidden="true"></div>
+  <!-- 작업지시서(쿠팡 출고 체크리스트) 인쇄 전용 스테이지 -->
+  <div class="print-stage" id="workorderStage" aria-hidden="true"></div>
 
   <!-- 트럭 라벨 ↔ 파렛트 매칭 확인창 (같은 센터에 트럭이 여러 대라 자동 구분이 모호할 때만 표시) -->
   <div class="truck-modal" id="truckModal" aria-hidden="true">
@@ -1322,6 +1351,9 @@ function fitPagesToA4() {
 function renderPreview(groups) {
   const stage = document.getElementById("previewStage");
   stage.innerHTML = "";
+  // 작업지시서는 업체정보와 무관하게 적재리스트(엑셀)만 있으면 인쇄 가능
+  const woBtn = document.getElementById("btnPrintWorkorder");
+  if (woBtn) woBtn.disabled = !groups.length;
   if (!groups.length) {
     stage.innerHTML = '<div class="preview-empty">업로드된 적재리스트가 여기에 A4 페이지로 표시됩니다.</div>';
     document.getElementById("btnPrint").disabled = true;
@@ -2469,11 +2501,142 @@ function exitIntegratedMode() {
   document.getElementById('btnPrint').disabled = !GROUPS.length || !document.querySelector('#previewStage > .page');
 }
 
+/* =========================================================
+   작업지시서 (쿠팡 출고 체크리스트) — 개괄 리스트 1장
+   - 입고처/주소/입고예약시간: 거래명세서(booking) 텍스트에서 파싱 (best-effort)
+   - 출고파렛트수(상품별)/비고/소비기한/수량: 적재리스트(엑셀)에서 집계
+========================================================= */
+function parseBookingInfo() {
+  const map = {};
+  const src = (pdfStore.booking || []).concat(pdfStore.supplier || []);
+  for (const it of src) {
+    for (const pg of (it.pages || [])) {
+      const cn = pg.centerNorm; if (!cn) continue;
+      if (!map[cn]) map[cn] = { addr: '', time: '', code: '' };
+      const slot = map[cn];
+      const t = String(pg.text || '').replace(/\s+/g, ' ');
+      if (!slot.time) {
+        let m = t.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일[^\d]{0,8}(\d{1,2})\s*[:시]\s*(\d{2})/);
+        if (m) slot.time = `${pad(m[1])}월${pad(m[2])}일 ${pad(m[3])}:${m[4]}`;
+        else {
+          m = t.match(/(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})[^\d]{0,8}(\d{1,2}):(\d{2})/);
+          if (m) slot.time = `${pad(m[2])}월${pad(m[3])}일 ${pad(m[4])}:${m[5]}`;
+        }
+      }
+      if (!slot.addr) {
+        const PROV = '서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|충북|충남|전라|전북|전남|경상|경북|경남|제주';
+        let m = t.match(new RegExp('(?:센터\\s*주소|배송지|배송\\s*주소|주소|소재지|도착지|Address)\\s*[:：]?\\s*((?:' + PROV + ')[가-힣A-Za-z0-9()\\-\\s]{4,45})'));
+        if (m) slot.addr = m[1].trim();
+        else {
+          m = t.match(new RegExp('((?:' + PROV + ')(?:특별시|광역시|특별자치시|특별자치도|도)?\\s?[가-힣]+(?:시|군|구)[가-힣0-9\\-\\s()]{0,40})'));
+          if (m) slot.addr = m[1].trim();
+        }
+      }
+      if (!slot.code) {
+        let m = t.match(/납품\s*센터\s+\S+?\([^)]*\)\s*\(([A-Za-z]{2,5}\d*)\)/) || t.match(/\b([A-Z]{2,4}\d{1,3})\b/);
+        if (m) slot.code = m[1];
+      }
+    }
+  }
+  return map;
+}
+
+function buildWorkOrderStage() {
+  const stage = document.getElementById('workorderStage');
+  stage.innerHTML = '';
+  if (!GROUPS.length) return 0;
+  const fy = document.getElementById("defaultYear").value.trim() || new Date().getFullYear();
+  const bk = parseBookingInfo();
+  // 입고처(센터+도착예정일) 단위로 집계
+  const byCenter = new Map();
+  for (const g of GROUPS) {
+    const etaKey = formatEta(g.eta, fy);
+    const key = g.center + '::' + etaKey;
+    if (!byCenter.has(key)) byCenter.set(key, { center: g.center, etaKey, cn: normCenter(g.center), pallets: new Set(), skus: new Map() });
+    const e = byCenter.get(key);
+    const pid = g.booking + '/' + g.palletNo;       // 출고건+파렛트번호 = 고유 파렛트
+    e.pallets.add(pid);
+    for (const it of g.items) {
+      const sid = it.skuId || it.skuName || it.status;
+      if (!e.skus.has(sid)) e.skus.set(sid, { skuName: it.skuName, status: it.status, expiry: it.expiry, qty: 0, pallets: new Set() });
+      const s = e.skus.get(sid);
+      s.qty += (+it.qty || 0);
+      s.pallets.add(pid);
+      if (!s.status && it.status) s.status = it.status;
+      if (!s.expiry && it.expiry) s.expiry = it.expiry;
+    }
+  }
+  const entries = [...byCenter.values()].sort((a, b) =>
+    (a.etaKey < b.etaKey ? -1 : a.etaKey > b.etaKey ? 1 : 0) || a.center.localeCompare(b.center, 'ko'));
+  const etaToMD = (k) => { const m = String(k || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[2]}월${m[3]}일` : (k || ''); };
+
+  let rowsHtml = '', totalPallet = 0, totalQty = 0;
+  for (const e of entries) {
+    const info = bk[e.cn] || {};
+    const skus = [...e.skus.values()].sort((a, b) => b.pallets.size - a.pallets.size || b.qty - a.qty);
+    const rs = skus.length || 1;
+    const centerTotalPallet = e.pallets.size;
+    totalPallet += centerTotalPallet;
+    const addrHtml = info.addr ? escapeHtml(info.addr) : '<span class="wo-miss">— (명세서 미검출)</span>';
+    const timeHtml = info.time ? escapeHtml(info.time)
+      : (e.etaKey ? etaToMD(e.etaKey) + ' <span class="wo-miss" style="font-weight:600;font-size:8pt;">(시각 미검출)</span>' : '<span class="wo-miss">—</span>');
+    const centerHtml = escapeHtml(e.center) + (info.code ? `<small>${escapeHtml(info.code)}</small>` : '') + `<small>총 ${centerTotalPallet}파렛트</small>`;
+    if (!skus.length) {
+      rowsHtml += `<tr class="wo-grp-first"><td class="wo-center">${centerHtml}</td><td class="wo-addr">${addrHtml}</td><td class="wo-time">${timeHtml}</td><td colspan="4" style="color:#999">상품 없음</td></tr>`;
+      continue;
+    }
+    skus.forEach((s, si) => {
+      totalQty += s.qty;
+      const remark = escapeHtml(s.status || s.skuName || '');
+      rowsHtml += `<tr class="${si === 0 ? 'wo-grp-first' : ''}">`;
+      if (si === 0) {
+        rowsHtml += `<td class="wo-center" rowspan="${rs}">${centerHtml}</td>` +
+          `<td class="wo-addr" rowspan="${rs}">${addrHtml}</td>` +
+          `<td class="wo-time" rowspan="${rs}">${timeHtml}</td>`;
+      }
+      rowsHtml += `<td class="wo-pallet">${s.pallets.size}파렛트</td>` +
+        `<td class="wo-remark">${remark || '-'}</td>` +
+        `<td class="wo-exp">${formatExpiry(s.expiry)}</td>` +
+        `<td class="wo-qty">${fmt(s.qty)}</td></tr>`;
+    });
+  }
+  const issued = new Date().toLocaleString("ko-KR", { hour12: false });
+  stage.innerHTML = `<div class="wo-doc">
+    <div class="wo-title">쿠팡 출고 체크리스트</div>
+    <div class="wo-sub">발행 ${escapeHtml(issued)} · 입고처 ${entries.length}곳 · 총 ${totalPallet}파렛트 · 총수량 ${fmt(totalQty)}</div>
+    <table class="wo-table">
+      <colgroup><col style="width:13%"><col style="width:22%"><col style="width:15%"><col style="width:12%"><col style="width:14%"><col style="width:12%"><col style="width:12%"></colgroup>
+      <thead><tr><th>입고처</th><th>주소</th><th>입고예약시간</th><th>출고파렛트수</th><th>비고</th><th>소비기한</th><th>수량</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </div>`;
+  return entries.length;
+}
+
+function printWorkorder() {
+  exitDuplexMode(); exitInvoiceMode(); exitIntegratedMode();
+  const n = buildWorkOrderStage();
+  if (!n) { setPdfStatus('작업지시서로 만들 적재리스트가 없습니다. 엑셀을 먼저 업로드하세요.', 'err'); return; }
+  let st = document.getElementById('wo-pagestyle');
+  if (!st) { st = document.createElement('style'); st.id = 'wo-pagestyle'; document.head.appendChild(st); }
+  st.textContent = '@media print { @page { size: A4 portrait; margin: 11mm 10mm; } }';
+  document.body.classList.add('print-workorder');
+  setPdfStatus(`작업지시서 ${n}개 입고처 준비 완료. 인쇄 다이얼로그를 엽니다...`, 'ok');
+  setTimeout(() => window.print(), 100);
+}
+function exitWorkorderMode() {
+  document.body.classList.remove('print-workorder');
+  const st = document.getElementById('wo-pagestyle'); if (st) st.remove();
+  const stage = document.getElementById('workorderStage'); if (stage) stage.innerHTML = '';
+}
+document.getElementById("btnPrintWorkorder").addEventListener("click", printWorkorder);
+
 // 인쇄 대화상자 닫히면(저장/취소 무관) 원상 복구
 window.addEventListener("afterprint", () => {
   exitDuplexMode();
   exitInvoiceMode();
   exitIntegratedMode();
+  exitWorkorderMode();
 });
 
 /* Import / Export 바인딩 */
