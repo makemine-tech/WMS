@@ -340,6 +340,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-center-summary .cs-need{color:var(--tx);font-weight:800}
 .cp-center-summary .cs-prog{color:var(--mu);font-weight:700;margin-left:.15rem}
 .cp-center-summary .cs-prog .pr{color:var(--g)}
+.cp-center-summary .cs-prog .wt{color:var(--b);font-weight:800;margin:0 .1rem}
 .cp-center-summary .cs-prog .rm{color:var(--y)}
 .cp-center-summary .cs-sep{color:var(--br);flex-shrink:0;padding:0 .15rem;font-weight:700}
 .cp-center-summary .cs-item.done b,
@@ -369,6 +370,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-prog-row.partial .qt{color:var(--y)}
 .cp-prog-row.pending .qt{color:var(--mu)}
 .cp-prog-row.over .qt{color:var(--r)}
+.cp-prog-row .qt .wt{color:var(--b);font-weight:800}
 .cp-prog-empty{padding:.5rem 0;color:var(--mu);font-size:.74rem;text-align:center}
 /* 스캔 결과 즉시 피드백 (입력 박스 옆 또는 위) */
 .cp-flash{padding:.55rem .85rem;border-radius:7px;margin-top:.55rem;font-size:.84rem;line-height:1.45}
@@ -3393,14 +3395,27 @@ function cpMatchingRowIdxs(bc){
   }
   return { idxs: idxs, via: via };
 }
-/* 특정 row(idx)의 잔여 = canShip(need) − 확정(shipped) − 현재 staging(매칭) − 이번 작업 예약분(reserve) */
-function cpRowRemaining(idx, reserve){
-  var prog = cpComputeRowProgress(idx);
-  var staged = ((workSession && workSession.staging) || []).reduce(function(s,x){
+/* row(idx)에 묶여 있는 입고대기(staging, 매칭만) 누적 수량 */
+function cpRowStaged(idx){
+  return ((workSession && workSession.staging) || []).reduce(function(s,x){
     return s + ((!x.unmatched && x.srcIdx === idx) ? (+x.qty||0) : 0);
   }, 0);
+}
+/* row(idx)에 묶여 있는 처리대기(pending) 누적 수량 */
+function cpRowPending(idx){
+  if (idx == null || idx < 0) return 0;
+  return ((workSession && workSession.pending) || []).reduce(function(s,x){
+    return s + ((x.srcIdx === idx) ? (+x.qty||0) : 0);
+  }, 0);
+}
+/* row(idx)의 '예약'(아직 완료 아님이지만 이미 재고 카운터에 잡혀야 하는) 수량 = 입고대기 + 처리대기.
+ * 대기로 넘긴 순간부터 출고된 것으로 간주 → 같은 바코드 재스캔 시 초과 판정이 정상 동작. */
+function cpRowReserved(idx){ return cpRowStaged(idx) + cpRowPending(idx); }
+/* 특정 row(idx)의 잔여 = canShip(need) − 확정(완료 scans) − 입고대기 − 처리대기 − 이번 작업 예약분(reserve) */
+function cpRowRemaining(idx, reserve){
+  var prog = cpComputeRowProgress(idx);
   var res = (reserve && reserve[idx]) ? reserve[idx] : 0;
-  return Math.max(0, prog.need - prog.shipped - staged - res);
+  return Math.max(0, prog.need - prog.shipped - cpRowReserved(idx) - res);
 }
 
 /* ── 박스 모드: 박스바코드 → 박스 안 SKU 처리
@@ -3610,8 +3625,7 @@ function cpProcessItemScan(raw){
     var totNeed = 0, totHave = 0, ctrList = [];
     match.idxs.forEach(function(ii){
       var p = cpComputeRowProgress(ii);
-      var st = (workSession.staging||[]).reduce(function(s,x){return s+((!x.unmatched&&x.srcIdx===ii)?(+x.qty||0):0);},0);
-      totNeed += p.need; totHave += (p.shipped+st);
+      totNeed += p.need; totHave += (p.shipped + cpRowReserved(ii));
       var c=(sessRows[ii]||{}).center; if(c) ctrList.push(c);
     });
     var nm0 = (sessRows[match.idxs[0]]||{}).skuName || raw;
@@ -5777,12 +5791,19 @@ function cpRefreshProgress(){
   if (!rows.length) { el.innerHTML = '<div class="cp-prog-empty">세션 라인 없음</div>'; return; }
   var html = rows.map(function(r, i){
     var p = cpComputeRowProgress(i);
-    var statusIcon = p.status==='done' ? '✓' : p.status==='partial' ? '◐' : p.status==='over' ? '⚠' : '○';
+    /* 대기(입고대기+처리대기)도 출고 처리된 것으로 간주해 진행률에 반영 */
+    var waiting = cpRowReserved(i);
+    var have = p.shipped + waiting;
+    var status = have===0 ? 'pending' : (have < p.need) ? 'partial' : (have === p.need) ? 'done' : 'over';
+    var statusIcon = status==='done' ? '✓' : status==='partial' ? '◐' : status==='over' ? '⚠' : '○';
     var name = r.skuName || '';
-    return '<div class="cp-prog-row '+p.status+'">'+
+    var qtyHtml = waiting>0
+      ? p.shipped+'<span class="wt">+'+waiting+'</span>/'+p.need
+      : p.shipped+'/'+p.need;
+    return '<div class="cp-prog-row '+status+'">'+
       '<span class="bc" title="PO '+escH(r.poBarcode)+'">'+escH(r.poBarcode)+'</span>'+
       '<span class="nm">'+escH(name)+'<small>'+escH(r.center||'')+'</small></span>'+
-      '<span class="qt">'+statusIcon+' '+p.shipped+'/'+p.need+'</span>'+
+      '<span class="qt">'+statusIcon+' '+qtyHtml+'</span>'+
     '</div>';
   }).join('');
   el.innerHTML = html;
@@ -5834,7 +5855,7 @@ function cpRefreshCenterSummary(){
   rows.forEach(function(r){
     var c = r.center || '(미지정)';
     if (!byCenter[c]){
-      byCenter[c] = { need: 0, shipped: 0, pallets: {} };
+      byCenter[c] = { need: 0, shipped: 0, waiting: 0, pallets: {} };
       order.push(c);
     }
     byCenter[c].need += (+r.canShip || +r.qty || 0);
@@ -5843,25 +5864,43 @@ function cpRefreshCenterSummary(){
     var r = rows[s.srcIdx] || {};
     var c = s.palletCenter || r.center || '(미지정)';
     if (!byCenter[c]){
-      byCenter[c] = { need: 0, shipped: 0, pallets: {} };
+      byCenter[c] = { need: 0, shipped: 0, waiting: 0, pallets: {} };
       order.push(c);
     }
     byCenter[c].shipped += (+s.qty || 0);
     var pn = +s.palletNo;
     if (pn > 0) byCenter[c].pallets[pn] = true;
   });
+  /* 입고대기(staging) + 처리대기(pending) 도 '대기'로 카운터에 합산 — 넘긴 순간부터 출고된 것으로 간주.
+   * 완료(shipped)와 별도 표기하되 잔여 계산엔 함께 차감. */
+  (workSession.staging||[]).forEach(function(t){
+    if (t.unmatched || t.srcIdx == null || t.srcIdx < 0) return;
+    var r = rows[t.srcIdx] || {};
+    var c = t.palletCenter || r.center || '(미지정)';
+    if (!byCenter[c]){ byCenter[c] = { need:0, shipped:0, waiting:0, pallets:{} }; order.push(c); }
+    byCenter[c].waiting += (+t.qty || 0);
+  });
+  (workSession.pending||[]).forEach(function(p){
+    if (p.srcIdx == null || p.srcIdx < 0) return;
+    var r = rows[p.srcIdx] || {};
+    var c = p.center || r.center || '(미지정)';
+    if (!byCenter[c]){ byCenter[c] = { need:0, shipped:0, waiting:0, pallets:{} }; order.push(c); }
+    byCenter[c].waiting += (+p.qty || 0);
+  });
   if (!order.length){ el.style.display='none'; el.innerHTML=''; return; }
   el.style.display = '';
   el.innerHTML = order.map(function(c){
     var sum = byCenter[c];
     var palCount = Object.keys(sum.pallets).length;
-    var rem = Math.max(0, sum.need - sum.shipped);
-    var done = sum.need > 0 && sum.shipped >= sum.need;
+    var have = sum.shipped + sum.waiting;          /* 완료 + 대기 = 카운터상 출고 처리된 총량 */
+    var rem = Math.max(0, sum.need - have);
+    var done = sum.need > 0 && have >= sum.need;
+    var waitHtml = sum.waiting > 0 ? '<span class="wt">+'+sum.waiting+'대기</span>' : '';
     return '<span class="cs-item'+(done?' done':'')+'">'+
       '<b>'+escH(c)+'</b>= '+
       '<span class="cs-pal">'+palCount+'P</span> - '+
       '<span class="cs-need">'+sum.need+'</span>'+
-      '<span class="cs-prog">(<span class="pr">'+sum.shipped+'</span>/<span class="rm">'+rem+'</span>)</span>'+
+      '<span class="cs-prog">(<span class="pr">'+sum.shipped+'</span>'+waitHtml+'/<span class="rm">'+rem+'</span>)</span>'+
     '</span>';
   }).join('<span class="cs-sep">|</span>');
 }
@@ -5951,7 +5990,7 @@ function cpRefreshStaging(){
         var prog = cpComputeRowProgress(it.srcIdx);
         var stageAddForSrc = items.filter(function(x){return !x.unmatched && x.srcIdx === it.srcIdx;})
           .reduce(function(s,x){return s+(+x.qty||0);},0);
-        if (prog.shipped + stageAddForSrc > prog.need) {
+        if (prog.shipped + cpRowPending(it.srcIdx) + stageAddForSrc > prog.need) {
           kind = 'over'; kindLabel = '발주초과';
         } else if (primaryCenter && r.center && r.center !== primaryCenter) {
           kind = 'mix'; kindLabel = '다른센터';
