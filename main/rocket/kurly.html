@@ -513,7 +513,7 @@ const SEED_DB = {
 // ============================================================
 // 상수 / 상태
 // ============================================================
-const HEADERS = ['발주번호','발주유형','발주현황','SKU ID','품명','바코드','물류센터','입고예정일','발주일','박스당입수','총수량','박스수'];
+const HEADERS = ['발주번호','발주유형','발주현황','SKU ID','품명','바코드','물류센터','입고예정일','발주일','박스당입수','총수량','박스수','소비기한'];
 
 const state = {
   files: [],
@@ -762,8 +762,11 @@ function rebuildRows(){
       const pdfBoxUnit = toNum(r.boxUnit);
       const totalQty = toNum(r.totalQty);
       const boxUnit = (dbBoxUnit !== null) ? dbBoxUnit : (pdfBoxUnit !== '' ? pdfBoxUnit : '');
+      // 소비기한 — 거래명세서에서 파싱한 (소/대) YYYY-MM-DD 중 날짜만 추출 후 YYYY.MM.DD 로 표기
+      const expRaw = (r.exp || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+      const expDate = expRaw ? (expRaw[1] + '.' + expRaw[2] + '.' + expRaw[3]) : '';
       const row = {
-        cells: ['컬리','','','', dbName, r.barcode||'', h.center||'', formatMD(h.arriveDate), h.orderDate||'', boxUnit, totalQty, ''],
+        cells: ['컬리','','','', dbName, r.barcode||'', h.center||'', formatMD(h.arriveDate), h.orderDate||'', boxUnit, totalQty, '', expDate],
         meta: {
           file:f.name, orderCode:h.orderCode, master:r.master,
           rawName: r.rawName, rawBoxUnit: pdfBoxUnit,
@@ -1214,6 +1217,7 @@ $('#btnExport').onclick = function(){
     if(/물류센터/.test(h)) return {wch:24};
     if(/SKU|마스터/.test(h)) return {wch:16};
     if(/바코드/.test(h)) return {wch:16};
+    if(/기한/.test(h)) return {wch:16};
     if(/일/.test(h)) return {wch:12};
     return {wch:11};
   });
