@@ -1158,6 +1158,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <span style="font-size:.7rem;color:var(--mu)" id="orderHint">출고 실행은 지시서 인쇄 후 작업 완료된 다음 누르세요</span>
         <button class="btn" style="background:var(--r);color:#fff" onclick="executeOrder()" id="execBtn">📤 이 지시서로 출고 실행</button>
         <button class="btn" style="background:#7c8399;color:#0f1117;display:none" onclick="cancelExecution()" id="cancelExecBtn">🔁 실행 취소</button>
+        <button class="btn" style="background:var(--g);color:#0f1117;display:none" onclick="reExecuteOrder()" id="reExecBtn">✅ 출고완료로 복원</button>
       </span>
     </div>
 
@@ -6740,8 +6741,10 @@ function handleExcelAdd(file){
 function refreshActionBar(){
   var execBtn = document.getElementById('execBtn');
   var cancelBtn = document.getElementById('cancelExecBtn');
+  var reExecBtn = document.getElementById('reExecBtn');
   var hint = document.getElementById('orderHint');
   if (!execBtn || !cancelBtn || !hint) return;
+  if (reExecBtn) reExecBtn.style.display = 'none';
   var st = curOrder.status || 'draft';
   if (st === 'executed') {
     execBtn.style.display = 'none';
@@ -6754,7 +6757,11 @@ function refreshActionBar(){
   } else if (st === 'cancelled') {
     execBtn.style.display = 'none';
     cancelBtn.style.display = 'none';
-    hint.textContent = '⛔ 취소된 지시서 — 새 지시서를 작성하세요';
+    /* admin 은 취소된 지시서를 다시 출고완료로 복원 가능 (재고 재차감) */
+    if (reExecBtn) reExecBtn.style.display = isAdmin ? '' : 'none';
+    hint.textContent = isAdmin
+      ? '⛔ 취소된 지시서 — 「✅ 출고완료로 복원」 으로 정상 지시서로 되돌릴 수 있습니다'
+      : '⛔ 취소된 지시서 — 복원은 관리자에게 요청하세요';
     hint.style.color = 'var(--r)';
   } else {
     execBtn.style.display = '';
@@ -6797,6 +6804,88 @@ function cancelExecution(){
   }).catch(function(err){
     setMsg('m0','er','❌ 실행 취소 실패: '+(err&&err.message||err));
   });
+}
+
+/* ─────────────── 출고 실행 복원 (취소됨 → 출고완료, admin) ───────────────
+ * 취소된 지시서를 다시 정상 출고완료로 되돌린다.
+ * 출고 로그를 새로 push 해 재고를 다시 차감하고, executedLogKeys 를 새 키로 교체한다.
+ * (이후 다시 실행취소하면 이 새 키들이 정상적으로 삭제·원복된다.) */
+function reExecuteOrder(){
+  if (!isAdmin) { setMsg('m0','er','❌ 관리자만 복원이 가능합니다'); return; }
+  if (!logsRef || !ordersRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  if ((curOrder.status||'') !== 'cancelled') { setMsg('m0','warn','⚠️ 취소된 지시서만 출고완료로 복원할 수 있습니다'); return; }
+  if (!curOrder.items || !curOrder.items.length) { setMsg('m0','warn','⚠️ 품목이 없어 복원할 수 없습니다'); return; }
+  var totQ = 0; curOrder.items.forEach(function(it){ totQ += (+it.qty||0); });
+  var msg = '✅ 취소된 지시서를 다시 출고완료로 복원합니다.\n\n' +
+            '  • 지시서: ' + curOrder.orderId + '\n' +
+            '  • 거래처: ' + (curOrder.customer||'') + '\n' +
+            '  • 품목 종수: ' + curOrder.items.length + '\n' +
+            '  • 총 수량: ' + totQ + '개\n\n' +
+            '재고에서 다시 ' + totQ + '개가 차감되고, 상태가 「출고완료」 로 복원됩니다.\n계속하시겠습니까?';
+  if (!confirm(msg)) return;
+
+  setMsg('m0','inf','<span>출고완료 복원 중 — 재고 재차감...</span>');
+  var by = getUserId();
+  var ts0 = Date.now();
+  var customer = curOrder.customer || '';
+  var orderId = curOrder.orderId;
+  var pushedKeys = [];
+  var chain = Promise.resolve();
+  curOrder.items.forEach(function(it, idx){
+    chain = chain.then(function(){
+      var rec = {
+        ts: ts0 + idx,
+        by: by,
+        type: 'out',
+        source: 'outorder',
+        orderId: orderId,
+        customer: customer,
+        box: it.box || '',
+        brand: it.brand || '',
+        code: it.code || '',
+        barcode: it.barcode || '',
+        altBarcode: it.altBarcode || '',
+        name: it.name || '',
+        material: it.material || '',
+        color: it.color || '',
+        size: it.size || '',
+        origin: it.origin || '',
+        qty: +it.qty || 0,
+        note: (it.note ? (it.note + ' · ') : '') + '지시서 ' + orderId + ' (' + customer + ') · 복원'
+      };
+      var newRef = logsRef.push();
+      pushedKeys.push(newRef.key);
+      return newRef.set(JSON.parse(JSON.stringify(rec)));
+    });
+  });
+  chain.then(function(){
+    curOrder.status = 'executed';
+    curOrder.executedAt = Date.now();
+    curOrder.executedBy = by;
+    curOrder.executedLogKeys = pushedKeys;
+    curOrder.restoredAt = Date.now();
+    curOrder.restoredBy = by;
+    delete curOrder.cancelledAt;
+    delete curOrder.cancelledBy;
+    return ordersRef.child(curOrder.orderId).set(JSON.parse(JSON.stringify(curOrder)));
+  }).then(function(){
+    curOrderSaved = true;
+    refreshActionBar();
+    renderItems();
+    setMsg('m0','ok','✅ 출고완료로 복원 · 지시서 ' + orderId + ' · '+curOrder.items.length+'행 / '+totQ+'개 재차감됨');
+  }).catch(function(err){
+    setMsg('m0','er','❌ 복원 실패: '+(err&&err.message||err));
+  });
+}
+/* 목록에서 바로 출고완료 복원 — 해당 지시서를 로드 후 reExecuteOrder 호출 */
+function loadAndReExecute(orderId){
+  var o = allOrders.find(function(x){ return x.orderId === orderId; });
+  if (!o) { setMsg('m0','er','❌ 지시서를 찾을 수 없습니다'); return; }
+  curOrder = JSON.parse(JSON.stringify(o));
+  delete curOrder._key;
+  if (!Array.isArray(curOrder.items)) curOrder.items = [];
+  curOrderSaved = true;
+  reExecuteOrder();
 }
 
 /* ─────────────── Firebase 저장 ─────────────── */
@@ -7026,6 +7115,7 @@ function renderList(){
       '<td style="white-space:nowrap;display:flex;gap:.3rem;flex-wrap:wrap">'+
         '<button class="btn btn-s" style="padding:.32rem .65rem;font-size:.72rem" onclick="loadOrder(\''+escH(o.orderId)+'\')">📂 열기</button>'+
         ((o.status==='executed' && isAdmin) ? '<button class="btn" style="padding:.32rem .65rem;font-size:.72rem;background:#7c8399;color:#0f1117" onclick="loadAndCancelExec(\''+escH(o.orderId)+'\')" title="이 지시서 실행 취소 — 재고 원복">🔁 실행취소</button>' : '') +
+        ((o.status==='cancelled' && isAdmin) ? '<button class="btn" style="padding:.32rem .65rem;font-size:.72rem;background:var(--g);color:#0f1117" onclick="loadAndReExecute(\''+escH(o.orderId)+'\')" title="취소된 지시서를 다시 출고완료로 — 재고 재차감">✅ 출고완료</button>' : '') +
         (o.status==='executed' ? '' : '<button class="btn btn-r" style="padding:.32rem .65rem;font-size:.72rem" onclick="deleteOrder(\''+escH(o.orderId)+'\')">✕ 삭제</button>') +
       '</td>'+
     '</tr>';
