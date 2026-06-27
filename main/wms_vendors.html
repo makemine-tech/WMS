@@ -32,6 +32,18 @@ h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
 .btn-del{background:rgba(239,68,68,.15);color:#F87171;border:1px solid rgba(239,68,68,.3);border-radius:7px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;}
 .add-form{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
 .add-form .inp{flex:1;min-width:120px;}
+.add-hint{font-size:11px;color:#64748B;margin-top:7px;line-height:1.5;}
+.vcard{background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:10px;padding:11px 13px;margin-bottom:8px;}
+.vcard-top{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
+.vcard-top .vname{flex:1;font-weight:700;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.vmails{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px;}
+.email-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);color:#93C5FD;border-radius:20px;padding:3px 5px 3px 11px;font-size:11px;font-weight:600;}
+.email-chip a{color:#60A5FA;cursor:pointer;font-weight:800;text-decoration:none;padding:0 5px;border-radius:50%;line-height:1.4;}
+.email-chip a:hover{background:rgba(239,68,68,.25);color:#F87171;}
+.muted-sm{font-size:11px;color:#475569;}
+.vmail-add{display:flex;gap:6px;}
+.vmail-add .inp{flex:1;padding:7px 10px;font-size:12px;min-width:0;}
+.vmail-add button{background:rgba(96,165,250,.15);color:#93C5FD;border:1px solid rgba(96,165,250,.3);border-radius:7px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 .prow{display:flex;align-items:center;gap:10px;padding:9px 13px;background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:9px;margin-bottom:6px;}
 .prow.unlinked{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.06);}
 .prow .pname{flex:1;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -79,6 +91,11 @@ function toast(msg){
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function keyOf(name){return String(name).replace(/[.#$/\[\]]/g,'_');}
 function genId(){return 'v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
+function emailKey(em){return String(em||'').trim().toLowerCase().replace(/[.#$/\[\]]/g,'_');}
+function validEmail(em){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);}
+/* 레거시 단일 email 필드 + 신규 emails 맵을 하나로 합쳐 {emailKey: email} 반환 */
+function currentEmailsMap(v){var m={}; if(v&&v.email){m[emailKey(v.email)]=v.email;} if(v&&v.emails){Object.keys(v.emails).forEach(function(k){m[k]=v.emails[k]||k;});} return m;}
+function findVendorByName(name){var lc=String(name||'').trim().toLowerCase(),f=null;Object.keys(_vendors).forEach(function(vid){if((_vendors[vid].name||'').trim().toLowerCase()===lc)f=vid;});return f;}
 
 function renderDenied(msg){
   app.innerHTML='<div class="center" style="color:#F87171;">'
@@ -149,11 +166,20 @@ function render(user){
     ? '<div class="empty">아직 등록된 업체가 없습니다. 아래에서 추가하세요.</div>'
     : vids.map(function(vid){
         var v=_vendors[vid];
-        return '<div class="vrow">'
-          +'<div class="vmeta"><div class="vname">'+esc(v.name)+'</div>'
-          +'<div class="vmail">'+(v.email?('✉ '+esc(v.email)):'<span style="color:#475569;">이메일 미입력</span>')+'</div></div>'
+        var ems=currentEmailsMap(v);
+        var chips=Object.keys(ems).map(function(ek){
+          return '<span class="email-chip">✉ '+esc(ems[ek])
+            +'<a title="담당자 제거" onclick="removeEmail(\''+vid+'\',\''+encodeURIComponent(ek)+'\')">✕</a></span>';
+        }).join('');
+        if(!chips) chips='<span class="muted-sm">담당자 이메일 없음 — 아래에서 추가</span>';
+        return '<div class="vcard">'
+          +'<div class="vcard-top"><div class="vname">'+esc(v.name)+'</div>'
           +'<div class="vcount">'+vendorProductCount(vid)+'개 상품</div>'
-          +'<button class="btn-del" onclick="delVendor(\''+vid+'\')">삭제</button>'
+          +'<button class="btn-del" onclick="delVendor(\''+vid+'\')">업체삭제</button></div>'
+          +'<div class="vmails">'+chips+'</div>'
+          +'<div class="vmail-add"><input id="em-'+vid+'" class="inp" type="email" placeholder="담당자 이메일 추가" '
+          +'onkeydown="if(event.key===\'Enter\')addEmailFromRow(\''+vid+'\')"/>'
+          +'<button onclick="addEmailFromRow(\''+vid+'\')">+ 담당자</button></div>'
           +'</div>';
       }).join('');
 
@@ -191,9 +217,11 @@ function render(user){
     +vendorHtml
     +'<div class="add-form">'
     +'<input id="nvName" class="inp" placeholder="업체명 (예: 가나푸드)" style="flex:2;"/>'
-    +'<input id="nvEmail" class="inp" type="email" placeholder="담당자 이메일" style="flex:3;"/>'
+    +'<input id="nvEmail" class="inp" type="email" placeholder="담당자 이메일 (선택)" style="flex:3;"/>'
     +'<button class="btn btn-primary" onclick="addVendor()">+ 추가</button>'
-    +'</div></div>'
+    +'</div>'
+    +'<div class="add-hint">💡 한 업체에 담당자 여러 명을 둘 수 있습니다. 이미 등록된 <b>업체명을 그대로</b> 입력하고 이메일을 넣으면 그 업체에 담당자가 추가됩니다.</div>'
+    +'</div>'
 
     +'<div class="section">'
     +'<div class="section-h">⚠️ 업체 미연결 <span class="count-chip" style="background:rgba(251,191,36,.15);color:#FBBF24;">'+unlinked.length+'</span></div>'
@@ -206,17 +234,70 @@ function render(user){
 
 /* ── 액션 ── */
 function addVendor(){
-  var name=(document.getElementById('nvName').value||'').trim();
-  var email=(document.getElementById('nvEmail').value||'').trim();
+  var nameEl=document.getElementById('nvName'), emailEl=document.getElementById('nvEmail');
+  var name=(nameEl.value||'').trim();
+  var email=(emailEl.value||'').trim();
   if(!name){toast('업체명을 입력하세요');return;}
-  if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('이메일 형식을 확인하세요');return;}
+  if(email && !validEmail(email)){toast('이메일 형식을 확인하세요');return;}
+  var existing=findVendorByName(name);
+  if(existing){
+    if(!email){toast('이미 등록된 업체입니다. 담당자 이메일을 입력하면 추가됩니다.');return;}
+    nameEl.value=''; emailEl.value='';
+    addEmailTo(existing, email, '기존 업체 "'+name+'"에 담당자 추가');
+    return;
+  }
   var vid=genId();
-  var rec={name:name, email:email, createdAt:Date.now()};
+  var emails={}; if(email) emails[emailKey(email)]=email;
+  var rec={name:name, emails:emails, createdAt:Date.now()};
   db.ref('vendorConfig/'+GID+'/vendors/'+vid).set(rec).then(function(){
-    _vendors[vid]=rec; renderReload(); toast('업체 추가됨 · '+name);
+    _vendors[vid]=rec; nameEl.value=''; emailEl.value=''; renderReload(); toast('업체 추가됨 · '+name);
   }).catch(function(e){toast('추가 실패: '+e.message);});
 }
 window.addVendor=addVendor;
+
+/* 업체에 담당자 이메일 추가 (여러 명 가능). 레거시 단일 email 필드는 emails 맵으로 정리. */
+function addEmailTo(vid, email, okMsg){
+  var v=_vendors[vid]; if(!v) return;
+  email=String(email||'').trim();
+  if(!validEmail(email)){toast('이메일 형식을 확인하세요');return;}
+  var ek=emailKey(email);
+  var cur=currentEmailsMap(v);
+  if(cur[ek]){toast('이미 등록된 담당자입니다');return;}
+  cur[ek]=email;
+  var updates={};
+  updates['vendorConfig/'+GID+'/vendors/'+vid+'/emails']=cur;
+  updates['vendorConfig/'+GID+'/vendors/'+vid+'/email']=null;
+  db.ref().update(updates).then(function(){
+    v.emails=cur; delete v.email; renderReload(); toast(okMsg||('담당자 추가 · '+email));
+  }).catch(function(e){toast('추가 실패: '+e.message);});
+}
+window.addEmailTo=addEmailTo;
+
+function addEmailFromRow(vid){
+  var el=document.getElementById('em-'+vid); if(!el) return;
+  var email=(el.value||'').trim();
+  if(!email){toast('이메일을 입력하세요');return;}
+  el.value='';
+  addEmailTo(vid, email);
+}
+window.addEmailFromRow=addEmailFromRow;
+
+function removeEmail(vid, encEk){
+  var v=_vendors[vid]; if(!v) return;
+  var ek=decodeURIComponent(encEk);
+  var cur=currentEmailsMap(v);
+  if(!cur[ek]) return;
+  if(!confirm('담당자 "'+cur[ek]+'" 를 제거할까요?')) return;
+  delete cur[ek];
+  var hasAny=Object.keys(cur).length>0;
+  var updates={};
+  updates['vendorConfig/'+GID+'/vendors/'+vid+'/emails']=hasAny?cur:null;
+  updates['vendorConfig/'+GID+'/vendors/'+vid+'/email']=null;
+  db.ref().update(updates).then(function(){
+    v.emails=cur; delete v.email; renderReload(); toast('담당자 제거됨');
+  }).catch(function(e){toast('제거 실패: '+e.message);});
+}
+window.removeEmail=removeEmail;
 
 function delVendor(vid){
   var v=_vendors[vid]; if(!v) return;
