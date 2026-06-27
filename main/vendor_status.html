@@ -35,7 +35,7 @@ body{background:var(--bg);font-family:system-ui,-apple-system,'Segoe UI',sans-se
 .scard.a .v{color:#60A5FA;} .scard.b .v{color:var(--green);} .scard.c .v{color:var(--amber);}
 
 /* 테이블 */
-.tbl-wrap{background:var(--card);border:1px solid var(--bd);border-radius:14px;overflow:hidden;}
+.tbl-wrap{background:var(--card);border:1px solid var(--bd);border-radius:14px;overflow-x:auto;overflow-y:hidden;}
 table{width:100%;border-collapse:collapse;}
 thead th{background:rgba(255,255,255,.04);font-size:11px;color:var(--sub);font-weight:700;letter-spacing:.05em;text-align:right;padding:12px 16px;border-bottom:1px solid var(--bd);}
 thead th.l{text-align:left;}
@@ -80,6 +80,18 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
 .restock:hover{background:rgba(239,68,68,.28);color:#fff;}
 .restock svg{flex-shrink:0;}
 
+/* 낱개수량 입력 */
+.loose-hint{background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:9px;padding:8px 12px;font-size:12px;color:#C4B5FD;line-height:1.55;margin-bottom:11px;}
+.loosehead{color:#C4B5FD!important;}
+.loosecell{background:rgba(124,58,237,.05);}
+.loose-inp{width:74px;background:#0B1220;border:1px solid #3B2E66;border-radius:7px;padding:7px 8px;color:#fff;font-size:14px;font-weight:700;text-align:right;outline:none;font-variant-numeric:tabular-nums;font-family:inherit;-moz-appearance:textfield;}
+.loose-inp:focus{border-color:#7C3AED;background:#15102b;}
+.loose-inp::-webkit-outer-spin-button,.loose-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.loose-inp::placeholder{color:#4B5563;font-weight:600;}
+.loosero{color:var(--sub);}
+.sumv{color:var(--green);font-weight:800;}
+.sumcell{background:rgba(52,211,153,.05);}
+
 .foot-note{font-size:11px;color:var(--sub);margin-top:16px;line-height:1.7;text-align:center;}
 .notreg{max-width:440px;margin:40px auto;background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:32px 26px;text-align:center;}
 
@@ -90,9 +102,17 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
   .scard{background:#f4f6fa;} thead th{background:#eef1f6;color:#333;}
   .rpt-vendor,.scard .v,.num{color:#000!important;}
 }
-@media(max-width:520px){
-  .rpt-vendor{font-size:22px;} .cards{gap:7px;} .scard .v{font-size:24px;}
-  thead th,tbody td,tfoot td{padding:10px 11px;font-size:13px;}
+@media(max-width:640px){
+  .wrap{padding:14px 10px;}
+  .rpt-vendor{font-size:22px;} .cards{gap:7px;} .scard{padding:14px 8px;} .scard .v{font-size:22px;} .scard .l{font-size:10px;}
+  thead th,tbody td,tfoot td{padding:8px 5px;font-size:11.5px;}
+  thead th{letter-spacing:0;}
+  .num .u,.qty-toggle .u{display:none;}   /* 단위 숨겨 폭 절약 — 헤더로 구분 */
+  .loose-inp{width:46px;padding:6px 4px;font-size:12px;}
+  .qty-toggle{font-size:12px;gap:2px;}
+  .pn{font-size:12px;}
+  .detail-row td{padding:0 10px 10px!important;}
+  .restock{font-size:9px;padding:2px 6px 2px 5px;margin-left:0;margin-top:4px;}
 }
 </style>
 </head>
@@ -138,6 +158,9 @@ function renderNotRegistered(email){
 var _sortMode='qty';     /* qty | pallet | name */
 var _expanded={};        /* productKey -> true (펼침 상태 유지) */
 var _lastInfo=null, _lastData=null;
+var _loose={};           /* productKey -> 낱개수량 (실물조사). vendorLoose 노드 */
+var _baseTotalQty=0;     /* 파렛트 기준 총수량 합 (낱개 제외) — 실시간 총합계 계산용 */
+var _canEdit=false;      /* 관리자 미리보기에서만 낱개 입력 가능 */
 
 function sortRows(rows){
   var r=rows.slice();
@@ -169,47 +192,65 @@ function restockBtn(p){
 
 function renderReport(info, data){
   _lastInfo=info; _lastData=data;
+  _canEdit=!!(info && info._admin);
   var vendorName=info.vendorName||'우리 업체';
   var products=(data && data.products) || {};
   var rows=Object.keys(products).map(function(k){ return Object.assign({_k:k}, products[k]); })
     .filter(function(p){return p && p.name;});
   rows=sortRows(rows);
 
-  var totQty=0, totPal=0;
-  rows.forEach(function(p){ totQty+=(+p.totalQty||0); totPal+=(+p.pallets||0); });
+  var totQty=0, totPal=0, totLoose=0;
+  rows.forEach(function(p){ totQty+=(+p.totalQty||0); totPal+=(+p.pallets||0); totLoose+=(+(_loose[p._k])||0); });
+  _baseTotalQty=totQty;
+  var grand=totQty+totLoose;
 
   function sbtn(mode,label){ return '<button class="sortbtn'+(_sortMode===mode?' active':'')+'" onclick="setSort(\''+mode+'\')">'+label+'</button>'; }
   var sortbar='<div class="sortbar"><span class="sortlabel">정렬</span>'
     +sbtn('qty','수량 많은순')+sbtn('pallet','파렛트순')+sbtn('name','이름순')+'</div>';
 
+  var looseHint=_canEdit
+    ? '<div class="loose-hint">✍ <b>낱개수량</b> 칸에 실물조사 수량을 입력하면 <b>총합계</b>에 즉시 합산·저장됩니다. (관리자 전용)</div>'
+    : '';
+
   var body = rows.length===0
     ? '<div class="empty">현재 재고에 등록된 상품이 없습니다.<br><span style="font-size:12px;">창고에서 입고가 이루어지면 자동으로 표시됩니다.</span></div>'
-    : sortbar+'<div class="tbl-wrap"><table>'
-        +'<thead><tr><th class="l">상품명</th><th>총수량</th><th>파렛트</th></tr></thead>'
+    : sortbar+looseHint+'<div class="tbl-wrap"><table>'
+        +'<thead><tr><th class="l">상품명</th><th>파렛트</th><th>총수량</th><th class="loosehead">낱개수량</th><th>총합계</th></tr></thead>'
         +'<tbody>'
-        + rows.map(function(p){
+        + rows.map(function(p,i){
             var low=(p.pallets||0)<=2;   /* 재고보충요망 임계값: 파렛트 2개 이하 */
             var open=!!_expanded[p._k];
+            var loose=(+(_loose[p._k])||0);
+            var rowSum=(+p.totalQty||0)+loose;
             var nameCell='<span class="pn">'+esc(p.name)+'</span>'+(low?restockBtn(p):'');
+            var palCell='<span class="num'+(low?' low':'')+'">'+nf(p.pallets)+'<span class="u">팔</span></span>';
             var qtyCell='<button class="qty-toggle'+(open?' open':'')+'" onclick="toggleDetail(\''+encodeURIComponent(p._k)+'\')">'
               +nf(p.totalQty)+'<span class="u">개</span><span class="caret">'+(open?'▴':'▾')+'</span></button>';
-            var palCell='<span class="num'+(low?' low':'')+'">'+nf(p.pallets)+'<span class="u">팔</span></span>';
+            var looseCell=_canEdit
+              ? '<input type="number" min="0" inputmode="numeric" class="loose-inp" id="loose-'+i+'" value="'+(loose||'')+'" placeholder="0" '
+                +'oninput="onLooseInput('+i+',\''+encodeURIComponent(p._k)+'\','+(+p.totalQty||0)+')" onchange="saveLoose(\''+encodeURIComponent(p._k)+'\')">'
+              : '<span class="num loosero">'+(loose?nf(loose):'—')+(loose?'<span class="u">개</span>':'')+'</span>';
+            var sumCell='<span class="num sumv" id="sum-'+i+'">'+nf(rowSum)+'<span class="u">개</span></span>';
             var tr='<tr class="prow'+(low?' lowrow':'')+'"><td class="l">'+nameCell+'</td>'
-              +'<td class="num qcell">'+qtyCell+'</td><td class="num">'+palCell+'</td></tr>';
-            var det= open ? '<tr class="detail-row"><td colspan="3">'+detailHtml(p)+'</td></tr>' : '';
+              +'<td class="num">'+palCell+'</td>'
+              +'<td class="num qcell">'+qtyCell+'</td>'
+              +'<td class="num loosecell">'+looseCell+'</td>'
+              +'<td class="num sumcell">'+sumCell+'</td></tr>';
+            var det= open ? '<tr class="detail-row"><td colspan="5">'+detailHtml(p)+'</td></tr>' : '';
             return tr+det;
           }).join('')
         +'</tbody>'
         +'<tfoot><tr><td class="l">합계 · '+rows.length+'개 품목</td>'
+          +'<td class="num">'+nf(totPal)+'<span class="u">팔</span></td>'
           +'<td class="num">'+nf(totQty)+'<span class="u">개</span></td>'
-          +'<td class="num">'+nf(totPal)+'<span class="u">팔</span></td></tr></tfoot>'
+          +'<td class="num" id="footLoose">'+nf(totLoose)+'<span class="u">개</span></td>'
+          +'<td class="num sumv" id="footSum">'+nf(grand)+'<span class="u">개</span></td></tr></tfoot>'
         +'</table></div>';
 
-  var isAdmin=!!(info && info._admin);
-  var titleLine=isAdmin
+  var titleLine=_canEdit
     ? '<div class="rpt-title">👁 관리자 미리보기 · 재고 현황</div>'
     : '<div class="rpt-title">재고 현황 보고서</div>';
-  var rightBtns=isAdmin
+  var rightBtns=_canEdit
     ? '<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="location.href=\'/wms_vendors.html?gid='+encodeURIComponent(info.gid||'')+'\'">‹ 업체관리</button>'
     : '<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
@@ -222,11 +263,11 @@ function renderReport(info, data){
     +'</div>'
     +'<div class="cards">'
     +'<div class="scard a"><div class="v">'+nf(rows.length)+'</div><div class="l">상품 품목</div></div>'
-    +'<div class="scard b"><div class="v">'+nf(totQty)+'</div><div class="l">총 수량 (개)</div></div>'
+    +'<div class="scard b"><div class="v" id="grandTotal">'+nf(grand)+'</div><div class="l">총 재고수량 (낱개포함)</div></div>'
     +'<div class="scard c"><div class="v">'+nf(totPal)+'</div><div class="l">총 파렛트 (팔)</div></div>'
     +'</div>'
     + body
-    +'<div class="foot-note">본 현황은 창고 운영 상황에 따라 갱신됩니다. 유통기한·보관위치 등 상세 정보는 제공되지 않습니다.<br>© 2026 Makemine Design · 메이크창고 WMS</div>';
+    +'<div class="foot-note">본 현황은 창고 운영 상황에 따라 갱신됩니다. 낱개수량은 실물조사 기준 관리자 입력값입니다. 유통기한·보관위치 등 상세 정보는 제공되지 않습니다.<br>© 2026 Makemine Design · 메이크창고 WMS</div>';
 }
 
 function setSort(mode){ _sortMode=mode; if(_lastInfo) renderReport(_lastInfo,_lastData); }
@@ -235,6 +276,36 @@ function toggleDetail(encKey){ var k=decodeURIComponent(encKey); _expanded[k]=!_
 window.toggleDetail=toggleDetail;
 function restockInfo(encName, pallets){ var nm=decodeURIComponent(encName); alert('📦 재고 보충 요망\n\n['+nm+'] 현재 파렛트 '+pallets+'개 — 보충이 필요합니다.'); }
 window.restockInfo=restockInfo;
+
+/* 낱개수량 입력(관리자 전용) — 입력 즉시 총합계/총재고 갱신, blur 시 저장 */
+function onLooseInput(i, encKey, totalQty){
+  var el=document.getElementById('loose-'+i); if(!el) return;
+  var v=parseInt(el.value,10); if(isNaN(v)||v<0){ v=0; }
+  var k=decodeURIComponent(encKey);
+  _loose[k]=v;
+  var sc=document.getElementById('sum-'+i);
+  if(sc) sc.innerHTML=nf((+totalQty||0)+v)+'<span class="u">개</span>';
+  updateGrand();
+}
+window.onLooseInput=onLooseInput;
+
+function updateGrand(){
+  var sumLoose=0;
+  var inps=document.querySelectorAll('.loose-inp');
+  for(var j=0;j<inps.length;j++){ sumLoose += (parseInt(inps[j].value,10)||0); }
+  var g=document.getElementById('grandTotal'); if(g) g.innerHTML=nf(_baseTotalQty+sumLoose);
+  var fl=document.getElementById('footLoose'); if(fl) fl.innerHTML=nf(sumLoose)+'<span class="u">개</span>';
+  var fs=document.getElementById('footSum'); if(fs) fs.innerHTML=nf(_baseTotalQty+sumLoose)+'<span class="u">개</span>';
+}
+
+function saveLoose(encKey){
+  if(!_lastInfo || !_lastInfo.gid || !_lastInfo.vendorId) return;
+  var k=decodeURIComponent(encKey);
+  var v=(+_loose[k]||0);
+  var ref=db.ref('vendorLoose/'+_lastInfo.gid+'/'+_lastInfo.vendorId+'/'+k);
+  (v>0 ? ref.set(v) : ref.remove()).catch(function(e){ console.warn('낱개 저장 실패', e); });
+}
+window.saveLoose=saveLoose;
 
 function doLogout(){ auth.signOut().then(function(){ location.replace('/wms_login.html'); }); }
 window.doLogout=doLogout;
@@ -245,9 +316,11 @@ function loadOwnByEmail(user){
   db.ref('vendorByEmail/'+ek).get().then(function(snap){
     if(!snap.exists()){ renderNotRegistered(user.email); return; }
     var info=snap.val();
-    db.ref('vendorStatus/'+info.gid+'/'+info.vendorId).on('value', function(s){
-      renderReport(info, s.val()||{});
-    }, function(err){
+    var lastStatus=null;
+    function rerender(){ if(lastStatus!==null) renderReport(info, lastStatus); }
+    /* 낱개수량 먼저 구독(읽기전용) */
+    db.ref('vendorLoose/'+info.gid+'/'+info.vendorId).on('value', function(s){ _loose=s.val()||{}; rerender(); }, function(){ /* 낱개 읽기 실패 무시 */ });
+    db.ref('vendorStatus/'+info.gid+'/'+info.vendorId).on('value', function(s){ lastStatus=s.val()||{}; rerender(); }, function(err){
       app.innerHTML='<div class="center" style="color:#F87171;">현황을 불러오지 못했습니다: '+esc(err.message)+'</div>';
     });
   }).catch(function(e){
@@ -261,11 +334,13 @@ function loadAdminPreview(user, gid, vid){
   Promise.all([
     db.ref('vendorConfig/'+gid+'/vendors/'+vid).get(),
     db.ref('vendorConfig/'+gid+'/map').get(),
-    db.ref('groups/'+gid).get()
+    db.ref('groups/'+gid).get(),
+    db.ref('vendorLoose/'+gid+'/'+vid).get()
   ]).then(function(r){
     if(!r[0].exists()){ app.innerHTML='<div class="center" style="color:#F87171;">업체를 찾을 수 없습니다.</div>'; return; }
     var vendorName=(r[0].val()||{}).name||'업체';
     var map=r[1].val()||{};
+    _loose=r[3].val()||{};
     var wids=r[2].exists()?Object.keys(r[2].val()).filter(function(k){return k!=='_init';}):[];
     Promise.all(wids.map(function(wid){ return db.ref('warehouses/'+wid).get().then(function(s){return s.val();}).catch(function(){return null;}); }))
     .then(function(whs){
@@ -280,7 +355,7 @@ function loadAdminPreview(user, gid, vid){
           ? {name:e.name, totalQty:a.totalQty, pallets:a.pallets, breakdown:a.breakdown}
           : {name:e.name, totalQty:0, pallets:0, breakdown:[]};
       });
-      renderReport({vendorName:vendorName, _admin:true, gid:gid}, {products:products, updatedAt:Date.now()});
+      renderReport({vendorName:vendorName, _admin:true, gid:gid, vendorId:vid}, {products:products, updatedAt:Date.now()});
       /* 저장된 요약본도 최신으로 갱신(담당자 화면도 같이 최신화) */
       if(window.WMSVendorProjection.sync) window.WMSVendorProjection.sync(gid, whs, db);
     });
