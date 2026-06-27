@@ -21,22 +21,32 @@
   /* wms_vendors.html 의 keyOf 와 동일해야 함 (상품명 → 안전키) */
   function keyOf(name){ return String(name).replace(/[.#$/\[\]]/g,'_'); }
 
-  /* 모든 창고 slots 합산 → {상품명:{totalQty,pallets}} (상품별재고와 동일 기준) */
+  /* 모든 창고 slots 합산 → {상품명:{totalQty,pallets,breakdown:[{qty,pallets}]}}
+     breakdown = 파렛트당 적재수량별 분포 (적재구성이 다른 경우 세부내역용) */
   function aggregate(whs){
-    var agg={};
+    var tmp={};
     (whs||[]).forEach(function(wh){
       if(!wh||!wh.cells) return;
       Object.keys(wh.cells).forEach(function(ck){
         var c=wh.cells[ck]; if(!c||!c.slots) return;
         Object.keys(c.slots).forEach(function(sk){
           var s=c.slots[sk]; if(!s||!s.name) return;
-          var a=agg[s.name]||(agg[s.name]={totalQty:0,pallets:0});
-          a.totalQty += (+s.qty||0);
-          a.pallets  += 1;
+          var t=tmp[s.name]||(tmp[s.name]={totalQty:0,pallets:0,byQty:{}});
+          var q=(+s.qty||0);
+          t.totalQty += q;
+          t.pallets  += 1;
+          t.byQty[q] = (t.byQty[q]||0) + 1;
         });
       });
     });
-    return agg;
+    var out={};
+    Object.keys(tmp).forEach(function(n){
+      var t=tmp[n];
+      var bd=Object.keys(t.byQty).map(function(q){ return { qty:+q, pallets:t.byQty[q] }; })
+        .sort(function(a,b){ return b.qty - a.qty; });
+      out[n]={ totalQty:t.totalQty, pallets:t.pallets, breakdown:bd };
+    });
+    return out;
   }
 
   function run(gid, whs, db){
@@ -55,7 +65,8 @@
       Object.keys(agg).forEach(function(name){
         var e = map[keyOf(name)];
         if(!e || !e.vendorId || !byV[e.vendorId]) return;   /* 미연결·삭제업체 skip */
-        byV[e.vendorId][keyOf(name)] = { name:name, totalQty:agg[name].totalQty, pallets:agg[name].pallets };
+        var a = agg[name];
+        byV[e.vendorId][keyOf(name)] = { name:name, totalQty:a.totalQty, pallets:a.pallets, breakdown:a.breakdown };
       });
 
       var updates={}, now=Date.now();

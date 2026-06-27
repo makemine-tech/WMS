@@ -48,6 +48,38 @@ tbody tr:nth-child(even){background:rgba(255,255,255,.015);}
 tfoot td{padding:14px 16px;font-size:14px;font-weight:800;text-align:right;border-top:2px solid var(--bd);background:rgba(59,130,246,.07);}
 tfoot td.l{text-align:left;letter-spacing:.04em;}
 .empty{text-align:center;color:var(--sub);padding:44px 20px;font-size:14px;}
+
+/* 정렬 바 */
+.sortbar{display:flex;align-items:center;gap:6px;margin-bottom:11px;flex-wrap:wrap;}
+.sortlabel{font-size:11px;color:var(--sub);font-weight:700;margin-right:2px;}
+.sortbtn{background:rgba(255,255,255,.05);color:var(--sub);border:1px solid var(--bd);border-radius:20px;padding:6px 13px;font-size:12px;font-weight:700;cursor:pointer;}
+.sortbtn.active{background:rgba(59,130,246,.18);color:#93C5FD;border-color:rgba(59,130,246,.5);}
+
+/* 총수량 펼침 버튼 */
+.qcell{cursor:pointer;}
+.pn{font-weight:600;}
+.qty-toggle{background:none;border:none;color:var(--tx);font-size:14px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:5px;padding:2px 0;}
+.qty-toggle .u{font-size:11px;color:var(--sub);font-weight:600;margin-left:1px;}
+.qty-toggle .caret{font-size:10px;color:#60A5FA;}
+.qty-toggle:hover{color:#93C5FD;}
+
+/* 세부 적재구성 */
+.detail-row td{padding:0 16px 12px!important;background:rgba(255,255,255,.015);text-align:left;}
+.bd-box{background:rgba(0,0,0,.22);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;}
+.bd-line{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.08);font-variant-numeric:tabular-nums;}
+.bd-line:last-of-type{border-bottom:none;}
+.bd-l{color:var(--tx);font-weight:600;}
+.bd-r{color:#93C5FD;font-weight:700;}
+.bd-total{text-align:right;font-size:13px;font-weight:800;color:var(--green);margin-top:8px;padding-top:8px;border-top:1px solid var(--bd);}
+.bd-empty{font-size:12px;color:var(--sub);padding:8px 2px;}
+
+/* 재고 부족 */
+.num.low{color:#F87171;}
+.lowrow td{background:rgba(239,68,68,.05);}
+.restock{display:inline-flex;align-items:center;gap:4px;background:rgba(239,68,68,.16);color:#FCA5A5;border:1px solid rgba(239,68,68,.45);border-radius:20px;padding:3px 9px 3px 7px;font-size:10.5px;font-weight:800;cursor:pointer;margin-left:8px;vertical-align:middle;letter-spacing:.02em;white-space:nowrap;}
+.restock:hover{background:rgba(239,68,68,.28);color:#fff;}
+.restock svg{flex-shrink:0;}
+
 .foot-note{font-size:11px;color:var(--sub);margin-top:16px;line-height:1.7;text-align:center;}
 .notreg{max-width:440px;margin:40px auto;background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:32px 26px;text-align:center;}
 
@@ -103,25 +135,66 @@ function renderNotRegistered(email){
    +'</div>';
 }
 
+var _sortMode='qty';     /* qty | pallet | name */
+var _expanded={};        /* productKey -> true (펼침 상태 유지) */
+var _lastInfo=null, _lastData=null;
+
+function sortRows(rows){
+  var r=rows.slice();
+  if(_sortMode==='name') r.sort(function(a,b){return String(a.name).localeCompare(String(b.name),'ko');});
+  else if(_sortMode==='pallet') r.sort(function(a,b){return (b.pallets||0)-(a.pallets||0);});
+  else r.sort(function(a,b){return (b.totalQty||0)-(a.totalQty||0);});
+  return r;
+}
+
+function detailHtml(p){
+  var bd=p.breakdown;
+  if(!bd || !bd.length){ return '<div class="bd-empty">세부 적재구성 정보가 아직 없습니다. (창고관리 갱신 후 표시)</div>'; }
+  var lines=bd.map(function(b){
+    return '<div class="bd-line"><span class="bd-l">'+nf(b.qty)+'개 × '+nf(b.pallets)+'팔</span>'
+      +'<span class="bd-r">= '+nf((b.qty||0)*(b.pallets||0))+'개</span></div>';
+  }).join('');
+  return '<div class="bd-box">'+lines
+    +'<div class="bd-total">총 '+nf(p.totalQty)+'개 · '+nf(p.pallets)+'팔</div></div>';
+}
+
+function restockBtn(p){
+  return '<button class="restock" title="재고 보충 요망" onclick="event.stopPropagation();restockInfo(\''+encodeURIComponent(p.name)+'\','+(p.pallets||0)+')">'
+    +'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>'
+    +'재고보충요망</button>';
+}
+
 function renderReport(info, data){
+  _lastInfo=info; _lastData=data;
   var vendorName=info.vendorName||'우리 업체';
   var products=(data && data.products) || {};
-  var rows=Object.keys(products).map(function(k){return products[k];})
-    .filter(function(p){return p && p.name;})
-    .sort(function(a,b){return (b.totalQty||0)-(a.totalQty||0);});
+  var rows=Object.keys(products).map(function(k){ return Object.assign({_k:k}, products[k]); })
+    .filter(function(p){return p && p.name;});
+  rows=sortRows(rows);
 
   var totQty=0, totPal=0;
   rows.forEach(function(p){ totQty+=(+p.totalQty||0); totPal+=(+p.pallets||0); });
 
+  function sbtn(mode,label){ return '<button class="sortbtn'+(_sortMode===mode?' active':'')+'" onclick="setSort(\''+mode+'\')">'+label+'</button>'; }
+  var sortbar='<div class="sortbar"><span class="sortlabel">정렬</span>'
+    +sbtn('qty','수량 많은순')+sbtn('pallet','파렛트순')+sbtn('name','이름순')+'</div>';
+
   var body = rows.length===0
     ? '<div class="empty">현재 재고에 등록된 상품이 없습니다.<br><span style="font-size:12px;">창고에서 입고가 이루어지면 자동으로 표시됩니다.</span></div>'
-    : '<div class="tbl-wrap"><table>'
+    : sortbar+'<div class="tbl-wrap"><table>'
         +'<thead><tr><th class="l">상품명</th><th>총수량</th><th>파렛트</th></tr></thead>'
         +'<tbody>'
         + rows.map(function(p){
-            return '<tr><td class="l">'+esc(p.name)+'</td>'
-              +'<td class="num">'+nf(p.totalQty)+'<span class="u">개</span></td>'
-              +'<td class="num">'+nf(p.pallets)+'<span class="u">팔</span></td></tr>';
+            var low=(p.pallets||0)<=10;
+            var open=!!_expanded[p._k];
+            var nameCell='<span class="pn">'+esc(p.name)+'</span>'+(low?restockBtn(p):'');
+            var qtyCell='<button class="qty-toggle'+(open?' open':'')+'" onclick="toggleDetail(\''+encodeURIComponent(p._k)+'\')">'
+              +nf(p.totalQty)+'<span class="u">개</span><span class="caret">'+(open?'▴':'▾')+'</span></button>';
+            var palCell='<span class="num'+(low?' low':'')+'">'+nf(p.pallets)+'<span class="u">팔</span></span>';
+            var tr='<tr class="prow'+(low?' lowrow':'')+'"><td class="l">'+nameCell+'</td>'
+              +'<td class="num qcell">'+qtyCell+'</td><td class="num">'+palCell+'</td></tr>';
+            var det= open ? '<tr class="detail-row"><td colspan="3">'+detailHtml(p)+'</td></tr>' : '';
+            return tr+det;
           }).join('')
         +'</tbody>'
         +'<tfoot><tr><td class="l">합계 · '+rows.length+'개 품목</td>'
@@ -152,6 +225,13 @@ function renderReport(info, data){
     + body
     +'<div class="foot-note">본 현황은 창고 운영 상황에 따라 갱신됩니다. 유통기한·보관위치 등 상세 정보는 제공되지 않습니다.<br>© 2026 Makemine Design · 메이크창고 WMS</div>';
 }
+
+function setSort(mode){ _sortMode=mode; if(_lastInfo) renderReport(_lastInfo,_lastData); }
+window.setSort=setSort;
+function toggleDetail(encKey){ var k=decodeURIComponent(encKey); _expanded[k]=!_expanded[k]; if(_lastInfo) renderReport(_lastInfo,_lastData); }
+window.toggleDetail=toggleDetail;
+function restockInfo(encName, pallets){ var nm=decodeURIComponent(encName); alert('📦 재고 보충 요망\n\n['+nm+'] 현재 파렛트 '+pallets+'개 — 보충이 필요합니다.'); }
+window.restockInfo=restockInfo;
 
 function doLogout(){ auth.signOut().then(function(){ location.replace('/wms_login.html'); }); }
 window.doLogout=doLogout;
@@ -191,7 +271,7 @@ function loadAdminPreview(user, gid, vid){
       var products={};
       Object.keys(agg).forEach(function(name){
         var e=map[kf(name)];
-        if(e && e.vendorId===vid){ products[kf(name)]={name:name, totalQty:agg[name].totalQty, pallets:agg[name].pallets}; }
+        if(e && e.vendorId===vid){ products[kf(name)]={name:name, totalQty:agg[name].totalQty, pallets:agg[name].pallets, breakdown:agg[name].breakdown}; }
       });
       renderReport({vendorName:vendorName, _admin:true, gid:gid}, {products:products, updatedAt:Date.now()});
       /* 저장된 요약본도 최신으로 갱신(담당자 화면도 같이 최신화) */
