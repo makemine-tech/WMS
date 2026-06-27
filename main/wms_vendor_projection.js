@@ -62,11 +62,14 @@
       var agg = aggregate(whs);
       var byV = {}; vids.forEach(function(v){ byV[v]={}; });
 
-      Object.keys(agg).forEach(function(name){
-        var e = map[keyOf(name)];
-        if(!e || !e.vendorId || !byV[e.vendorId]) return;   /* 미연결·삭제업체 skip */
-        var a = agg[name];
-        byV[e.vendorId][keyOf(name)] = { name:name, totalQty:a.totalQty, pallets:a.pallets, breakdown:a.breakdown };
+      /* 연결된 모든 상품을 내보냄 — 재고 없는 상품도 0팔 0개로 표시 */
+      Object.keys(map).forEach(function(k){
+        var e = map[k];
+        if(!e || !e.vendorId || !byV[e.vendorId] || !e.name) return;   /* 미연결·삭제업체 skip */
+        var a = agg[e.name];
+        byV[e.vendorId][k] = a
+          ? { name:e.name, totalQty:a.totalQty, pallets:a.pallets, breakdown:a.breakdown }
+          : { name:e.name, totalQty:0, pallets:0, breakdown:[] };
       });
 
       var updates={}, now=Date.now();

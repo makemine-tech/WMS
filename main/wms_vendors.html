@@ -50,6 +50,7 @@ h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
 .prow.unlinked{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.06);}
 .prow .pname{flex:1;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .prow .pstale{font-size:10px;color:#64748B;font-weight:500;margin-left:6px;}
+.pzero{display:inline-block;font-size:10px;font-weight:700;color:#FCA5A5;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:1px 7px;margin-left:8px;vertical-align:middle;}
 .sel{background:#0F172A;border:1px solid #334155;border-radius:7px;padding:7px 9px;color:#E2E8F0;font-size:12px;outline:none;font-family:inherit;flex-shrink:0;max-width:170px;}
 .sel.none{color:#FBBF24;border-color:rgba(251,191,36,.4);}
 .unlinked-banner{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;font-size:12px;color:#FCD34D;line-height:1.6;margin-bottom:12px;}
@@ -154,9 +155,14 @@ function vendorProductCount(vid){
 }
 
 function render(user){
-  /* 현재 재고에 있는 상품만 표시 (오타·출고완료분 제외). 과거에 연결만 남은
-     상품은 화면에 안 보이지만 연결 기록은 유지 — 재고로 돌아오면 자동 적용됨. */
-  var allNames=_products;
+  /* 현재 재고 상품 + 업체에 이미 연결된 상품(재고 0이어도 유지). pColors 누적분은 제외. */
+  var liveSet={}; _products.forEach(function(n){liveSet[n]=1;});
+  var mapOnly=[];
+  Object.keys(_map).forEach(function(k){
+    var nm=_map[k]&&_map[k].name;
+    if(nm && !liveSet[nm]) mapOnly.push(nm);
+  });
+  var allNames=_products.concat(mapOnly.sort(function(a,b){return a.localeCompare(b,'ko');}));
 
   var linked=[], unlinked=[];
   allNames.forEach(function(nm){
@@ -192,8 +198,9 @@ function render(user){
   function prow(nm, isUnlinked){
     var k=keyOf(nm);
     var sel=(_map[k]&&_map[k].vendorId)||'';
+    var zero=(_products.indexOf(nm)<0) ? '<span class="pzero">재고 0</span>' : '';
     return '<div class="prow'+(isUnlinked?' unlinked':'')+'">'
-      +'<div class="pname">'+esc(nm)+'</div>'
+      +'<div class="pname">'+esc(nm)+zero+'</div>'
       +'<select class="sel'+(sel?'':' none')+'" onchange="linkProduct(\''+encodeURIComponent(nm)+'\',this.value)">'
       +vendorOptions(sel)+'</select></div>';
   }
@@ -215,7 +222,7 @@ function render(user){
     +'<div style="font-size:11px;color:#64748B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(user.email)+'</div></div>'
     +'</div>'
     +'<h1>🏷️ 업체등록 · 상품연결</h1>'
-    +'<div class="sub">창고가 여러 개여도 그룹 단위로 통합 관리됩니다. <b style="color:#94A3B8;">현재 재고에 있는 상품만</b> 표시됩니다(상품별재고 기준 · 오타·출고완료분 제외). 상품명마다 거래 업체를 지정하면, 추후 해당 업체 담당자가 자기 상품 현황을 볼 수 있습니다.</div>'
+    +'<div class="sub">창고가 여러 개여도 그룹 단위로 통합 관리됩니다. <b style="color:#94A3B8;">현재 재고 상품 + 연결된 상품</b>이 표시됩니다(연결된 상품은 재고 0이어도 유지). 상품명마다 거래 업체를 지정하면, 해당 업체 담당자가 자기 상품 현황을 볼 수 있습니다.</div>'
 
     +'<div class="section">'
     +'<div class="section-h">📇 업체 목록 <span class="count-chip">'+vids.length+'</span></div>'
@@ -234,7 +241,16 @@ function render(user){
 
     +'<div class="section">'
     +'<div class="section-h">🔗 연결된 상품 <span class="count-chip" style="background:rgba(124,58,237,.15);color:#A78BFA;">'+linked.length+'</span></div>'
-    +linkedHtml+'</div>';
+    +linkedHtml+'</div>'
+
+    +'<div class="section">'
+    +'<div class="section-h">➕ 재고 없는 상품 추가 <span class="muted-sm" style="font-weight:600;">현황에 0팔 0개로 표시</span></div>'
+    +'<div class="add-hint" style="margin-top:0;margin-bottom:10px;">창고에 아직 재고가 없는 상품을 미리 업체에 연결해 두면 현황 보고서에 <b>0팔 0개(재고보충요망)</b>로 표시됩니다. 재고가 들어오면 자동으로 실수량으로 바뀝니다. <b style="color:#FBBF24;">상품명은 창고에서 쓰는 이름과 정확히 동일</b>해야 합니다.</div>'
+    +'<div class="add-form">'
+    +'<input id="mpName" class="inp" placeholder="상품명 (예: 21곡45)" style="flex:2;"/>'
+    +'<select id="mpVendor" class="inp" style="flex:2;">'+vendorOptions('')+'</select>'
+    +'<button class="btn btn-primary" onclick="addManualProduct()">+ 추가</button>'
+    +'</div></div>';
 }
 
 /* ── 액션 ── */
@@ -332,6 +348,23 @@ function previewVendor(vid){
   window.open('/vendor_status.html?gid='+encodeURIComponent(GID)+'&vid='+encodeURIComponent(vid),'_blank');
 }
 window.previewVendor=previewVendor;
+
+/* 재고 없는 상품을 업체에 직접 연결 — 현황에 0팔 0개로 표시됨 */
+function addManualProduct(){
+  var nameEl=document.getElementById('mpName'), vidEl=document.getElementById('mpVendor');
+  var name=(nameEl.value||'').trim();
+  var vid=vidEl.value;
+  if(!name){toast('상품명을 입력하세요');return;}
+  if(!vid){toast('연결할 업체를 선택하세요');return;}
+  var k=keyOf(name);
+  if(_map[k] && _map[k].vendorId){ toast('이미 연결된 상품입니다'); return; }
+  var rec={name:name, vendorId:vid};
+  db.ref('vendorConfig/'+GID+'/map/'+k).set(rec).then(function(){
+    _map[k]=rec; nameEl.value=''; renderReload();
+    toast(name+' → '+(_vendors[vid]?_vendors[vid].name:'업체')+' (재고 0)');
+  }).catch(function(e){toast('추가 실패: '+e.message);});
+}
+window.addManualProduct=addManualProduct;
 
 function linkProduct(encName, vendorId){
   var nm=decodeURIComponent(encName);

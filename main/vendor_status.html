@@ -149,7 +149,10 @@ function sortRows(rows){
 
 function detailHtml(p){
   var bd=p.breakdown;
-  if(!bd || !bd.length){ return '<div class="bd-empty">세부 적재구성 정보가 아직 없습니다. (창고관리 갱신 후 표시)</div>'; }
+  if(!bd || !bd.length){
+    if((p.totalQty||0)===0 && (p.pallets||0)===0){ return '<div class="bd-empty" style="color:#FCA5A5;">현재 재고가 없습니다 — 보충이 필요합니다.</div>'; }
+    return '<div class="bd-empty">세부 적재구성 정보가 아직 없습니다. (창고관리 갱신 후 표시)</div>';
+  }
   var lines=bd.map(function(b){
     return '<div class="bd-line"><span class="bd-l">'+nf(b.qty)+'개 × '+nf(b.pallets)+'팔</span>'
       +'<span class="bd-r">= '+nf((b.qty||0)*(b.pallets||0))+'개</span></div>';
@@ -269,9 +272,13 @@ function loadAdminPreview(user, gid, vid){
       whs=whs.filter(Boolean);
       var agg=window.WMSVendorProjection.aggregate(whs), kf=window.WMSVendorProjection.keyOf;
       var products={};
-      Object.keys(agg).forEach(function(name){
-        var e=map[kf(name)];
-        if(e && e.vendorId===vid){ products[kf(name)]={name:name, totalQty:agg[name].totalQty, pallets:agg[name].pallets, breakdown:agg[name].breakdown}; }
+      Object.keys(map).forEach(function(k){
+        var e=map[k];
+        if(!e || e.vendorId!==vid || !e.name) return;
+        var a=agg[e.name];
+        products[k]= a
+          ? {name:e.name, totalQty:a.totalQty, pallets:a.pallets, breakdown:a.breakdown}
+          : {name:e.name, totalQty:0, pallets:0, breakdown:[]};
       });
       renderReport({vendorName:vendorName, _admin:true, gid:gid}, {products:products, updatedAt:Date.now()});
       /* 저장된 요약본도 최신으로 갱신(담당자 화면도 같이 최신화) */
