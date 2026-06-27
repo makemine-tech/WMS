@@ -92,6 +92,8 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){retur
 function keyOf(name){return String(name).replace(/[.#$/\[\]]/g,'_');}
 function genId(){return 'v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
 function emailKey(em){return String(em||'').trim().toLowerCase().replace(/[.#$/\[\]]/g,'_');}
+/* vendorByEmail 인덱스 키 — DB 규칙(auth.token.email.toLowerCase().replace('.',',')) 과 반드시 동일 */
+function emIdxKey(em){return String(em||'').trim().toLowerCase().replace(/\./g,',');}
 function validEmail(em){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);}
 /* 레거시 단일 email 필드 + 신규 emails 맵을 하나로 합쳐 {emailKey: email} 반환 */
 function currentEmailsMap(v){var m={}; if(v&&v.email){m[emailKey(v.email)]=v.email;} if(v&&v.emails){Object.keys(v.emails).forEach(function(k){m[k]=v.emails[k]||k;});} return m;}
@@ -249,7 +251,10 @@ function addVendor(){
   var vid=genId();
   var emails={}; if(email) emails[emailKey(email)]=email;
   var rec={name:name, emails:emails, createdAt:Date.now()};
-  db.ref('vendorConfig/'+GID+'/vendors/'+vid).set(rec).then(function(){
+  var updates={};
+  updates['vendorConfig/'+GID+'/vendors/'+vid]=rec;
+  if(email) updates['vendorByEmail/'+emIdxKey(email)]={gid:GID, vendorId:vid, vendorName:name};
+  db.ref().update(updates).then(function(){
     _vendors[vid]=rec; nameEl.value=''; emailEl.value=''; renderReload(); toast('업체 추가됨 · '+name);
   }).catch(function(e){toast('추가 실패: '+e.message);});
 }
@@ -267,6 +272,7 @@ function addEmailTo(vid, email, okMsg){
   var updates={};
   updates['vendorConfig/'+GID+'/vendors/'+vid+'/emails']=cur;
   updates['vendorConfig/'+GID+'/vendors/'+vid+'/email']=null;
+  updates['vendorByEmail/'+emIdxKey(email)]={gid:GID, vendorId:vid, vendorName:v.name};
   db.ref().update(updates).then(function(){
     v.emails=cur; delete v.email; renderReload(); toast(okMsg||('담당자 추가 · '+email));
   }).catch(function(e){toast('추가 실패: '+e.message);});
@@ -287,12 +293,14 @@ function removeEmail(vid, encEk){
   var ek=decodeURIComponent(encEk);
   var cur=currentEmailsMap(v);
   if(!cur[ek]) return;
-  if(!confirm('담당자 "'+cur[ek]+'" 를 제거할까요?')) return;
+  var removedEmail=cur[ek];
+  if(!confirm('담당자 "'+removedEmail+'" 를 제거할까요?')) return;
   delete cur[ek];
   var hasAny=Object.keys(cur).length>0;
   var updates={};
   updates['vendorConfig/'+GID+'/vendors/'+vid+'/emails']=hasAny?cur:null;
   updates['vendorConfig/'+GID+'/vendors/'+vid+'/email']=null;
+  updates['vendorByEmail/'+emIdxKey(removedEmail)]=null;
   db.ref().update(updates).then(function(){
     v.emails=cur; delete v.email; renderReload(); toast('담당자 제거됨');
   }).catch(function(e){toast('제거 실패: '+e.message);});
@@ -303,9 +311,12 @@ function delVendor(vid){
   var v=_vendors[vid]; if(!v) return;
   var cnt=vendorProductCount(vid);
   if(!confirm('업체 "'+v.name+'" 을(를) 삭제할까요?'+(cnt?('\n\n연결된 '+cnt+'개 상품은 미연결 상태가 됩니다.'):''))) return;
-  /* 연결된 상품 링크 해제 */
+  /* 연결된 상품 링크 해제 + 담당자 인덱스/현황 요약본 정리 */
   var updates={};
   Object.keys(_map).forEach(function(k){ if(_map[k]&&_map[k].vendorId===vid) updates['vendorConfig/'+GID+'/map/'+k]=null; });
+  var ems=currentEmailsMap(v);
+  Object.keys(ems).forEach(function(ek){ updates['vendorByEmail/'+emIdxKey(ems[ek])]=null; });
+  updates['vendorStatus/'+GID+'/'+vid]=null;
   updates['vendorConfig/'+GID+'/vendors/'+vid]=null;
   db.ref().update(updates).then(function(){
     Object.keys(_map).forEach(function(k){ if(_map[k]&&_map[k].vendorId===vid) delete _map[k]; });

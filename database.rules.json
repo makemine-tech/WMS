@@ -66,8 +66,22 @@
     },
     "vendorConfig": {
       "$gid": {
-        ".read": "auth != null && root.child('superadmins/'+auth.uid).exists()",
+        ".read": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).val() === $gid)",
         ".write": "auth != null && root.child('superadmins/'+auth.uid).exists()"
+      }
+    },
+    "vendorByEmail": {
+      "$ekey": {
+        ".read": "auth != null && (root.child('superadmins/'+auth.uid).exists() || (auth.token.email != null && auth.token.email.toLowerCase().replace('.',',') === $ekey))",
+        ".write": "auth != null && root.child('superadmins/'+auth.uid).exists()"
+      }
+    },
+    "vendorStatus": {
+      "$gid": {
+        ".write": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).val() === $gid)",
+        "$vid": {
+          ".read": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).val() === $gid || (auth.token.email != null && root.child('vendorByEmail/'+auth.token.email.toLowerCase().replace('.',',')+'/gid').val() === $gid && root.child('vendorByEmail/'+auth.token.email.toLowerCase().replace('.',',')+'/vendorId').val() === $vid))"
+        }
       }
     },
     "wms_sync": {
