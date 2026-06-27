@@ -74,5 +74,6 @@
     timer = setTimeout(function(){ timer=null; run(gid, whs, db); }, 2000);
   }
 
-  window.WMSVendorProjection = { sync: sync };
+  /* 관리자 미리보기(vendor_status.html)에서 재사용 — 창고 원본으로 즉시 계산 */
+  window.WMSVendorProjection = { sync: sync, aggregate: aggregate, keyOf: keyOf };
 })();
