@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>메이크창고 WMS — 슈퍼관리자 관리도구</title>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;min-height:100vh;padding:24px 16px 80px;}
+.wrap{max-width:760px;margin:0 auto;}
+.topbar{display:flex;align-items:center;gap:12px;margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid #334155;}
+.badge-admin{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:#F87171;white-space:nowrap;}
+.btn-back{background:rgba(255,255,255,.06);color:#94A3B8;border:1px solid #334155;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
+.btn-back:hover{background:rgba(255,255,255,.1);}
+h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
+.sub{font-size:12px;color:#64748B;margin-bottom:20px;line-height:1.6;}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px;}
+.legend .chip{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;border:1px solid;}
+.group-title{font-size:12px;font-weight:800;color:#94A3B8;letter-spacing:.04em;margin:22px 0 10px;text-transform:uppercase;}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:10px;margin-bottom:8px;}
+.row .meta{flex:1;min-width:0;}
+.row .nm{font-weight:700;font-size:14px;}
+.row .fk{font-size:11px;color:#64748B;margin-top:2px;font-family:ui-monospace,monospace;}
+.row .floor-note{font-size:10px;color:#7C3AED;margin-top:2px;}
+.seg{display:flex;gap:0;border:1px solid #334155;border-radius:8px;overflow:hidden;flex-shrink:0;}
+.seg button{background:transparent;color:#94A3B8;border:none;border-left:1px solid #334155;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.seg button:first-child{border-left:none;}
+.seg button:disabled{opacity:.25;cursor:not-allowed;}
+.seg button.active{color:#fff;}
+.seg button.lv0.active{background:#475569;}
+.seg button.lv1.active{background:#2563EB;}
+.seg button.lv2.active{background:#7C3AED;}
+.seg button.lv3.active{background:#DC2626;}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1E293B;border:1px solid #334155;border-radius:10px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;z-index:50;}
+.toast.show{opacity:1;}
+.center{text-align:center;padding:60px 20px;color:#64748B;font-size:14px;}
+.spinner{width:24px;height:24px;border:2px solid #334155;border-top-color:#3B82F6;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 16px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.note-box{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:10px;padding:13px 15px;font-size:12px;color:#93C5FD;line-height:1.7;margin-bottom:18px;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="center"><div class="spinner"></div>인증 확인 중...</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── Firebase ── */
+firebase.initializeApp({
+  apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
+  authDomain:"makewon.com",
+  databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"makechango-wms",
+  storageBucket:"makechango-wms.firebasestorage.app",
+  messagingSenderId:"333385336098",
+  appId:"1:333385336098:web:94f07492421965ab32917b"
+});
+var auth=firebase.auth(), db=firebase.database();
+var app=document.getElementById('app'), toastEl=document.getElementById('toast');
+
+/* ── 등급 정의 ── */
+var LEVELS=[
+  {v:0,label:'비회원 공개',short:'비회원',cls:'lv0',color:'#94A3B8',bd:'#475569'},
+  {v:1,label:'일반회원이상',short:'일반',cls:'lv1',color:'#60A5FA',bd:'#2563EB'},
+  {v:2,label:'초대회원이상',short:'초대',cls:'lv2',color:'#A78BFA',bd:'#7C3AED'},
+  {v:3,label:'슈퍼관리자만',short:'관리자',cls:'lv3',color:'#F87171',bd:'#DC2626'}
+];
+
+/* ── 페이지 레지스트리 ── floor: 페이지가 정상 동작하기 위한 최소 등급 ── */
+var REGISTRY=[
+  {group:'핵심 콘솔', items:[
+    {key:'wms',          file:'wms.html',          label:'메이크창고 WMS (메인 콘솔)', floor:2},
+  ]},
+  {group:'출고 · 입고 도구 (그룹 동기화)', items:[
+    {key:'star_coupang', file:'star_coupang.html', label:'쿠팡 출고', floor:2},
+    {key:'star_outorder',file:'star_outorder.html',label:'출고 지시', floor:2},
+    {key:'star_instock', file:'star_instock.html', label:'입고 관리', floor:2},
+    {key:'star_picking', file:'star_picking.html', label:'피킹 (송장정렬)', floor:2},
+    {key:'star_extract', file:'star_extract.html', label:'데이터 추출', floor:2},
+    {key:'picktalk',     file:'picktalk.html',     label:'피크톡', floor:2},
+  ]},
+  {group:'유틸리티 (공개 가능)', items:[
+    {key:'index',        file:'index.html',        label:'홈 / 랜딩', floor:0},
+    {key:'saju',         file:'saju.html',         label:'사주', floor:0},
+    {key:'pdf_pdf',      file:'pdf_pdf.html',      label:'PDF 도구', floor:0},
+    {key:'pdf_smart_merge',file:'pdf_smart_merge.html',label:'PDF 스마트 병합', floor:0},
+    {key:'excel_merge',  file:'excel_merge.html',  label:'엑셀 병합', floor:0},
+    {key:'picking_ebut', file:'picking_ebut.html', label:'피킹(이벗)', floor:0},
+    {key:'picking_ez',   file:'picking_ez.html',   label:'피킹(이지)', floor:0},
+    {key:'tutorial_ebut',file:'tutorial_ebut.html',label:'튜토리얼(이벗)', floor:0},
+    {key:'tutorial_ez',  file:'tutorial_ez.html',  label:'튜토리얼(이지)', floor:0},
+    {key:'wms-tutorial', file:'wms-tutorial.html', label:'WMS 튜토리얼', floor:0},
+  ]},
+];
+
+var _access={};   /* pageAccey 설정값 캐시 */
+
+function toast(msg){
+  toastEl.textContent=msg; toastEl.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(function(){toastEl.classList.remove('show');},1600);
+}
+
+function effective(item){
+  var configured=_access[item.key];
+  configured=(configured===undefined||configured===null)?0:(+configured);
+  return Math.max(configured, item.floor||0);
+}
+
+function renderDenied(){
+  app.innerHTML='<div class="center" style="color:#F87171;">'
+   +'<div style="font-size:40px;margin-bottom:10px;">🚫</div>'
+   +'접근 권한이 없습니다.<br><span style="font-size:12px;color:#64748B;">슈퍼관리자만 이용할 수 있습니다.</span><br><br>'
+   +'<a href="/wms_login.html" class="btn-back">로그인 화면으로</a></div>';
+}
+
+function renderAdmin(user){
+  var legend=LEVELS.map(function(L){
+    return '<span class="chip" style="color:'+L.color+';border-color:'+L.bd+';">'+L.label+'</span>';
+  }).join('');
+
+  var groupsHtml=REGISTRY.map(function(g){
+    var rows=g.items.map(function(item){
+      var cur=effective(item);
+      var segBtns=LEVELS.map(function(L){
+        var disabled=(L.v < (item.floor||0));
+        return '<button class="'+L.cls+(L.v===cur?' active':'')+'"'
+          +(disabled?' disabled':'')
+          +' onclick="setLevel(\''+item.key+'\','+L.v+','+(item.floor||0)+')">'+L.short+'</button>';
+      }).join('');
+      var floorNote=(item.floor>0)
+        ? '<div class="floor-note">⚙ 그룹 동기화 필요 — 최소 '+LEVELS[item.floor].label+'</div>' : '';
+      return '<div class="row" id="row-'+item.key+'">'
+        +'<div class="meta"><div class="nm">'+item.label+'</div>'
+        +'<div class="fk">'+item.file+'</div>'+floorNote+'</div>'
+        +'<div class="seg">'+segBtns+'</div></div>';
+    }).join('');
+    return '<div class="group-title">'+g.group+'</div>'+rows;
+  }).join('');
+
+  app.innerHTML=
+    '<div class="topbar">'
+    +'<a href="/wms_login.html" class="btn-back">‹ 그룹 관리</a>'
+    +'<div class="badge-admin">🛡️ 슈퍼관리자</div>'
+    +'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(user.displayName||'')+'</div>'
+    +'<div style="font-size:11px;color:#64748B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+user.email+'</div></div>'
+    +'</div>'
+    +'<h1>🛠️ 관리도구 · 페이지 접근 권한</h1>'
+    +'<div class="sub">각 페이지에 접근할 수 있는 최소 회원 등급을 지정합니다. 변경 즉시 저장되며 모든 기기에 반영됩니다.</div>'
+    +'<div class="note-box">📌 <b>등급 안내</b><br>'
+    +'· <b>비회원 공개</b> — 로그인 없이 누구나<br>'
+    +'· <b>일반회원이상</b> — 구글 로그인만 하면 (그룹 미가입자 포함)<br>'
+    +'· <b>초대회원이상</b> — 초대코드로 그룹에 가입한 작업자부터<br>'
+    +'· <b>슈퍼관리자만</b> — 대표 본인만<br>'
+    +'설정이 없는 페이지의 기본값은 <b>비회원 공개</b>입니다.</div>'
+    +'<div class="legend">'+legend+'</div>'
+    +groupsHtml;
+}
+
+function setLevel(key, level, floor){
+  if(level < floor){ toast('이 페이지는 최소 '+LEVELS[floor].label+' 필요'); return; }
+  var prev=_access[key];
+  _access[key]=level;
+  /* 낙관적 UI */
+  refreshRow(key);
+  db.ref('pageAccess/'+key).set(level).then(function(){
+    toast('저장됨 · '+LEVELS[level].label);
+  }).catch(function(e){
+    _access[key]=prev; refreshRow(key);
+    toast('저장 실패: '+e.message);
+  });
+}
+
+function refreshRow(key){
+  var item=null;
+  REGISTRY.forEach(function(g){g.items.forEach(function(it){if(it.key===key)item=it;});});
+  if(!item) return;
+  var row=document.getElementById('row-'+key);
+  if(!row) return;
+  var cur=effective(item);
+  var btns=row.querySelectorAll('.seg button');
+  btns.forEach(function(b,i){ b.classList.toggle('active', i===cur); });
+}
+window.setLevel=setLevel;
+
+/* ── 부팅: 슈퍼관리자 확인 → pageAccess 로드 ── */
+auth.onAuthStateChanged(function(user){
+  if(!user){ location.replace('/wms_login.html?return='+encodeURIComponent('/wms_admin.html')); return; }
+  db.ref('superadmins/'+user.uid).get().then(function(snap){
+    if(!snap.exists()){ renderDenied(); return; }
+    db.ref('pageAccess').get().then(function(aSnap){
+      _access=aSnap.val()||{};
+      renderAdmin(user);
+    }).catch(function(e){
+      _access={}; renderAdmin(user); toast('설정 로드 경고: '+e.message);
+    });
+  }).catch(function(e){
+    app.innerHTML='<div class="center" style="color:#F87171;">권한 확인 실패: '+e.message+'</div>';
+  });
+});
+</script>
+</body>
+</html>
