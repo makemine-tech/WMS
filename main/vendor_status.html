@@ -8,6 +8,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="/wms_vendor_projection.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{--bg:#0B1220;--card:#141E33;--bd:#26344F;--tx:#E8EEF7;--sub:#8597B0;--accent:#3B82F6;--green:#34D399;--amber:#FBBF24;}
@@ -161,6 +162,7 @@ var _lastInfo=null, _lastData=null;
 var _loose={};           /* productKey -> 낱개수량 (실물조사). vendorLoose 노드 */
 var _baseTotalQty=0;     /* 파렛트 기준 총수량 합 (낱개 제외) — 실시간 총합계 계산용 */
 var _canEdit=false;      /* 관리자 미리보기에서만 낱개 입력 가능 */
+var _rows=[];            /* 현재 표시 중인 행 (엑셀 내보내기용) */
 
 function sortRows(rows){
   var r=rows.slice();
@@ -198,6 +200,7 @@ function renderReport(info, data){
   var rows=Object.keys(products).map(function(k){ return Object.assign({_k:k}, products[k]); })
     .filter(function(p){return p && p.name;});
   rows=sortRows(rows);
+  _rows=rows;
 
   var totQty=0, totPal=0, totLoose=0;
   rows.forEach(function(p){ totQty+=(+p.totalQty||0); totPal+=(+p.pallets||0); totLoose+=(+(_loose[p._k])||0); });
@@ -251,9 +254,11 @@ function renderReport(info, data){
     ? '<div class="rpt-title">👁 관리자 미리보기 · 재고 현황</div>'
     : '<div class="rpt-title">재고 현황 보고서</div>';
   var rightBtns=_canEdit
-    ? '<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
+    ? '<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
+      +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="location.href=\'/wms_vendors.html?gid='+encodeURIComponent(info.gid||'')+'\'">‹ 업체관리</button>'
-    : '<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
+    : '<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
+      +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="doLogout()">로그아웃</button>';
   app.innerHTML=
     '<div class="rpt-head">'
@@ -309,6 +314,35 @@ window.saveLoose=saveLoose;
 
 function doLogout(){ auth.signOut().then(function(){ location.replace('/wms_login.html'); }); }
 window.doLogout=doLogout;
+
+/* 현황 엑셀(.xlsx) 내보내기 — 세부 적재구성 제외, 5컬럼 + 합계만 */
+function dateStamp(){ var d=new Date(); var p=function(x){return (x<10?'0':'')+x;}; return ''+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate()); }
+function exportExcel(){
+  if(typeof XLSX==='undefined'){ alert('엑셀 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'); return; }
+  var info=_lastInfo||{}, data=_lastData||{};
+  var vendorName=info.vendorName||'업체';
+  var totPal=0, totQty=0, totLoose=0;
+  var aoa=[];
+  aoa.push(['재고 현황 보고서']);
+  aoa.push(['업체', vendorName]);
+  aoa.push(['기준시각', fmtTime(data.updatedAt)]);
+  aoa.push([]);
+  aoa.push(['상품명','파렛트(팔)','총수량(개)','낱개수량(개)','총합계(개)']);
+  (_rows||[]).forEach(function(p){
+    var loose=(+(_loose[p._k])||0);
+    var pal=(+p.pallets||0), qty=(+p.totalQty||0), sum=qty+loose;
+    totPal+=pal; totQty+=qty; totLoose+=loose;
+    aoa.push([p.name, pal, qty, loose, sum]);
+  });
+  aoa.push(['합계', totPal, totQty, totLoose, totQty+totLoose]);
+  var ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:24},{wch:11},{wch:12},{wch:12},{wch:14}];
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '재고현황');
+  var fname=String(vendorName).replace(/[\\\/:*?"<>|]/g,'_')+'_재고현황_'+dateStamp()+'.xlsx';
+  XLSX.writeFile(wb, fname);
+}
+window.exportExcel=exportExcel;
 
 /* 업체 담당자 본인 — 이메일로 자기 업체 현황 (vendorStatus 요약본 실시간) */
 function loadOwnByEmail(user){
