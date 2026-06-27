@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>메이크창고 WMS — 업체등록 · 상품연결</title>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;min-height:100vh;padding:24px 16px 90px;}
+.wrap{max-width:760px;margin:0 auto;}
+.topbar{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #334155;}
+.badge-admin{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:#F87171;white-space:nowrap;}
+.btn-back{background:rgba(255,255,255,.06);color:#94A3B8;border:1px solid #334155;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap;}
+.btn-back:hover{background:rgba(255,255,255,.1);}
+h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
+.sub{font-size:12px;color:#64748B;margin-bottom:22px;line-height:1.6;}
+.section{margin-bottom:26px;}
+.section-h{font-size:13px;font-weight:800;color:#94A3B8;letter-spacing:.03em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.count-chip{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.06);color:#94A3B8;}
+.inp{background:#0F172A;border:1px solid #334155;border-radius:8px;padding:9px 11px;color:#E2E8F0;font-size:13px;outline:none;font-family:inherit;}
+.inp:focus{border-color:#3B82F6;}
+.btn{border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;}
+.btn-primary{background:#2563EB;color:#fff;}
+.vrow{display:flex;align-items:center;gap:10px;padding:11px 13px;background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:10px;margin-bottom:8px;}
+.vrow .vmeta{flex:1;min-width:0;}
+.vrow .vname{font-weight:700;font-size:14px;}
+.vrow .vmail{font-size:11px;color:#64748B;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.vrow .vcount{font-size:11px;color:#A78BFA;font-weight:700;flex-shrink:0;}
+.btn-del{background:rgba(239,68,68,.15);color:#F87171;border:1px solid rgba(239,68,68,.3);border-radius:7px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;}
+.add-form{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.add-form .inp{flex:1;min-width:120px;}
+.prow{display:flex;align-items:center;gap:10px;padding:9px 13px;background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:9px;margin-bottom:6px;}
+.prow.unlinked{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.06);}
+.prow .pname{flex:1;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.prow .pstale{font-size:10px;color:#64748B;font-weight:500;margin-left:6px;}
+.sel{background:#0F172A;border:1px solid #334155;border-radius:7px;padding:7px 9px;color:#E2E8F0;font-size:12px;outline:none;font-family:inherit;flex-shrink:0;max-width:170px;}
+.sel.none{color:#FBBF24;border-color:rgba(251,191,36,.4);}
+.unlinked-banner{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;font-size:12px;color:#FCD34D;line-height:1.6;margin-bottom:12px;}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1E293B;border:1px solid #334155;border-radius:10px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;z-index:50;}
+.toast.show{opacity:1;}
+.center{text-align:center;padding:60px 20px;color:#64748B;font-size:14px;}
+.spinner{width:24px;height:24px;border:2px solid #334155;border-top-color:#3B82F6;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 16px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;color:#64748B;padding:18px;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="center"><div class="spinner"></div>인증 확인 중...</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+firebase.initializeApp({
+  apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
+  authDomain:"makewon.com",
+  databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"makechango-wms",
+  storageBucket:"makechango-wms.firebasestorage.app",
+  messagingSenderId:"333385336098",
+  appId:"1:333385336098:web:94f07492421965ab32917b"
+});
+var auth=firebase.auth(), db=firebase.database();
+var app=document.getElementById('app'), toastEl=document.getElementById('toast');
+
+var GID = (new URLSearchParams(location.search).get('gid')) || localStorage.getItem('wms_adminGroupId') || '';
+
+var _products=[];   /* 라이브 상품명 (창고 pColors 합집합) */
+var _vendors={};    /* vendorId -> {name,email,createdAt} */
+var _map={};        /* productKey -> {name, vendorId} */
+
+function toast(msg){
+  toastEl.textContent=msg; toastEl.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(function(){toastEl.classList.remove('show');},1600);
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function keyOf(name){return String(name).replace(/[.#$/\[\]]/g,'_');}
+function genId(){return 'v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
+
+function renderDenied(msg){
+  app.innerHTML='<div class="center" style="color:#F87171;">'
+   +'<div style="font-size:40px;margin-bottom:10px;">🚫</div>'
+   +(msg||'접근 권한이 없습니다.')+'<br><br>'
+   +'<a href="/wms.html" class="btn-back">창고관리로 돌아가기</a></div>';
+}
+
+/* ── 데이터 로드 ── */
+function loadAll(){
+  return db.ref('groups/'+GID).get().then(function(gs){
+    var wids = gs.exists() ? Object.keys(gs.val()).filter(function(k){return k!=='_init';}) : [];
+    var jobs = wids.map(function(wid){
+      return db.ref('warehouses/'+wid+'/pColors').get().then(function(s){
+        return s.exists() ? Object.keys(s.val()||{}) : [];
+      }).catch(function(){return [];});
+    });
+    return Promise.all(jobs);
+  }).then(function(lists){
+    var set={};
+    lists.forEach(function(arr){arr.forEach(function(n){if(n)set[n]=true;});});
+    _products = Object.keys(set).sort(function(a,b){return a.localeCompare(b,'ko');});
+    return Promise.all([
+      db.ref('vendorConfig/'+GID+'/vendors').get(),
+      db.ref('vendorConfig/'+GID+'/map').get()
+    ]);
+  }).then(function(res){
+    _vendors = (res[0] && res[0].val()) || {};
+    _map = (res[1] && res[1].val()) || {};
+  });
+}
+
+/* ── 렌더 ── */
+function vendorOptions(selected){
+  var opts='<option value="">— 미연결 —</option>';
+  Object.keys(_vendors).forEach(function(vid){
+    opts+='<option value="'+vid+'"'+(vid===selected?' selected':'')+'>'+esc(_vendors[vid].name)+'</option>';
+  });
+  return opts;
+}
+function vendorProductCount(vid){
+  var n=0; Object.keys(_map).forEach(function(k){if(_map[k]&&_map[k].vendorId===vid)n++;}); return n;
+}
+
+function render(user){
+  /* 라이브 상품 + map 에만 있는(창고에서 사라진) 상품 합치기 */
+  var liveSet={}; _products.forEach(function(n){liveSet[n]=true;});
+  var mapOnly=[];
+  Object.keys(_map).forEach(function(k){
+    var nm=_map[k]&&_map[k].name;
+    if(nm && !liveSet[nm]) mapOnly.push(nm);
+  });
+  var allNames=_products.concat(mapOnly.sort());
+
+  var linked=[], unlinked=[];
+  allNames.forEach(function(nm){
+    var e=_map[keyOf(nm)];
+    if(e && e.vendorId && _vendors[e.vendorId]) linked.push(nm); else unlinked.push(nm);
+  });
+
+  /* 업체 목록 */
+  var vids=Object.keys(_vendors);
+  var vendorHtml = vids.length===0
+    ? '<div class="empty">아직 등록된 업체가 없습니다. 아래에서 추가하세요.</div>'
+    : vids.map(function(vid){
+        var v=_vendors[vid];
+        return '<div class="vrow">'
+          +'<div class="vmeta"><div class="vname">'+esc(v.name)+'</div>'
+          +'<div class="vmail">'+(v.email?('✉ '+esc(v.email)):'<span style="color:#475569;">이메일 미입력</span>')+'</div></div>'
+          +'<div class="vcount">'+vendorProductCount(vid)+'개 상품</div>'
+          +'<button class="btn-del" onclick="delVendor(\''+vid+'\')">삭제</button>'
+          +'</div>';
+      }).join('');
+
+  /* 상품 연결 행 */
+  function prow(nm, isUnlinked){
+    var k=keyOf(nm);
+    var sel=(_map[k]&&_map[k].vendorId)||'';
+    var stale=_products.indexOf(nm)<0 ? '<span class="pstale">· 창고에 없음</span>' : '';
+    return '<div class="prow'+(isUnlinked?' unlinked':'')+'">'
+      +'<div class="pname">'+esc(nm)+stale+'</div>'
+      +'<select class="sel'+(sel?'':' none')+'" onchange="linkProduct(\''+encodeURIComponent(nm)+'\',this.value)">'
+      +vendorOptions(sel)+'</select></div>';
+  }
+
+  var unlinkedHtml = unlinked.length===0
+    ? '<div class="empty" style="color:#34D399;">✅ 모든 상품이 업체에 연결되었습니다</div>'
+    : '<div class="unlinked-banner">⚠️ 아래 '+unlinked.length+'개 상품이 아직 업체에 연결되지 않았습니다. 누락 없이 연결해 주세요.</div>'
+      + unlinked.map(function(nm){return prow(nm,true);}).join('');
+
+  var linkedHtml = linked.length===0
+    ? '<div class="empty">연결된 상품이 없습니다</div>'
+    : linked.map(function(nm){return prow(nm,false);}).join('');
+
+  app.innerHTML=
+    '<div class="topbar">'
+    +'<a href="/wms.html" class="btn-back">‹ 창고관리</a>'
+    +'<div class="badge-admin">🛡️ 슈퍼관리자</div>'
+    +'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">그룹 · '+esc(GID)+'</div>'
+    +'<div style="font-size:11px;color:#64748B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(user.email)+'</div></div>'
+    +'</div>'
+    +'<h1>🏷️ 업체등록 · 상품연결</h1>'
+    +'<div class="sub">창고가 여러 개여도 그룹 단위로 통합 관리됩니다. 상품명마다 거래 업체를 지정하면, 추후 해당 업체 담당자가 자기 상품 현황을 볼 수 있습니다.</div>'
+
+    +'<div class="section">'
+    +'<div class="section-h">📇 업체 목록 <span class="count-chip">'+vids.length+'</span></div>'
+    +vendorHtml
+    +'<div class="add-form">'
+    +'<input id="nvName" class="inp" placeholder="업체명 (예: 가나푸드)" style="flex:2;"/>'
+    +'<input id="nvEmail" class="inp" type="email" placeholder="담당자 이메일" style="flex:3;"/>'
+    +'<button class="btn btn-primary" onclick="addVendor()">+ 추가</button>'
+    +'</div></div>'
+
+    +'<div class="section">'
+    +'<div class="section-h">⚠️ 업체 미연결 <span class="count-chip" style="background:rgba(251,191,36,.15);color:#FBBF24;">'+unlinked.length+'</span></div>'
+    +unlinkedHtml+'</div>'
+
+    +'<div class="section">'
+    +'<div class="section-h">🔗 연결된 상품 <span class="count-chip" style="background:rgba(124,58,237,.15);color:#A78BFA;">'+linked.length+'</span></div>'
+    +linkedHtml+'</div>';
+}
+
+/* ── 액션 ── */
+function addVendor(){
+  var name=(document.getElementById('nvName').value||'').trim();
+  var email=(document.getElementById('nvEmail').value||'').trim();
+  if(!name){toast('업체명을 입력하세요');return;}
+  if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('이메일 형식을 확인하세요');return;}
+  var vid=genId();
+  var rec={name:name, email:email, createdAt:Date.now()};
+  db.ref('vendorConfig/'+GID+'/vendors/'+vid).set(rec).then(function(){
+    _vendors[vid]=rec; renderReload(); toast('업체 추가됨 · '+name);
+  }).catch(function(e){toast('추가 실패: '+e.message);});
+}
+window.addVendor=addVendor;
+
+function delVendor(vid){
+  var v=_vendors[vid]; if(!v) return;
+  var cnt=vendorProductCount(vid);
+  if(!confirm('업체 "'+v.name+'" 을(를) 삭제할까요?'+(cnt?('\n\n연결된 '+cnt+'개 상품은 미연결 상태가 됩니다.'):''))) return;
+  /* 연결된 상품 링크 해제 */
+  var updates={};
+  Object.keys(_map).forEach(function(k){ if(_map[k]&&_map[k].vendorId===vid) updates['vendorConfig/'+GID+'/map/'+k]=null; });
+  updates['vendorConfig/'+GID+'/vendors/'+vid]=null;
+  db.ref().update(updates).then(function(){
+    Object.keys(_map).forEach(function(k){ if(_map[k]&&_map[k].vendorId===vid) delete _map[k]; });
+    delete _vendors[vid]; renderReload(); toast('삭제됨');
+  }).catch(function(e){toast('삭제 실패: '+e.message);});
+}
+window.delVendor=delVendor;
+
+function linkProduct(encName, vendorId){
+  var nm=decodeURIComponent(encName);
+  var k=keyOf(nm);
+  if(!vendorId){
+    db.ref('vendorConfig/'+GID+'/map/'+k).remove().then(function(){
+      delete _map[k]; renderReload(); toast('미연결로 변경 · '+nm);
+    }).catch(function(e){toast('실패: '+e.message);});
+  }else{
+    var rec={name:nm, vendorId:vendorId};
+    db.ref('vendorConfig/'+GID+'/map/'+k).set(rec).then(function(){
+      _map[k]=rec; renderReload(); toast(nm+' → '+(_vendors[vendorId]?_vendors[vendorId].name:'업체'));
+    }).catch(function(e){toast('실패: '+e.message);});
+  }
+}
+window.linkProduct=linkProduct;
+
+var _user=null;
+function renderReload(){ if(_user) render(_user); }
+
+/* ── 부팅 ── */
+auth.onAuthStateChanged(function(user){
+  if(!user){ location.replace('/wms_login.html?return='+encodeURIComponent('/wms_vendors.html'+location.search)); return; }
+  if(!GID){ renderDenied('그룹이 지정되지 않았습니다. 창고관리 메인에서 그룹을 선택한 뒤 다시 들어오세요.'); return; }
+  db.ref('superadmins/'+user.uid).get().then(function(snap){
+    if(!snap.exists()){ renderDenied('슈퍼관리자만 이용할 수 있습니다.'); return; }
+    _user=user;
+    loadAll().then(function(){ render(user); }).catch(function(e){
+      app.innerHTML='<div class="center" style="color:#F87171;">데이터 로드 실패: '+esc(e.message)+'</div>';
+    });
+  }).catch(function(e){
+    app.innerHTML='<div class="center" style="color:#F87171;">권한 확인 실패: '+esc(e.message)+'</div>';
+  });
+});
+</script>
+</body>
+</html>
