@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>메이크창고 WMS — 업체 현황·낱개입력</title>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;min-height:100vh;padding:24px 16px 80px;}
+.wrap{max-width:680px;margin:0 auto;}
+.topbar{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #334155;}
+.badge{border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;white-space:nowrap;}
+.badge.admin{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#F87171;}
+.badge.member{background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.3);color:#60A5FA;}
+.btn-back{background:rgba(255,255,255,.06);color:#94A3B8;border:1px solid #334155;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap;}
+.btn-back:hover{background:rgba(255,255,255,.1);}
+h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
+.sub{font-size:12px;color:#64748B;margin-bottom:22px;line-height:1.6;}
+.vrow{display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:12px;margin-bottom:9px;cursor:pointer;transition:background .15s,border-color .15s;}
+.vrow:hover{background:rgba(124,58,237,.1);border-color:rgba(124,58,237,.4);}
+.vrow .ico{font-size:22px;flex-shrink:0;}
+.vrow .meta{flex:1;min-width:0;}
+.vrow .nm{font-weight:700;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.vrow .cnt{font-size:11px;color:#64748B;margin-top:2px;}
+.vrow .go{color:#A78BFA;font-weight:700;font-size:13px;flex-shrink:0;}
+.center{text-align:center;padding:60px 20px;color:#64748B;font-size:14px;}
+.spinner{width:24px;height:24px;border:2px solid #334155;border-top-color:#3B82F6;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 16px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;color:#64748B;padding:40px 20px;font-size:13px;line-height:1.7;}
+.note{background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.25);border-radius:10px;padding:12px 14px;font-size:12px;color:#C4B5FD;line-height:1.65;margin-bottom:18px;}
+.adminlink{display:inline-block;margin-top:14px;font-size:12px;color:#A78BFA;text-decoration:underline;cursor:pointer;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="center"><div class="spinner"></div>인증 확인 중...</div>
+</div>
+
+<script>
+firebase.initializeApp({
+  apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
+  authDomain:"makewon.com",
+  databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"makechango-wms",
+  storageBucket:"makechango-wms.firebasestorage.app",
+  messagingSenderId:"333385336098",
+  appId:"1:333385336098:web:94f07492421965ab32917b"
+});
+var auth=firebase.auth(), db=firebase.database();
+var app=document.getElementById('app');
+var GID=(new URLSearchParams(location.search).get('gid'))||localStorage.getItem('wms_adminGroupId')||'';
+var _isSuper=false;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+function renderDenied(msg){
+  app.innerHTML='<div class="center" style="color:#F87171;">'
+   +'<div style="font-size:40px;margin-bottom:10px;">🚫</div>'+(msg||'접근 권한이 없습니다.')+'<br><br>'
+   +'<a href="/wms.html" class="btn-back">창고관리로 돌아가기</a></div>';
+}
+
+function openVendor(vid){
+  location.href='/vendor_status.html?gid='+encodeURIComponent(GID)+'&vid='+encodeURIComponent(vid);
+}
+window.openVendor=openVendor;
+
+function render(vendors, map){
+  var vids=Object.keys(vendors||{});
+  function count(vid){ var n=0; Object.keys(map||{}).forEach(function(k){if(map[k]&&map[k].vendorId===vid)n++;}); return n; }
+
+  var list = vids.length===0
+    ? '<div class="empty">등록된 업체가 없습니다.'+(_isSuper?'<br>업체등록·상품연결 페이지에서 먼저 업체를 등록하세요.':'<br>관리자에게 업체 등록을 요청하세요.')+'</div>'
+    : vids.map(function(vid){
+        return '<div class="vrow" onclick="openVendor(\''+vid+'\')">'
+          +'<span class="ico">🏢</span>'
+          +'<div class="meta"><div class="nm">'+esc(vendors[vid].name)+'</div>'
+          +'<div class="cnt">연결 상품 '+count(vid)+'개</div></div>'
+          +'<span class="go">현황·낱개입력 ›</span></div>';
+      }).join('');
+
+  app.innerHTML=
+    '<div class="topbar">'
+    +'<a href="/wms.html" class="btn-back">‹ 창고관리</a>'
+    +'<div class="badge '+(_isSuper?'admin':'member')+'">'+(_isSuper?'🛡️ 슈퍼관리자':'👷 작업자')+'</div>'
+    +'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">그룹 · '+esc(GID)+'</div></div>'
+    +'</div>'
+    +'<h1>📋 업체 현황 · 낱개입력</h1>'
+    +'<div class="sub">업체를 선택하면 그 업체의 재고 현황 보고서가 열립니다.</div>'
+    +'<div class="note">✍ <b>재고조사 낱개수량</b>은 이 화면에서 업체를 열어 입력합니다. 완전한 파렛트 외에 남은 낱개 수량을 적으면 총합계에 즉시 반영됩니다.</div>'
+    +list
+    +(_isSuper?'<a class="adminlink" href="/wms_vendors.html?gid='+encodeURIComponent(GID)+'">＋ 업체등록·상품연결 (관리자)</a>':'');
+}
+
+auth.onAuthStateChanged(function(user){
+  if(!user){ location.replace('/wms_login.html?return='+encodeURIComponent('/vendor_list.html'+location.search)); return; }
+  db.ref('superadmins/'+user.uid).get().then(function(a){
+    _isSuper=a.exists();
+    function proceed(){
+      if(!GID){ renderDenied('그룹이 지정되지 않았습니다. 창고관리 메인에서 들어와 주세요.'); return; }
+      Promise.all([
+        db.ref('vendorConfig/'+GID+'/vendors').get(),
+        db.ref('vendorConfig/'+GID+'/map').get()
+      ]).then(function(r){
+        render((r[0]&&r[0].val())||{}, (r[1]&&r[1].val())||{});
+      }).catch(function(e){ renderDenied('현황을 불러오지 못했습니다: '+esc(e.message)); });
+    }
+    if(_isSuper){ proceed(); return; }
+    /* 멤버 — 본인 그룹만 */
+    db.ref('userGroup/'+user.uid).get().then(function(g){
+      if(!g.exists()){ renderDenied('작업 그룹에 등록되어 있지 않습니다.'); return; }
+      if(!GID) GID=g.val();
+      if(g.val()!==GID){ renderDenied('이 그룹에 대한 접근 권한이 없습니다.'); return; }
+      proceed();
+    }).catch(function(e){ renderDenied('권한 확인 실패: '+esc(e.message)); });
+  }).catch(function(e){ renderDenied('권한 확인 실패: '+esc(e.message)); });
+});
+</script>
+</body>
+</html>
