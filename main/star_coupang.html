@@ -1423,10 +1423,12 @@ function onBoxKey(ev) {
     return;
   }
   pendingBoxOverride = null;
+  var closedPrevBox = false;
   if (currentBox) {
     currentBox.closed = true;
     var idx = boxes.findIndex(function(b){ return b.id === currentBox.id; });
     if (idx === -1) boxes.unshift(currentBox); else boxes[idx] = currentBox;
+    closedPrevBox = true;
   }
   /* 기존에 같은 ID 박스가 있으면 그 박스를 이어서 진행 */
   var existing = boxes.find(function(b){ return b.id === val; });
@@ -1451,6 +1453,12 @@ function onBoxKey(ev) {
   renderBoxList();
   updateStats();
   saveSession();
+  /* 다음 박스 바코드를 스캔해 이전 박스가 자동으로 닫혔을 때도 동기화.
+     (📦 박스 종료 버튼을 안 누르고 스캔으로 넘기는 실제 작업 방식에서
+      동기화가 한 번도 안 걸려 다른 PC에 안 보이던 문제 수정 — endBox()와 동일 처리) */
+  if (closedPrevBox && isAutoSyncOn() && window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+    setTimeout(syncWithCloud, 1200); /* 디바운싱 push가 끝난 후 */
+  }
   /* 박스 패턴 학습 + '빡쓰' 음성 */
   boxPattern = _scanSig(val);
   if (soundEnabled) speakKo('빡쓰', { rate: 1.4 });
