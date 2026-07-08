@@ -121,7 +121,14 @@ h1 em{color:var(--g);font-style:normal}
   <span style="font-size:.74rem;color:var(--mu);font-family:var(--mo)">라벨 사이즈</span>
   <button class="size-btn on" id="size50" onclick="setSize('50x30')">50 × 30mm</button>
   <button class="size-btn" id="size80" onclick="setSize('80x40')">80 × 40mm</button>
-  <span class="hint" style="margin:0 0 0 auto">인쇄 여백 좌우 4mm · 상하 3mm 안쪽 · 바코드 가운데 정렬</span>
+  <span style="width:1px;height:22px;background:var(--br);margin:0 .3rem"></span>
+  <span style="font-size:.74rem;color:var(--mu);font-family:var(--mo)">인쇄 보정</span>
+  <span style="font-size:.8rem;color:var(--mu)" title="가로: +오른쪽 / −왼쪽">↔</span>
+  <input class="mini-inp" id="offX" type="number" step="0.5" style="width:62px" title="가로 보정(mm): +값이면 오른쪽으로, −값이면 왼쪽으로" oninput="setOffset()">
+  <span style="font-size:.8rem;color:var(--mu)" title="세로: +아래 / −위">↕</span>
+  <input class="mini-inp" id="offY" type="number" step="0.5" style="width:62px" title="세로 보정(mm): +값이면 아래로, −값이면 위로" oninput="setOffset()">
+  <span style="font-size:.7rem;color:var(--mu)">mm</span>
+  <span class="hint" style="margin:0 0 0 auto;max-width:300px;text-align:right">실제 인쇄가 쏠릴 때만 조정 (미리보기는 항상 정중앙). 여백 좌우4·상하3mm 안쪽.</span>
 </div>
 
 <!-- 탭 -->
@@ -226,6 +233,9 @@ var SIZES = {
 };
 var curSize = '50x30';
 var curTab = 'manual';
+/* 인쇄 보정(mm) — 프린터 물리 오프셋 보정. 미리보기가 정상인데 실제 인쇄만 쏠릴 때 사용.
+   +offX=오른쪽 / +offY=아래. localStorage 저장. 기본값은 측정된 보정치(오른쪽2·아래4). */
+var offX = 2, offY = 4;
 var groupId = null, regRef = null, registry = {};
 var excelRows = [];   /* [{name, barcode, exp, qty}] */
 
@@ -283,6 +293,13 @@ function setSize(key){
   document.getElementById('size50').classList.toggle('on', key==='50x30');
   document.getElementById('size80').classList.toggle('on', key==='80x40');
   renderPreview();
+}
+function setOffset(){
+  var vx = parseFloat(document.getElementById('offX').value);
+  var vy = parseFloat(document.getElementById('offY').value);
+  offX = isNaN(vx) ? 0 : vx;
+  offY = isNaN(vy) ? 0 : vy;
+  try { localStorage.setItem('bcp_offX', offX); localStorage.setItem('bcp_offY', offY); } catch(e){}
 }
 function setTab(t){
   curTab = t;
@@ -558,7 +575,7 @@ function doPrint(labels){
       '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; page-break-after:always; overflow:hidden }'+
       '.label:last-child { page-break-after:auto }'+
       /* 여백 좌우4mm·상하3mm 안쪽 + 세로 가운데 정렬 */
-      '.pad { width:100%; height:100%; box-sizing:border-box; padding:'+S.padV+'mm '+S.padH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.8mm; text-align:center }'+
+      '.pad { width:100%; height:100%; box-sizing:border-box; padding:'+S.padV+'mm '+S.padH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.8mm; text-align:center; transform:translate('+offX+'mm,'+offY+'mm) }'+
       '.nm { font-size:'+S.nameFs+'; font-weight:800; line-height:1.05; width:100%; display:-webkit-box; -webkit-line-clamp:'+S.nameLines+'; -webkit-box-orient:vertical; overflow:hidden }'+
       '.bc { width:100%; height:auto; max-height:'+S.bcMax+' }'+
       '.ex { font-size:'+S.expFs+'; font-weight:900; letter-spacing:.02em; line-height:1 }'+
@@ -598,6 +615,13 @@ function doPrint(labels){
   if(!window.WMSync){ setMsg('m0','er','❌ 동기화 모듈 로딩 실패 — 새로고침하세요'); return; }
   WMSync.init('star_barcode', { requireAuth:true });
   WMSync.onAuth(function(state){ wmsHandleAuthState(state); });
+  /* 저장된 인쇄 보정 로드 (없으면 기본값 오른쪽2·아래4 유지) */
+  try {
+    var ox = parseFloat(localStorage.getItem('bcp_offX')); if(!isNaN(ox)) offX = ox;
+    var oy = parseFloat(localStorage.getItem('bcp_offY')); if(!isNaN(oy)) offY = oy;
+  } catch(e){}
+  document.getElementById('offX').value = offX;
+  document.getElementById('offY').value = offY;
   setSize('50x30');
   renderPreview();
 })();
