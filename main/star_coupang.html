@@ -3633,10 +3633,11 @@ function printLabels(codes, doneCb) {
       'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
       '.label { width:50mm; height:30mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
       '.label:last-child { page-break-after:auto }'+
-      '.inner { width:40mm; height:25mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.6mm }'+
-      '.bc { width:40mm; height:25mm }'+
+      '.inner { width:46mm; height:26mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.8mm }'+
+      /* 바코드: viewBox+preserveAspectRatio로 가운데 정렬(인쇄 시 위로 쏠림 방지), height:auto 로 자연 비율 유지 */
+      '.bc { width:46mm; height:auto; max-height:22mm }'+
       /* 한글 라벨 있는 경우: 바코드 영역 조금 줄이고 한글 추가 */
-      '.label.with-label .bc { height:19mm }'+
+      '.label.with-label .bc { max-height:15mm }'+
       '.ko { font-size:14pt; font-weight:900; line-height:1; letter-spacing:.04em; color:#000 }'+
       '@media screen { body{padding:12px;background:#222;color:#fff} .label{background:#fff;color:#000;margin:0 auto 4px;border:1px dashed #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
       '@media print { .toolbar{display:none} .label{margin:0} }'+
@@ -3652,8 +3653,12 @@ function printLabels(codes, doneCb) {
         'var svgs = document.querySelectorAll("svg.bc");'+
         'svgs.forEach(function(s){'+
           'var height = s.closest(".label.with-label") ? 50 : 65;'+
-          'try { JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:24, fontOptions:"bold", textMargin:2, margin:0, width:2, height:height, textAlign:"center" }); }'+
-          'catch(e) { console.error(e); }'+
+          'try {'+
+            'JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:24, fontOptions:"bold", textMargin:2, margin:0, width:2, height:height, textAlign:"center" });'+
+            '/* 렌더 후 viewBox 부여 → CSS 박스 안에서 가로·세로 정확히 가운데 정렬 (인쇄 시 위로 쏠림 방지) */'+
+            'var vw = parseFloat(s.getAttribute("width")), vh = parseFloat(s.getAttribute("height"));'+
+            'if (vw && vh) { s.setAttribute("viewBox", "0 0 " + vw + " " + vh); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); s.removeAttribute("width"); s.removeAttribute("height"); }'+
+          '} catch(e) { console.error(e); }'+
         '});'+
         'setTimeout(function(){ window.print(); }, 300);'+
       '});'+
