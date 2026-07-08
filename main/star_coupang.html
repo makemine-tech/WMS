@@ -535,6 +535,7 @@ h1 em{color:var(--g);font-style:normal}
   <div class="brow" style="margin-top:1rem">
     <button class="btn btn-g" onclick="downloadAll()" id="downloadAllBtn" title="모든 행 포함 (입고된 것 + 미입고) · 원본 양식 유지 + A열 박스ID + 수정 셀 표시">📥 전체 엑셀 다운로드</button>
     <button class="btn btn-y" onclick="downloadDone()" id="downloadDoneBtn" title="박스 × SKU 단위로 펼침 — 같은 SKU가 박스 2개에 분산되면 2행으로">📥 완료건 엑셀 다운로드</button>
+    <button class="btn btn-b" onclick="downloadForInstock()" id="downloadInstockBtn" title="재고관리(star_instock)의 [📊 엑셀 일괄 입고] 양식(12열)에 맞춰 내보냅니다 — 박스×품목 단위. 이 파일을 star_instock에 올리면 재고로 잡힙니다.">📦 재고 입고용 엑셀</button>
     <button class="btn btn-s" onclick="exportSessionJson()" id="exportJsonBtn" title="현재 작업 전체를 .json 으로 백업 — 나중에 '세션 가져오기'로 100% 복원 가능 (엑셀보다 안전)">💾 세션 백업(JSON)</button>
     <button class="btn" id="btnPhotoSort" onclick="openPhotoSortModal()" style="display:none;background:var(--p);color:#0f1117;font-weight:800" title="휴대폰으로 찍은 신규 SKU 사진들을 촬영 시간순으로 정렬 → 로그와 매칭 → 바코드명으로 일괄 변경 ZIP 다운로드">📷 신규 사진 일괄 정리</button>
     <button class="btn btn-s" onclick="goTo(0)">← 새 파일 업로드</button>
@@ -2500,6 +2501,50 @@ function downloadDone() {
   } catch(err) {
     console.error(err);
     setMsg('m1','er','❌ 완료건 다운로드 실패: '+err.message);
+  }
+}
+
+/* 재고 입고용 엑셀 — star_instock(재고관리)의 [엑셀 일괄 입고] 12열 양식에 맞춤.
+   박스×품목 단위로 한 행씩(같은 SKU가 여러 박스에 있으면 박스별로 분리) →
+   star_instock에 올리면 박스바코드까지 살려 재고로 잡힘. 원본 xlsx 불필요. */
+function downloadForInstock() {
+  if (!boxes || !boxes.length) { setMsg('m1','warn','⚠️ 입고된 박스가 없습니다 — 스캔 후 다시 시도하세요'); return; }
+  /* star_instock/downloadTemplate 과 동일한 헤더(12열) */
+  var aoa = [['박스바코드','브랜드','품번','바코드','대체바코드','품명','소재','컬러','사이즈','원산지','수량','비고']];
+  var nn = function(v){ return (v === null || v === undefined) ? '' : v; };
+  boxes.slice().sort(function(a,b){ return (a.ts||0) - (b.ts||0); }).forEach(function(box){
+    (box.items || []).forEach(function(it){
+      if (!it || (it.count||0) <= 0) return;
+      var r = rows[it.rowIdx];
+      if (!r) return;
+      var v = r.vals || [];
+      aoa.push([
+        nn(box.id),
+        nn(v[COL.BRAND]),
+        nn(v[COL.CODE]),
+        nn(v[COL.BARCODE]),
+        nn(v[COL.ALT_BARCODE]),
+        nn(v[COL.NAME]),
+        nn(v[COL.MATERIAL]),
+        nn(v[COL.COLOR]),
+        nn(v[COL.SIZE]),      /* 검수사이즈(작업자 수정본) */
+        nn(v[COL.ORIGIN]),
+        it.count,
+        ''
+      ]);
+    });
+  });
+  if (aoa.length <= 1) { setMsg('m1','warn','⚠️ 입고 수량이 있는 항목이 없습니다'); return; }
+  try {
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '재고입고');
+    var out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+    saveBlob(out, '_재고입고용_star_instock.xlsx');
+    setMsg('m1','ok','✅ 재고 입고용 엑셀 저장 완료 · '+(aoa.length-1)+'행 (박스×품목). 재고관리(star_instock) 페이지의 [📊 엑셀 일괄 입고]에 이 파일을 올리면 재고로 잡힙니다.');
+  } catch(err) {
+    console.error(err);
+    setMsg('m1','er','❌ 재고 입고용 엑셀 저장 실패: '+err.message);
   }
 }
 
