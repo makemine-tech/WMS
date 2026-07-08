@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CJKYQB2TTY"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-CJKYQB2TTY');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>바코드 라벨 인쇄</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--s1:#161b26;--s2:#1e2333;--br:#252b3b;
+  --g:#4af0a8;--y:#f0c44a;--b:#5b9cf6;--r:#f05858;--p:#c084fc;--o:#ff8c5a;
+  --tx:#e8eaf0;--mu:#7c8399;--mo:'Courier New',monospace
+}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column}
+.app{width:min(98%,1200px);margin:0 auto;padding:1.2rem 1rem 2rem;flex:1}
+.unified-ftr{text-align:center;padding:12px 20px;background:#1f2937;color:rgba(255,255,255,.35);font-size:10px;letter-spacing:.04em;margin-top:auto;width:100%}
+.hd{text-align:center;margin-bottom:1rem}
+.badge{font-family:var(--mo);font-size:.62rem;color:var(--g);border:1px solid rgba(74,240,168,.3);padding:.18rem .75rem;border-radius:2px;display:inline-block;margin-bottom:.5rem;letter-spacing:.1em}
+h1{font-size:1.5rem;font-weight:900;margin-bottom:.2rem}
+h1 em{color:var(--g);font-style:normal}
+.hs{color:var(--mu);font-size:.78rem}
+.msg{border-radius:7px;padding:.55rem .9rem;font-size:.8rem;margin:.5rem 0}
+.ok{background:rgba(74,240,168,.08);border:1px solid var(--g);color:var(--g)}
+.er{background:rgba(240,88,88,.1);border:1px solid var(--r);color:var(--r)}
+.inf{background:rgba(91,156,246,.08);border:1px solid var(--b);color:var(--b)}
+.warn{background:rgba(240,196,74,.08);border:1px solid var(--y);color:var(--y)}
+.btn{padding:.55rem 1.1rem;border-radius:7px;border:none;font-size:.84rem;font-weight:700;cursor:pointer;transition:all .15s}
+.btn-g{background:var(--g);color:#0f1117}.btn-g:hover:not(:disabled){background:#6affc0;transform:translateY(-1px)}
+.btn-y{background:var(--y);color:#0f1117}.btn-y:hover:not(:disabled){background:#f7d068}
+.btn-b{background:var(--b);color:#fff}.btn-b:hover:not(:disabled){background:#7bb0f8}
+.btn-r{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.5)}.btn-r:hover{background:rgba(240,88,88,.08)}
+.btn-s{background:var(--s2);color:var(--tx);border:1px solid var(--br)}.btn-s:hover{border-color:var(--mu)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+.dz-mini{position:relative;overflow:hidden;display:inline-block}
+.dz-mini input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+
+/* 헤더 */
+.hdr-home-btn{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;padding:5px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;flex-shrink:0;white-space:nowrap}
+.hdr-home-btn:hover{color:#fff;border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.08)}
+@media(max-width:380px){.hdr-home-txt{display:none}}
+
+/* 사이즈 선택 */
+.sizebar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.9rem;padding:.7rem .9rem;background:var(--s1);border:1px solid var(--br);border-radius:9px}
+.size-btn{padding:.5rem 1.1rem;border-radius:8px;border:2px solid var(--br);background:var(--s2);color:var(--mu);font-weight:800;cursor:pointer;font-family:var(--mo);font-size:.9rem}
+.size-btn.on{background:var(--g);color:#0f1117;border-color:var(--g)}
+
+/* 탭 */
+.tabs{display:flex;gap:.4rem;margin-bottom:.9rem;flex-wrap:wrap}
+.tab{padding:.55rem 1rem;border-radius:8px 8px 0 0;border:1px solid var(--br);border-bottom:none;background:var(--s1);color:var(--mu);font-weight:800;cursor:pointer;font-size:.85rem}
+.tab.on{background:var(--s2);color:var(--g)}
+.panel{display:none;background:var(--s1);border:1px solid var(--br);border-radius:0 9px 9px 9px;padding:1rem}
+.panel.on{display:block}
+
+/* 입력 필드 */
+.fld{margin-bottom:.7rem}
+.fld label{display:block;font-size:.72rem;color:var(--mu);font-family:var(--mo);margin-bottom:.25rem}
+.inp{width:100%;background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.6rem .8rem;font-size:1rem;font-family:var(--mo);outline:none}
+.inp:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(74,240,168,.12)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+@media(max-width:720px){.grid2{grid-template-columns:1fr}}
+
+/* 실시간 미리보기 */
+.prev-wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem;margin-top:.6rem}
+.prev-stage{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:18px;min-height:120px}
+.prev-label{background:#fff;color:#000;box-shadow:0 0 0 1px #bbb;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden}
+.prev-label .pnm{font-weight:800;line-height:1.05;width:100%;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
+.prev-label .pbc{width:100%;height:auto}
+.prev-label .pex{font-weight:900;letter-spacing:.02em}
+.prev-hint{font-size:.7rem;color:var(--mu)}
+
+/* 목록 테이블 */
+.tbl{width:100%;border-collapse:collapse;font-size:.82rem}
+.tbl th,.tbl td{padding:.45rem .55rem;border-bottom:1px solid var(--br);text-align:left}
+.tbl th{color:var(--mu);font-family:var(--mo);font-size:.68rem;font-weight:700;position:sticky;top:0;background:var(--s1)}
+.tbl tr:hover td{background:var(--s2)}
+.tbl .num{text-align:right;font-family:var(--mo)}
+.tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--br);border-radius:8px}
+.mini-inp{width:74px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.35rem;font-family:var(--mo);text-align:center;font-size:.82rem}
+.rowbtn{padding:.32rem .6rem;font-size:.72rem;border-radius:5px;border:1px solid var(--br);background:var(--s2);color:var(--tx);cursor:pointer}
+.rowbtn:hover{border-color:var(--g);color:var(--g)}
+.hint{font-size:.72rem;color:var(--mu);margin-top:.3rem}
+</style>
+</head>
+<body>
+<div class="unified-hdr" style="background:linear-gradient(135deg,#1f2937,#374151);color:#fff;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10000;gap:10px;">
+  <div style="display:flex;align-items:center;gap:10px;min-width:0">
+    <div style="width:28px;height:28px;background:rgba(255,255,255,.12);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🏷️</div>
+    <div style="min-width:0">
+      <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">바코드 라벨 인쇄</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.45);letter-spacing:.06em;white-space:nowrap">BARCODE LABEL PRINT</div>
+    </div>
+  </div>
+  <div id="syncBox" style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.72);font-family:system-ui,sans-serif">
+    <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#666;display:inline-block"></span>
+    <span id="syncLabel" style="font-weight:700;letter-spacing:.04em;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">확인 중...</span>
+    <button id="syncBtn" onclick="wmsHandleLogout()" style="font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;display:none">🚪 로그아웃</button>
+  </div>
+  <a href="https://makewon.com/" class="hdr-home-btn" rel="noopener">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5L12 4l9 7.5"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
+    <span class="hdr-home-txt">MAKEWON.COM</span>
+  </a>
+</div>
+
+<div class="app">
+<div class="hd">
+  <div class="badge">BARCODE LABEL PRINT v1</div>
+  <h1>바코드 <em>라벨 인쇄</em></h1>
+  <p class="hs">엑셀 일괄 인쇄 · 직접 입력 실시간 미리보기 · 등록 바코드 재인쇄 · 50×30 / 80×40</p>
+</div>
+
+<div id="m0" class="msg" style="display:none"></div>
+
+<!-- 라벨 사이즈 -->
+<div class="sizebar">
+  <span style="font-size:.74rem;color:var(--mu);font-family:var(--mo)">라벨 사이즈</span>
+  <button class="size-btn on" id="size50" onclick="setSize('50x30')">50 × 30mm</button>
+  <button class="size-btn" id="size80" onclick="setSize('80x40')">80 × 40mm</button>
+  <span class="hint" style="margin:0 0 0 auto">인쇄 여백 좌우 4mm · 상하 3mm 안쪽 · 바코드 가운데 정렬</span>
+</div>
+
+<!-- 탭 -->
+<div class="tabs">
+  <button class="tab on" id="tabManual" onclick="setTab('manual')">✍️ 직접 입력 · 미리보기</button>
+  <button class="tab" id="tabExcel" onclick="setTab('excel')">📊 엑셀 일괄 인쇄</button>
+  <button class="tab" id="tabReg" onclick="setTab('reg')">🗂️ 등록 바코드 목록</button>
+</div>
+
+<!-- ── 직접 입력 ── -->
+<div class="panel on" id="panelManual">
+  <div class="grid2">
+    <div class="fld">
+      <label>바코드 * (이미 등록된 번호면 상품명 자동 표시)</label>
+      <input class="inp" id="mBarcode" placeholder="예: R255045380001" autocomplete="off" oninput="onManualBarcode()">
+    </div>
+    <div class="fld">
+      <label>상품명</label>
+      <input class="inp" id="mName" placeholder="상품명" autocomplete="off" oninput="renderPreview()">
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="fld">
+      <label>소비기한 (작업자 직접 기입 — 예: 270314 또는 2027-03-14)</label>
+      <input class="inp" id="mExp" placeholder="소비기한" autocomplete="off" oninput="renderPreview()">
+    </div>
+    <div class="fld">
+      <label>인쇄 장수</label>
+      <input class="inp" id="mQty" type="number" min="1" value="1" oninput="renderPreview()">
+    </div>
+  </div>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.3rem">
+    <button class="btn btn-g" onclick="printManual()">🖨 인쇄</button>
+    <button class="btn btn-s" onclick="clearManual()">✕ 비우기</button>
+    <span class="hint" id="mLookup" style="align-self:center"></span>
+  </div>
+
+  <div class="prev-wrap">
+    <div class="prev-hint">실시간 미리보기 (실제 인쇄 비율)</div>
+    <div class="prev-stage">
+      <div class="prev-label" id="prevLabel">
+        <div class="pnm" id="pnm"></div>
+        <svg class="pbc" id="pbc"></svg>
+        <div class="pex" id="pex"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 엑셀 일괄 ── -->
+<div class="panel" id="panelExcel">
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem">
+    <span class="btn btn-b dz-mini">📊 엑셀 업로드
+      <input type="file" accept=".xlsx,.xls" onchange="handleExcel(this.files[0]);this.value='';">
+    </span>
+    <button class="btn btn-g" id="printAllBtn" onclick="printExcelAll()" disabled>🖨 전체 인쇄 (확정수량대로)</button>
+    <span class="hint" id="excelInfo">기본 양식: SKU 이름 · SKU Barcode · 확정수량 · 유통(소비기한) 열을 사용합니다.</span>
+  </div>
+  <div class="tbl-wrap" id="excelWrap" style="display:none">
+    <table class="tbl">
+      <thead><tr><th>#</th><th>상품명</th><th>바코드</th><th>소비기한(수정가능)</th><th style="text-align:right">장수(수정가능)</th><th></th></tr></thead>
+      <tbody id="excelBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── 등록 목록 ── -->
+<div class="panel" id="panelReg">
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem">
+    <input class="inp" id="regSearch" placeholder="🔍 바코드 · 상품명 검색" style="max-width:360px" oninput="renderRegistry()">
+    <span class="hint" id="regInfo"></span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>바코드</th><th>상품명</th><th>최근 등록</th><th></th></tr></thead>
+      <tbody id="regBody"></tbody>
+    </table>
+  </div>
+  <p class="hint">행을 선택하면 [직접 입력] 탭으로 불러옵니다 — 소비기한과 장수만 기입해 인쇄하세요. (소비기한은 매번 직접 입력)</p>
+</div>
+
+</div>
+
+<div class="unified-ftr">
+  © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
+</div>
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="wms_sync.js"></script>
+<script src="/wms_access.js" data-page="barcodeprint" data-floor="2"></script>
+<script>
+/* ─────────────── 설정 ─────────────── */
+/* 라벨 사이즈별 인쇄/미리보기 파라미터.
+   printable = 라벨 - 여백(좌우4mm·상하3mm 안쪽). 바코드는 viewBox로 가운데 정렬. */
+var SIZES = {
+  '50x30': { w:50, h:30, padV:3, padH:4, nameFs:'7pt',  expFs:'7.5pt', bcMax:'12mm', barH:42, bcFont:16, nameLines:2, prevScale:7.4 },
+  '80x40': { w:80, h:40, padV:3, padH:4, nameFs:'10.5pt', expFs:'11pt', bcMax:'17mm', barH:64, bcFont:20, nameLines:2, prevScale:5.6 }
+};
+var curSize = '50x30';
+var curTab = 'manual';
+var groupId = null, regRef = null, registry = {};
+var excelRows = [];   /* [{name, barcode, exp, qty}] */
+
+/* ─────────────── 유틸 ─────────────── */
+function setMsg(id, kind, html){ var el=document.getElementById(id); if(!el)return; el.className='msg '+kind; el.innerHTML=html; el.style.display=''; }
+function hideMsg(id){ var el=document.getElementById(id); if(el) el.style.display='none'; }
+function escH(s){ if(s===null||s===undefined)return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s){ if(s===null||s===undefined)return ''; return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function regKey(code){ return String(code||'').trim().toUpperCase().replace(/[.#$/\[\]\s]+/g,'_'); }
+
+/* 소비기한 표시 정규화: 270314→2027.03.14, 20270314→2027.03.14, 그 외 입력 그대로 */
+function fmtExp(v){
+  if(v===null||v===undefined) return '';
+  var s = String(v).trim();
+  if(!s) return '';
+  var d = s.replace(/[^0-9]/g,'');
+  if(/^\d{6}$/.test(d)) return '20'+d.slice(0,2)+'.'+d.slice(2,4)+'.'+d.slice(4,6);
+  if(/^\d{8}$/.test(d)) return d.slice(0,4)+'.'+d.slice(4,6)+'.'+d.slice(6,8);
+  return s;
+}
+
+/* 바코드 렌더 — 숫자 자릿수 맞으면 EAN/UPC, 아니면 CODE128. 실패 시 CODE128 폴백.
+   렌더 후 viewBox 부여 → CSS 박스 안에서 가로·세로 가운데 정렬(인쇄 시 쏠림 방지). */
+function makeBarcode(svg, code, barH, fontSize){
+  if(!svg) return false;
+  svg.innerHTML='';
+  code = String(code||'').trim();
+  if(!code) return false;
+  var fmt = 'CODE128';
+  if(/^\d{13}$/.test(code)) fmt='EAN13';
+  else if(/^\d{8}$/.test(code)) fmt='EAN8';
+  else if(/^\d{12}$/.test(code)) fmt='UPC';
+  var opts = { displayValue:true, font:'Courier New', fontSize:fontSize||16, fontOptions:'bold', textMargin:2, margin:0, width:2, height:barH||45, textAlign:'center' };
+  var okFlag = true;
+  try {
+    JsBarcode(svg, code, Object.assign({ format:fmt, valid:function(v){ okFlag=v; } }, opts));
+  } catch(e){ okFlag=false; }
+  if(!okFlag){
+    try { svg.innerHTML=''; JsBarcode(svg, code, Object.assign({ format:'CODE128' }, opts)); }
+    catch(e2){ console.error(e2); return false; }
+  }
+  var vw = parseFloat(svg.getAttribute('width')), vh = parseFloat(svg.getAttribute('height'));
+  if(vw && vh){
+    svg.setAttribute('viewBox','0 0 '+vw+' '+vh);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.removeAttribute('width'); svg.removeAttribute('height');
+  }
+  return true;
+}
+
+/* ─────────────── 사이즈 / 탭 ─────────────── */
+function setSize(key){
+  if(!SIZES[key]) return;
+  curSize = key;
+  document.getElementById('size50').classList.toggle('on', key==='50x30');
+  document.getElementById('size80').classList.toggle('on', key==='80x40');
+  renderPreview();
+}
+function setTab(t){
+  curTab = t;
+  ['manual','excel','reg'].forEach(function(k){
+    document.getElementById('tab'+k.charAt(0).toUpperCase()+k.slice(1)).classList.toggle('on', k===t);
+    document.getElementById('panel'+k.charAt(0).toUpperCase()+k.slice(1)).classList.toggle('on', k===t);
+  });
+  if(t==='manual') renderPreview();
+  if(t==='reg') renderRegistry();
+}
+
+/* ─────────────── 인증 ─────────────── */
+function wmsHandleLogout(){
+  if(!window.WMSync || !WMSync.isReady()) return;
+  if(!confirm('로그아웃하면 로그인 화면으로 이동합니다.')) return;
+  WMSync.signOut().then(function(){ window.location.replace('/wms_login.html'); });
+}
+function wmsUpdateBadge(state){
+  var dot=document.getElementById('syncDot'), label=document.getElementById('syncLabel'), btn=document.getElementById('syncBtn');
+  if(state && state.user && state.groupId){ dot.style.background='#4af0a8'; label.textContent=state.user.email||state.user.uid; label.style.color='#4af0a8'; btn.style.display=''; }
+  else if(state && state.user){ dot.style.background='#f0c44a'; label.textContent='권한 없음'; label.style.color='#f0c44a'; btn.style.display=''; }
+  else { dot.style.background='#888'; label.textContent='로그인 필요'; label.style.color='rgba(255,255,255,.6)'; btn.style.display='none'; }
+}
+function wmsHandleAuthState(state){
+  wmsUpdateBadge(state);
+  var returnUrl = '/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search);
+  if(!state.user){ setTimeout(function(){ if(!WMSync.isSignedIn()) window.location.replace(returnUrl); }, 3000); return; }
+  if(!state.groupId){ alert('이 계정은 작업 그룹에 등록되어 있지 않습니다.\n관리자에게 초대 코드를 요청하세요.'); window.location.replace(returnUrl); return; }
+  groupId = state.groupId;
+  attachRegistryRef();
+}
+
+/* ─────────────── Firebase 바코드 레지스트리 ─────────────── */
+function attachRegistryRef(){
+  if(!groupId || typeof firebase==='undefined') return;
+  if(regRef){ try{ regRef.off(); }catch(e){} }
+  regRef = firebase.database().ref('wms_sync/groups/'+groupId+'/star_barcode/registry');
+  regRef.on('value', function(snap){
+    var v = snap.val() || {};
+    registry = {};
+    Object.keys(v).forEach(function(k){ registry[k] = v[k]; });
+    renderRegistry();
+    onManualBarcode(); /* 열려있는 입력에 상품명 재조회 */
+  }, function(err){ console.warn('[registry] 읽기 실패:', err); });
+}
+/* 바코드→상품명 등록/갱신 (소비기한은 매번 바뀌므로 저장하지 않음) */
+function registerBarcode(code, name){
+  if(!regRef) return;
+  var key = regKey(code); if(!key) return;
+  var by = (window.WMSync && WMSync.getUser()) ? (WMSync.getUser().email || WMSync.getUser().uid) : '?';
+  var prev = registry[key] || {};
+  var rec = { barcode:String(code).trim(), name:(name||prev.name||''), updatedAt:Date.now(), by:by };
+  try { regRef.child(key).set(rec); } catch(e){ console.warn('등록 실패:', e); }
+}
+function lookupName(code){ var e = registry[regKey(code)]; return e ? (e.name||'') : ''; }
+
+/* ─────────────── 직접 입력 ─────────────── */
+function onManualBarcode(){
+  var code = document.getElementById('mBarcode').value.trim();
+  var nameEl = document.getElementById('mName');
+  var look = document.getElementById('mLookup');
+  var known = code ? lookupName(code) : '';
+  if(known){
+    /* 등록된 바코드 — 상품명 칸이 비어있으면 자동 채움 */
+    if(!nameEl.value.trim()){ nameEl.value = known; }
+    look.innerHTML = '✓ 등록된 바코드 — 상품명 <b style="color:var(--g)">'+escH(known)+'</b>';
+    look.style.color = 'var(--g)';
+  } else if(code){
+    look.textContent = '새 바코드 — 인쇄 시 상품명과 함께 목록에 등록됩니다';
+    look.style.color = 'var(--mu)';
+  } else {
+    look.textContent = '';
+  }
+  renderPreview();
+}
+function clearManual(){
+  document.getElementById('mBarcode').value='';
+  document.getElementById('mName').value='';
+  document.getElementById('mExp').value='';
+  document.getElementById('mQty').value='1';
+  document.getElementById('mLookup').textContent='';
+  renderPreview();
+  document.getElementById('mBarcode').focus();
+}
+function renderPreview(){
+  var S = SIZES[curSize];
+  var code = document.getElementById('mBarcode').value.trim();
+  var name = document.getElementById('mName').value.trim();
+  var exp  = fmtExp(document.getElementById('mExp').value);
+  var lab = document.getElementById('prevLabel');
+  var sc = S.prevScale;
+  lab.style.width  = (S.w*sc)+'px';
+  lab.style.height = (S.h*sc)+'px';
+  lab.style.padding = (S.padV*sc)+'px '+(S.padH*sc)+'px';
+  lab.style.gap = (0.8*sc)+'px';
+  var nm = document.getElementById('pnm'), ex = document.getElementById('pex'), bc = document.getElementById('pbc');
+  nm.textContent = name;
+  nm.style.fontSize = (curSize==='50x30'?9.3:12)+'px';
+  nm.style.webkitLineClamp = S.nameLines;
+  ex.textContent = exp ? ('소비기한 '+exp) : '';
+  ex.style.fontSize = (curSize==='50x30'?10:13)+'px';
+  bc.style.maxHeight = (parseFloat(S.bcMax)*sc)+'px';
+  if(code){ makeBarcode(bc, code, S.barH, S.bcFont); }
+  else { bc.innerHTML=''; }
+}
+function printManual(){
+  var code = document.getElementById('mBarcode').value.trim();
+  var name = document.getElementById('mName').value.trim();
+  var exp  = fmtExp(document.getElementById('mExp').value);
+  var qty  = parseInt(document.getElementById('mQty').value,10) || 0;
+  if(!code){ setMsg('m0','er','❌ 바코드를 입력하세요'); return; }
+  if(qty<1){ setMsg('m0','er','❌ 인쇄 장수를 1 이상으로 입력하세요'); return; }
+  registerBarcode(code, name);
+  var labels = [];
+  for(var i=0;i<qty;i++) labels.push({ code:code, name:name, exp:exp });
+  doPrint(labels);
+}
+
+/* ─────────────── 엑셀 일괄 ─────────────── */
+/* 헤더 텍스트로 열을 찾는다(열 순서 바뀌어도 안전). 못 찾으면 기본 위치 사용. */
+function findCol(headers, keys, fallback){
+  /* 키 우선순위대로 — 더 구체적인 키(예: '확정수량')를 전체 헤더에서 먼저 찾는다.
+     ('수량'을 먼저 돌리면 '발주수량'이 '확정수량'보다 앞서 잡히는 문제 방지) */
+  for(var k=0;k<keys.length;k++){
+    for(var i=0;i<headers.length;i++){
+      var h = String(headers[i]||'').toLowerCase().replace(/\s+/g,'');
+      if(h.indexOf(keys[k])!==-1) return i;
+    }
+  }
+  return fallback;
+}
+function handleExcel(file){
+  if(!file) return;
+  if(!/\.xlsx?$/i.test(file.name)){ setMsg('m0','er','❌ .xlsx 파일만 지원합니다'); return; }
+  setMsg('m0','inf','<span>엑셀 분석 중...</span>');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+      if(aoa.length<2){ setMsg('m0','er','❌ 데이터 행이 없습니다'); return; }
+      /* 헤더 행 탐색 — 'barcode'와 '확정수량'이 있는 행 */
+      var hRow = 0;
+      for(var i=0;i<Math.min(aoa.length,10);i++){
+        var joined = (aoa[i]||[]).map(function(c){ return String(c||''); }).join('|').toLowerCase();
+        if(joined.indexOf('barcode')!==-1 || joined.indexOf('확정수량')!==-1){ hRow=i; break; }
+      }
+      var headers = aoa[hRow] || [];
+      var cName = findCol(headers, ['sku이름','이름','상품명','품명'], 4);
+      var cBar  = findCol(headers, ['barcode','바코드'], 5);
+      var cQty  = findCol(headers, ['확정수량','수량'], 10);
+      var cExp  = findCol(headers, ['유통','소비기한','유통기한'], 13);
+      excelRows = [];
+      for(var r=hRow+1;r<aoa.length;r++){
+        var row = aoa[r]; if(!row||!row.length) continue;
+        var bc = row[cBar];
+        if(bc===null||bc===undefined||String(bc).trim()==='') continue;
+        var qty = parseInt(row[cQty],10); if(isNaN(qty)||qty<0) qty=0;
+        excelRows.push({
+          name: row[cName]!=null ? String(row[cName]).trim() : '',
+          barcode: String(bc).trim(),
+          exp: row[cExp]!=null ? String(row[cExp]).trim() : '',
+          qty: qty
+        });
+      }
+      if(!excelRows.length){ setMsg('m0','er','❌ 바코드가 있는 행이 없습니다'); return; }
+      renderExcel();
+      var totLabels = excelRows.reduce(function(s,x){ return s+(x.qty||0); },0);
+      setMsg('m0','ok','✅ '+excelRows.length+'개 품목 · 총 '+totLabels+'장 인쇄 예정. 소비기한·장수를 확인/수정 후 [전체 인쇄]를 누르세요.');
+    } catch(err){ console.error(err); setMsg('m0','er','❌ 엑셀 분석 실패: '+err.message); }
+  };
+  reader.onerror = function(){ setMsg('m0','er','❌ 파일 읽기 실패'); };
+  reader.readAsArrayBuffer(file);
+}
+function renderExcel(){
+  var body = document.getElementById('excelBody');
+  document.getElementById('excelWrap').style.display = excelRows.length ? '' : 'none';
+  document.getElementById('printAllBtn').disabled = !excelRows.length;
+  body.innerHTML = excelRows.map(function(x, i){
+    return '<tr>'+
+      '<td class="num">'+(i+1)+'</td>'+
+      '<td>'+escH(x.name)+'</td>'+
+      '<td style="font-family:var(--mo)">'+escH(x.barcode)+'</td>'+
+      '<td><input class="mini-inp" style="width:120px;text-align:left" value="'+escAttr(x.exp)+'" oninput="excelRows['+i+'].exp=this.value"></td>'+
+      '<td class="num"><input class="mini-inp" type="number" min="0" value="'+(x.qty||0)+'" oninput="excelRows['+i+'].qty=parseInt(this.value,10)||0"></td>'+
+      '<td><button class="rowbtn" onclick="printExcelRow('+i+')">🖨 이 품목</button></td>'+
+    '</tr>';
+  }).join('');
+}
+function excelToLabels(list){
+  var labels = [];
+  list.forEach(function(x){
+    registerBarcode(x.barcode, x.name);
+    var q = x.qty||0;
+    for(var i=0;i<q;i++) labels.push({ code:x.barcode, name:x.name, exp:fmtExp(x.exp) });
+  });
+  return labels;
+}
+function printExcelRow(i){
+  var x = excelRows[i]; if(!x) return;
+  if((x.qty||0)<1){ setMsg('m0','er','❌ 장수가 0입니다'); return; }
+  doPrint(excelToLabels([x]));
+}
+function printExcelAll(){
+  if(!excelRows.length) return;
+  var labels = excelToLabels(excelRows);
+  if(!labels.length){ setMsg('m0','er','❌ 인쇄할 장수가 없습니다 (모든 장수가 0)'); return; }
+  doPrint(labels);
+}
+
+/* ─────────────── 등록 목록 ─────────────── */
+function renderRegistry(){
+  var body = document.getElementById('regBody');
+  var info = document.getElementById('regInfo');
+  if(!body) return;
+  var q = (document.getElementById('regSearch').value||'').trim().toLowerCase();
+  var arr = Object.keys(registry).map(function(k){ return registry[k]; })
+    .filter(function(e){ return e && e.barcode; });
+  if(q){
+    arr = arr.filter(function(e){
+      return (String(e.barcode).toLowerCase().indexOf(q)!==-1) || (String(e.name||'').toLowerCase().indexOf(q)!==-1);
+    });
+  }
+  arr.sort(function(a,b){ return (b.updatedAt||0)-(a.updatedAt||0); });
+  info.textContent = Object.keys(registry).length + '개 등록' + (q?(' · 검색 '+arr.length+'개'):'');
+  if(!arr.length){ body.innerHTML = '<tr><td colspan="4" style="color:var(--mu);text-align:center;padding:1rem">'+(q?'검색 결과 없음':'아직 등록된 바코드가 없습니다 — 인쇄하면 자동 등록됩니다')+'</td></tr>'; return; }
+  body.innerHTML = arr.slice(0,800).map(function(e){
+    var d = e.updatedAt ? new Date(e.updatedAt) : null;
+    var ds = d ? ((d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')) : '';
+    return '<tr>'+
+      '<td style="font-family:var(--mo);color:var(--y)">'+escH(e.barcode)+'</td>'+
+      '<td>'+escH(e.name)+'</td>'+
+      '<td style="font-family:var(--mo);color:var(--mu);font-size:.72rem">'+ds+'</td>'+
+      '<td><button class="rowbtn" onclick="pickRegistry(\''+escAttr(regKey(e.barcode))+'\')">불러오기 →</button></td>'+
+    '</tr>';
+  }).join('');
+}
+function pickRegistry(key){
+  var e = registry[key]; if(!e) return;
+  setTab('manual');
+  document.getElementById('mBarcode').value = e.barcode||'';
+  document.getElementById('mName').value = e.name||'';
+  document.getElementById('mExp').value = '';   /* 소비기한은 매번 직접 입력 */
+  document.getElementById('mQty').value = '1';
+  onManualBarcode();
+  setMsg('m0','inf','📥 불러왔습니다 — <b>소비기한</b>과 <b>장수</b>를 입력 후 인쇄하세요.');
+  document.getElementById('mExp').focus();
+}
+
+/* ─────────────── 인쇄 ─────────────── */
+function doPrint(labels){
+  if(!labels || !labels.length){ setMsg('m0','er','❌ 인쇄할 라벨이 없습니다'); return; }
+  if(typeof JsBarcode==='undefined'){ setMsg('m0','er','❌ 바코드 라이브러리 로딩 실패 — 새로고침하세요'); return; }
+  if(labels.length>3000 && !confirm(labels.length+'장을 인쇄합니다. 계속할까요?')) return;
+  var S = SIZES[curSize];
+  var w = window.open('', '_blank', 'width=520,height=680');
+  if(!w){ alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
+
+  var labelsHtml = labels.map(function(it){
+    var nm = it.name ? '<div class="nm">'+escH(it.name)+'</div>' : '<div class="nm"></div>';
+    var ex = it.exp ? '<div class="ex">소비기한 '+escH(it.exp)+'</div>' : '<div class="ex"></div>';
+    return '<div class="label"><div class="pad">'+nm+'<svg class="bc" data-code="'+escAttr(it.code)+'"></svg>'+ex+'</div></div>';
+  }).join('');
+
+  w.document.open();
+  w.document.write(
+    '<!doctype html><html><head><meta charset="utf-8"><title>바코드 라벨 '+labels.length+'장</title>'+
+    '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>'+
+    '<style>'+
+      '@page { size: '+S.w+'mm '+S.h+'mm; margin: 0 }'+
+      'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
+      '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; page-break-after:always; overflow:hidden }'+
+      '.label:last-child { page-break-after:auto }'+
+      /* 여백 좌우4mm·상하3mm 안쪽 + 세로 가운데 정렬 */
+      '.pad { width:100%; height:100%; box-sizing:border-box; padding:'+S.padV+'mm '+S.padH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.8mm; text-align:center }'+
+      '.nm { font-size:'+S.nameFs+'; font-weight:800; line-height:1.05; width:100%; display:-webkit-box; -webkit-line-clamp:'+S.nameLines+'; -webkit-box-orient:vertical; overflow:hidden }'+
+      '.bc { width:100%; height:auto; max-height:'+S.bcMax+' }'+
+      '.ex { font-size:'+S.expFs+'; font-weight:900; letter-spacing:.02em; line-height:1 }'+
+      '@media screen { body{padding:14px;background:#222} .label{background:#fff;margin:0 auto 8px;box-shadow:0 0 0 1px #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
+      '@media print { .toolbar{display:none} .label{margin:0} }'+
+    '</style></head><body>'+
+    '<div class="toolbar">'+
+      '<span style="color:#fff;margin-right:12px;font-size:13px">🏷️ '+S.w+'×'+S.h+'mm · '+labels.length+'장</span>'+
+      '<button onclick="window.print()">🖨 인쇄</button>'+
+      '<button class="s" onclick="window.close()">닫기</button>'+
+    '</div>'+
+    labelsHtml +
+    '<script>'+
+      'window.addEventListener("load",function(){'+
+        'var barH = '+S.barH+', bcFont = '+S.bcFont+';'+
+        'document.querySelectorAll("svg.bc").forEach(function(s){'+
+          'var code = s.getAttribute("data-code");'+
+          'var fmt = /^\\d{13}$/.test(code)?"EAN13":(/^\\d{8}$/.test(code)?"EAN8":(/^\\d{12}$/.test(code)?"UPC":"CODE128"));'+
+          'var opts = { displayValue:true, font:"Courier New", fontSize:bcFont, fontOptions:"bold", textMargin:2, margin:0, width:2, height:barH, textAlign:"center" };'+
+          'var ok = true;'+
+          'try { JsBarcode(s, code, Object.assign({ format:fmt, valid:function(v){ ok=v; } }, opts)); } catch(e){ ok=false; }'+
+          'if(!ok){ try{ s.innerHTML=""; JsBarcode(s, code, Object.assign({ format:"CODE128" }, opts)); }catch(e2){ console.error(e2); } }'+
+          'var vw = parseFloat(s.getAttribute("width")), vh = parseFloat(s.getAttribute("height"));'+
+          'if(vw && vh){ s.setAttribute("viewBox","0 0 "+vw+" "+vh); s.setAttribute("preserveAspectRatio","xMidYMid meet"); s.removeAttribute("width"); s.removeAttribute("height"); }'+
+        '});'+
+        'setTimeout(function(){ window.print(); }, 350);'+
+      '});'+
+    '<\/script>'+
+    '</body></html>'
+  );
+  w.document.close();
+  setMsg('m0','ok','🖨 인쇄 창을 열었습니다 · '+labels.length+'장 ('+S.w+'×'+S.h+'mm)');
+}
+
+/* ─────────────── 초기화 ─────────────── */
+(function init(){
+  if(!window.WMSync){ setMsg('m0','er','❌ 동기화 모듈 로딩 실패 — 새로고침하세요'); return; }
+  WMSync.init('star_barcode', { requireAuth:true });
+  WMSync.onAuth(function(state){ wmsHandleAuthState(state); });
+  setSize('50x30');
+  renderPreview();
+})();
+</script>
+</body>
+</html>
