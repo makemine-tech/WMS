@@ -2303,6 +2303,18 @@ function promptOriginalUpload(kind) {
   inp.click();
 }
 
+/* 원본 xlsx가 메모리·클라우드 어디에도 없을 때(예: JSON 백업으로 복구) —
+   막다른 길로 파일 선택창만 반복해서 뜨지 않도록, 사용자가 방식을 고르게 한다.
+   [확인] 원본 양식 그대로 저장(원본 .xlsx 1회 선택) / [취소] 원본 없이 전체표로 즉시 저장. */
+function offerDownloadWithoutOriginal(kind) {
+  var ok = confirm(
+    '원본 쿠팡 양식 파일이 없습니다. (JSON 백업으로 복구한 경우 등)\n\n' +
+    '[확인] 원본 .xlsx를 직접 선택 → 원본 양식 그대로 저장 (한 번만 고르면 이후 자동)\n' +
+    '[취소] 원본 없이 전체 내용을 표로 바로 저장 (서식만 단순, 데이터는 동일)');
+  if (ok) promptOriginalUpload(kind);
+  else downloadFallback(kind);
+}
+
 function downloadAll() {
   if (!workbookRaw) {
     /* 자료 없이 시작 — 원본 양식이 애초에 없음. 기록된 내용 그대로 저장. */
@@ -2319,16 +2331,18 @@ function downloadAll() {
           hideMsg('m1');
           downloadAll();
         } else {
-          /* 클라우드에도 없음 → 원본 파일 1회 선택창 */
-          promptOriginalUpload('all');
+          /* 클라우드에도 없음 → 원본 선택 or 원본 없이 전체표 저장 (선택) */
+          hideMsg('m1');
+          offerDownloadWithoutOriginal('all');
         }
       }).catch(function(){
-        promptOriginalUpload('all');
+        hideMsg('m1');
+        offerDownloadWithoutOriginal('all');
       });
       return;
     }
-    /* 비로그인 — 파일 선택창 */
-    promptOriginalUpload('all');
+    /* 비로그인 — 원본 선택 or 원본 없이 전체표 저장 (선택) */
+    offerDownloadWithoutOriginal('all');
     return;
   }
   try {
