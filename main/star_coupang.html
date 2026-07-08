@@ -1283,6 +1283,30 @@ function normalizeSession(data) {
   return data;
 }
 
+/* 세션 파일 식별자(이름 + 클라우드 fileKey) 보장.
+   새로고침 시 restoreSession 이 workbookFile 을 복원하지 않아 workbookFile=null →
+   다음 saveSession 이 fileName 을 null 로 덮음 → getFileKey()=null → 동기화가 조용히 꺼지던
+   근본 버그를 막는다. 이름이 없으면 안정적인 이름을 생성해 부여(이후 계속 유지).
+   반환: 확정된 파일 이름(문자열) 또는 null(그룹 미연결 등으로 부여 못 한 경우). */
+function genSessionName() {
+  var d = new Date();
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  return '입고세션_' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) +
+         '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.xlsx';
+}
+function ensureSessionFileName(preferred) {
+  var name = preferred
+    || (workbookFile && workbookFile.name)
+    || (loadSessionData() || {}).fileName
+    || genSessionName();
+  if (!workbookFile) workbookFile = { name: name };
+  else if (!workbookFile.name) workbookFile.name = name;
+  if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
+    try { WMSync.setFileKey(name); } catch(e){}
+  }
+  return name;
+}
+
 function restoreSession() {
   var data = loadSessionData();
   if (!data) return;
@@ -1300,6 +1324,9 @@ function restoreSession() {
   lastScans = data.lastScans || [];
   photoLog = objToArray(data.photoLog) || [];
   updatePhotoLogUI();
+  /* 파일 식별자 복원 — 없으면 다음 저장에서 fileName 이 null 로 덮여 동기화가 꺼진다.
+     이름이 아예 없던 세션(예: 이름 없는 백업 복구)엔 자동으로 이름을 부여해 동기화를 살린다. */
+  ensureSessionFileName(data.fileName);
   /* boxes를 source of truth로 row.qtyReceived 재계산 — 다른 작업장 데이터 합산 후에도 정합성 보장 */
   recalcRowQtys();
   document.getElementById('restoreBanner').style.display = 'none';
@@ -2554,12 +2581,17 @@ function importSessionJson() {
       if (!data || !data.rowsLite) { setMsg('m1','er','❌ 입고 세션 JSON이 아닙니다'); return; }
       var rcv = (data.rowsLite||[]).reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
       if (rows && rows.length && !confirm('현재 진행 중인 작업이 있습니다.\n가져오는 세션으로 덮어쓸까요?\n\n가져올 내용: 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개\n\n(현재 작업을 잃고 싶지 않으면 취소 후 먼저 [💾 세션 백업]을 받으세요)')) return;
+      var norm = normalizeSession(data);
+      /* 이름 없는 백업도 동기화되도록 안정적인 이름을 부여하고 저장에 반영 —
+         저장까지 해둬야 다음 새로고침에도 같은 이름이 유지되어 동기화가 계속 살아있다. */
+      if (!norm.fileName) norm.fileName = genSessionName();
       try {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(normalizeSession(data)));
+        localStorage.setItem(SESSION_KEY, JSON.stringify(norm));
       } catch(err){ setMsg('m1','er','❌ 저장 실패(용량): '+err.message); return; }
-      /* 같은 파일명으로 클라우드 ref 부착 — 이후 박스 종료 시 자동 동기화 */
-      if (data.fileName && window.WMSync && WMSync.hasGroup()) {
-        try { WMSync.setFileKey(data.fileName); workbookFile = { name: data.fileName }; } catch(e){}
+      /* 파일명으로 클라우드 ref 부착 — 이후 박스 종료/스캔 시 자동 동기화 */
+      workbookFile = { name: norm.fileName };
+      if (window.WMSync && WMSync.hasGroup()) {
+        try { WMSync.setFileKey(norm.fileName); } catch(e){}
       }
       restoreSession();
       setMsg('m1','ok','✅ 세션 가져오기 완료 — 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개. 이어서 스캔하세요.');
@@ -3649,7 +3681,16 @@ var isSyncing = false;
    클라우드 갱신은 이 함수로만 일어남. 스캔 중 saveSession은 클라우드를 건드리지 않음. */
 function syncWithCloud(opts) {
   opts = opts || {};
-  if (!window.WMSync || !WMSync.hasGroup() || !WMSync.getFileKey()) return Promise.resolve();
+  if (!window.WMSync || !WMSync.hasGroup()) {
+    setSyncStatus('er', '동기화 불가 — 로그인/그룹 연결을 확인하세요 (상단 배지가 초록인지 확인)');
+    return Promise.resolve();
+  }
+  /* 파일 연결이 끊겨 있으면(새로고침 등) 세션 이름으로 재부착 시도 — 조용히 죽지 않게 */
+  if (!WMSync.getFileKey()) ensureSessionFileName();
+  if (!WMSync.getFileKey()) {
+    setSyncStatus('er', '동기화 불가 — 작업 파일이 연결되지 않았습니다. 진행 중 작업이 없으면 파일을 업로드하거나 이어받기 하세요.');
+    return Promise.resolve();
+  }
   if (isSyncing) return Promise.resolve();
   isSyncing = true;
   setSyncStatus('inf', '⟳ 동기화 중...');
