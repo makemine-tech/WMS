@@ -217,7 +217,35 @@
     border-bottom: 1px solid #e2e8f0;
   }
   .pl-item .c-wait { font-weight: 800; font-size: 12pt; color: #0f172a; text-align: center; }
-  .pl-item .c-name { font-weight: 500; color: #0f172a; padding-right: 2mm; word-break: break-word; }
+  .pl-item .c-name { font-weight: 500; color: #0f172a; padding-right: 2mm; word-break: break-word; cursor: pointer; }
+  .pl-item .c-name:hover { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+
+  /* 상품별 비고 줄: 상품명 클릭 시 바로 아래에 ㄴ 표시로 열림 (위 상품 참고) */
+  .pl-remark {
+    display: grid;
+    grid-template-columns: 14mm 1fr;
+    column-gap: 2mm;
+    padding: 2px 4px 5px;
+    border-bottom: 1px solid #e2e8f0;
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .pl-remark .r-mark {
+    text-align: center; font-weight: 800; font-size: 10pt;
+    color: #b45309; line-height: 1.3;
+  }
+  .pl-remark .r-text {
+    font-size: 9pt; color: #b45309; font-weight: 600;
+    word-break: break-word; white-space: pre-wrap;
+    min-height: 1.4em; line-height: 1.4;
+    border-bottom: 1px dashed #cbd5e1; outline: none;
+  }
+  .pl-remark .r-text:empty::before {
+    content: attr(data-ph); color: #94a3b8; font-weight: 400;
+  }
+  .pl-remark .r-text:focus { background: #fffbeb; border-bottom-color: #b45309; }
+  body.mode-invoice .pl-remark { grid-template-columns: 10mm 1fr; padding: 1px 2px 3px; }
+  body.mode-invoice .pl-remark .r-mark { font-size: 8pt; }
+  body.mode-invoice .pl-remark .r-text { font-size: 7pt; }
   .pl-item .c-opt  { font-size: 8pt; color: #64748b; text-align: center; }
   .pl-item .c-stk  { font-size: 8.5pt; color: #0f172a; text-align: right; padding-right: 2mm; }
   .pl-head .c-wait, .pl-head .c-opt { text-align: center; }
@@ -277,6 +305,10 @@
     .pl-page + .pl-page { page-break-before: always; break-before: page; }
     /* A4 모드: 상·하 @page 여백(20mm)만큼 .pl-page 높이 축소 → 빈 페이지 방지 */
     body:not(.mode-invoice) .pl-page { min-height: 277mm; }
+    /* 비고: 인쇄 시 입력용 점선·플레이스홀더 제거하고 텍스트만 그대로 */
+    .pl-remark .r-text { border-bottom: none; background: none !important; }
+    .pl-remark .r-text:empty::before { content: ""; }
+    .pl-remark:has(.r-text:empty) { display: none; }
   }
 
   /* ===== 웹 푸터 (main/index.html 통일) ===== */
@@ -383,6 +415,10 @@ console.log("%c© 2026 Makemine Design. All rights reserved.", "color:#0f172a;fo
 /* ---------- 상태 ---------- */
 let ROWS = [];
 let META = { vendor: "", total: 0, totalWait: 0, fileName: "" };
+/* 상품별 비고: key(고객사상품명옵션) → 비고 텍스트.
+   재렌더(필터·정렬·고객사 변경) 시에도 유지됨. */
+const REMARKS = {};
+function itemKey(r){ return `${r.vendor}${r.name}${r.option}`; }
 
 const H = {
   vendor:  ["고객사","거래처","업체명"],
@@ -489,14 +525,25 @@ function getGroupedFilteredList() {
 }
 
 /* ---------- 렌더 조각 ---------- */
+function buildRemarkRowHtml(key, text) {
+  return `<div class="pl-remark" data-key="${escapeHtml(key)}">
+      <div class="r-mark">ㄴ</div>
+      <div class="r-text" contenteditable="true" data-ph="위 상품 비고 입력…">${escapeHtml(text || "")}</div>
+    </div>`;
+}
 function buildItemRowsHtml(items) {
-  return items.map(r => `
-    <div class="pl-item">
+  return items.map(r => {
+    const key = itemKey(r);
+    const rem = REMARKS[key];
+    const remHtml = rem ? buildRemarkRowHtml(key, rem) : "";
+    return `
+    <div class="pl-item" data-key="${escapeHtml(key)}">
       <div class="c-wait">${fmt(r.wait)}</div>
-      <div class="c-name">${escapeHtml(r.name)}</div>
+      <div class="c-name" title="클릭하면 비고 입력란이 열립니다">${escapeHtml(r.name)}</div>
       <div class="c-opt">${escapeHtml(r.option || "-")}</div>
       <div class="c-stk">${fmt(r.stock)}</div>
-    </div>`).join("");
+    </div>${remHtml}`;
+  }).join("");
 }
 function buildHeaderRow() {
   return `
@@ -733,6 +780,75 @@ window.addEventListener("afterprint", restorePreview);
 
 document.getElementById("btnPrintA4").addEventListener("click", printA4);
 document.getElementById("btnPrintInvoice").addEventListener("click", printInvoice);
+
+/* =========================================================
+   상품별 비고 입력 (상품명 클릭 → 아래 ㄴ 줄 열림)
+   - REMARKS 맵에 저장되어 재렌더에도 유지
+   - 이벤트 위임: previewStage 가 재렌더되어도 동작 유지
+========================================================= */
+const previewStage = document.getElementById("previewStage");
+
+function placeCaretEnd(el) {
+  el.focus();
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (_) {}
+}
+
+/* 상품명 클릭 → 해당 .pl-item 바로 아래 비고 줄을 열고 포커스 */
+previewStage.addEventListener("click", (e) => {
+  const nameCell = e.target.closest(".c-name");
+  if (!nameCell) return;
+  const item = nameCell.closest(".pl-item");
+  if (!item) return;  // 헤더(.pl-head)의 상품명은 무시
+  const key = item.dataset.key;
+
+  let remark = item.nextElementSibling;
+  if (remark && remark.classList.contains("pl-remark") && remark.dataset.key === key) {
+    placeCaretEnd(remark.querySelector(".r-text"));
+    return;
+  }
+  remark = document.createElement("div");
+  remark.className = "pl-remark";
+  remark.dataset.key = key;
+  remark.innerHTML =
+    '<div class="r-mark">ㄴ</div>' +
+    '<div class="r-text" contenteditable="true" data-ph="위 상품 비고 입력…"></div>';
+  item.after(remark);
+  placeCaretEnd(remark.querySelector(".r-text"));
+});
+
+/* 입력 중 → REMARKS 즉시 반영 */
+previewStage.addEventListener("input", (e) => {
+  const rt = e.target.closest && e.target.closest(".r-text");
+  if (!rt) return;
+  const remark = rt.closest(".pl-remark");
+  const key = remark.dataset.key;
+  const val = rt.textContent.trim();
+  if (val) REMARKS[key] = val; else delete REMARKS[key];
+});
+
+/* 포커스 아웃 → 빈 비고 줄은 제거 */
+previewStage.addEventListener("focusout", (e) => {
+  const rt = e.target.closest && e.target.closest(".r-text");
+  if (!rt) return;
+  if (!rt.textContent.trim()) {
+    const remark = rt.closest(".pl-remark");
+    if (remark) { delete REMARKS[remark.dataset.key]; remark.remove(); }
+  }
+});
+
+/* 비고 입력 중 Enter = 완료(줄바꿈 방지), Shift+Enter = 줄바꿈 */
+previewStage.addEventListener("keydown", (e) => {
+  const rt = e.target.closest && e.target.closest(".r-text");
+  if (!rt) return;
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); rt.blur(); }
+});
 </script>
 
 </body>
