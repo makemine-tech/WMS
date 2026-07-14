@@ -2544,11 +2544,21 @@ function parseBookingInfo() {
       }
       if (!slot.addr) {
         const PROV = '서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|충북|충남|전라|전북|전남|경상|경북|경남|제주';
-        let m = t.match(new RegExp('(?:센터\\s*주소|배송지|배송\\s*주소|주소|소재지|도착지|Address)\\s*[:：]?\\s*((?:' + PROV + ')[가-힣A-Za-z0-9()\\-\\s]{4,45})'));
-        if (m) slot.addr = m[1].trim();
-        else {
+        // 회송지/반품/리턴/반송 주소는 납품(입고) 주소가 아니므로 건너뜀 (예: xrc11)
+        const RET = /회송|반품|리턴|반송|return/i;
+        // ① 라벨이 붙은 주소 — 라벨 바로 앞 문맥이 회송/반품 계열이면 스킵하고 다음 후보 탐색
+        const labelRe = new RegExp('(?:센터\\s*주소|배송지|배송\\s*주소|주소|소재지|도착지|Address)\\s*[:：]?\\s*((?:' + PROV + ')[가-힣A-Za-z0-9()\\-\\s]{4,45})', 'g');
+        let m;
+        while ((m = labelRe.exec(t)) !== null) {
+          const before = t.slice(Math.max(0, m.index - 8), m.index);
+          if (RET.test(before)) continue;   // 회송지 주소 등은 건너뜀
+          slot.addr = m[1].trim();
+          break;
+        }
+        // ② 라벨 없이 시·도 시작 주소 — 역시 회송/반품 문맥이면 스킵
+        if (!slot.addr) {
           m = t.match(new RegExp('((?:' + PROV + ')(?:특별시|광역시|특별자치시|특별자치도|도)?\\s?[가-힣]+(?:시|군|구)[가-힣0-9\\-\\s()]{0,40})'));
-          if (m) slot.addr = m[1].trim();
+          if (m && !RET.test(t.slice(Math.max(0, m.index - 8), m.index))) slot.addr = m[1].trim();
         }
       }
       if (!slot.code) {
