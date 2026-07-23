@@ -888,7 +888,24 @@ var headers = [];           // 헤더 행 배열 (인덱스 = 컬럼 인덱스)
 var rows = [];              // [{r:행번호, vals:{컬럼명->값}, sizeMod:bool, originMod:bool, qtyReceived:N}, ...]
 var byBarcode = {};         // {바코드문자열: rowIndex}
 var currentBox = null;
-var boxes = [];             // [{id, ts, items:[{barcode, rowIdx, count}], closed}]
+var boxes = [];             // [{id, ts(시작시각), lastTs(마지막 작업시각), items:[{barcode, rowIdx, count}], closed}]
+
+/* ── 처리완료 목록 정렬 키 ──
+   ts = 박스를 처음 스캔한 '시작' 시각(시간 컬럼 표시용, 불변).
+   lastTs = 그 박스에 마지막으로 손댄(스캔/재개/종료) 시각.
+   완료 목록은 lastTs 기준 최신순으로 쌓여야, 방금 끝낸 박스가 항상 맨 위에 순차적으로 올라온다.
+   (예전에는 ts(시작시각)만으로 정렬 → 박스를 재개하거나 순서를 바꿔 작업하면
+    방금 끝낸 박스가 위가 아닌 '불특정한 위치'에 끼어들어 기록 누락처럼 보였음.)
+   lastTs는 실제 벽시계(Date.now)라 여러 PC 병합 시에도 전역 비교가 가능하다. */
+function boxRecency(b){ return (b && (b.lastTs != null ? b.lastTs : b.ts)) || 0; }
+/* 박스에 방금 작업했음을 기록 — boxes 배열의 실 항목과 currentBox 양쪽을 갱신.
+   (새로고침 복원 직후엔 currentBox와 boxes 항목이 서로 다른 객체일 수 있어 둘 다 갱신) */
+function touchBox(id){
+  var now = Date.now();
+  var b = boxes.find(function(x){ return x.id === id; });
+  if (b) b.lastTs = now;
+  if (currentBox && currentBox.id === id) currentBox.lastTs = now;
+}
 var lastScans = [];         // [{rowIdx, barcode, ts, boxId}] — undo 용
 var rowFlt = 'all';
 var currentDisplayRow = -1; // 큰 디스플레이에 표시 중인 row 인덱스 (인라인 편집 대상)
@@ -1462,12 +1479,14 @@ function onBoxKey(ev) {
   var existing = boxes.find(function(b){ return b.id === val; });
   if (existing) {
     existing.closed = false;
+    existing.lastTs = Date.now();   /* 재개 시각 갱신 → 완료 목록 맨 위로 */
     currentBox = existing;
     boxes = boxes.filter(function(b){ return b.id !== val; });
     boxes.unshift(currentBox);
     updateScanDisplay('warn', '📦 기존 박스 재개: '+escH(val), null);
   } else {
-    currentBox = { id: val, ts: Date.now(), items: [], closed: false };
+    var _now = Date.now();
+    currentBox = { id: val, ts: _now, lastTs: _now, items: [], closed: false };
     boxes.unshift(currentBox);
     updateScanDisplay('ok', '📦 박스 시작: '+escH(val)+'<div style="font-size:.9rem;font-weight:700;margin-top:.35rem;color:var(--mu)">제품 바코드를 스캔하세요</div>', null);
   }
@@ -1562,6 +1581,7 @@ function handleNormalScan(rowIdx, key) {
   var bItem = currentBox.items.find(function(it){ return it.rowIdx === rowIdx; });
   if (bItem) bItem.count++;
   else currentBox.items.push({ rowIdx: rowIdx, barcode: key, count: 1 });
+  touchBox(currentBox.id);   /* 작업 중 박스는 항상 완료 목록 최상단 유지 */
   /* 마지막 스캔 기록 (undo 용) */
   lastScans.push({ rowIdx: rowIdx, barcode: key, boxId: currentBox.id, ts: Date.now() });
   if (lastScans.length > 200) lastScans = lastScans.slice(-200);
@@ -1797,6 +1817,7 @@ function flashFeedback(kind, html) {
 function endBox() {
   if (!currentBox) return;
   currentBox.closed = true;
+  touchBox(currentBox.id);   /* 종료 시각 갱신 → 방금 끝낸 박스가 완료 목록 맨 위로 순차 정렬 */
   updateScanDisplay('idle', '📦 박스 종료: '+escH(currentBox.id)+'<div style="font-size:.9rem;font-weight:700;margin-top:.35rem;color:var(--mu)">다음 박스를 스캔하세요</div>', null);
   document.getElementById('boxState').textContent = '대기';
   document.getElementById('boxState').classList.remove('act');
@@ -1805,6 +1826,7 @@ function endBox() {
   document.getElementById('endBoxBtn').disabled = true;
   currentBox = null;
   document.getElementById('boxInp').focus();
+  renderTable();   /* 완료 목록 즉시 갱신 — 종료한 박스를 최상단에 반영(예전엔 갱신 안 돼 기록 누락처럼 보였음) */
   renderBoxList();
   saveSession();
   playBoxDoneSound();
@@ -2056,8 +2078,8 @@ function renderTable() {
      같은 SKU가 박스 2개에 분산되면 2행으로 표시. */
   var doneHtml = '';
   var doneCnt = 0;
-  /* 박스를 시작 시간 역순(최근 위) */
-  var sortedBoxes = boxes.slice().sort(function(a,b){ return b.ts - a.ts; });
+  /* 마지막 작업 시각 역순 — 방금 손댄(종료/스캔/재개) 박스가 맨 위로 순차 정렬 */
+  var sortedBoxes = boxes.slice().sort(function(a,b){ return boxRecency(b) - boxRecency(a); });
   sortedBoxes.forEach(function(box){
     box.items.forEach(function(it){
       if (it.count <= 0) return;
@@ -2199,7 +2221,8 @@ function renderBoxList() {
   var cnt = document.getElementById('boxCnt');
   cnt.textContent = boxes.length + '개';
   var html = '';
-  boxes.forEach(function(b){
+  /* 완료 목록과 동일한 정렬(마지막 작업 시각 역순) — 두 목록 순서가 어긋나 보이지 않게 */
+  boxes.slice().sort(function(a,b){ return boxRecency(b) - boxRecency(a); }).forEach(function(b){
     var total = b.items.reduce(function(s,i){ return s+i.count; }, 0);
     var skuCnt = b.items.length;
     var d = new Date(b.ts);
@@ -2455,9 +2478,9 @@ function downloadDone() {
       }
     }
 
-    /* 박스×SKU 단위로 행 채우기 — 박스 시간 역순 → 박스 안 추가순 */
+    /* 박스×SKU 단위로 행 채우기 — 마지막 작업 시각 역순(화면 완료 목록과 동일) → 박스 안 추가순 */
     var records = [];
-    var sortedBoxes = boxes.slice().sort(function(a,b){ return b.ts - a.ts; });
+    var sortedBoxes = boxes.slice().sort(function(a,b){ return boxRecency(b) - boxRecency(a); });
     sortedBoxes.forEach(function(box){
       box.items.forEach(function(it){
         if (it.count <= 0) return;
@@ -2567,7 +2590,7 @@ function downloadFallback(kind) {
   var aoa, fname;
   if (kind === 'done') {
     aoa = [['박스', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '박스내 수량', '예정 Q']];
-    boxes.slice().sort(function(a,b){return b.ts-a.ts;}).forEach(function(box){
+    boxes.slice().sort(function(a,b){return boxRecency(b)-boxRecency(a);}).forEach(function(box){
       var d = new Date(box.ts);
       var t = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
       box.items.forEach(function(it){
@@ -3733,11 +3756,15 @@ function mergeBoxes(local, remote) {
       }
     });
     if ((rb.ts||0) > (loc.ts||0)) loc.ts = rb.ts;
+    /* 마지막 작업 시각은 더 최근 값 채택 — 완료 목록 정렬의 기준(벽시계라 PC 간 비교 가능) */
+    var rl = (rb.lastTs != null ? rb.lastTs : rb.ts) || 0;
+    var ll = (loc.lastTs != null ? loc.lastTs : loc.ts) || 0;
+    if (rl > ll) loc.lastTs = rl;
     if (rb.closed) loc.closed = true;
   });
-  /* 배열로 변환 + 시작 시각 순서 (최근 위) */
+  /* 배열로 변환 + 마지막 작업 시각 역순(최근 위) — 화면 완료 목록과 동일 정렬 */
   return Object.keys(map).map(function(k){ return map[k]; })
-    .sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+    .sort(function(a,b){ return boxRecency(b) - boxRecency(a); });
 }
 
 /* 클라우드와 수동 동기화 — 다른 작업장 진행분 합산 */
