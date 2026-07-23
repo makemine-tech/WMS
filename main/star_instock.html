@@ -225,6 +225,7 @@ h1 em{color:var(--g);font-style:normal}
   <span class="btn dz-mini" style="background:linear-gradient(135deg,#c91d2f,#e6394e);color:#fff;border:1.5px solid #8c1422;box-shadow:0 4px 12px rgba(201,29,47,.35);font-weight:900" title="한글표시사항 엑셀 업로드 — 바코드 기준으로 기존 입고 로그의 상품명·품번·사이즈·재질·색상·제조국을 덮어씁니다">📋 한글표시사항 입력
     <input type="file" accept=".xlsx,.xls" onchange="handleKoLabelExcel(this.files[0]);this.value='';">
   </span>
+  <button class="btn btn-s" onclick="downloadKoLabelTemplate()" title="한글표시사항 입력 양식 다운로드 — 바코드·상품명·품번·사이즈·재질·색상·제조국 7열">📄 한글표시사항 양식</button>
 </div>
 
 <!-- 스캔 패널 -->
@@ -842,6 +843,25 @@ function downloadOutTemplate(){
     XLSX.utils.book_append_sheet(wb, ws, '재고출고양식');
     XLSX.writeFile(wb, 'STAR_재고출고_업로드양식.xlsx');
     setMsg('m0','ok','✅ 출고 양식을 다운로드했습니다 — 박스바코드·바코드·수량·비고 4열. 박스바코드/비고는 비워도 됩니다.');
+  } catch(err){
+    setMsg('m0','er','❌ 양식 생성 실패: '+(err&&err.message||err));
+  }
+}
+
+/* 한글표시사항 입력 양식 다운로드 — handleKoLabelExcel 파서가 인식하는 7열.
+   1행 헤더, 2행부터 데이터. 바코드 필수, 나머지는 채운 컬럼만 덮어씀. */
+function downloadKoLabelTemplate(){
+  try {
+    var headers = ['바코드','상품명','품번','사이즈','재질','색상','제조국'];
+    var sample1 = ['4570158735506','슬림핏 반팔 티셔츠','ABC-1001','M','면 100%','블랙','베트남'];
+    var sample2 = ['4570158735476','와이드 데님 팬츠','ABC-1002','L','면 98% 폴리우레탄 2%','인디고','중국'];
+    var aoa = [headers, sample1, sample2];
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:16},{wch:24},{wch:14},{wch:8},{wch:22},{wch:12},{wch:10}];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '한글표시사항양식');
+    XLSX.writeFile(wb, 'STAR_한글표시사항_입력양식.xlsx');
+    setMsg('m0','ok','✅ 한글표시사항 양식을 다운로드했습니다 — 바코드·상품명·품번·사이즈·재질·색상·제조국 7열. 바코드는 필수, 나머지는 채운 컬럼만 덮어씁니다.');
   } catch(err){
     setMsg('m0','er','❌ 양식 생성 실패: '+(err&&err.message||err));
   }
