@@ -1252,6 +1252,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <span class="label" id="cpScanHint">발주 업로드 후 부족·없음 행을 모두 [🔍 대체] 또는 [✓ 이대로 확정] 처리하면 스캔 시작 활성화됩니다</span>
       <button class="btn btn-s" onclick="cpReset()">🔄 처음부터</button>
       <button class="btn btn-y" onclick="cpCheckAltBarcodes()" title="라벨 인쇄 시 사용될 출고 바코드(원바코드 vs 대체바코드) 사전 점검">🏷️ 대체바코드 점검</button>
+      <button class="btn btn-s" onclick="cpShowPlan()" title="스캔 전 미리보기 — 박스바코드별로 어떤 상품이 어느 센터로 나뉘는지, 센터 분리가 필요한 박스는 어떤 것인지 개괄표로 확인">📦 박스별 분류 개괄표</button>
       <button class="btn btn-b" id="cpScanBtn" disabled onclick="cpStartScan()" title="모든 행이 처리되어야 활성화">▶ 스캔 시작 (Step 2)</button>
     </div>
     </div><!-- /cpPoView -->
@@ -1484,6 +1485,23 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <button onclick="cpCopyKioskHelp()" style="background:#0f1117;color:var(--o);border:1.5px solid var(--o);border-radius:7px;font-weight:800;padding:.6rem 1rem;cursor:pointer">📋 복사</button>
       <button onclick="cpDownloadKioskHelp()" style="background:#0f1117;color:var(--b);border:1.5px solid var(--b);border-radius:7px;font-weight:800;padding:.6rem 1rem;cursor:pointer">⬇ txt 다운로드</button>
       <button class="confirm" onclick="cpCloseKioskHelp()">닫기</button>
+    </span>
+  </div>
+</div>
+
+<!-- 박스별 분류 개괄표 모달 — PO 기준 사전 시뮬레이션 (스캔 전에 미리 보는 분류 계획) -->
+<div class="cp-popup-back" id="cpPlanBack" onclick="cpClosePlan()"></div>
+<div class="cp-popup-box" id="cpPlanBox" style="width:min(1180px,96vw);max-height:92vh">
+  <div class="cp-popup-hdr">
+    📦 박스별 분류 개괄표 <span id="cpPlanCtx" style="font-weight:600;color:var(--mu);font-size:.8rem"></span>
+    <button class="x" onclick="cpClosePlan()" aria-label="닫기">✕</button>
+  </div>
+  <div class="cp-popup-body" id="cpPlanBody" style="overflow:auto"></div>
+  <div class="cp-popup-foot" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+    <span id="cpPlanFootInfo" style="font-size:.74rem;color:var(--mu)"></span>
+    <span style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <button onclick="cpDownloadPlan()" style="background:#0f1117;color:var(--g);border:1.5px solid var(--g);border-radius:7px;font-weight:800;padding:.6rem 1rem;cursor:pointer">⬇ 엑셀 다운로드</button>
+      <button class="confirm" onclick="cpClosePlan()">닫기</button>
     </span>
   </div>
 </div>
@@ -2360,6 +2378,274 @@ function cpCheckAltBarcodes(){
   lines.push('※ alt 가 비어있으면 원바코드 그대로 인쇄.');
   alert(lines.join('\n'));
   setMsg('cpMsg','inf','🏷️ 점검 완료 — alt 사용 ' + withAlt.length + '건 · 원바코드 ' + withoutAlt.length + '건' + (notFound.length?' · ⚠ 메타없음 '+notFound.length+'건':''));
+}
+
+/* ═══════════ 박스별 분류 개괄표 (스캔 전 사전 시뮬레이션) ═══════════
+ * 등록된 PO + 우리 재고의 박스ID 인덱스(boxIndex) 를 대조해서
+ * "박스바코드 하나가 → 어떤 상품이 → 어느 센터로 몇 개씩 갈라지는지" 를 미리 계산한다.
+ * 실제 박스 스캔(cpProcessBoxScan)과 같은 배분 규칙:
+ *   - 같은 바코드가 여러 센터에 발주됐으면 '소량 출고지 우선' 순으로 채움
+ *   - 센터 발주수량을 다 채우고 남은 수량, PO 에 아예 없는 SKU → '잔류'
+ * 박스 순회는 박스ID 오름차순 (결과가 항상 같도록). 실제 스캔 순서와 다르면
+ * 센터 배분이 조금 달라질 수 있어 '계획' 용도로만 사용. */
+var cpPlanCache = null;   /* 마지막 계산 결과 — 엑셀 다운로드에서 재사용 */
+
+/* 출고 대상 PO 라인 — 개괄표는 확정 전에도 봐야 하므로 전 라인 사용 (발주수량 기준) */
+function cpPlanPoRows(){
+  return (cpState.rows||[]).map(function(r, i){
+    var m = cpClassify(r);
+    return {
+      srcIdx: i, center: (r.center||'').trim() || '(센터없음)', eta: r.eta||'',
+      skuName: r.skuName||'', poBarcode: r.barcode||'', srcBarcode: m.matchedBc||'',
+      need: +r.qty || 0
+    };
+  }).filter(function(r){ return r.need > 0; });
+}
+/* 박스 안 바코드 → PO 라인 인덱스들 (직접 → alt → 숫자코어, 소량 센터 우선 정렬) */
+function cpPlanMatchIdxs(bc, rows, centerTot){
+  var idxs = [], i;
+  for (i=0; i<rows.length; i++){
+    if (normBarcode(rows[i].srcBarcode) === bc || normBarcode(rows[i].poBarcode) === bc) idxs.push(i);
+  }
+  if (!idxs.length && stockByAlt[bc]) {
+    var src = stockByAlt[bc];
+    for (i=0; i<rows.length; i++){ if (normBarcode(rows[i].srcBarcode) === src) idxs.push(i); }
+  }
+  if (!idxs.length) {
+    var core = barcodeCore(bc);
+    if (core) for (i=0; i<rows.length; i++){
+      if (barcodeCore(rows[i].srcBarcode) === core || barcodeCore(rows[i].poBarcode) === core) idxs.push(i);
+    }
+  }
+  if (idxs.length > 1) {
+    idxs.sort(function(a,b){
+      var ta = centerTot[rows[a].center] || 0, tb = centerTot[rows[b].center] || 0;
+      return (ta - tb) || (a - b);
+    });
+  }
+  return idxs;
+}
+function cpBuildBoxPlan(){
+  var rows = cpPlanPoRows();
+  if (!rows.length) return null;
+  var centerTot = {};
+  rows.forEach(function(r){ centerTot[r.center] = (centerTot[r.center]||0) + r.need; });
+  var remain = rows.map(function(r){ return r.need; });
+
+  var boxIds = Object.keys(boxIndex).sort(function(a,b){ return String(a).localeCompare(String(b), 'ko', {numeric:true}); });
+  var boxes = [], skipBoxes = 0, skipQty = 0;
+
+  boxIds.forEach(function(boxId){
+    var contents = boxIndex[boxId] || {};
+    var lines = [];
+    Object.keys(contents).sort().forEach(function(bc){
+      var qty = +contents[bc] || 0;
+      if (qty <= 0) return;
+      var meta = stockMeta[bc] || {};
+      var idxs = cpPlanMatchIdxs(bc, rows, centerTot);
+      if (!idxs.length) { lines.push({ bc:bc, name: meta.name||'', center:'잔류', qty:qty, kind:'none' }); return; }
+      var left = qty;
+      idxs.forEach(function(ix){
+        if (left <= 0 || remain[ix] <= 0) return;
+        var take = Math.min(left, remain[ix]);
+        remain[ix] -= take; left -= take;
+        lines.push({ bc:bc, name: rows[ix].skuName || meta.name || '', center: rows[ix].center,
+                     qty:take, kind:'ship', eta: rows[ix].eta||'' });
+      });
+      /* 전 센터 발주수량을 다 채우고도 박스에 남은 수량 — 창고 잔류 */
+      if (left > 0) lines.push({ bc:bc, name: rows[idxs[0]].skuName || meta.name || '', center:'잔류', qty:left, kind:'over' });
+    });
+    if (!lines.length) return;
+    var shipLines = lines.filter(function(l){ return l.kind === 'ship'; });
+    if (!shipLines.length) {
+      /* 이번 PO 와 무관하거나 이미 발주수량이 다 찬 박스 — 표에서 제외하고 건수만 집계 */
+      skipBoxes++; skipQty += lines.reduce(function(s,l){ return s+l.qty; }, 0);
+      return;
+    }
+    var ctrMap = {};
+    shipLines.forEach(function(l){ ctrMap[l.center] = (ctrMap[l.center]||0) + l.qty; });
+    var centers = Object.keys(ctrMap);
+    var hasResidual = lines.length > shipLines.length;
+    boxes.push({
+      boxId: boxId, lines: lines, centers: centers, ctrMap: ctrMap, hasResidual: hasResidual,
+      split: centers.length > 1 || hasResidual,
+      shipQty: shipLines.reduce(function(s,l){ return s+l.qty; }, 0),
+      totalQty: lines.reduce(function(s,l){ return s+l.qty; }, 0)
+    });
+  });
+
+  /* 센터별 요약 */
+  var centerSum = {};
+  boxes.forEach(function(b){
+    Object.keys(b.ctrMap).forEach(function(c){
+      if (!centerSum[c]) centerSum[c] = { center:c, qty:0, boxes:0, sole:0, split:0, skus:{} };
+      centerSum[c].qty   += b.ctrMap[c];
+      centerSum[c].boxes += 1;
+      if (b.split) centerSum[c].split += 1; else centerSum[c].sole += 1;
+    });
+    b.lines.forEach(function(l){ if (l.kind === 'ship') centerSum[l.center].skus[l.bc] = 1; });
+  });
+  var centerList = Object.keys(centerSum).map(function(c){
+    var s = centerSum[c]; s.skuCnt = Object.keys(s.skus).length; return s;
+  }).sort(function(a,b){ return b.qty - a.qty; });
+
+  /* PO 미충족 — 박스에서 채우지 못한 잔여 발주수량 */
+  var shortLines = [];
+  rows.forEach(function(r, i){
+    if (remain[i] > 0) shortLines.push({ center:r.center, barcode:r.poBarcode, name:r.skuName, need:r.need, filled:r.need-remain[i], short:remain[i] });
+  });
+
+  return {
+    fileName: cpState.fileName || '', poLines: rows.length,
+    boxes: boxes, centers: centerList, shortLines: shortLines,
+    skipBoxes: skipBoxes, skipQty: skipQty,
+    soleBoxes: boxes.filter(function(b){ return !b.split; }).length,
+    splitBoxes: boxes.filter(function(b){ return b.split; }).length,
+    totalShipQty: boxes.reduce(function(s,b){ return s+b.shipQty; }, 0)
+  };
+}
+
+/* ── 개괄표 모달 ── */
+function cpShowPlan(){
+  if (!(cpState.rows||[]).length) { setMsg('cpMsg','warn','⚠️ PO 데이터가 없습니다 — 먼저 쿠팡 발주 엑셀을 업로드하세요'); return; }
+  if (!Object.keys(boxIndex||{}).length) { setMsg('cpMsg','warn','⚠️ 입고 박스 정보가 없습니다 — star_instock 에 박스바코드로 입고된 재고가 필요합니다'); return; }
+  var plan = cpBuildBoxPlan();
+  if (!plan || !plan.boxes.length) { setMsg('cpMsg','warn','⚠️ 이번 PO 와 매칭되는 박스가 없습니다'); return; }
+  cpPlanCache = plan;
+
+  var ctx = document.getElementById('cpPlanCtx');
+  if (ctx) ctx.textContent = (plan.fileName ? plan.fileName + ' · ' : '') + 'PO ' + plan.poLines + '라인';
+
+  var h = '';
+  /* 요약 카드 */
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:.5rem;margin-bottom:.8rem">' +
+       cpPlanCard('대상 박스', plan.boxes.length + '개', 'var(--tx)') +
+       cpPlanCard('✅ 단독 박스', plan.soleBoxes + '개', 'var(--g)', '박스 통째로 한 센터') +
+       cpPlanCard('⚠️ 분리 필요', plan.splitBoxes + '개', 'var(--y)', '센터 2곳 이상 또는 잔류 포함') +
+       cpPlanCard('센터', plan.centers.length + '곳', 'var(--b)') +
+       cpPlanCard('출고 수량', plan.totalShipQty + '개', 'var(--tx)') +
+       '</div>';
+
+  /* 센터별 요약 */
+  h += '<div style="font-size:.82rem;font-weight:800;color:var(--g);margin:.2rem 0 .4rem">🏢 센터별 필요 박스 / 수량</div>';
+  h += '<div class="tbl-wrap" style="margin-bottom:.9rem"><table class="tbl"><thead><tr>' +
+       '<th>센터</th><th style="text-align:right">SKU 종수</th><th style="text-align:right">수량</th>' +
+       '<th style="text-align:right">관련 박스</th><th style="text-align:right">단독</th>' +
+       '<th style="text-align:right" title="다른 센터 또는 잔류와 같은 박스에 섞여 있어 분리가 필요한 박스">분리필요</th>' +
+       '</tr></thead><tbody>';
+  plan.centers.forEach(function(c){
+    h += '<tr><td style="font-weight:800">'+escH(c.center)+'</td>'+
+         '<td style="text-align:right">'+c.skuCnt+'</td>'+
+         '<td style="text-align:right;font-weight:800">'+c.qty+'</td>'+
+         '<td style="text-align:right">'+c.boxes+'</td>'+
+         '<td style="text-align:right;color:var(--g)">'+c.sole+'</td>'+
+         '<td style="text-align:right;color:'+(c.split?'var(--y)':'var(--mu)')+';font-weight:'+(c.split?'800':'400')+'">'+c.split+'</td></tr>';
+  });
+  h += '</tbody></table></div>';
+
+  /* 박스별 상세 — 분리 필요 박스를 위로 */
+  var ordered = plan.boxes.slice().sort(function(a,b){
+    if (a.split !== b.split) return a.split ? -1 : 1;
+    return String(a.boxId).localeCompare(String(b.boxId), 'ko', {numeric:true});
+  });
+  h += '<div style="font-size:.82rem;font-weight:800;color:var(--g);margin:.2rem 0 .4rem">📦 박스별 상세 <span style="font-weight:600;color:var(--mu)">— 분리 필요 박스가 위에 옵니다</span></div>';
+  h += '<div class="tbl-wrap" style="max-height:48vh"><table class="tbl"><thead><tr>' +
+       '<th>박스바코드</th><th>박스유형</th><th>상품바코드</th><th>상품명</th><th>센터</th><th style="text-align:right">수량</th>' +
+       '</tr></thead><tbody>';
+  ordered.forEach(function(b){
+    var typeHtml = b.centers.length > 1
+      ? '<span style="color:var(--y);font-weight:800">⚠ 센터분리 '+b.centers.length+'</span>'
+      : '<span style="color:var(--g);font-weight:800">단독</span>';
+    if (b.hasResidual) typeHtml += '<br><span style="color:var(--o);font-weight:800;font-size:.7rem">+잔류</span>';
+    b.lines.forEach(function(l, i){
+      var isRes = (l.kind !== 'ship');
+      h += '<tr'+(isRes?' style="opacity:.72"':'')+'>';
+      if (i === 0) {
+        h += '<td rowspan="'+b.lines.length+'" style="font-family:var(--mo);font-weight:800;vertical-align:top;border-left:3px solid '+(b.split?'var(--y)':'var(--g)')+'">'+escH(b.boxId)+'</td>';
+        h += '<td rowspan="'+b.lines.length+'" style="vertical-align:top;font-size:.72rem">'+typeHtml+'</td>';
+      }
+      h += '<td style="font-family:var(--mo)">'+escH(l.bc)+'</td>'+
+           '<td>'+escH(l.name||'-')+'</td>'+
+           '<td style="font-weight:800;color:'+(isRes?'var(--o)':'var(--tx)')+'">'+escH(l.center)+(l.kind==='over'?' <span style="font-size:.66rem;font-weight:600">(발주초과분)</span>':'')+(l.kind==='none'?' <span style="font-size:.66rem;font-weight:600">(PO 없음)</span>':'')+'</td>'+
+           '<td style="text-align:right;font-weight:800">'+l.qty+'</td></tr>';
+    });
+  });
+  h += '</tbody></table></div>';
+
+  /* PO 미충족 */
+  if (plan.shortLines.length) {
+    h += '<div style="font-size:.82rem;font-weight:800;color:var(--y);margin:.9rem 0 .4rem">🟡 박스 재고로 못 채운 발주 ('+plan.shortLines.length+'라인)</div>';
+    h += '<div class="tbl-wrap" style="max-height:26vh"><table class="tbl"><thead><tr>' +
+         '<th>센터</th><th>바코드</th><th>상품명</th><th style="text-align:right">발주</th><th style="text-align:right">채움</th><th style="text-align:right">부족</th>' +
+         '</tr></thead><tbody>';
+    plan.shortLines.forEach(function(s){
+      h += '<tr><td>'+escH(s.center)+'</td><td style="font-family:var(--mo)">'+escH(s.barcode)+'</td><td>'+escH(s.name||'-')+'</td>'+
+           '<td style="text-align:right">'+s.need+'</td><td style="text-align:right">'+s.filled+'</td>'+
+           '<td style="text-align:right;color:var(--y);font-weight:800">'+s.short+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  document.getElementById('cpPlanBody').innerHTML = h;
+  var fi = document.getElementById('cpPlanFootInfo');
+  if (fi) fi.textContent = '※ 박스ID 오름차순 기준 계획값 — 실제 스캔 순서에 따라 센터 배분이 달라질 수 있습니다'
+                         + (plan.skipBoxes ? ' · PO 무관 박스 '+plan.skipBoxes+'개('+plan.skipQty+'개) 제외' : '');
+  document.getElementById('cpPlanBack').classList.add('open');
+  document.getElementById('cpPlanBox').classList.add('open');
+}
+function cpPlanCard(label, val, color, tip){
+  return '<div style="background:#0f1117;border:1px solid var(--br);border-radius:9px;padding:.55rem .65rem"'+(tip?' title="'+escH(tip)+'"':'')+'>'+
+         '<div style="font-size:.68rem;color:var(--mu)">'+escH(label)+'</div>'+
+         '<div style="font-size:1.1rem;font-weight:900;color:'+color+'">'+escH(val)+'</div></div>';
+}
+function cpClosePlan(){
+  document.getElementById('cpPlanBack').classList.remove('open');
+  document.getElementById('cpPlanBox').classList.remove('open');
+}
+/* 개괄표 엑셀 — 박스별상세 / 센터별요약 / PO미충족 3시트 */
+function cpDownloadPlan(){
+  var plan = cpPlanCache || cpBuildBoxPlan();
+  if (!plan) { setMsg('cpMsg','warn','⚠️ 내보낼 데이터가 없습니다'); return; }
+  try {
+    var wb = XLSX.utils.book_new();
+
+    var d1 = [['박스바코드','박스유형','상품바코드','상품명','센터','수량','구분']];
+    plan.boxes.slice().sort(function(a,b){
+      if (a.split !== b.split) return a.split ? -1 : 1;
+      return String(a.boxId).localeCompare(String(b.boxId), 'ko', {numeric:true});
+    }).forEach(function(b){
+      var type = (b.centers.length > 1 ? '센터분리('+b.centers.length+')' : '단독') + (b.hasResidual ? '+잔류' : '');
+      b.lines.forEach(function(l, i){
+        d1.push([ i===0 ? b.boxId : '', i===0 ? type : '', l.bc, l.name||'', l.center, l.qty,
+                  l.kind==='ship' ? '출고' : (l.kind==='over' ? '잔류(발주초과)' : '잔류(PO없음)') ]);
+      });
+    });
+    var ws1 = XLSX.utils.aoa_to_sheet(d1);
+    ws1['!cols'] = [{wch:18},{wch:14},{wch:16},{wch:32},{wch:14},{wch:8},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws1, '박스별상세');
+
+    var d2 = [['센터','SKU 종수','수량','관련 박스','단독 박스','분리필요 박스']];
+    plan.centers.forEach(function(c){ d2.push([c.center, c.skuCnt, c.qty, c.boxes, c.sole, c.split]); });
+    d2.push([]);
+    d2.push(['합계 — 대상 박스', plan.boxes.length, '단독', plan.soleBoxes, '분리필요', plan.splitBoxes]);
+    var ws2 = XLSX.utils.aoa_to_sheet(d2);
+    ws2['!cols'] = [{wch:16},{wch:10},{wch:10},{wch:11},{wch:11},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws2, '센터별요약');
+
+    if (plan.shortLines.length) {
+      var d3 = [['센터','바코드','상품명','발주','채움','부족']];
+      plan.shortLines.forEach(function(s){ d3.push([s.center, s.barcode, s.name||'', s.need, s.filled, s.short]); });
+      var ws3 = XLSX.utils.aoa_to_sheet(d3);
+      ws3['!cols'] = [{wch:14},{wch:16},{wch:32},{wch:8},{wch:8},{wch:8}];
+      XLSX.utils.book_append_sheet(wb, ws3, 'PO미충족');
+    }
+
+    var base = (plan.fileName || 'PO').replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_');
+    XLSX.writeFile(wb, base + '_박스별분류개괄표.xlsx');
+    setMsg('cpMsg','ok','✅ 박스별 분류 개괄표를 다운로드했습니다 — 박스 '+plan.boxes.length+'개 (분리필요 '+plan.splitBoxes+'개)');
+  } catch(err){
+    setMsg('cpMsg','er','❌ 엑셀 생성 실패: '+(err&&err.message||err));
+  }
 }
 
 /* ── 새 스캔 세션 시작 ── */
