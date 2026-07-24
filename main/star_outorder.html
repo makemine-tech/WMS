@@ -331,6 +331,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-scan-inp:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(74,240,168,.18)}
 .cp-scan-hint{margin-top:.45rem;font-size:.74rem;color:var(--mu);font-family:var(--mo)}
 /* 박스 스캔 아래 — PO 바탕 센터별 진행 요약 한 줄 (예: 인천1 = 1P - 300(50/250) | 인천2 = ...) */
+/* 요약 줄 + 우측 고정 [분류표] 버튼 — 요약만 가로 스크롤되고 버튼은 항상 보이도록 */
+.cp-center-summary-row{margin-top:.55rem;display:flex;align-items:stretch;gap:.4rem}
+.cp-center-summary-row .cp-center-summary{flex:1;min-width:0;margin-top:0}
+.cp-plan-btn{flex-shrink:0;background:#0f1117;color:var(--y);border:1.5px solid var(--y);border-radius:6px;font-size:.76rem;font-weight:900;padding:0 .7rem;cursor:pointer;white-space:nowrap}
+.cp-plan-btn:hover{background:rgba(240,196,74,.12)}
 .cp-center-summary{margin-top:.55rem;padding:.45rem .65rem;background:#0a0d13;border:1px solid var(--br);border-radius:6px;font-family:var(--mo);font-size:.78rem;white-space:nowrap;overflow-x:auto;display:flex;align-items:center;gap:0;flex-wrap:nowrap;scrollbar-width:thin}
 .cp-center-summary::-webkit-scrollbar{height:6px}
 .cp-center-summary::-webkit-scrollbar-thumb{background:var(--br);border-radius:3px}
@@ -1311,7 +1316,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)">
         <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄 출고</div>
         <div id="cpScanFlash" style="display:none"></div>
-        <div class="cp-center-summary" id="cpCenterSummary" style="display:none"></div>
+        <div class="cp-center-summary-row" id="cpCenterSummaryRow" style="display:none">
+          <div class="cp-center-summary" id="cpCenterSummary"></div>
+          <button class="cp-plan-btn" onclick="cpShowPlan()" title="박스별 분류 개괄표 — 박스바코드별로 어느 센터로 몇 개씩 갈라지는지, 센터 분리가 필요한 박스는 어떤 것인지 확인">📦 분류표</button>
+        </div>
       </div>
 
       <!-- 메인 스테이지: 좌(입고 대기 카드 — 옛 디스플레이 자리) + 우(파렛트 세로) -->
@@ -2390,8 +2398,19 @@ function cpCheckAltBarcodes(){
  * 센터 배분이 조금 달라질 수 있어 '계획' 용도로만 사용. */
 var cpPlanCache = null;   /* 마지막 계산 결과 — 엑셀 다운로드에서 재사용 */
 
-/* 출고 대상 PO 라인 — 개괄표는 확정 전에도 봐야 하므로 전 라인 사용 (발주수량 기준) */
+/* 출고 대상 PO 라인.
+ * 스캔 세션이 살아있으면 세션 rows(canShip 기준) — 지금 실제로 나가는 라인과 일치.
+ * 세션 전(PO 뷰)이면 cpState.rows 전 라인 (확정 전에도 봐야 하므로 발주수량 기준). */
 function cpPlanPoRows(){
+  if (workSession && (workSession.rows||[]).length){
+    return workSession.rows.map(function(r, i){
+      return {
+        srcIdx: i, center: (r.center||'').trim() || '(센터없음)', eta: r.eta||'',
+        skuName: r.skuName||'', poBarcode: r.poBarcode||'', srcBarcode: r.srcBarcode||'',
+        need: +r.canShip || +r.qty || 0
+      };
+    }).filter(function(r){ return r.need > 0; });
+  }
   return (cpState.rows||[]).map(function(r, i){
     var m = cpClassify(r);
     return {
@@ -2425,9 +2444,22 @@ function cpPlanMatchIdxs(bc, rows, centerTot){
   }
   return idxs;
 }
+/* 이미 스캔한(완료/입고대기/처리대기) 박스ID 집합 — 작업 중 '남은 박스' 구분용 */
+function cpPlanDoneBoxes(){
+  var done = {};
+  if (!workSession) return done;
+  (workSession.scans||[]).forEach(function(s){
+    if (s.undone) return;
+    var k = s.srcBoxBarcode || s.boxBarcode; if (k) done[k] = true;
+  });
+  (workSession.staging||[]).forEach(function(t){ if (t.srcBoxBarcode) done[t.srcBoxBarcode] = true; });
+  (workSession.pending||[]).forEach(function(p){ if (p.srcBoxBarcode) done[p.srcBoxBarcode] = true; });
+  return done;
+}
 function cpBuildBoxPlan(){
   var rows = cpPlanPoRows();
   if (!rows.length) return null;
+  var doneBoxes = cpPlanDoneBoxes();
   var centerTot = {};
   rows.forEach(function(r){ centerTot[r.center] = (centerTot[r.center]||0) + r.need; });
   var remain = rows.map(function(r){ return r.need; });
@@ -2468,6 +2500,7 @@ function cpBuildBoxPlan(){
     var hasResidual = lines.length > shipLines.length;
     boxes.push({
       boxId: boxId, lines: lines, centers: centers, ctrMap: ctrMap, hasResidual: hasResidual,
+      done: !!doneBoxes[boxId],
       split: centers.length > 1 || hasResidual,
       shipQty: shipLines.reduce(function(s,l){ return s+l.qty; }, 0),
       totalQty: lines.reduce(function(s,l){ return s+l.qty; }, 0)
@@ -2501,24 +2534,38 @@ function cpBuildBoxPlan(){
     skipBoxes: skipBoxes, skipQty: skipQty,
     soleBoxes: boxes.filter(function(b){ return !b.split; }).length,
     splitBoxes: boxes.filter(function(b){ return b.split; }).length,
+    doneBoxCnt: boxes.filter(function(b){ return b.done; }).length,
+    leftBoxCnt: boxes.filter(function(b){ return !b.done; }).length,
+    inSession: !!(workSession && (workSession.rows||[]).length),
     totalShipQty: boxes.reduce(function(s,b){ return s+b.shipQty; }, 0)
   };
+}
+/* 표 정렬 — 아직 안 한 박스 우선, 그 안에서 분리필요 먼저, 그다음 박스ID 순 */
+function cpPlanSortBoxes(boxes){
+  return boxes.slice().sort(function(a,b){
+    if (a.done !== b.done)   return a.done ? 1 : -1;
+    if (a.split !== b.split) return a.split ? -1 : 1;
+    return String(a.boxId).localeCompare(String(b.boxId), 'ko', {numeric:true});
+  });
 }
 
 /* ── 개괄표 모달 ── */
 function cpShowPlan(){
-  if (!(cpState.rows||[]).length) { setMsg('cpMsg','warn','⚠️ PO 데이터가 없습니다 — 먼저 쿠팡 발주 엑셀을 업로드하세요'); return; }
-  if (!Object.keys(boxIndex||{}).length) { setMsg('cpMsg','warn','⚠️ 입고 박스 정보가 없습니다 — star_instock 에 박스바코드로 입고된 재고가 필요합니다'); return; }
+  var hasPo = (cpState.rows||[]).length || (workSession && (workSession.rows||[]).length);
+  if (!hasPo) { setMsg('cpMsg','warn','⚠️ PO 데이터가 없습니다 — 먼저 쿠팡 발주 엑셀을 업로드하세요'); return; }
+  if (!Object.keys(boxIndex||{}).length) { cpPlanWarn('⚠️ 입고 박스 정보가 없습니다 — star_instock 에 박스바코드로 입고된 재고가 필요합니다'); return; }
   var plan = cpBuildBoxPlan();
-  if (!plan || !plan.boxes.length) { setMsg('cpMsg','warn','⚠️ 이번 PO 와 매칭되는 박스가 없습니다'); return; }
+  if (!plan || !plan.boxes.length) { cpPlanWarn('⚠️ 이번 PO 와 매칭되는 박스가 없습니다'); return; }
   cpPlanCache = plan;
 
   var ctx = document.getElementById('cpPlanCtx');
-  if (ctx) ctx.textContent = (plan.fileName ? plan.fileName + ' · ' : '') + 'PO ' + plan.poLines + '라인';
+  if (ctx) ctx.textContent = (plan.fileName ? plan.fileName + ' · ' : '') + 'PO ' + plan.poLines + '라인'
+                           + (plan.inSession ? ' · 작업 중 세션 기준' : '');
 
   var h = '';
-  /* 요약 카드 */
+  /* 요약 카드 — 작업 중이면 '남은 박스' 를 먼저 보여준다 */
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:.5rem;margin-bottom:.8rem">' +
+       (plan.inSession ? cpPlanCard('📦 남은 박스', plan.leftBoxCnt + '개', 'var(--y)', '아직 스캔 안 한 박스 (완료 ' + plan.doneBoxCnt + '개 제외)') : '') +
        cpPlanCard('대상 박스', plan.boxes.length + '개', 'var(--tx)') +
        cpPlanCard('✅ 단독 박스', plan.soleBoxes + '개', 'var(--g)', '박스 통째로 한 센터') +
        cpPlanCard('⚠️ 분리 필요', plan.splitBoxes + '개', 'var(--y)', '센터 2곳 이상 또는 잔류 포함') +
@@ -2543,12 +2590,10 @@ function cpShowPlan(){
   });
   h += '</tbody></table></div>';
 
-  /* 박스별 상세 — 분리 필요 박스를 위로 */
-  var ordered = plan.boxes.slice().sort(function(a,b){
-    if (a.split !== b.split) return a.split ? -1 : 1;
-    return String(a.boxId).localeCompare(String(b.boxId), 'ko', {numeric:true});
-  });
-  h += '<div style="font-size:.82rem;font-weight:800;color:var(--g);margin:.2rem 0 .4rem">📦 박스별 상세 <span style="font-weight:600;color:var(--mu)">— 분리 필요 박스가 위에 옵니다</span></div>';
+  /* 박스별 상세 — 미처리 → 분리필요 순 */
+  var ordered = cpPlanSortBoxes(plan.boxes);
+  h += '<div style="font-size:.82rem;font-weight:800;color:var(--g);margin:.2rem 0 .4rem">📦 박스별 상세 <span style="font-weight:600;color:var(--mu)">— '
+     + (plan.inSession ? '아직 안 한 박스 → 분리 필요 순' : '분리 필요 박스가 위에 옵니다') + '</span></div>';
   h += '<div class="tbl-wrap" style="max-height:48vh"><table class="tbl"><thead><tr>' +
        '<th>박스바코드</th><th>박스유형</th><th>상품바코드</th><th>상품명</th><th>센터</th><th style="text-align:right">수량</th>' +
        '</tr></thead><tbody>';
@@ -2557,11 +2602,12 @@ function cpShowPlan(){
       ? '<span style="color:var(--y);font-weight:800">⚠ 센터분리 '+b.centers.length+'</span>'
       : '<span style="color:var(--g);font-weight:800">단독</span>';
     if (b.hasResidual) typeHtml += '<br><span style="color:var(--o);font-weight:800;font-size:.7rem">+잔류</span>';
+    if (b.done) typeHtml += '<br><span style="color:var(--mu);font-weight:800;font-size:.7rem">✅ 처리됨</span>';
     b.lines.forEach(function(l, i){
       var isRes = (l.kind !== 'ship');
-      h += '<tr'+(isRes?' style="opacity:.72"':'')+'>';
+      h += '<tr'+(b.done ? ' style="opacity:.45"' : (isRes?' style="opacity:.72"':''))+'>';
       if (i === 0) {
-        h += '<td rowspan="'+b.lines.length+'" style="font-family:var(--mo);font-weight:800;vertical-align:top;border-left:3px solid '+(b.split?'var(--y)':'var(--g)')+'">'+escH(b.boxId)+'</td>';
+        h += '<td rowspan="'+b.lines.length+'" style="font-family:var(--mo);font-weight:800;vertical-align:top;border-left:3px solid '+(b.done?'var(--br)':(b.split?'var(--y)':'var(--g)'))+'">'+escH(b.boxId)+'</td>';
         h += '<td rowspan="'+b.lines.length+'" style="vertical-align:top;font-size:.72rem">'+typeHtml+'</td>';
       }
       h += '<td style="font-family:var(--mo)">'+escH(l.bc)+'</td>'+
@@ -2601,27 +2647,33 @@ function cpPlanCard(label, val, color, tip){
 function cpClosePlan(){
   document.getElementById('cpPlanBack').classList.remove('open');
   document.getElementById('cpPlanBox').classList.remove('open');
+  /* 스캔 화면에서 열었으면 닫자마자 스캔 입력으로 포커스 복귀 (스캐너가 바로 먹히도록) */
+  var inp = document.getElementById('cpScanInp');
+  if (inp && inp.offsetParent !== null) inp.focus();
+}
+/* 메시지 — PO 뷰면 cpMsg, 스캔 뷰면 cpScanMsg 로 (스캔 중엔 cpMsg 가 안 보임) */
+function cpPlanWarn(text, kind){
+  var inScan = document.getElementById('cpScanView') && document.getElementById('cpScanView').style.display !== 'none';
+  setMsg(inScan ? 'cpScanMsg' : 'cpMsg', kind || 'warn', text);
 }
 /* 개괄표 엑셀 — 박스별상세 / 센터별요약 / PO미충족 3시트 */
 function cpDownloadPlan(){
   var plan = cpPlanCache || cpBuildBoxPlan();
-  if (!plan) { setMsg('cpMsg','warn','⚠️ 내보낼 데이터가 없습니다'); return; }
+  if (!plan) { cpPlanWarn('⚠️ 내보낼 데이터가 없습니다'); return; }
   try {
     var wb = XLSX.utils.book_new();
 
-    var d1 = [['박스바코드','박스유형','상품바코드','상품명','센터','수량','구분']];
-    plan.boxes.slice().sort(function(a,b){
-      if (a.split !== b.split) return a.split ? -1 : 1;
-      return String(a.boxId).localeCompare(String(b.boxId), 'ko', {numeric:true});
-    }).forEach(function(b){
+    var d1 = [['박스바코드','박스유형','작업상태','상품바코드','상품명','센터','수량','구분']];
+    cpPlanSortBoxes(plan.boxes).forEach(function(b){
       var type = (b.centers.length > 1 ? '센터분리('+b.centers.length+')' : '단독') + (b.hasResidual ? '+잔류' : '');
       b.lines.forEach(function(l, i){
-        d1.push([ i===0 ? b.boxId : '', i===0 ? type : '', l.bc, l.name||'', l.center, l.qty,
+        d1.push([ i===0 ? b.boxId : '', i===0 ? type : '', i===0 ? (b.done ? '처리됨' : '대기') : '',
+                  l.bc, l.name||'', l.center, l.qty,
                   l.kind==='ship' ? '출고' : (l.kind==='over' ? '잔류(발주초과)' : '잔류(PO없음)') ]);
       });
     });
     var ws1 = XLSX.utils.aoa_to_sheet(d1);
-    ws1['!cols'] = [{wch:18},{wch:14},{wch:16},{wch:32},{wch:14},{wch:8},{wch:14}];
+    ws1['!cols'] = [{wch:18},{wch:14},{wch:10},{wch:16},{wch:32},{wch:14},{wch:8},{wch:14}];
     XLSX.utils.book_append_sheet(wb, ws1, '박스별상세');
 
     var d2 = [['센터','SKU 종수','수량','관련 박스','단독 박스','분리필요 박스']];
@@ -2642,9 +2694,10 @@ function cpDownloadPlan(){
 
     var base = (plan.fileName || 'PO').replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_');
     XLSX.writeFile(wb, base + '_박스별분류개괄표.xlsx');
-    setMsg('cpMsg','ok','✅ 박스별 분류 개괄표를 다운로드했습니다 — 박스 '+plan.boxes.length+'개 (분리필요 '+plan.splitBoxes+'개)');
+    cpPlanWarn('✅ 박스별 분류 개괄표를 다운로드했습니다 — 박스 '+plan.boxes.length+'개 (분리필요 '+plan.splitBoxes+'개)'
+             + (plan.inSession ? ' · 남은 박스 '+plan.leftBoxCnt+'개' : ''), 'ok');
   } catch(err){
-    setMsg('cpMsg','er','❌ 엑셀 생성 실패: '+(err&&err.message||err));
+    cpPlanWarn('❌ 엑셀 생성 실패: '+(err&&err.message||err), 'er');
   }
 }
 
@@ -6133,10 +6186,12 @@ function cpRefreshScanUI(){
 function cpRefreshCenterSummary(){
   var el = document.getElementById('cpCenterSummary');
   if (!el) return;
-  if (!workSession){ el.style.display='none'; el.innerHTML=''; return; }
+  /* 표시/숨김은 래퍼(요약 + 우측 분류표 버튼) 기준 */
+  var wrap = document.getElementById('cpCenterSummaryRow') || el;
+  if (!workSession){ wrap.style.display='none'; el.innerHTML=''; return; }
   var rows = workSession.rows || [];
   var scans = (workSession.scans||[]).filter(function(s){return !s.undone;});
-  if (!rows.length){ el.style.display='none'; el.innerHTML=''; return; }
+  if (!rows.length){ wrap.style.display='none'; el.innerHTML=''; return; }
   /* 센터별 집계 */
   var byCenter = {};
   var order = [];
@@ -6175,8 +6230,8 @@ function cpRefreshCenterSummary(){
     if (!byCenter[c]){ byCenter[c] = { need:0, shipped:0, waiting:0, pallets:{} }; order.push(c); }
     byCenter[c].waiting += (+p.qty || 0);
   });
-  if (!order.length){ el.style.display='none'; el.innerHTML=''; return; }
-  el.style.display = '';
+  if (!order.length){ wrap.style.display='none'; el.innerHTML=''; return; }
+  wrap.style.display = '';
   el.innerHTML = order.map(function(c){
     var sum = byCenter[c];
     var palCount = Object.keys(sum.pallets).length;
