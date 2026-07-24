@@ -498,7 +498,13 @@ function loadXlsx(cb) {
   var s = document.createElement('script');
   s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
   s.onload = function(){ xlsxOk = true; xlsxQ.forEach(function(f){ f(); }); xlsxQ = []; };
-  s.onerror = function(){ setIntg('bad', '엑셀 라이브러리 로딩 실패'); };
+  s.onerror = function(){
+    // 실패 시 큐를 비우고 스크립트를 제거해, 다음 업로드가 재시도(재주입)될 수 있게 한다.
+    // (비우지 않으면 xlsxQ.length>1 가드에 걸려 이후 모든 업로드가 조용히 무반응이 됨)
+    setIntg('bad', '엑셀 라이브러리 로딩 실패 — 다시 올리면 재시도합니다');
+    xlsxQ = [];
+    if (s.parentNode) s.parentNode.removeChild(s);
+  };
   document.head.appendChild(s);
 }
 
@@ -1224,20 +1230,29 @@ function mismDiffBlock(title, arr){
 }
 
 /* 엑셀 드롭존 (할당리스트 & 주문내역 — 종류 자동 구분, 어느 존에 올려도 정상 라우팅) */
-function ingestXlsFile(file){
+function ingestXlsFile(file, role){
+  // ── 즉시 피드백 : XLSX(CDN) 로딩 전에도 '반응'을 보장한다 ──
+  //    (파일명·상태를 async 콜백 뒤로 미루면, 첫 업로드 시 CDN 로딩 동안 무반응처럼 보임)
+  var selId = (role === 'order') ? 'orderSelected' : 'xlsSelected';
+  document.getElementById(selId).textContent = '✓ ' + file.name;
+  setIntg('', '<span class="spinner"></span> 분석 중...');
   var reader = new FileReader();
+  reader.onerror = function(){ setIntg('bad', '파일 읽기 실패 — 다시 시도하세요'); };
   reader.onload = function(e){
     var buf = e.target.result;
     loadXlsx(function(){
+      if (typeof XLSX === 'undefined'){ setIntg('bad', '엑셀 라이브러리 로딩 실패 — 인터넷 확인 후 다시 올려주세요'); return; }
       var kind = classifyXlsBuffer(buf);
       if (kind === 'order'){
         lastOrderName = file.name;
         document.getElementById('orderSelected').textContent = '✓ ' + file.name;
+        if (role !== 'order') document.getElementById('xlsSelected').textContent = '';  // 잘못 얹힌 라벨 정리
         applyOrder(buf);
         if (!autoLoading){ syncSaveBin('order', buf, file.name); syncSavePayload(); }
       } else {
         lastXlsName = file.name;
         document.getElementById('xlsSelected').textContent = '✓ ' + file.name;
+        if (role === 'order') document.getElementById('orderSelected').textContent = '';
         runIntegrity(buf);
         if (!autoLoading){ syncSaveBin('xls', buf, file.name); syncSavePayload(); }
       }
@@ -1245,10 +1260,10 @@ function ingestXlsFile(file){
   };
   reader.readAsArrayBuffer(file);
 }
-function wireXlsDrop(dzId, inpId){
+function wireXlsDrop(dzId, inpId, role){
   var dz = document.getElementById(dzId), inp = document.getElementById(inpId);
   if (!dz || !inp) return;
-  inp.addEventListener('change', function(){ if (inp.files[0]) ingestXlsFile(inp.files[0]); });
+  inp.addEventListener('change', function(){ if (inp.files[0]) ingestXlsFile(inp.files[0], role); });
   dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
   dz.addEventListener('dragleave', function(){ dz.classList.remove('drag-over'); });
   dz.addEventListener('drop', function(e){
@@ -1256,12 +1271,12 @@ function wireXlsDrop(dzId, inpId){
     var f = e.dataTransfer.files[0];
     if (f && /\.(xls|xlsx|csv)$/i.test(f.name)){
       var dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files;
-      ingestXlsFile(f);
+      ingestXlsFile(f, role);
     }
   });
 }
-wireXlsDrop('xlsDrop', 'xlsInput');
-wireXlsDrop('orderDrop', 'orderInput');
+wireXlsDrop('xlsDrop', 'xlsInput', 'alloc');
+wireXlsDrop('orderDrop', 'orderInput', 'order');
 
 /* ═══════════════════════════════════════════════════
    픽킹리스트 출력 (인쇄용)
