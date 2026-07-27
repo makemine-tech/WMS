@@ -1712,10 +1712,21 @@ function pkStorageUpload(buf, onProgress){
     try {
       var ref = firebase.storage().ref(path);
       var task = ref.put(new Blob([buf], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+      var settled = false, lastProgress = Date.now();
+      /* 무진행 감시 — 30초간 전송이 전혀 안 늘면 CORS/네트워크 막힘으로 보고 중단.
+         (0%에서 멈추는 증상 = 대개 버킷 CORS 미설정) */
+      var iv = setInterval(function(){
+        if (settled) return;
+        if (Date.now() - lastProgress > 30000){
+          settled = true; clearInterval(iv);
+          try { task.cancel(); } catch(e){}
+          rej(new Error('upload-stalled(CORS?)'));
+        }
+      }, 5000);
       task.on('state_changed',
-        function(s){ if (onProgress && s.totalBytes) onProgress(s.bytesTransferred / s.totalBytes); },
-        function(err){ rej(err); },
-        function(){ res(path); });
+        function(s){ lastProgress = Date.now(); if (onProgress && s.totalBytes) onProgress(s.bytesTransferred / s.totalBytes); },
+        function(err){ if (settled) return; settled = true; clearInterval(iv); rej(err); },
+        function(){ if (settled) return; settled = true; clearInterval(iv); res(path); });
     } catch(e){ rej(e); }
   });
 }
