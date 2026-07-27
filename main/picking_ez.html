@@ -216,6 +216,7 @@ h1 em{color:var(--g);font-style:normal}
       <div style="font-size:.85rem;font-weight:700;color:var(--y)">인쇄하려면 PDF를 다시 업로드해야 합니다</div>
       <div id="reuploadStatus" style="font-size:.72rem;color:var(--mu);font-family:var(--mo);margin-top:.18rem">복원된 세션입니다 — 같은 PDF 파일을 선택하세요</div>
     </div>
+    <button onclick="pkFetchFromWarehouse()" style="padding:.48rem 1.1rem;border-radius:6px;background:transparent;border:1.5px solid var(--g);color:var(--g);font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">☁ 창고에서 받기</button>
     <label style="padding:.48rem 1.1rem;border-radius:6px;background:var(--y);color:#0f1117;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">
       📂 PDF 선택
       <input type="file" id="reuploadInput" accept=".pdf" style="display:none" onchange="reloadPDF(this)">
@@ -1840,7 +1841,12 @@ function pkAttach(){
       try { pkAttachPdfBytes(pkB64toAb(pdf.b64), pkJobKey); } catch(e){}
     } else if (pdf.storagePath){
       pkSetStatus('☁ 대용량 PDF 창고에서 내려받는 중...', 'warn');
-      pkStorageDownload(pdf.storagePath).then(function(buf){ pkAttachPdfBytes(buf, pkJobKey); }).catch(function(){});
+      pkStorageDownload(pdf.storagePath).then(function(buf){ pkAttachPdfBytes(buf, pkJobKey); }).catch(function(err){
+        var code = (err && (err.code || err.message)) || '알수없음';
+        pkSetStatus('☁ 창고 다운로드 실패(' + code + ') · 아래 [☁ 창고에서 받기] 재시도 또는 [PDF 선택]', 'er');
+        console.warn('[picking] 창고 다운로드 실패', code, err);
+        var rb = document.getElementById('reuploadBox'); if (rb) rb.style.display = 'block';
+      });
     }
   }, function(err){ console.warn('[picking] pdf 읽기 실패', err); });
 }
@@ -1863,6 +1869,26 @@ function pkHealCloudPdf(buf){
         console.warn('[picking] heal 업로드 실패', code, err);
       });
   }).catch(function(){});
+}
+
+/* 수동 재시도 — 창고에서 원본을 다시 받아옴 (자동 다운로드 실패 시 버튼) */
+function pkFetchFromWarehouse(){
+  if (!pkReady || !pkBase){ alert('로그인 후 사용하세요.'); return; }
+  pkSetStatus('☁ 창고에서 내려받는 중...', 'warn');
+  pkBase.child('pdf').once('value').then(function(s){
+    var pdf = s.val() || {};
+    pkPdfState = pdf; pkUpdateWarehouseBadge();
+    if (pdf.b64){ try { pkAttachPdfBytes(pkB64toAb(pdf.b64), pkJobKey); pkSetStatus('☁ 받기 완료 · 인쇄 가능','ok'); } catch(e){ pkSetStatus('☁ 디코드 실패','er'); } return; }
+    if (!pdf.storagePath){ pkSetStatus('☁ 창고에 원본이 아직 없습니다 — 원본 PC 의 업로드 완료를 기다리세요','warn'); return; }
+    pkStorageDownload(pdf.storagePath).then(function(buf){
+      pkAttachPdfBytes(buf, pkJobKey);
+      pkSetStatus('☁ 창고에서 받기 완료 · 인쇄 가능','ok');
+    }).catch(function(err){
+      var code = (err && (err.code || err.message)) || '알수없음';
+      pkSetStatus('☁ 창고 다운로드 실패(' + code + ') — 아래 [PDF 선택]으로 원본을 열어주세요','er');
+      console.warn('[picking] 수동 다운로드 실패', code, err);
+    });
+  }).catch(function(err){ pkSetStatus('☁ 창고 조회 실패: '+(err&&(err.code||err.message)||err),'er'); });
 }
 
 /* PDF 바이트를 뒤늦게 받았을 때 적용 (창고 업로드 완료 후 다른 PC 자동 반영) */
@@ -1945,8 +1971,11 @@ function pkLoadRemoteJob(meta){
         pkStorageDownload(pdf.storagePath).then(function(buf){
           decodeAndFinish(buf, true);
         }).catch(function(err){
-          console.warn('[picking] Storage 다운로드 실패(각 PC 열기로 폴백):', err && (err.code||err.message||err));
+          var code = (err && (err.code||err.message)) || '알수없음';
+          console.warn('[picking] Storage 다운로드 실패:', code, err);
+          pkPdfState = pdf;
           rawBuffer = null; afterState();
+          pkSetStatus('☁ 창고 다운로드 실패(' + code + ') · [☁ 창고에서 받기] 재시도 또는 [PDF 선택]', 'er');
         });
         return;
       }
