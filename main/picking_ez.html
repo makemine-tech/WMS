@@ -253,6 +253,10 @@ h1 em{color:var(--g);font-style:normal}
     <div class="prg-b"><div class="prg-f" id="pf0"></div></div>
   </div>
   <div id="m0"></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:.6rem">
+    <button onclick="pkResetAll()" title="현재 진행 중인 작업을 전체 초기화 — 로컬 + 그룹 DB 에서 삭제(다른 PC 에서도 사라짐)"
+      style="padding:.4rem .95rem;border-radius:6px;border:1.5px solid var(--r);background:transparent;color:var(--r);font-size:.76rem;font-weight:700;cursor:pointer">🗑 전체 초기화</button>
+  </div>
 
   <div class="fmt-box">
     <b>▶ 이지어드민 인식 패턴</b><br>
@@ -460,8 +464,11 @@ function reloadPDF(input) {
       rawBuffer = e.target.result.slice(0);
       pdfjsLib.getDocument({data: new Uint8Array(e.target.result.slice(0))}).promise.then(function(doc){
         pdfDoc = doc;
+        /* 이 PC 캐시 — 대용량이라 클라우드에 없던 원본을 여기 저장하면 다음부턴 안 열어도 됨 */
+        if (pkJobKey) pkIdbReplace(pkJobKey, rawBuffer);
         status.style.color = 'var(--g)';
-        status.textContent = '✅ ' + file.name + ' (' + doc.numPages + '페이지) — 인쇄 버튼을 누르세요';
+        status.textContent = '✅ ' + file.name + ' (' + doc.numPages + '페이지) — 이 PC 에 저장됨 · 인쇄 버튼을 누르세요';
+        if (pkReady) pkSetStatus('☁ 실시간 연동 중 · ' + file.name, 'ok');
         document.getElementById('reuploadBox').style.borderColor = 'var(--g)';
         document.getElementById('reuploadBox').style.background = 'rgba(10,26,10,.95)';
         /* 3초 후 자동으로 배너 닫기 */
@@ -480,6 +487,7 @@ function clearSession() {
   if (!confirm('세션 데이터를 완전히 삭제합니다.\n모든 인쇄 기록이 사라집니다.' + remoteWarn + '\n\n진행하시겠습니까?')) return;
   localStorage.removeItem(SESSION_KEY);
   pkClearRemoteJob();
+  pkIdbClear();
   alert('✅ 세션 삭제 완료');
   location.reload();
 }
@@ -1586,6 +1594,60 @@ function pkB64toAb(b64){
   return bytes.buffer;
 }
 
+/* PDF 클라우드(RTDB base64) 저장 상한 — 이보다 크면 상태만 공유하고
+   PDF 는 각 PC IndexedDB 캐시 + 1회 열기로 처리 (대용량 100MB 대응) */
+var PK_PDF_CLOUD_MAX = 8 * 1024 * 1024;   /* 8MB (raw) */
+
+/* ── IndexedDB: PDF 원본을 이 PC 에 캐시 (새로고침해도 재업로드 불필요) ──
+   단일작업(1회용)이라 항상 최신 1개만 보관 */
+var PK_IDB_NAME = 'pk_picking', PK_IDB_STORE = 'pdf';
+function pkIdbOpen(){
+  return new Promise(function(res, rej){
+    try {
+      if (!window.indexedDB){ rej(new Error('no-idb')); return; }
+      var r = indexedDB.open(PK_IDB_NAME, 1);
+      r.onupgradeneeded = function(){ try { r.result.createObjectStore(PK_IDB_STORE); } catch(e){} };
+      r.onsuccess = function(){ res(r.result); };
+      r.onerror = function(){ rej(r.error); };
+    } catch(e){ rej(e); }
+  });
+}
+/* 이전 캐시 비우고 새 PDF 저장 (jobKey 로 식별) */
+function pkIdbReplace(key, buf){
+  if (!key || !buf) return Promise.resolve();
+  return pkIdbOpen().then(function(db){
+    return new Promise(function(res){
+      try {
+        var tx = db.transaction(PK_IDB_STORE, 'readwrite'), st = tx.objectStore(PK_IDB_STORE);
+        st.clear(); st.put(buf, key);
+        tx.oncomplete = function(){ res(); }; tx.onerror = function(){ res(); };
+      } catch(e){ res(); }
+    });
+  }).catch(function(){});
+}
+function pkIdbGet(key){
+  if (!key) return Promise.resolve(null);
+  return pkIdbOpen().then(function(db){
+    return new Promise(function(res){
+      try {
+        var rq = db.transaction(PK_IDB_STORE, 'readonly').objectStore(PK_IDB_STORE).get(key);
+        rq.onsuccess = function(){ res(rq.result || null); };
+        rq.onerror = function(){ res(null); };
+      } catch(e){ res(null); }
+    });
+  }).catch(function(){ return null; });
+}
+function pkIdbClear(){
+  return pkIdbOpen().then(function(db){
+    return new Promise(function(res){
+      try {
+        var tx = db.transaction(PK_IDB_STORE, 'readwrite'); tx.objectStore(PK_IDB_STORE).clear();
+        tx.oncomplete = function(){ res(); }; tx.onerror = function(){ res(); };
+      } catch(e){ res(); }
+    });
+  }).catch(function(){});
+}
+
 /* ── 인증 시작 (비파괴적: 로그인 안 돼 있으면 기존처럼 로컬 전용) ── */
 function pkInitAuth(){
   if (typeof WMSync === 'undefined') { console.warn('[picking] WMSync 미로드 — 로컬 전용'); return; }
@@ -1686,23 +1748,42 @@ function pkLoadRemoteJob(meta){
       if (typeof updateDoneSection === 'function') updateDoneSection();
       var rb = document.getElementById('reuploadBox');
       var pdfLoaded = !!rawBuffer;
-      pkSetStatus('☁ 실시간 연동 중 · ' + (meta.fileName||'') + (pdfLoaded?'':' · ⚠ PDF 로드 실패, 재업로드 필요'), pdfLoaded?'ok':'warn');
-      if (rb) rb.style.display = pdfLoaded ? 'none' : 'block';
+      var mb = meta.pdfSize ? (meta.pdfSize/1048576).toFixed(1) + 'MB' : '';
+      if (pdfLoaded){
+        pkSetStatus('☁ 실시간 연동 중 · ' + (meta.fileName||''), 'ok');
+        if (rb) rb.style.display = 'none';
+      } else {
+        pkSetStatus('☁ 상태 연동됨 · 인쇄하려면 원본 PDF 를 1회 열어주세요' + (mb?' ('+mb+' 대용량)':''), 'warn');
+        var rs = document.getElementById('reuploadStatus');
+        if (rs) rs.textContent = (meta.fileName||'') + (mb?' · '+mb:'') + ' — 같은 PDF 파일을 선택하면 이 PC 에 저장되어 다음부턴 안 열어도 됩니다';
+        if (rb) rb.style.display = 'block';
+      }
       try { localStorage.removeItem(SESSION_KEY); } catch(e){}
       document.getElementById('restoreBanner').style.display = 'none';
     };
-    if (pdf && pdf.b64){
+    var decodeAndFinish = function(buf, cacheIt){
       try {
-        rawBuffer = pkB64toAb(pdf.b64);
+        rawBuffer = buf;
+        if (cacheIt) pkIdbReplace(meta.jobKey, buf);
         loadPdfjs(function(){
           pdfjsLib.getDocument({ data: new Uint8Array(rawBuffer.slice(0)) }).promise.then(function(doc){
             pdfDoc = doc; afterState();
           }).catch(function(err){ console.warn('[picking] PDF 파싱 실패', err); rawBuffer=null; afterState(); });
         });
-      } catch(e){ console.warn('[picking] PDF 디코드 실패', e); rawBuffer=null; afterState(); }
-    } else {
+      } catch(e){ console.warn('[picking] PDF 처리 실패', e); rawBuffer=null; afterState(); }
+    };
+    /* 1) 이 PC IndexedDB 캐시 우선 (대용량도 재열기 불필요) */
+    pkIdbGet(meta.jobKey).then(function(cached){
+      if (cached){ decodeAndFinish(cached, false); return; }
+      /* 2) 클라우드 base64 (작은 파일만) */
+      if (pdf && pdf.b64){
+        try { decodeAndFinish(pkB64toAb(pdf.b64), true); }
+        catch(e){ console.warn('[picking] base64 디코드 실패', e); rawBuffer=null; afterState(); }
+        return;
+      }
+      /* 3) 대용량 — 이 PC 에서 원본 1회 열기 필요 */
       rawBuffer = null; afterState();
-    }
+    });
   }).catch(function(err){
     pkLoadingRemote = false;
     console.warn('[picking] 원격 작업 로드 실패', err);
@@ -1710,31 +1791,41 @@ function pkLoadRemoteJob(meta){
   });
 }
 
-/* ── 업로드 시 작업 발행 (이전 작업 전체 교체) ── */
+/* ── 업로드 시 작업 발행 (이전 작업 전체 교체) ──
+   상태(meta/static)는 크기 무관 항상 발행. PDF 는 작을 때만 클라우드(base64),
+   크면 상태만 공유하고 각 PC 는 IndexedDB 캐시 + 1회 열기로 처리. */
 function pkPublishJob(){
   if (!pkReady || !pkBase || pkSuppressPublish) return;
   if (!rawBuffer || !invoices.length){ return; }
   var jobKey = 'J' + Date.now() + '_' + pkSafeKey((pkCurrentFileName||'').slice(0,40));
-  var b64;
-  try { b64 = pkAb2b64(rawBuffer); }
-  catch(e){ pkSetStatus('☁ PDF 인코딩 실패 — 로컬 전용', 'er'); return; }
-  var sizeMB = b64.length / 1048576;
-  if (sizeMB > 18){
-    pkSetStatus('☁ PDF 가 너무 큼(' + sizeMB.toFixed(1) + 'MB) — 이 PC 로컬로만 진행됩니다', 'warn');
-    return;
-  }
-  pkSetStatus('☁ 작업 업로드 중... (' + sizeMB.toFixed(1) + 'MB)', 'warn');
   pkJobKey = jobKey;  /* 자기 echo 로 재로드 안 하도록 먼저 세팅 */
+  var rawSize = rawBuffer.byteLength;
+  pkIdbReplace(jobKey, rawBuffer);  /* 이 PC 캐시 — 새로고침 시 재업로드 불필요 */
+
   var payload = {
     meta:   { jobKey: jobKey, fileName: pkCurrentFileName||'', uploadedAt: Date.now(),
-              uploadedBy: pkUid, invCount: invoices.length, pageCount: (pdfDoc?pdfDoc.numPages:0) },
+              uploadedBy: pkUid, invCount: invoices.length, pageCount: (pdfDoc?pdfDoc.numPages:0),
+              pdfSize: rawSize },
     static: { invoices: JSON.parse(JSON.stringify(invoices)), locGroups: JSON.parse(JSON.stringify(locGroups)) },
-    pdf:    { b64: b64, size: b64.length },
     printed: null,
     batches: null
   };
+  var small = rawSize <= PK_PDF_CLOUD_MAX;
+  if (small){
+    var b64 = null;
+    try { b64 = pkAb2b64(rawBuffer); } catch(e){ b64 = null; }
+    payload.pdf = b64 ? { b64: b64, size: b64.length, raw: rawSize } : { tooBig: true, raw: rawSize };
+    small = !!b64;
+  } else {
+    payload.pdf = { tooBig: true, raw: rawSize };
+  }
+  pkSetStatus('☁ 작업 업로드 중...', 'warn');
   pkBase.set(payload).then(function(){
-    pkSetStatus('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨', 'ok');
+    var mb = (rawSize/1048576).toFixed(1);
+    pkSetStatus(small
+      ? ('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨 (' + mb + 'MB)')
+      : ('☁ 실시간 연동 중 · 상태 공유됨 · PDF ' + mb + 'MB(대용량) — 다른 PC 는 원본 1회 열기 필요'),
+      small ? 'ok' : 'warn');
   }).catch(function(err){
     pkSetStatus('☁ 업로드 실패: ' + (err&&err.message||err), 'er');
   });
@@ -1817,6 +1908,18 @@ function pkRerender(){
 function pkClearRemoteJob(){
   if (pkReady && pkBase){ pkBase.remove().catch(function(){}); }
   pkJobKey = null;
+}
+
+/* STEP 1 전체 초기화 — 로컬 + 그룹 DB + 이 PC 캐시 모두 삭제 후 새로고침 */
+function pkResetAll(){
+  var remoteWarn = pkReady
+    ? '\n\n⚠ 그룹 DB 의 현재 작업도 삭제되어 다른 PC 에서도 사라집니다.'
+    : '\n\n(현재 로그인 안 됨 — 이 PC 로컬만 초기화됩니다)';
+  if (!confirm('현재 작업을 전체 초기화합니다.\n업로드한 송장·PDF·인쇄기록이 모두 사라집니다.' + remoteWarn + '\n\n진행하시겠습니까?')) return;
+  try { localStorage.removeItem(SESSION_KEY); } catch(e){}
+  pkClearRemoteJob();
+  pkIdbClear().then(function(){ location.reload(); }, function(){ location.reload(); });
+  setTimeout(function(){ location.reload(); }, 1500);  /* IDB 응답 없어도 강제 새로고침 */
 }
 
 document.addEventListener('DOMContentLoaded', pkInitAuth);
