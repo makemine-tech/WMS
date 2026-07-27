@@ -469,6 +469,8 @@ function reloadPDF(input) {
         status.style.color = 'var(--g)';
         status.textContent = '✅ ' + file.name + ' (' + doc.numPages + '페이지) — 이 PC 에 저장됨 · 인쇄 버튼을 누르세요';
         if (pkReady) pkSetStatus('☁ 실시간 연동 중 · ' + file.name, 'ok');
+        /* 창고에 원본이 없으면 이 PC 가 대신 올려 다른 PC 도 자동으로 받게 복구 */
+        pkHealCloudPdf(rawBuffer);
         document.getElementById('reuploadBox').style.borderColor = 'var(--g)';
         document.getElementById('reuploadBox').style.background = 'rgba(10,26,10,.95)';
         /* 3초 후 자동으로 배너 닫기 */
@@ -1779,6 +1781,26 @@ function pkAttach(){
   }, function(err){ console.warn('[picking] pdf 읽기 실패', err); });
 }
 
+/* 창고에 현재 작업 PDF 가 없으면(대용량 업로드 실패/미완료) 이 PC 가 대신 올려서
+   다른 PC 도 자동으로 받게 '복구'. reloadPDF(원본 다시 열기) 시 호출. */
+function pkHealCloudPdf(buf){
+  if (!pkReady || !pkBase || !pkStorageAvailable() || !buf || !pkJobKey) return;
+  pkBase.child('pdf').once('value').then(function(s){
+    var pdf = s.val() || {};
+    if (pdf.storagePath || pdf.b64) return;   /* 이미 창고/클라우드에 있음 — 복구 불필요 */
+    var mb = (buf.byteLength/1048576).toFixed(1);
+    pkSetStatus('☁ 창고에 올리는 중... 0% (' + mb + 'MB)', 'warn');
+    pkStorageUpload(buf, function(p){ pkSetStatus('☁ 창고에 올리는 중... ' + Math.round(p*100) + '% (' + mb + 'MB)', 'warn'); })
+      .then(function(path){ return pkBase.child('pdf').set({ storagePath: path, raw: buf.byteLength, viaStorage: true }); })
+      .then(function(){ pkSetStatus('☁ 창고 업로드 완료 · 다른 PC 도 자동으로 받습니다 (' + mb + 'MB)', 'ok'); })
+      .catch(function(err){
+        var code = (err && (err.code || err.message)) || '알수없음';
+        pkSetStatus('☁ 창고 업로드 실패(' + code + ') — 이 PC 만 인쇄 가능, 다른 PC 는 각자 열기', 'warn');
+        console.warn('[picking] heal 업로드 실패', code, err);
+      });
+  }).catch(function(){});
+}
+
 /* PDF 바이트를 뒤늦게 받았을 때 적용 (창고 업로드 완료 후 다른 PC 자동 반영) */
 function pkAttachPdfBytes(buf, cacheKey){
   if (!buf) return;
@@ -1918,8 +1940,9 @@ function pkPublishJob(){
     }).catch(function(err){
       /* Storage 미설정/실패 → 상태만 공유, PDF 는 각 PC 1회 열기 */
       pkBase.child('pdf').set({ tooBig: true, raw: rawSize });
-      pkSetStatus('☁ 상태 공유됨 · PDF ' + mb + 'MB — 창고 미설정, 각 PC 원본 1회 열기 (창고 켜면 자동공유)', 'warn');
-      console.warn('[picking] Storage 업로드 실패(폴백):', err && (err.code||err.message||err));
+      var code = (err && (err.code || err.message)) || '알수없음';
+      pkSetStatus('☁ 상태는 공유됨 · 창고 업로드 실패(' + code + ') · ' + mb + 'MB — 각 PC 원본 1회 열기', 'warn');
+      console.warn('[picking] Storage 업로드 실패(폴백):', code, err);
     });
   }).catch(function(err){
     pkSetStatus('☁ 업로드 실패: ' + (err&&err.message||err), 'er');
