@@ -1555,6 +1555,7 @@ function esc2(s){ return String(s||'').replace(/"/g,'""'); }
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="wms_sync.js"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════
@@ -1648,6 +1649,46 @@ function pkIdbClear(){
   }).catch(function(){});
 }
 
+/* ── Firebase Storage: 대용량 PDF 창고 (그룹당 파일 1개 고정경로, 1회용 덮어쓰기) ──
+   콘솔에서 Storage 활성화 + 규칙 설정돼 있어야 동작. 안 돼 있으면 reject → 각 PC 1회 열기로 폴백. */
+function pkStoragePath(){ return pkGid ? ('picking_ez/' + pkGid + '/current.pdf') : null; }
+function pkStorageAvailable(){ return (typeof firebase !== 'undefined') && !!firebase.storage; }
+function pkStorageUpload(buf, onProgress){
+  return new Promise(function(res, rej){
+    var path = pkStoragePath();
+    if (!pkStorageAvailable() || !path){ rej(new Error('storage-unavailable')); return; }
+    try {
+      var ref = firebase.storage().ref(path);
+      var task = ref.put(new Blob([buf], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+      task.on('state_changed',
+        function(s){ if (onProgress && s.totalBytes) onProgress(s.bytesTransferred / s.totalBytes); },
+        function(err){ rej(err); },
+        function(){ res(path); });
+    } catch(e){ rej(e); }
+  });
+}
+function pkStorageDownload(path){
+  return new Promise(function(res, rej){
+    if (!pkStorageAvailable() || !path){ rej(new Error('storage-unavailable')); return; }
+    try {
+      var ref = firebase.storage().ref(path);
+      /* SDK getBlob 우선(내부 CORS 처리), 없으면 downloadURL + fetch */
+      if (typeof ref.getBlob === 'function'){
+        ref.getBlob().then(function(blob){ return blob.arrayBuffer(); }).then(res).catch(function(){
+          ref.getDownloadURL().then(function(url){ return fetch(url).then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.arrayBuffer(); }); }).then(res).catch(rej);
+        });
+      } else {
+        ref.getDownloadURL().then(function(url){ return fetch(url).then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.arrayBuffer(); }); }).then(res).catch(rej);
+      }
+    } catch(e){ rej(e); }
+  });
+}
+function pkStorageDelete(){
+  var path = pkStoragePath();
+  if (!pkStorageAvailable() || !path) return;
+  try { firebase.storage().ref(path).delete().catch(function(){}); } catch(e){}
+}
+
 /* ── 인증 시작 (비파괴적: 로그인 안 돼 있으면 기존처럼 로컬 전용) ── */
 function pkInitAuth(){
   if (typeof WMSync === 'undefined') { console.warn('[picking] WMSync 미로드 — 로컬 전용'); return; }
@@ -1724,6 +1765,34 @@ function pkAttach(){
     if (typeof updateDoneSection === 'function') updateDoneSection();
     if (typeof renderInvoiceProgress === 'function') renderInvoiceProgress();
   }, function(err){ console.warn('[picking] batches 읽기 실패', err); });
+
+  /* pdf: 대용량 업로드가 뒤늦게 끝나면(다른 PC 가 먼저 열려있던 경우) 자동으로 받아옴 */
+  pkBase.child('pdf').on('value', function(snap){
+    if (!pkReady || !pkJobKey || rawBuffer || pkLoadingRemote) return;  /* 이미 있거나 초기로드 중이면 무시 */
+    var pdf = snap.val(); if (!pdf) return;
+    if (pdf.b64){
+      try { pkAttachPdfBytes(pkB64toAb(pdf.b64), pkJobKey); } catch(e){}
+    } else if (pdf.storagePath){
+      pkSetStatus('☁ 대용량 PDF 창고에서 내려받는 중...', 'warn');
+      pkStorageDownload(pdf.storagePath).then(function(buf){ pkAttachPdfBytes(buf, pkJobKey); }).catch(function(){});
+    }
+  }, function(err){ console.warn('[picking] pdf 읽기 실패', err); });
+}
+
+/* PDF 바이트를 뒤늦게 받았을 때 적용 (창고 업로드 완료 후 다른 PC 자동 반영) */
+function pkAttachPdfBytes(buf, cacheKey){
+  if (!buf) return;
+  rawBuffer = buf;
+  if (cacheKey) pkIdbReplace(cacheKey, buf);
+  loadPdfjs(function(){
+    pdfjsLib.getDocument({ data: new Uint8Array(rawBuffer.slice(0)) }).promise.then(function(doc){
+      pdfDoc = doc;
+      var rb = document.getElementById('reuploadBox'); if (rb) rb.style.display = 'none';
+      if (pkReady) pkSetStatus('☁ 실시간 연동 중 · PDF 준비 완료', 'ok');
+      if (typeof renderGrpList === 'function') renderGrpList();
+      if (typeof updateGrpStats === 'function') updateGrpStats();
+    }).catch(function(err){ console.warn('[picking] 지연 PDF 파싱 실패', err); rawBuffer = null; });
+  });
 }
 
 /* ── 원격 작업 로드 (static + pdf 1회) ── */
@@ -1781,7 +1850,18 @@ function pkLoadRemoteJob(meta){
         catch(e){ console.warn('[picking] base64 디코드 실패', e); rawBuffer=null; afterState(); }
         return;
       }
-      /* 3) 대용량 — 이 PC 에서 원본 1회 열기 필요 */
+      /* 3) 대용량 창고(Storage) 에 있으면 내려받아 캐시 */
+      if (pdf && pdf.storagePath){
+        pkSetStatus('☁ 대용량 PDF 창고에서 내려받는 중...', 'warn');
+        pkStorageDownload(pdf.storagePath).then(function(buf){
+          decodeAndFinish(buf, true);
+        }).catch(function(err){
+          console.warn('[picking] Storage 다운로드 실패(각 PC 열기로 폴백):', err && (err.code||err.message||err));
+          rawBuffer = null; afterState();
+        });
+        return;
+      }
+      /* 4) 업로드 중이거나 창고 미설정 — 이 PC 에서 원본 1회 열기 */
       rawBuffer = null; afterState();
     });
   }).catch(function(err){
@@ -1810,22 +1890,37 @@ function pkPublishJob(){
     printed: null,
     batches: null
   };
+  var mb = (rawSize/1048576).toFixed(1);
   var small = rawSize <= PK_PDF_CLOUD_MAX;
+  var b64 = null;
   if (small){
-    var b64 = null;
     try { b64 = pkAb2b64(rawBuffer); } catch(e){ b64 = null; }
-    payload.pdf = b64 ? { b64: b64, size: b64.length, raw: rawSize } : { tooBig: true, raw: rawSize };
     small = !!b64;
-  } else {
-    payload.pdf = { tooBig: true, raw: rawSize };
   }
+  /* 작은 파일: base64 로 RTDB (창고 설정 없이도 즉시 공유)
+     큰 파일: 일단 'uploading' 로 상태만 발행 → 뒤이어 Storage 업로드 */
+  payload.pdf = small ? { b64: b64, size: b64.length, raw: rawSize } : { status: 'uploading', raw: rawSize };
+
   pkSetStatus('☁ 작업 업로드 중...', 'warn');
   pkBase.set(payload).then(function(){
-    var mb = (rawSize/1048576).toFixed(1);
-    pkSetStatus(small
-      ? ('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨 (' + mb + 'MB)')
-      : ('☁ 실시간 연동 중 · 상태 공유됨 · PDF ' + mb + 'MB(대용량) — 다른 PC 는 원본 1회 열기 필요'),
-      small ? 'ok' : 'warn');
+    if (small){
+      pkSetStatus('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨 (' + mb + 'MB)', 'ok');
+      return;
+    }
+    /* 큰 파일 → Storage 창고 업로드 (백그라운드). 실패 시 각 PC 1회 열기로 폴백 */
+    pkSetStatus('☁ 대용량 PDF 창고 업로드 중... 0% (' + mb + 'MB)', 'warn');
+    pkStorageUpload(rawBuffer, function(p){
+      pkSetStatus('☁ 대용량 PDF 창고 업로드 중... ' + Math.round(p*100) + '% (' + mb + 'MB)', 'warn');
+    }).then(function(path){
+      return pkBase.child('pdf').set({ storagePath: path, raw: rawSize, viaStorage: true });
+    }).then(function(){
+      pkSetStatus('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨 (' + mb + 'MB · 대용량 창고)', 'ok');
+    }).catch(function(err){
+      /* Storage 미설정/실패 → 상태만 공유, PDF 는 각 PC 1회 열기 */
+      pkBase.child('pdf').set({ tooBig: true, raw: rawSize });
+      pkSetStatus('☁ 상태 공유됨 · PDF ' + mb + 'MB — 창고 미설정, 각 PC 원본 1회 열기 (창고 켜면 자동공유)', 'warn');
+      console.warn('[picking] Storage 업로드 실패(폴백):', err && (err.code||err.message||err));
+    });
   }).catch(function(err){
     pkSetStatus('☁ 업로드 실패: ' + (err&&err.message||err), 'er');
   });
@@ -1906,7 +2001,7 @@ function pkRerender(){
 
 /* 현재 작업 비우기 (원격 포함) — 새 업로드 없이 초기화하고 싶을 때 */
 function pkClearRemoteJob(){
-  if (pkReady && pkBase){ pkBase.remove().catch(function(){}); }
+  if (pkReady && pkBase){ pkStorageDelete(); pkBase.remove().catch(function(){}); }
   pkJobKey = null;
 }
 
