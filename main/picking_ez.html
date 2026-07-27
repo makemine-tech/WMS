@@ -1131,14 +1131,37 @@ function toggleDoneList() {
   arrow.textContent = list.classList.contains('open') ? '▼' : '▶';
 }
 
+/* 인쇄완료 목록에 그릴 배열 — 재출력(reprintDone)이 이 배열을 그대로 참조 */
+var doneRenderList = [];
+/* batch 이력이 있으면 그대로, 없지만 인쇄된 송장이 있으면 송장별로 복원(폴백).
+   실시간 동기화로 batches 노드가 비어도 인쇄완료 목록/재출력이 유지되게 함. */
+function pkBuildDoneList(){
+  if (printedBatches && printedBatches.length) return printedBatches;
+  var nums = Object.keys(printedInvNums || {}).filter(function(n){ return printedInvNums[n]; });
+  if (!nums.length) return [];
+  return nums.map(function(n){
+    var inv = null;
+    for (var i=0; i<invoices.length; i++){ if (invoices[i].invNum === n){ inv = invoices[i]; break; } }
+    inv = inv || {};
+    return {
+      ts: 0, synthetic: true,
+      isMulti: (inv.totalQty||0) >= 2,
+      items: inv.items || [],
+      customerSummary: inv.customer ? { kind:'single', name: inv.customer } : null,
+      invNums: [n], invCount: 1,
+      pages: inv.pages || []
+    };
+  });
+}
 function updateDoneSection() {
   var sec  = document.getElementById('doneSection');
   var list = document.getElementById('doneList');
   var cnt  = document.getElementById('doneCnt');
-  cnt.textContent = printedBatches.length + '건';
-  sec.style.display = printedBatches.length ? '' : 'none';
+  doneRenderList = pkBuildDoneList();
+  cnt.textContent = doneRenderList.length + '건';
+  sec.style.display = doneRenderList.length ? '' : 'none';
   list.innerHTML = '';
-  printedBatches.forEach(function(batch, di) {
+  doneRenderList.forEach(function(batch, di) {
     var isM = batch.isMulti, invCnt = batch.invCount || (batch.invNums||[]).length;
     var card = document.createElement('div');
     card.className = 'grp-card done-card';
@@ -1468,8 +1491,14 @@ function pagesForInvNums(invNums, fallbackPages){
 
 /* ─────────────── 재출력 (인쇄완료 목록에서) ─────────────── */
 function reprintDone(di) {
-  var batch = printedBatches[di];
-  if (!batch || !rawBuffer) return;
+  var batch = doneRenderList[di] || printedBatches[di];
+  if (!batch) return;
+  if (!rawBuffer) {
+    alert('PDF 원본이 이 PC 에 없습니다.\n상단/하단의 [PDF 선택] 으로 원본을 한 번 열어주세요.');
+    var rb = document.getElementById('reuploadBox'); if (rb) rb.style.display = 'block';
+    return;
+  }
+  if (!batch.pages || !batch.pages.length) { alert('이 항목의 페이지 정보가 없어 재출력할 수 없습니다.'); return; }
   if (!confirm('재출력합니다. 프린터 확인 후 진행해주세요.')) return;
   buildPdfFromPages(batch.pages, function(bytes){
     var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
@@ -2020,6 +2049,7 @@ function pkRerender(){
   if (typeof populateCustomerFilter === 'function') populateCustomerFilter();
   if (typeof renderInvoiceProgress === 'function') renderInvoiceProgress();
   if (typeof renderPick === 'function') renderPick();
+  if (typeof updateDoneSection === 'function') updateDoneSection();  /* 인쇄완료 목록도 함께 갱신 */
 }
 
 /* 현재 작업 비우기 (원격 포함) — 새 업로드 없이 초기화하고 싶을 때 */
