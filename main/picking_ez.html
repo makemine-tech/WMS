@@ -236,7 +236,8 @@ h1 em{color:var(--g);font-style:normal}
   <div class="step"   id="st1"><span class="step-n">STEP 2</span>피킹리스트</div>
   <div class="step"   id="st2"><span class="step-n">STEP 3</span>그룹 인쇄</div>
 </div>
-<div id="pkStatus" style="display:none;text-align:center;font-size:.7rem;font-family:var(--mo);color:var(--mu);margin:-.6rem 0 1rem;letter-spacing:.02em">☁ 연결 중...</div>
+<div id="pkStatus" style="display:none;text-align:center;font-size:.7rem;font-family:var(--mo);color:var(--mu);margin:-.6rem 0 .5rem;letter-spacing:.02em">☁ 연결 중...</div>
+<div id="pkWarehouse" style="display:none;text-align:center;font-size:.72rem;font-family:var(--mo);margin:0 0 1rem;letter-spacing:.02em"></div>
 
 <!-- STEP 1 : 업로드 -->
 <div class="pg on" id="pg0">
@@ -469,6 +470,7 @@ function reloadPDF(input) {
         status.style.color = 'var(--g)';
         status.textContent = '✅ ' + file.name + ' (' + doc.numPages + '페이지) — 이 PC 에 저장됨 · 인쇄 버튼을 누르세요';
         if (pkReady) pkSetStatus('☁ 실시간 연동 중 · ' + file.name, 'ok');
+        pkUpdateWarehouseBadge();
         /* 창고에 원본이 없으면 이 PC 가 대신 올려 다른 PC 도 자동으로 받게 복구 */
         pkHealCloudPdf(rawBuffer);
         document.getElementById('reuploadBox').style.borderColor = 'var(--g)';
@@ -1609,6 +1611,25 @@ var pkJobKey = null;      /* 현재 로드된 작업 키 */
 var pkBase = null;        /* firebase ref (job 노드) */
 var pkLoadingRemote = false;
 var pkSuppressPublish = false;  /* 원격 로드 중 재발행 방지 */
+var pkPdfState = null;          /* 현재 작업 job/pdf 노드 최신값 (창고 배지 표시용) */
+
+/* ── 창고 배지: 원본이 창고에 있는지 + 이 PC 인쇄 가능 여부 한 줄 표시 ── */
+function pkUpdateWarehouseBadge(){
+  var el = document.getElementById('pkWarehouse');
+  if (!el) return;
+  if (!pkReady || !pkJobKey){ el.style.display = 'none'; return; }
+  var s = pkPdfState || {};
+  var cloud, color;
+  if (s.storagePath){ cloud = '📦 창고 있음 — 다른 PC 자동 수신'; color = 'var(--g)'; }
+  else if (s.b64){    cloud = '📦 자동 공유됨 (작은 파일)';        color = 'var(--g)'; }
+  else if (s.status === 'uploading'){ cloud = '📦 창고 업로드 중…';  color = 'var(--y)'; }
+  else {              cloud = '📦 창고 없음 — 각 PC에서 원본 1회 열기'; color = 'var(--y)'; }
+  var here = rawBuffer ? '🖨 이 PC 인쇄 가능' : '⚠ 이 PC 원본 필요';
+  el.innerHTML = '<span style="color:' + color + '">' + cloud + '</span>'
+               + ' <span style="color:var(--mu)">·</span> '
+               + '<span style="color:' + (rawBuffer ? 'var(--g)' : 'var(--y)') + '">' + here + '</span>';
+  el.style.display = '';
+}
 
 function pkJobPath(){ return pkGid ? ('wms_sync/groups/' + pkGid + '/picking_ez/job') : null; }
 /* Firebase 키 안전화 — '.' '#' '$' '[' ']' '/' 금지 */
@@ -1767,6 +1788,7 @@ function pkAttach(){
     if (!m || !m.jobKey){
       /* 원격 작업 없음 — 다른 PC 가 비웠거나 최초 */
       if (pkJobKey){ pkJobKey = null; }
+      pkPdfState = null; pkUpdateWarehouseBadge();
       return;
     }
     if (m.jobKey !== pkJobKey){
@@ -1799,8 +1821,10 @@ function pkAttach(){
 
   /* pdf: 대용량 업로드가 뒤늦게 끝나면(다른 PC 가 먼저 열려있던 경우) 자동으로 받아옴 */
   pkBase.child('pdf').on('value', function(snap){
+    pkPdfState = snap.val() || {};   /* 창고 상태 최신값 — 배지 갱신 (가드보다 먼저) */
+    pkUpdateWarehouseBadge();
     if (!pkReady || !pkJobKey || rawBuffer || pkLoadingRemote) return;  /* 이미 있거나 초기로드 중이면 무시 */
-    var pdf = snap.val(); if (!pdf) return;
+    var pdf = pkPdfState; if (!pdf || !Object.keys(pdf).length) return;
     if (pdf.b64){
       try { pkAttachPdfBytes(pkB64toAb(pdf.b64), pkJobKey); } catch(e){}
     } else if (pdf.storagePath){
@@ -1840,6 +1864,7 @@ function pkAttachPdfBytes(buf, cacheKey){
       pdfDoc = doc;
       var rb = document.getElementById('reuploadBox'); if (rb) rb.style.display = 'none';
       if (pkReady) pkSetStatus('☁ 실시간 연동 중 · PDF 준비 완료', 'ok');
+      pkUpdateWarehouseBadge();
       if (typeof renderGrpList === 'function') renderGrpList();
       if (typeof updateGrpStats === 'function') updateGrpStats();
     }).catch(function(err){ console.warn('[picking] 지연 PDF 파싱 실패', err); rawBuffer = null; });
@@ -1859,6 +1884,7 @@ function pkLoadRemoteJob(meta){
   }).then(function(p){
     var pdf = p.val();
     pkJobKey = meta.jobKey;
+    pkPdfState = pdf || {};   /* 창고 배지 즉시 반영 */
     var afterState = function(){
       pkLoadingRemote = false;
       /* printed/batches 는 각 리스너가 곧 채움 */
@@ -1880,6 +1906,7 @@ function pkLoadRemoteJob(meta){
       }
       try { localStorage.removeItem(SESSION_KEY); } catch(e){}
       document.getElementById('restoreBanner').style.display = 'none';
+      pkUpdateWarehouseBadge();
     };
     var decodeAndFinish = function(buf, cacheIt){
       try {
@@ -1951,6 +1978,7 @@ function pkPublishJob(){
   /* 작은 파일: base64 로 RTDB (창고 설정 없이도 즉시 공유)
      큰 파일: 일단 'uploading' 로 상태만 발행 → 뒤이어 Storage 업로드 */
   payload.pdf = small ? { b64: b64, size: b64.length, raw: rawSize } : { status: 'uploading', raw: rawSize };
+  pkPdfState = payload.pdf; pkUpdateWarehouseBadge();  /* 업로더 즉시 배지 반영 */
 
   pkSetStatus('☁ 작업 업로드 중...', 'warn');
   pkBase.set(payload).then(function(){
