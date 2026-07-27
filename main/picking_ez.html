@@ -236,6 +236,7 @@ h1 em{color:var(--g);font-style:normal}
   <div class="step"   id="st1"><span class="step-n">STEP 2</span>피킹리스트</div>
   <div class="step"   id="st2"><span class="step-n">STEP 3</span>그룹 인쇄</div>
 </div>
+<div id="pkStatus" style="display:none;text-align:center;font-size:.7rem;font-family:var(--mo);color:var(--mu);margin:-.6rem 0 1rem;letter-spacing:.02em">☁ 연결 중...</div>
 
 <!-- STEP 1 : 업로드 -->
 <div class="pg on" id="pg0">
@@ -475,8 +476,10 @@ function reloadPDF(input) {
 }
 
 function clearSession() {
-  if (!confirm('세션 데이터를 완전히 삭제합니다.\n모든 인쇄 기록이 사라집니다. 진행하시겠습니까?')) return;
+  var remoteWarn = pkReady ? '\n\n⚠ 그룹 DB 의 현재 작업도 삭제되어 다른 PC 에서도 사라집니다.' : '';
+  if (!confirm('세션 데이터를 완전히 삭제합니다.\n모든 인쇄 기록이 사라집니다.' + remoteWarn + '\n\n진행하시겠습니까?')) return;
   localStorage.removeItem(SESSION_KEY);
+  pkClearRemoteJob();
   alert('✅ 세션 삭제 완료');
   location.reload();
 }
@@ -571,7 +574,9 @@ function resetAll() {
 })();
 
 /* ─────────────── PDF 로딩 ─────────────── */
+var pkCurrentFileName = '';   /* 마지막 업로드 파일명 — DB 발행 메타용 */
 function loadFile(file) {
+  pkCurrentFileName = (file && file.name) || '';
   var pw=document.getElementById('pw0'), pf=document.getElementById('pf0'), pl=document.getElementById('pl0');
   pw.style.display='block'; pf.style.width='0%';
   setMsg('m0','inf','<span class="sp"></span>로딩 중...');
@@ -628,7 +633,8 @@ function processAllPages(doc, pw, pf, pl) {
     /* 새 분석 시작 → 인쇄 추적 초기화 */
     printedInvNums = {};
     printedBatches = [];
-    saveSession(); /* ← 자동 저장 */
+    saveSession(); /* ← 로컬 캐시 저장 */
+    pkPublishJob(); /* ← 그룹 DB 로 발행 (이전 작업 교체 · 다른 PC 자동 로드) */
 
     var withCust = invoices.filter(function(i){ return i.customer; }).length;
     var custNames = {};
@@ -1351,17 +1357,26 @@ function markInvoicesPrinted(invNums, pages, opts) {
   var isMulti = (opts.isMulti !== undefined) ? opts.isMulti :
                 (freshInvs[0] ? (freshInvs[0].totalQty||0)>=2 : false);
 
-  printedBatches.unshift({
+  var batch = {
     ts: Date.now(),
     isMulti: isMulti,
     items: JSON.parse(JSON.stringify(items)),
     customerSummary: customerSummary,
     invNums: fresh,
     invCount: fresh.length,
+    by: pkUid || '',
     pages: (pages && pages.length) ? pages.slice() :
            (function(){ var s={}; freshInvs.forEach(function(i){(i.pages||[]).forEach(function(p){s[p]=1;});}); return Object.keys(s).map(Number).sort(function(a,b){return a-b;}); })()
-  });
-  fresh.forEach(function(n){ printedInvNums[n] = 1; });
+  };
+  /* 온라인이면 원격 batch 로 기록 → batches 리스너가 printedBatches 재구성.
+     (printed 플래그는 이미 인쇄 클릭 시 트랜잭션으로 선점됨) */
+  if (pkReady){
+    pkPushBatch(batch);
+    fresh.forEach(function(n){ printedInvNums[n] = 1; });  /* 리스너 왕복 전 즉시 반영 */
+  } else {
+    printedBatches.unshift(batch);
+    fresh.forEach(function(n){ printedInvNums[n] = 1; });
+  }
   return true;
 }
 
@@ -1396,28 +1411,48 @@ function printGrp(btn) {
   var payload = extractCardPayload(chk);
   if (!payload.invNums.length || !payload.pages.length) { btn.textContent='❌'; return; }
   /* 카드 박제 시점에 이미 인쇄됐을 가능성 차단 (race condition) */
-  var stillFresh = payload.invNums.some(function(n){ return !printedInvNums[n]; });
-  if (!stillFresh) { btn.textContent='이미 인쇄됨'; renderGrpList(); return; }
+  var fresh = payload.invNums.filter(function(n){ return !printedInvNums[n]; });
+  if (!fresh.length) { btn.textContent='이미 인쇄됨'; renderGrpList(); return; }
   btn.textContent = '⏳';
-  buildPdfFromPages(payload.pages, function(bytes){
-    var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
-    var done=function(){
-      markInvoicesPrinted(payload.invNums, payload.pages, {});
-      renderGrpList();
-      updateDoneSection();
-      updateGrpStats();
-      populateCustomerFilter();
-      saveSession();
-    };
-    if(location.protocol==='file:'){
-      var a=document.createElement('a'); a.href=url;
-      a.download='그룹_'+payload.invNums.length+'건.pdf'; a.click();
-      setTimeout(function(){URL.revokeObjectURL(url);done();},1000);
-    } else {
-      var w=window.open(url,'_blank');
-      if(w) w.onload=function(){ w.print(); done(); setTimeout(function(){URL.revokeObjectURL(url);},3000); };
+  /* 잠금 — 인쇄 전 트랜잭션으로 선점 (다른 PC 와 겹침 방지) */
+  pkClaimPrint(fresh, function(ok, claimed, conflict){
+    if (!ok || !claimed.length){
+      btn.textContent = (conflict && conflict.length) ? '🔒 다른 PC 인쇄중' : '❌ 실패';
+      renderGrpList(); updateGrpStats(); updateDoneSection();
+      return;
     }
-  }, function(e){ btn.textContent='❌'; console.error(e); });
+    var claimedPages = pagesForInvNums(claimed, payload.pages);
+    buildPdfFromPages(claimedPages, function(bytes){
+      var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
+      var done=function(){
+        markInvoicesPrinted(claimed, claimedPages, {});
+        renderGrpList();
+        updateDoneSection();
+        updateGrpStats();
+        populateCustomerFilter();
+        saveSession();
+      };
+      if(location.protocol==='file:'){
+        var a=document.createElement('a'); a.href=url;
+        a.download='그룹_'+claimed.length+'건.pdf'; a.click();
+        setTimeout(function(){URL.revokeObjectURL(url);done();},1000);
+      } else {
+        var w=window.open(url,'_blank');
+        if(w) w.onload=function(){ w.print(); done(); setTimeout(function(){URL.revokeObjectURL(url);},3000); };
+        else { pkReleasePrint(claimed); btn.textContent='❌ 팝업차단'; }
+      }
+    }, function(e){ pkReleasePrint(claimed); btn.textContent='❌'; console.error(e); });
+  });
+}
+/* claimed 송장들에 해당하는 페이지만 추려서 반환 (충돌로 일부만 선점됐을 때 대비) */
+function pagesForInvNums(invNums, fallbackPages){
+  var set = {};
+  invNums.forEach(function(n){
+    var inv = invoices.find(function(i){ return i.invNum === n; });
+    if (inv) (inv.pages||[]).forEach(function(p){ set[p]=1; });
+  });
+  var arr = Object.keys(set).map(Number).sort(function(a,b){return a-b;});
+  return arr.length ? arr : (fallbackPages||[]);
 }
 
 
@@ -1456,48 +1491,335 @@ function printChecked() {
     totalInv += fresh.length;
   });
   if (!cardPayloads.length) { alert('선택 필요'); return; }
-  /* 카드 순서를 보존하며 페이지 이어붙이기 — 절대 sort 하지 않음.
-     PDF는 주문처별로 페이지가 흩어져 있어 sort하면 카드 순서가 깨지고
-     주문처별로 묶여 출력됨(=사용자 신고 버그의 원인). */
-  var seenPages = {};
-  var pagesArr = [];
-  cardPayloads.forEach(function(cp){
-    cp.pages.forEach(function(pg){
-      if (!seenPages[pg]) { seenPages[pg] = 1; pagesArr.push(pg); }
-    });
-  });
   var msg=document.getElementById('mpdf');
   msg.style.display='block'; msg.className='msg inf';
-  msg.innerHTML='<span class="sp"></span>'+totalInv+'건 생성 중...';
-  buildPdfFromPages(pagesArr, function(bytes){
-    var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
-    var markAll=function(){
-      /* 2) 카드별로 batch 분리 등록.
-         unshift 특성상 역순 순회해야 화면에서 위→아래가 선택순서대로 보임 */
-      for (var i = cardPayloads.length - 1; i >= 0; i--) {
-        var cp = cardPayloads[i];
-        markInvoicesPrinted(cp.invNums, cp.pages, {});
-      }
-      renderGrpList();
-      updateDoneSection();
-      updateGrpStats();
-      populateCustomerFilter();
-      msg.className='msg ok'; msg.textContent='✅ '+totalInv+'건 완료 ('+cardPayloads.length+'그룹)';
-      saveSession();
-    };
-    if(location.protocol==='file:'){
-      var a=document.createElement('a');a.href=url;a.download='선택_'+totalInv+'건.pdf';a.click();
-      setTimeout(function(){URL.revokeObjectURL(url);markAll();},1000);
-    } else {
-      var w=window.open(url,'_blank');
-      if(w) w.onload=function(){w.print();markAll();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
+  msg.innerHTML='<span class="sp"></span>'+totalInv+'건 잠금 확인 중...';
+
+  /* 전체 fresh 송장을 한 번에 선점 (부분 충돌 시 충돌분만 빠지고 나머지 진행) */
+  var allFresh = [];
+  cardPayloads.forEach(function(cp){ cp.invNums.forEach(function(n){ allFresh.push(n); }); });
+  pkClaimPrintPartial(allFresh, function(claimedSet, conflict){
+    /* 각 카드의 invNums 를 실제 선점된 것만 남김 */
+    var kept = [];
+    cardPayloads.forEach(function(cp){
+      var c = cp.invNums.filter(function(n){ return claimedSet[n]; });
+      if (c.length) kept.push({ invNums: c, pages: pagesForInvNums(c, cp.pages) });
+    });
+    if (!kept.length){
+      msg.className='msg er';
+      msg.textContent = conflict.length ? ('🔒 선택 '+conflict.length+'건 모두 다른 PC 에서 인쇄중') : '❌ 인쇄할 송장이 없습니다';
+      renderGrpList(); updateGrpStats(); updateDoneSection();
+      return;
     }
-  }, function(e){msg.className='msg er';msg.textContent='❌ '+e.message;});
+    var keptInv = kept.reduce(function(s,k){ return s+k.invNums.length; }, 0);
+    /* 카드 순서 보존하며 페이지 이어붙이기 — sort 금지 */
+    var seenPages = {}, pagesArr = [];
+    kept.forEach(function(cp){ cp.pages.forEach(function(pg){ if(!seenPages[pg]){seenPages[pg]=1;pagesArr.push(pg);} }); });
+    msg.innerHTML='<span class="sp"></span>'+keptInv+'건 생성 중...';
+    var allClaimed = [];
+    kept.forEach(function(k){ k.invNums.forEach(function(n){ allClaimed.push(n); }); });
+    buildPdfFromPages(pagesArr, function(bytes){
+      var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
+      var markAll=function(){
+        for (var i = kept.length - 1; i >= 0; i--) markInvoicesPrinted(kept[i].invNums, kept[i].pages, {});
+        renderGrpList(); updateDoneSection(); updateGrpStats(); populateCustomerFilter();
+        msg.className='msg ok';
+        msg.textContent='✅ '+keptInv+'건 완료 ('+kept.length+'그룹)' + (conflict.length ? ' · 🔒 '+conflict.length+'건 제외(다른 PC 인쇄중)' : '');
+        saveSession();
+      };
+      if(location.protocol==='file:'){
+        var a=document.createElement('a');a.href=url;a.download='선택_'+keptInv+'건.pdf';a.click();
+        setTimeout(function(){URL.revokeObjectURL(url);markAll();},1000);
+      } else {
+        var w=window.open(url,'_blank');
+        if(w) w.onload=function(){w.print();markAll();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
+        else { pkReleasePrint(allClaimed); msg.className='msg er'; msg.textContent='❌ 팝업이 차단되었습니다'; }
+      }
+    }, function(e){ pkReleasePrint(allClaimed); msg.className='msg er';msg.textContent='❌ '+e.message;});
+  });
 }
 
 /* ─────────────── 유틸 ─────────────── */
 function escH(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function esc2(s){ return String(s||'').replace(/"/g,'""'); }
+</script>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="wms_sync.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   실시간 DB 연동 (PC 간 이어작업)
+   - 업로드하면 파싱결과 + PDF원본(base64) 이 그룹 DB 에 저장됨 → 어느 PC 든 자동 로드
+   - 인쇄완료 상태는 실시간 공유 → A 가 1,2,3 뽑으면 B 화면에서 즉시 사라짐
+   - '1회용': 새 PDF 업로드 시 이전 작업(PDF 포함) 전체 교체(삭제)
+   - 동시 인쇄 잠금: 인쇄 클릭 순간 트랜잭션으로 그 송장들을 '선점' → 겹쳐 인쇄 방지
+   DB 경로: wms_sync/groups/{gid}/picking_ez/job
+     meta     { jobKey, fileName, uploadedAt, uploadedBy, invCount, pageCount }
+     static   { invoices, locGroups }              (jobKey 바뀔 때 1회 로드)
+     pdf      { b64, size }                          (jobKey 바뀔 때 1회 로드)
+     printed  { <invKey>: {ts, by} }                (실시간 · 트랜잭션 잠금)
+     batches  { <pushId>: {ts, by, invNums, ...} }  (실시간)
+   ═══════════════════════════════════════════════════════════════ */
+var pkGid = null;         /* 그룹 ID */
+var pkUid = '';           /* 사용자 식별 (email/uid) */
+var pkReady = false;      /* 인증 + 그룹 확인됨 */
+var pkJobKey = null;      /* 현재 로드된 작업 키 */
+var pkBase = null;        /* firebase ref (job 노드) */
+var pkLoadingRemote = false;
+var pkSuppressPublish = false;  /* 원격 로드 중 재발행 방지 */
+
+function pkJobPath(){ return pkGid ? ('wms_sync/groups/' + pkGid + '/picking_ez/job') : null; }
+/* Firebase 키 안전화 — '.' '#' '$' '[' ']' '/' 금지 */
+function pkSafeKey(s){ return String(s==null?'':s).replace(/[.#$/\[\]]/g,'_'); }
+
+/* ArrayBuffer ↔ base64 (대용량 안전: 32KB 청크) */
+function pkAb2b64(buf){
+  var bytes = new Uint8Array(buf), CH = 0x8000, out = '';
+  for (var i=0; i<bytes.length; i+=CH) out += String.fromCharCode.apply(null, bytes.subarray(i, i+CH));
+  return btoa(out);
+}
+function pkB64toAb(b64){
+  var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+  for (var i=0; i<len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/* ── 인증 시작 (비파괴적: 로그인 안 돼 있으면 기존처럼 로컬 전용) ── */
+function pkInitAuth(){
+  if (typeof WMSync === 'undefined') { console.warn('[picking] WMSync 미로드 — 로컬 전용'); return; }
+  WMSync.init('picking_ez', {});
+  WMSync.onAuth(function(state){ pkHandleAuth(state); });
+}
+function pkHandleAuth(state){
+  if (!state.user){
+    /* 로그인 안 됨 — 강제하지 않음. 기존 로컬 방식 그대로. */
+    pkGid = null; pkReady = false;
+    pkSetStatus('💾 로컬 전용 · PC 간 공유하려면 ' +
+      '<a href="/wms_login.html?return=' + encodeURIComponent(location.pathname) +
+      '" style="color:var(--b);text-decoration:underline">로그인</a>', 'warn', true);
+    return;
+  }
+  if (!state.groupId){
+    pkGid = null; pkReady = false;
+    pkSetStatus('💾 로컬 전용 · 이 계정은 작업 그룹 미등록 (관리자에게 초대코드 요청)', 'warn');
+    return;
+  }
+  pkGid = state.groupId;
+  pkUid = (state.user && (state.user.email || state.user.uid)) || '';
+  pkReady = true;
+  pkSetStatus('☁ 실시간 연동 중 · ' + pkUid, 'ok');
+  pkAttach();
+}
+
+/* ── 상단 상태 뱃지 ── */
+function pkSetStatus(text, kind, allowHtml){
+  var el = document.getElementById('pkStatus');
+  if (!el) return;
+  if (allowHtml) el.innerHTML = text; else el.textContent = text;
+  el.style.color = kind==='ok' ? 'var(--g)' : (kind==='warn' ? 'var(--y)' : (kind==='er' ? 'var(--r)' : 'var(--mu)'));
+  el.style.display = '';
+}
+
+/* ── 실시간 리스너 부착 ── */
+function pkAttach(){
+  if (!pkGid || typeof firebase === 'undefined') return;
+  pkBase = firebase.database().ref(pkJobPath());
+
+  /* meta: jobKey 가 바뀌면(=다른 PC 새 업로드) static+pdf 재로드 */
+  pkBase.child('meta').on('value', function(snap){
+    var m = snap.val();
+    if (!m || !m.jobKey){
+      /* 원격 작업 없음 — 다른 PC 가 비웠거나 최초 */
+      if (pkJobKey){ pkJobKey = null; }
+      return;
+    }
+    if (m.jobKey !== pkJobKey){
+      pkLoadRemoteJob(m);
+    }
+  }, function(err){ console.warn('[picking] meta 읽기 실패', err); });
+
+  /* printed: 실시간 인쇄완료 집합 */
+  pkBase.child('printed').on('value', function(snap){
+    if (!pkReady) return;
+    var v = snap.val() || {};
+    var map = {};
+    Object.keys(v).forEach(function(k){
+      var inv = (v[k] && v[k].inv != null) ? v[k].inv : k;
+      map[inv] = 1;
+    });
+    printedInvNums = map;
+    pkRerender();
+  }, function(err){ console.warn('[picking] printed 읽기 실패', err); });
+
+  /* batches: 실시간 인쇄 이력 (ts 역순) */
+  pkBase.child('batches').on('value', function(snap){
+    if (!pkReady) return;
+    var v = snap.val() || {};
+    printedBatches = Object.keys(v).map(function(k){ return v[k]; })
+                     .sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+    if (typeof updateDoneSection === 'function') updateDoneSection();
+    if (typeof renderInvoiceProgress === 'function') renderInvoiceProgress();
+  }, function(err){ console.warn('[picking] batches 읽기 실패', err); });
+}
+
+/* ── 원격 작업 로드 (static + pdf 1회) ── */
+function pkLoadRemoteJob(meta){
+  if (pkLoadingRemote) return;
+  pkLoadingRemote = true;
+  pkSetStatus('☁ 다른 PC 작업 불러오는 중...', 'warn');
+  pkBase.child('static').once('value').then(function(s){
+    var st = s.val() || {};
+    invoices  = st.invoices  || [];
+    locGroups = st.locGroups || [];
+    return pkBase.child('pdf').once('value');
+  }).then(function(p){
+    var pdf = p.val();
+    pkJobKey = meta.jobKey;
+    var afterState = function(){
+      pkLoadingRemote = false;
+      /* printed/batches 는 각 리스너가 곧 채움 */
+      if (typeof goTo === 'function') goTo(2);
+      if (typeof renderGrpPage === 'function') renderGrpPage();
+      pkRerender();
+      if (typeof updateDoneSection === 'function') updateDoneSection();
+      var rb = document.getElementById('reuploadBox');
+      var pdfLoaded = !!rawBuffer;
+      pkSetStatus('☁ 실시간 연동 중 · ' + (meta.fileName||'') + (pdfLoaded?'':' · ⚠ PDF 로드 실패, 재업로드 필요'), pdfLoaded?'ok':'warn');
+      if (rb) rb.style.display = pdfLoaded ? 'none' : 'block';
+      try { localStorage.removeItem(SESSION_KEY); } catch(e){}
+      document.getElementById('restoreBanner').style.display = 'none';
+    };
+    if (pdf && pdf.b64){
+      try {
+        rawBuffer = pkB64toAb(pdf.b64);
+        loadPdfjs(function(){
+          pdfjsLib.getDocument({ data: new Uint8Array(rawBuffer.slice(0)) }).promise.then(function(doc){
+            pdfDoc = doc; afterState();
+          }).catch(function(err){ console.warn('[picking] PDF 파싱 실패', err); rawBuffer=null; afterState(); });
+        });
+      } catch(e){ console.warn('[picking] PDF 디코드 실패', e); rawBuffer=null; afterState(); }
+    } else {
+      rawBuffer = null; afterState();
+    }
+  }).catch(function(err){
+    pkLoadingRemote = false;
+    console.warn('[picking] 원격 작업 로드 실패', err);
+    pkSetStatus('☁ 작업 로드 실패: ' + (err&&err.message||err), 'er');
+  });
+}
+
+/* ── 업로드 시 작업 발행 (이전 작업 전체 교체) ── */
+function pkPublishJob(){
+  if (!pkReady || !pkBase || pkSuppressPublish) return;
+  if (!rawBuffer || !invoices.length){ return; }
+  var jobKey = 'J' + Date.now() + '_' + pkSafeKey((pkCurrentFileName||'').slice(0,40));
+  var b64;
+  try { b64 = pkAb2b64(rawBuffer); }
+  catch(e){ pkSetStatus('☁ PDF 인코딩 실패 — 로컬 전용', 'er'); return; }
+  var sizeMB = b64.length / 1048576;
+  if (sizeMB > 18){
+    pkSetStatus('☁ PDF 가 너무 큼(' + sizeMB.toFixed(1) + 'MB) — 이 PC 로컬로만 진행됩니다', 'warn');
+    return;
+  }
+  pkSetStatus('☁ 작업 업로드 중... (' + sizeMB.toFixed(1) + 'MB)', 'warn');
+  pkJobKey = jobKey;  /* 자기 echo 로 재로드 안 하도록 먼저 세팅 */
+  var payload = {
+    meta:   { jobKey: jobKey, fileName: pkCurrentFileName||'', uploadedAt: Date.now(),
+              uploadedBy: pkUid, invCount: invoices.length, pageCount: (pdfDoc?pdfDoc.numPages:0) },
+    static: { invoices: JSON.parse(JSON.stringify(invoices)), locGroups: JSON.parse(JSON.stringify(locGroups)) },
+    pdf:    { b64: b64, size: b64.length },
+    printed: null,
+    batches: null
+  };
+  pkBase.set(payload).then(function(){
+    pkSetStatus('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨', 'ok');
+  }).catch(function(err){
+    pkSetStatus('☁ 업로드 실패: ' + (err&&err.message||err), 'er');
+  });
+}
+
+/* ── 인쇄 선점(잠금) — 트랜잭션 ──
+   invNums 중 이미 다른 PC 가 가져간 게 없으면 전부 선점하고 true.
+   일부라도 충돌하면 아무것도 안 가져가고 {claimed:[], conflict:[...]} 반환.
+   cb(ok, claimedInvNums, conflictInvNums) */
+function pkClaimPrint(invNums, cb){
+  if (!pkReady || !pkBase){ cb(true, invNums.slice(), []); return; }  /* 로컬 전용 폴백 */
+  var want = invNums.slice();
+  var conflict = [];
+  pkBase.child('printed').transaction(function(cur){
+    cur = cur || {};
+    conflict = [];
+    want.forEach(function(n){ if (cur[pkSafeKey(n)]) conflict.push(n); });
+    if (conflict.length) return;  /* abort — 하나라도 충돌하면 전체 취소 */
+    var now = Date.now();
+    want.forEach(function(n){ cur[pkSafeKey(n)] = { inv: n, ts: now, by: pkUid }; });
+    return cur;
+  }, function(err, committed){
+    if (err){ cb(false, [], []); return; }
+    if (!committed){ cb(false, [], conflict.length?conflict:want); return; }
+    cb(true, want, []);
+  }, false);
+}
+
+/* ── 부분 선점 — 빈 송장만 전부 가져가고 충돌분은 보고 (체크 인쇄용) ──
+   cb(claimedSet{invNum:1}, conflictInvNums[]) */
+function pkClaimPrintPartial(invNums, cb){
+  var want = invNums.slice();
+  if (!pkReady || !pkBase){
+    var s = {}; want.forEach(function(n){ s[n]=1; }); cb(s, []); return;   /* 로컬 폴백 */
+  }
+  var claimed = {}, conflict = [];
+  pkBase.child('printed').transaction(function(cur){
+    cur = cur || {};
+    claimed = {}; conflict = [];
+    var now = Date.now();
+    want.forEach(function(n){
+      var k = pkSafeKey(n);
+      if (cur[k]) { conflict.push(n); }
+      else { cur[k] = { inv:n, ts:now, by:pkUid }; claimed[n] = 1; }
+    });
+    if (!Object.keys(claimed).length) return;  /* 가져갈 게 없으면 abort */
+    return cur;
+  }, function(err, committed){
+    if (err || !committed){ cb({}, want); return; }
+    cb(claimed, conflict);
+  }, false);
+}
+
+/* ── 선점 해제 (PDF 생성 실패 등으로 인쇄 못 했을 때 되돌림) ── */
+function pkReleasePrint(invNums){
+  if (!pkReady || !pkBase || !invNums || !invNums.length) return;
+  pkBase.child('printed').transaction(function(cur){
+    cur = cur || {};
+    invNums.forEach(function(n){ delete cur[pkSafeKey(n)]; });
+    return cur;
+  }, null, false);
+}
+
+/* ── 인쇄 이력 batch 원격 기록 ── */
+function pkPushBatch(batch){
+  if (!pkReady || !pkBase) return;
+  pkBase.child('batches').push(batch).catch(function(err){ console.warn('[picking] batch 기록 실패', err); });
+}
+
+/* ── 실시간 반영 후 화면 갱신 ── */
+function pkRerender(){
+  if (typeof renderGrpList === 'function') renderGrpList();
+  if (typeof updateGrpStats === 'function') updateGrpStats();
+  if (typeof populateCustomerFilter === 'function') populateCustomerFilter();
+  if (typeof renderInvoiceProgress === 'function') renderInvoiceProgress();
+  if (typeof renderPick === 'function') renderPick();
+}
+
+/* 현재 작업 비우기 (원격 포함) — 새 업로드 없이 초기화하고 싶을 때 */
+function pkClearRemoteJob(){
+  if (pkReady && pkBase){ pkBase.remove().catch(function(){}); }
+  pkJobKey = null;
+}
+
+document.addEventListener('DOMContentLoaded', pkInitAuth);
 </script>
 <div class="unified-ftr">
   © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
