@@ -4280,9 +4280,11 @@ function cpBuildProdLabels(items){
     var altMarkerHtml = hasAlt
       ? '<div class="pl-alt-marker" title="원바코드 '+escH(origBc)+' → 대체 '+escH(altBc)+'">'+escH(cpAltMarker(origBc, altBc))+'</div>'
       : '';
+    /* 라벨 내용 서명 — 동일 서명끼리는 바코드 렌더·폰트축소를 1회만 하고 나머지는 복제(속도) */
+    var sig = [labelBc,name,code,size,material,color,origin,ctrAbbr,hasAlt?1:0].join('␟');
     for (var i=0; i<qty; i++) {
       labels.push(
-        '<div class="prod-label">'+
+        '<div class="prod-label" data-sig="'+escAttrLocal(sig)+'">'+
           /* ① 상단: 상품명 전체폭 2줄 */
           '<div class="pl-name-band">'+
             '<span class="pl-key">상품명:</span>'+
@@ -4324,30 +4326,14 @@ function cpPrintLabelsFromItems(items){
   var area = document.getElementById('prodLabelArea');
   if (!area){ cpFlash('er','라벨 영역 없음'); return; }
   area.innerHTML = labels.join('');
-  if (typeof JsBarcode !== 'undefined') {
-    var svgs = area.querySelectorAll('svg[data-bc]');
-    svgs.forEach(function(svg){
-      var v = svg.getAttribute('data-bc') || '';
-      try {
-        JsBarcode(svg, v, {
-          format:'CODE128', displayValue:false, width:2.2, height:64,
-          margin:0, background:'#ffffff', lineColor:'#000000'
-        });
-        svg.removeAttribute('width');
-        svg.removeAttribute('height');
-        svg.setAttribute('preserveAspectRatio', 'none');
-      } catch(e){}
-    });
-  } else {
-    cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄');
-  }
+  if (typeof JsBarcode === 'undefined') cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄');
 
-  /* 폰트 자동 축소 — 측정용으로 잠시 오프스크린에 렌더 후 각 셀 fit */
+  /* 측정 가능하도록 잠시 오프스크린에 렌더 → 대표 라벨만 바코드+폰트축소, 동일 라벨은 복제 */
   var savedCss = area.style.cssText;
   area.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;width:80mm;z-index:-1;visibility:hidden';
   /* 다음 페인트 후 측정 — DOM reflow 보장 */
   requestAnimationFrame(function(){
-    area.querySelectorAll('.prod-label').forEach(function(lbl){ cpFitLabelText(lbl); });
+    cpRenderFitDedup(area);
     area.style.cssText = savedCss;  /* 원복 — CSS 의 display:none 으로 돌아감 */
 
     /* @page 80x40mm + 인쇄 */
@@ -4430,6 +4416,31 @@ function cpPrintLabelsDirect(items){
 /* 라벨 안 각 값 셀의 폰트를 컨테이너 너비/높이에 맞게 자동 축소
  * .pl-val.big (품번/사이즈, 1줄), .pl-val.small (제조국/색상/재질, 2줄 wrap),
  * .pl-val.name (상품명 2줄 wrap), .pl-bc-num (단일 줄) */
+/* 대표 라벨만 바코드 생성 + 폰트축소하고, 동일 서명(data-sig) 라벨은 그 결과 HTML 을 복제.
+ * 수량 복제·같은 상품이 많을수록 측정/바코드 횟수를 '고유 라벨 수'로 줄여 대폭 가속. */
+function cpRenderFitDedup(area){
+  if (!area) return;
+  var lbls = area.querySelectorAll('.prod-label');
+  var rep = Object.create(null);   /* sig → 완성(바코드+축소) innerHTML */
+  var hasJB = (typeof JsBarcode !== 'undefined');
+  var uniq = 0;
+  lbls.forEach(function(lbl){
+    var sig = lbl.getAttribute('data-sig');
+    if (sig != null && rep[sig] !== undefined){ lbl.innerHTML = rep[sig]; return; }  /* 복제 */
+    if (hasJB){
+      lbl.querySelectorAll('svg[data-bc]').forEach(function(svg){
+        try {
+          JsBarcode(svg, svg.getAttribute('data-bc')||'', {format:'CODE128',displayValue:false,width:2.2,height:64,margin:0,background:'#ffffff',lineColor:'#000000'});
+          svg.removeAttribute('width'); svg.removeAttribute('height'); svg.setAttribute('preserveAspectRatio','none');
+        } catch(e){}
+      });
+    }
+    cpFitLabelText(lbl);
+    uniq++;
+    if (sig != null) rep[sig] = lbl.innerHTML;   /* 축소·바코드까지 끝난 최종 HTML 캐시 */
+  });
+  return uniq;
+}
 function cpFitLabelText(rootEl){
   if (!rootEl) return;
   /* 품번·사이즈 (nowrap) — 가로 폭 기준 */
