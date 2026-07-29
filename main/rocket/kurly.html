@@ -10,6 +10,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<!-- Tesseract.js — 이미지(스캔) 거래명세서 OCR 추출용 -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 
 <!-- Firebase Realtime Database (makemine-wms) -->
 <script type="module">
@@ -137,6 +139,9 @@
   td.miss .cell-edit::placeholder { color:var(--dng); opacity:0.7; }
   td.calc .cell-edit { color:var(--suc); font-weight:600; background:var(--suc-l); }
   td.fixed .cell-edit { color:var(--kurly); font-weight:600; background:var(--kurly-l); }
+  /* OCR 안전모드 — 자동 인식값 검토 표시 (miss 규칙보다 뒤에 두어 우선 적용) */
+  td.ocr-chk .cell-edit { background:var(--wrn-l); color:var(--wrn); font-weight:600; }
+  td.ocr-bad .cell-edit { background:var(--dng-l); color:var(--dng); font-weight:700; box-shadow:inset 0 0 0 2px var(--dng); }
   .cell-edit { display:block; width:100%; padding:7px 10px; background:transparent; border:1px solid transparent; outline:none; font:inherit; color:inherit; font-size:12px; }
   .cell-edit:hover { border-color:var(--border2); background:#fff; }
   .cell-edit:focus { border-color:var(--pri); background:#fff; box-shadow:0 0 0 2px rgba(26,86,219,0.12); }
@@ -307,7 +312,7 @@
     <div class="hdr-icon">컬리</div>
     <div>
       <div class="hdr-name">Kurly 거래명세서 → WMS 엑셀 변환</div>
-      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v3.3</div>
+      <div class="hdr-sub">WMS · ROCKET · KURLY PARSER · v4.0 (OCR)</div>
     </div>
   </div>
   <a href="https://www.makewon.com/" class="btn-home">← 홈으로</a>
@@ -564,10 +569,29 @@ function normKurly(s){
   return s.replace(/[\x00\xA0 -​  　﻿]/g, ' ');
 }
 
-async function parseKurlyPdf(file){
+// ── 텍스트/이미지 자동 분기 ──
+async function parseKurlyPdf(file, onProgress){
   const arr = new Uint8Array(await file.arrayBuffer());
   const arrCopy = new Uint8Array(arr);  // PDF.js가 데이터를 변형하므로 별도 복사 보관
   const pdf = await pdfjsLib.getDocument({data: arr}).promise;
+
+  // 어떤 페이지가 '텍스트 명세서'인지 판별 (글자가 충분한 페이지)
+  const textPages = [];
+  for(let i=1;i<=pdf.numPages;i++){
+    const tc = await (await pdf.getPage(i)).getTextContent();
+    if(tc.items.map(it=>it.str||'').join('').replace(/\s/g,'').length >= 40) textPages.push(i);
+  }
+  if(textPages.length){
+    const r = await parseKurlyText(pdf, arrCopy);
+    r.docPages = textPages;
+    return r;
+  }
+  // 텍스트가 전혀 없음 → 이미지(스캔) 명세서 → OCR
+  return await parseKurlyOcr(pdf, file.name, arrCopy, onProgress);
+}
+
+// ── (구) 텍스트 PDF 파싱 — 기존 방식 유지 (하위호환) ──
+async function parseKurlyText(pdf, arrCopy){
   const pageCount = pdf.numPages;
 
   const allLines = [];
@@ -671,6 +695,248 @@ function parseRowText(t){
 }
 
 // ============================================================
+// 이미지(스캔) 명세서 OCR 파싱 — Tesseract.js
+//  · 표 격자선으로 행을 분리 → 셀 단위로 잘라 OCR (행 누락 방지)
+//  · 바코드 체크섬 + (수량×박스입수=총수량) 검증식으로 오인식 자동 검출
+//  · 컬럼 경계는 컬리 표준 양식 기준 (정규화 폭 2381px = A4 scale4)
+// ============================================================
+const KURLY_OCR = {
+  W: 2381,
+  gx: [134, 2246],  // 상품표 좌/우 끝 (격자 검출 범위)
+  grid: [134,218,493,725,1063,1169,1423,1634,1740,1824,1930,2246],  // 11컬럼 세로 격자선 x
+  COL: { master:[218,493], barcode:[493,725], name:[725,1063], tq:[1063,1169], exp:[1169,1423], qty:[1634,1740], bu:[1740,1824] }
+};
+
+let _ocrWorkersPromise = null;
+async function getOcrWorkers(){
+  if(_ocrWorkersPromise) return _ocrWorkersPromise;
+  if(typeof Tesseract === 'undefined') throw new Error('Tesseract.js 로드 실패 — 새로고침 필요');
+  _ocrWorkersPromise = (async()=>{
+    const digit = await Tesseract.createWorker('eng');
+    await digit.setParameters({ tessedit_char_whitelist:'0123456789', tessedit_pageseg_mode:'7' });
+    const kor = await Tesseract.createWorker('kor+eng');
+    await kor.setParameters({ tessedit_pageseg_mode:'6' });
+    return { digit, kor };
+  })();
+  return _ocrWorkersPromise;
+}
+
+// GTIN(EAN-8/12/13/14) 체크섬 검증 → 바코드 OCR 오인식 자동 검출
+function gtinValid(s){
+  if(!/^\d+$/.test(s) || ![8,12,13,14].includes(s.length)) return false;
+  const d = s.split('').map(Number); const chk = d.pop();
+  let sum = 0; d.reverse().forEach((n,i)=> sum += n * ((i % 2 === 0) ? 3 : 1));
+  return ((10 - (sum % 10)) % 10) === chk;
+}
+
+// 셀 전체를 지정 높이로 업스케일 (바코드·품명 등 넓은 셀)
+function ocrCellFull(src, x0,x1,y0,y1, targetH, padX){
+  padX = padX || 4;
+  const w = x1-x0-padX*2, h = y1-y0; if(w<=0||h<=0) return null;
+  const sc = Math.max(1, targetH/h);
+  const out = document.createElement('canvas');
+  out.width = Math.round(w*sc); out.height = Math.round(h*sc);
+  const oc = out.getContext('2d');
+  oc.fillStyle='#fff'; oc.fillRect(0,0,out.width,out.height);
+  oc.drawImage(src, x0+padX, y0, w, h, 0,0, out.width, out.height);
+  return out;
+}
+
+// 어두운 픽셀 bbox만 타이트하게 잘라 업스케일 (작은 숫자칸)
+function ocrCellTight(src, x0,x1,y0,y1, targetH, thr){
+  thr = thr || 115;
+  const w = x1-x0, h = y1-y0; if(w<=0||h<=0) return null;
+  const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h;
+  const tc = tmp.getContext('2d', {willReadFrequently:true});
+  tc.drawImage(src, x0,y0,w,h, 0,0,w,h);
+  const d = tc.getImageData(0,0,w,h).data;
+  let mnx=w, mny=h, mxx=0, mxy=0, f=false;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const i=(y*w+x)*4; const l=d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11;
+    if(l<thr){ f=true; if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y; } }
+  if(!f) return null;
+  const pad=6; mnx=Math.max(0,mnx-pad); mny=Math.max(0,mny-pad); mxx=Math.min(w,mxx+pad); mxy=Math.min(h,mxy+pad);
+  const cw=mxx-mnx, ch=mxy-mny; if(cw<3||ch<3) return null;
+  const sc = Math.max(1, targetH/ch);
+  const out = document.createElement('canvas'); out.width=Math.round(cw*sc); out.height=Math.round(ch*sc);
+  const oc = out.getContext('2d'); oc.fillStyle='#fff'; oc.fillRect(0,0,out.width,out.height);
+  oc.drawImage(tmp, mnx,mny,cw,ch, 0,0, out.width,out.height);
+  return out;
+}
+
+async function ocrRecognize(worker, cnv){ if(!cnv) return ''; const { data } = await worker.recognize(cnv); return data.text || ''; }
+
+// 한 페이지 canvas에서 상품 행 추출
+async function ocrProductRows(canvas, workers, onProg){
+  const W = canvas.width, H = canvas.height;
+  const S = W / KURLY_OCR.W;                 // 정규화px → 실제px 배율
+  const px = v => Math.round(v * S);
+  const col = k => [px(KURLY_OCR.COL[k][0]), px(KURLY_OCR.COL[k][1])];
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const img = ctx.getImageData(0,0,W,H).data;
+  const dark = new Uint8Array(W*H);
+  for(let p=0,i=0;p<W*H;p++,i+=4){ const l=img[i]*0.3+img[i+1]*0.59+img[i+2]*0.11; dark[p]= l<128?1:0; }
+  const gx0 = px(KURLY_OCR.gx[0]), gx1 = px(KURLY_OCR.gx[1]);
+  // 가로 격자선 검출
+  const hRowsY = [];
+  for(let y=0;y<H;y++){ let c=0; for(let x=gx0;x<gx1;x++) c+=dark[y*W+x]; if(c > (gx1-gx0)*0.5) hRowsY.push(y); }
+  const hLines = []; { let s=null, pr=null; const gap=px(4);
+    hRowsY.forEach(i=>{ if(s===null){s=pr=i;} else if(i-pr<=gap){pr=i;} else {hLines.push(Math.round((s+pr)/2)); s=pr=i;} });
+    if(s!==null) hLines.push(Math.round((s+pr)/2)); }
+  // 페이지 게이트 — 명세서 표(11컬럼 세로 격자선)가 없으면 스킵 (준수사항 등 헛OCR 방지)
+  let vCount = 0;
+  for(const gv of KURLY_OCR.grid){
+    const cx = px(gv); let best = 0;
+    for(let dxp=-px(3); dxp<=px(3); dxp++){
+      const xx = cx + dxp; if(xx<0 || xx>=W) continue;
+      let run=0, mx=0;
+      for(let y=0;y<H;y++){ if(dark[y*W+xx]){ if(++run>mx) mx=run; } else run=0; }
+      if(mx>best) best = mx;
+    }
+    if(best >= px(80)) vCount++;
+  }
+  if(vCount < 7) return [];  // 명세서 표 페이지 아님
+  const [bx0,bx1] = col('barcode');
+  const minH = px(38), maxH = px(460);
+  const rows = [];
+  for(let i=0;i<hLines.length-1;i++){
+    const y0=hLines[i], y1=hLines[i+1], hg=y1-y0;
+    if(hg<minH || hg>maxH) continue;
+    // 바코드 (전체셀 → 실패 시 타이트)
+    let bc = (await ocrRecognize(workers.digit, ocrCellFull(canvas, bx0,bx1,y0,y1, 70))).replace(/\D/g,'');
+    if(!gtinValid(bc)){ const bc2=(await ocrRecognize(workers.digit, ocrCellTight(canvas, bx0,bx1,y0,y1, 80))).replace(/\D/g,''); if(gtinValid(bc2)) bc=bc2; }
+    if(bc.length<8 || bc.length>14) continue;   // 상품행 아님(헤더·다른 표 제외)
+    // 밴드 내 '숫자가 있는 줄' y 찾기 (총수량/박스입수는 바코드와 같은 줄)
+    let ty0=y0+px(4), ty1=y1-px(4);
+    { const on=[]; const a=y0+px(4), b=y1-px(4);
+      for(let y=a;y<b;y++){ let c=0; for(let x=bx0;x<bx1;x++) c+=dark[y*W+x]; if(c>6) on.push(y); }
+      if(on.length){ ty0=on[0]-px(6); ty1=on[on.length-1]+px(6); } }
+    const num = async k => (await ocrRecognize(workers.digit, ocrCellTight(canvas, col(k)[0],col(k)[1], ty0,ty1, 90))).replace(/\D/g,'');
+    const totalQty = await num('tq');
+    const boxUnit  = await num('bu');
+    const qty      = await num('qty');
+    const exp      = (await ocrRecognize(workers.kor, ocrCellTight(canvas, col('exp')[0],col('exp')[1], ty0,ty1, 90))).replace(/\s+/g,' ').trim();
+    let rawName    = (await ocrRecognize(workers.kor, ocrCellFull(canvas, col('name')[0],col('name')[1], y0+px(4), y1-px(4), 120))).replace(/\s+/g,' ').trim();
+    const bcOk  = gtinValid(bc);
+    const chkOk = (+qty>0 && +boxUnit>0) ? ((+qty)*(+boxUnit) === +totalQty) : null;
+    rows.push({ master:'', barcode:bc, rawName, totalQty, exp, qty, boxUnit, spec:'',
+                bandCenterY:(y0+y1)/2, verify:{ bcOk, chkOk } });
+    if(onProg) onProg(rows.length);
+  }
+  return rows;
+}
+
+// 상단 헤더 영역 OCR → 센터명 추출
+async function ocrHeaderCenter(canvas, kor){
+  const W=canvas.width, H=canvas.height, ch=Math.round(H*0.24);
+  const crop = document.createElement('canvas'); crop.width=W; crop.height=ch;
+  crop.getContext('2d').drawImage(canvas, 0,0,W,ch, 0,0,W,ch);
+  return await ocrRecognize(kor, crop);
+}
+
+// 파일명 + 헤더OCR로 헤더 필드 구성
+function buildOcrHeader(fileName, headerText){
+  let orderCode='', arriveDate='';
+  const mc = (fileName||'').match(/K(\d{2})(\d{2})(\d{2})[_-]?([A-Za-z0-9]+)/);
+  if(mc){ orderCode = 'K'+mc[1]+mc[2]+mc[3]+'_'+mc[4].toUpperCase(); arriveDate = '20'+mc[1]+'-'+mc[2]+'-'+mc[3]; }
+  const t = (headerText||'').replace(/\s+/g,' ');
+  let center='';
+  let m = t.match(/([가-힣]{2,}(?:상온|냉장|냉동|드라이|FF))\s*\(([^)]{0,20})\)/);
+  if(m) center = m[1] + '(' + m[2].trim() + ')';
+  else { m = t.match(/([가-힣]{2,}(?:상온|냉장|냉동|드라이|FF))/); if(m) center = m[1]; }
+  const md = t.match(/(20\d{2}-\d{2}-\d{2})/);
+  if(md && !arriveDate) arriveDate = md[1];
+  return { orderCode, orderDate:'', arriveDate, center };
+}
+
+// ── 임베디드 JPEG 추출 (DCTDecode 이미지 스트림) ──
+//  · pdf.js render()가 일부 브라우저에서 이미지 페이지에 무한 멈춤 → 우회
+//  · PDF 안의 JPEG 원본 바이트를 직접 꺼내 createImageBitmap(네이티브 디코드)로 렌더
+function buildJpegIndex(bytes){
+  // latin1 문자열로 딕셔너리 스캔 (바이너리 스트림은 8KB 단위로 안전 변환)
+  let s = '';
+  const CH = 0x8000;
+  for(let i=0;i<bytes.length;i+=CH){ s += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i+CH, bytes.length))); }
+  const list = [];
+  const re = /\/Subtype\s*\/Image[\s\S]{0,600}?stream\r?\n/g; let m;
+  while((m = re.exec(s))){
+    if(!/DCTDecode/.test(m[0])) continue;
+    const lm = m[0].match(/\/Length\s+(\d+)/); if(!lm) continue;
+    const wm = m[0].match(/\/Width\s+(\d+)/), hm = m[0].match(/\/Height\s+(\d+)/);
+    list.push({ start: m.index + m[0].length, len: +lm[1], w: wm ? +wm[1] : 0, h: hm ? +hm[1] : 0 });
+  }
+  return list;
+}
+function findJpeg(index, w, h){
+  return index.find(j => j.w === w && j.h === h) || index.find(j => Math.abs(j.w-w)<=2 && Math.abs(j.h-h)<=2) || null;
+}
+
+// 페이지를 canvas로 렌더 (JPEG 직접 디코드 → 실패 시 pdf.js render 폴백)
+async function renderKurlyPage(pdf, pageNo, jpegIndex, bytes){
+  const page = await pdf.getPage(pageNo);
+  const view = page.view; const pageW = view[2], pageH = view[3];
+  const scale = KURLY_OCR.W / pageW;   // 폭 2381px 정규화
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(pageW*scale); canvas.height = Math.round(pageH*scale);
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  let drew = 0;
+  try {
+    const ops = await page.getOperatorList();
+    const OPS = pdfjsLib.OPS;
+    let cm = null;
+    for(let i=0;i<ops.fnArray.length;i++){
+      const fn = ops.fnArray[i], a = ops.argsArray[i];
+      if(fn === OPS.transform) cm = a;
+      else if((fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) && cm && a){
+        const jp = findJpeg(jpegIndex, a[1], a[2]);
+        if(jp){
+          try {
+            const bmp = await createImageBitmap(new Blob([bytes.slice(jp.start, jp.start+jp.len)], {type:'image/jpeg'}));
+            const A=cm[0], D=cm[3], E=cm[4], F=cm[5];   // [a,b,c,d,e,f], b=c=0 가정
+            ctx.drawImage(bmp, E*scale, (pageH-(F+D))*scale, A*scale, D*scale);
+            if(bmp.close) bmp.close();
+            drew++;
+          } catch(e){ console.warn('[KURLY OCR] JPEG 디코드 실패:', e); }
+        }
+      }
+    }
+  } catch(e){ console.warn('[KURLY OCR] operatorList 실패:', e); }
+  if(!drew){
+    // 폴백: pdf.js render (15초 타임아웃 — 무한멈춤 방지)
+    const vp = page.getViewport({scale});
+    const rp = page.render({canvasContext:ctx, viewport:vp}).promise;
+    await Promise.race([ rp, new Promise((_,rej)=>setTimeout(()=>rej(new Error('render timeout')), 15000)) ])
+      .catch(e=>console.warn('[KURLY OCR] render 폴백 실패:', e.message));
+  }
+  canvas._kurlyScale = scale; canvas._kurlyPageH = pageH;
+  return canvas;
+}
+
+// 이미지 PDF 전체 OCR 파싱
+async function parseKurlyOcr(pdf, fileName, arrCopy, onProgress){
+  const workers = await getOcrWorkers();
+  const jpegIndex = buildJpegIndex(arrCopy);
+  const rawRows = [], docPages = [];
+  let headerText = '';
+  for(let pageNo=1; pageNo<=pdf.numPages; pageNo++){
+    const canvas = await renderKurlyPage(pdf, pageNo, jpegIndex, arrCopy);
+    if(onProgress) onProgress(pageNo, pdf.numPages, 0);
+    const pageRows = await ocrProductRows(canvas, workers, (n)=>{ if(onProgress) onProgress(pageNo, pdf.numPages, n); });
+    if(pageRows.length){
+      docPages.push(pageNo);
+      const sc = canvas._kurlyScale || 4;
+      pageRows.forEach(r=>{ r.pageNo = pageNo; r.yPos = (canvas.height - r.bandCenterY)/sc; });
+      rawRows.push(...pageRows);
+      if(!headerText) headerText = await ocrHeaderCenter(canvas, workers.kor);
+    }
+    canvas.width = 0; canvas.height = 0;  // 메모리 해제
+  }
+  const header = buildOcrHeader(fileName, headerText);
+  return { header, rawRows, pdfData: arrCopy, pageCount: pdf.numPages, docPages, ocr:true,
+           warning: rawRows.length ? '' : '이미지에서 상품 행을 찾지 못함 — 원본 확인 필요' };
+}
+
+// ============================================================
 // PDF 파일 업로드 (모달 없이 바로 표 표시)
 // ============================================================
 const dropzone = $('#dropzone');
@@ -687,14 +953,21 @@ async function handleFiles(files){
   toast('📄 ' + files.length + '개 PDF 분석 시작...', '');
   $('#progressWrap').classList.remove('hidden');
   let done = 0;
-  let totalRowsOk = 0, totalRowsErr = 0;
+  let usedOcr = false;
   for(const f of files){
     let entry = { name: f.name, ok: false, error: '', header: {}, rawRows: [] };
     try{
-      const result = await parseKurlyPdf(f);
+      const onProgress = (pageNo, totalPages, rowN)=>{
+        if(!usedOcr){ usedOcr = true; toast('🔎 이미지 명세서 — OCR 인식 중 (최초 1회 엔진 다운로드로 다소 느립니다)', ''); }
+        $('#parseHintMsg').textContent = `OCR 인식 중… ${escapeHtml(f.name)} · ${pageNo}/${totalPages}p` + (rowN?` · ${rowN}행`:'');
+        $('#cardPreview').classList.remove('hidden');
+      };
+      const result = await parseKurlyPdf(f, onProgress);
       entry.header = result.header; entry.rawRows = result.rawRows; entry.ok = true;
       entry.pdfData = result.pdfData;
       entry.pageCount = result.pageCount;
+      entry.docPages = result.docPages || null;
+      entry.ocr = !!result.ocr;
       if(result.warning) entry.error = result.warning;
     }catch(err){ console.error(err); entry.error = String(err.message || err); }
     state.files.push(entry);
@@ -773,7 +1046,10 @@ function rebuildRows(){
           yPos: r.yPos,  // PDF 행 위치 (좌하 원점)
           missingName: !dbName && !!r.barcode,
           missingBoxUnit: (dbBoxUnit === null) && !!r.barcode,
-          missingBarcode: !r.barcode
+          missingBarcode: !r.barcode,
+          ocr: !!f.ocr,                       // 이미지 OCR로 추출된 행
+          verify: r.verify || null,           // {bcOk, chkOk}
+          verifyFail: !!(r.verify && (r.verify.bcOk === false || r.verify.chkOk === false))
         }
       };
       const tq = +row.cells[10] || 0, bu = +row.cells[9] || 0;
@@ -893,6 +1169,12 @@ function renderPreview(){
       if(ci === 7 && !v) cls = 'miss';
       if(ci === 9 && r.meta.missingBoxUnit) cls = 'miss';
       if(ci === 10 && (v === '' || v === null || v === undefined)) cls = 'miss';
+      // OCR 안전모드: 총수량(10)/박스입수(9)/바코드(5) 검토 강조
+      if(r.meta.ocr){
+        const bad = r.meta.verifyFail;
+        if(ci === 10 || ci === 9) cls = (cls ? cls + ' ' : '') + (bad ? 'ocr-bad' : 'ocr-chk');
+        if(ci === 5 && r.meta.verify && r.meta.verify.bcOk === false) cls = (cls ? cls + ' ' : '') + 'ocr-bad';
+      }
       const display = v === '' || v === null || v === undefined ? '' : v;
       let placeholder = '';
       if(ci === 4 && r.meta.missingName && r.meta.rawName){
@@ -926,7 +1208,16 @@ function renderPreview(){
   });
 
   const total = state.rows.length;
-  $('#parseHintMsg').innerHTML = `${total}개 상품 행 · 품명 매칭 ${total - missingNames}건` + (missingNames ? ` · <b style="color:var(--dng)">${missingNames}건 직접 입력 필요</b>` : ' · <b style="color:var(--suc)">모두 등록됨</b>');
+  const ocrRows = state.rows.filter(r=>r.meta.ocr);
+  let hint = `${total}개 상품 행 · 품명 매칭 ${total - missingNames}건` + (missingNames ? ` · <b style="color:var(--dng)">${missingNames}건 직접 입력 필요</b>` : ' · <b style="color:var(--suc)">모두 등록됨</b>');
+  if(ocrRows.length){
+    const fails = ocrRows.filter(r=>r.meta.verifyFail).length;
+    const okN = ocrRows.length - fails;
+    hint += `<br><b style="color:var(--wrn)">🔎 이미지 OCR 자동 인식</b> — 노란칸(총수량·박스입수)을 원본과 대조하세요. `;
+    hint += `검증식(수량×박스입수=총수량) 통과 <b style="color:${fails?'var(--dng)':'var(--suc)'}">${okN}/${ocrRows.length}</b>` + (fails?` · <b style="color:var(--dng)">${fails}행 검증 실패(빨강) 반드시 확인</b>`:'');
+  }
+  $('#parseHintMsg').innerHTML = hint;
+  if(ocrRows.length){ $('#parseHint').classList.add('wrn'); } else { $('#parseHint').classList.remove('wrn'); }
 }
 
 function onCellEdit(e){
@@ -1308,6 +1599,18 @@ window.toast = toast;
 // ============================================================
 let _currentPdfFileIdx = -1;
 
+// 표시/인쇄할 '명세서 페이지' 집합 (1-base). 이미지 PDF는 docPages(OCR에서 기록)를 사용.
+async function pagesToShow(f, pdf){
+  if(f && f.docPages && f.docPages.length) return new Set(f.docPages);
+  const set = new Set();
+  for(let i=1;i<=pdf.numPages;i++){
+    const tc = await (await pdf.getPage(i)).getTextContent();
+    if(tc.items.map(it=>it.str||'').join('').replace(/\s/g,'').length >= 30) set.add(i);
+  }
+  if(!set.size){ for(let i=2;i<=pdf.numPages;i++) set.add(i); }  // 전부 이미지면 1p(준수사항) 제외
+  return set;
+}
+
 async function renderPdfInContainer(fileIdx, containerEl){
   const f = state.files[fileIdx];
   if(!f || !f.pdfData){
@@ -1320,16 +1623,11 @@ async function renderPdfInContainer(fileIdx, containerEl){
     const dataCopy = new Uint8Array(f.pdfData);
     const pdf = await pdfjsLib.getDocument({data: dataCopy}).promise;
     containerEl.innerHTML = '';
-    // 입고 준수사항(보통 1페이지)는 자동 스킵 — 명세서 페이지만 (텍스트가 충분한 페이지)
+    // 입고 준수사항(보통 1페이지)는 자동 스킵 — 명세서 페이지만 표시
+    const show = await pagesToShow(f, pdf);
     for(let i=1; i<=pdf.numPages; i++){
+      if(!show.has(i)) continue;
       const page = await pdf.getPage(i);
-      // 텍스트 양 확인 — 30자 이하면 이미지 페이지로 판단해 스킵
-      const tc = await page.getTextContent();
-      const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
-      if(txt.length < 30){
-        console.log('[PDF] 페이지', i, '스킵 (텍스트 짧음, 이미지로 추정)');
-        continue;
-      }
       const viewport = page.getViewport({scale: 1.5});
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
@@ -1363,13 +1661,8 @@ async function printPdfFile(fileIdx){
   try {
     const dataCopy = new Uint8Array(f.pdfData);
     const pdfjs = await pdfjsLib.getDocument({data: dataCopy}).promise;
-    const textPages = [];
-    for(let i=0; i<pdfjs.numPages; i++){
-      const p = await pdfjs.getPage(i+1);
-      const tc = await p.getTextContent();
-      const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
-      if(txt.length >= 30) textPages.push(i);
-    }
+    const show = await pagesToShow(f, pdfjs);
+    const textPages = [...show].map(p=>p-1).sort((a,b)=>a-b);  // pdf-lib는 0-base
     if(!textPages.length){ toast('인쇄할 페이지가 없습니다','err'); return; }
     const dataCopy2 = new Uint8Array(f.pdfData);
     const src = await PDFLib.PDFDocument.load(dataCopy2);
@@ -1430,12 +1723,11 @@ async function loadSidePdf(fileIdx){
     wrap.innerHTML = '';
     _sidePagePositions = [];
     _sidePdfPageHeight = 0;
-    // 텍스트 짧은(이미지) 페이지는 스킵
+    // 준수사항(1p) 등 비명세서 페이지는 스킵 — 명세서 페이지만
+    const show = await pagesToShow(f, pdf);
     for(let i=1; i<=pdf.numPages; i++){
+      if(!show.has(i)) continue;
       const page = await pdf.getPage(i);
-      const tc = await page.getTextContent();
-      const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
-      if(txt.length < 30) continue;
       const viewport = page.getViewport({scale: _sideZoom});
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
@@ -1539,16 +1831,11 @@ $('#btnPrintAll').onclick = async function(){
     const merged = await PDFLib.PDFDocument.create();
     for(const f of okFiles){
       try {
-        // 어느 페이지가 명세서인지 PDF.js로 텍스트 양 확인 (이미지 페이지 제외)
+        // 어느 페이지가 명세서인지 판별 (준수사항/이미지 제외 — docPages 우선)
         const dataCopy = new Uint8Array(f.pdfData);
         const pdfjs = await pdfjsLib.getDocument({data: dataCopy}).promise;
-        const textPages = [];
-        for(let i=0; i<pdfjs.numPages; i++){
-          const p = await pdfjs.getPage(i+1);
-          const tc = await p.getTextContent();
-          const txt = tc.items.map(it=>it.str).join('').replace(/\s/g,'');
-          if(txt.length >= 30) textPages.push(i);  // pdf-lib는 0-base
-        }
+        const show = await pagesToShow(f, pdfjs);
+        const textPages = [...show].map(p=>p-1).sort((a,b)=>a-b);  // pdf-lib는 0-base
         if(!textPages.length) continue;
         const dataCopy2 = new Uint8Array(f.pdfData);
         const src = await PDFLib.PDFDocument.load(dataCopy2);
@@ -1608,8 +1895,8 @@ function initFirebaseSync(){
 
 updateStats();
 initFirebaseSync();
-console.log('[KURLY v3.8] 로드 완료 — sticky 그룹 + 원본 PDF 인쇄 — PDF 보기/인쇄 추가');
-setTimeout(()=>toast('Kurly Parser v3.8 로드 완료',''), 300);
+console.log('[KURLY v4.0] 로드 완료 — 이미지(스캔) 명세서 OCR 지원 + 텍스트 PDF 하위호환');
+setTimeout(()=>toast('Kurly Parser v4.0 (OCR) 로드 완료',''), 300);
 </script>
 </body>
 </html>
