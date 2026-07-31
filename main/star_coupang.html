@@ -389,7 +389,8 @@ h1 em{color:var(--g);font-style:normal}
   <div class="stats">
     <div class="sc"><div class="sc-l">SKU 수</div><div class="sc-v" id="s0">—</div></div>
     <div class="sc"><div class="sc-l">예정 수량</div><div class="sc-v" id="s1">—</div></div>
-    <div class="sc"><div class="sc-l">실입고</div><div class="sc-v" style="color:var(--g)" id="s2">—</div></div>
+    <div class="sc"><div class="sc-l">실입고(정상)</div><div class="sc-v" style="color:var(--g)" id="s2">—</div></div>
+    <div class="sc"><div class="sc-l">불량</div><div class="sc-v" style="color:#ff6b6b" id="s5">—</div></div>
     <div class="sc"><div class="sc-l">잔여</div><div class="sc-v" style="color:var(--y)" id="s3">—</div></div>
     <div class="sc"><div class="sc-l">박스</div><div class="sc-v" style="color:var(--b)" id="s4">—</div></div>
   </div>
@@ -427,6 +428,10 @@ h1 em{color:var(--g);font-style:normal}
     <div class="scan-actions">
       <button class="btn btn-y" onclick="endBox()" id="endBoxBtn" disabled style="font-size:.76rem;padding:.42rem .85rem">📦 박스 종료</button>
       <button class="btn btn-s" onclick="undoLastScan()" id="undoBtn" disabled style="font-size:.76rem;padding:.42rem .85rem">↶ 마지막 스캔 취소</button>
+      <label class="opt-chk" id="defectChkWrap" title="켜면 이후 스캔이 '불량'으로 기록됩니다. 실입고(정상)와 분리 집계되고 엑셀엔 별도 시트로 저장됩니다." style="border:1px solid rgba(255,107,107,.5);background:rgba(255,107,107,.08)">
+        <input type="checkbox" id="defectChk" onchange="onDefectToggle(this.checked)" style="accent-color:#ff6b6b">
+        <span style="color:#ff8a8a;font-weight:800">🚫 불량입고 진행</span>
+      </label>
       <label class="opt-chk" title="신규 SKU(처음 등록되는 바코드)를 첫 스캔할 때 '📸 촬영해주세요' 큰 알림 표시. 기본값 꺼짐.">
         <input type="checkbox" id="photoReqChk" onchange="onPhotoReqToggle(this.checked)">
         <span>📸 신규 SKU 촬영요망</span>
@@ -439,6 +444,9 @@ h1 em{color:var(--g);font-style:normal}
       <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
     </div>
   </div>
+
+  <!-- 불량입고 모드 배너 -->
+  <div id="defectBanner" style="display:none;margin:.4rem 0;padding:.55rem .9rem;border-radius:8px;background:rgba(255,107,107,.14);border:1px solid rgba(255,107,107,.55);color:#ff8a8a;font-weight:800;font-size:.9rem;text-align:center;letter-spacing:.02em">🚫 불량입고 모드 — 지금 스캔하는 제품은 <u>불량</u>으로 기록됩니다 (정상 입고하려면 위 체크 해제)</div>
 
   <!-- 큰 스캔 결과 디스플레이 -->
   <div class="scan-display idle" id="scanDisplay">
@@ -469,6 +477,7 @@ h1 em{color:var(--g);font-style:normal}
         <div class="qty-block recv">
           <div class="qty-l">실입고</div>
           <div class="qty-v" id="sdQtyRecv">0</div>
+          <div id="sdQtyDef" style="display:none;font-size:.9rem;font-weight:800;color:#ff6b6b;margin-top:.15rem">불량 0</div>
         </div>
         <div class="qty-block rem" id="sdQtyRemBlock">
           <div class="qty-l" id="sdQtyRemLbl">잔여</div>
@@ -916,6 +925,7 @@ var pendingUnknownRaw = null;     // 미등록 바코드 원본 값
 var startedEmpty = false;          // 자료 없이 시작 모드 (모든 바코드 자동 신규 추가)
 var photoReqEnabled = false;       // 신규 SKU 첫 스캔 시 사진촬영 요망 알림 (체크박스)
 var soundEnabled = false;          // 신규 SKU 첫 스캔 시 비프 + TTS 음성 출력
+var defectMode = false;            // 불량입고 모드 — ON이면 이후 스캔이 불량(box.defItems)으로 기록
 var _audioCtx = null;              // Web Audio Context 재사용
 /* 촬영 로그 — 신규 SKU 알림이 뜬 순간의 타임스탬프 + 바코드.
    휴대폰 촬영은 알림 직후에 일어나고, 이 순서가 사진 정렬 순서와 일치하므로
@@ -1058,6 +1068,7 @@ function handleFile(file) {
                 var pr = pendingRows[i];
                 if (!pr) return;
                 r.qtyReceived = pr.qtyReceived || 0;
+                r.qtyDefective = pr.qtyDefective || 0;
                 ['SIZE','ORIGIN','NAME','COLOR'].forEach(function(f){
                   var mk = f.toLowerCase()+'Mod';
                   if (pr[mk]) { r.vals[COL[f]] = pr.vals[COL[f]]; r[mk] = true; }
@@ -1229,6 +1240,7 @@ function buildSessionData() {
         r: r.r,
         vals: (r.vals || []).map(nn),
         qtyReceived: r.qtyReceived || 0,
+        qtyDefective: r.qtyDefective || 0,
         sizeMod: !!r.sizeMod,
         originMod: !!r.originMod,
         nameMod: !!r.nameMod,
@@ -1557,16 +1569,22 @@ function ignoreUnknownBarcode() {
 }
 
 /* 일반 스캔 처리 — rowIdx 매칭 후 공통 로직 (정상/신규 둘 다 사용) */
+/* 박스 총 수량(정상 items + 불량 defItems) — 음성/박스카운트/목록 표시용 */
+function boxItemTotal(box) {
+  if (!box) return 0;
+  var n = (box.items||[]).reduce(function(s, it){ return s + (it.count||0); }, 0);
+  var d = (box.defItems||[]).reduce(function(s, it){ return s + (it.count||0); }, 0);
+  return n + d;
+}
+
 function handleNormalScan(rowIdx, key) {
   var row = rows[rowIdx];
   prodPattern = _scanSig(key);   /* 제품바코드 패턴 학습 */
-  row.qtyReceived = (row.qtyReceived || 0) + 1;
-  /* 각 SKU 의 첫 스캔 → 시각 알림 + 음성 + 촬영 로그.
-     예정수량을 미리 등록(엑셀)한 SKU도 '실물 첫 입고'는 촬영 대상이므로,
-     목록 등록 여부(isNew)와 무관하게 그 SKU를 처음 스캔(qtyReceived===1)하면 촬영요망을 띄운다.
-     '사진 촬영해 주세요' 음성은 photoReqEnabled 가 ON 일 때만 (그게 촬영 워크플로우의 일부니까).
-     초과/박스완료/동기화완료 같은 일반 사운드는 soundEnabled 만으로 독립 동작. */
-  var firstScanOfSku = row.qtyReceived === 1;
+  var isDef = defectMode;        /* 불량입고 모드 여부 */
+  if (isDef) row.qtyDefective = (row.qtyDefective || 0) + 1;
+  else       row.qtyReceived  = (row.qtyReceived  || 0) + 1;
+  /* 각 SKU 의 첫 스캔(정상+불량 합산 기준) → 시각 알림 + 음성 + 촬영 로그. */
+  var firstScanOfSku = ((row.qtyReceived||0) + (row.qtyDefective||0)) === 1;
   if (firstScanOfSku) {
     if (photoReqEnabled) {
       showPhotoReqAlert();
@@ -1577,30 +1595,39 @@ function handleNormalScan(rowIdx, key) {
   } else {
     hidePhotoReqAlert();
   }
-  /* 박스 내부 누적 */
-  var bItem = currentBox.items.find(function(it){ return it.rowIdx === rowIdx; });
-  if (bItem) bItem.count++;
-  else currentBox.items.push({ rowIdx: rowIdx, barcode: key, count: 1 });
+  /* 박스 내부 누적 — 정상은 items, 불량은 defItems (검증된 정상 경로는 그대로) */
+  if (isDef) {
+    if (!currentBox.defItems) currentBox.defItems = [];
+    var dItem = currentBox.defItems.find(function(it){ return it.rowIdx === rowIdx; });
+    if (dItem) dItem.count++;
+    else currentBox.defItems.push({ rowIdx: rowIdx, barcode: key, count: 1 });
+  } else {
+    var bItem = currentBox.items.find(function(it){ return it.rowIdx === rowIdx; });
+    if (bItem) bItem.count++;
+    else currentBox.items.push({ rowIdx: rowIdx, barcode: key, count: 1 });
+  }
   touchBox(currentBox.id);   /* 작업 중 박스는 항상 완료 목록 최상단 유지 */
-  /* 마지막 스캔 기록 (undo 용) */
-  lastScans.push({ rowIdx: rowIdx, barcode: key, boxId: currentBox.id, ts: Date.now() });
+  /* 마지막 스캔 기록 (undo 용) — 정상/불량 구분 포함 */
+  lastScans.push({ rowIdx: rowIdx, barcode: key, boxId: currentBox.id, def: isDef, ts: Date.now() });
   if (lastScans.length > 200) lastScans = lastScans.slice(-200);
 
-  /* 카운트 음성 — 이 박스 누적 수량을 한국어로 (일·이·삼…십, 그 이상 반복).
-     신규 SKU 촬영알림('사진 촬영해 주세요')이 울린 스캔은 그 음성을 우선하므로 생략. */
+  /* 카운트 음성 — 이 박스 누적 수량(정상+불량)을 한국어로. */
   if (!(firstScanOfSku && photoReqEnabled)) {
-    var boxTotal = currentBox.items.reduce(function(s, it){ return s + (it.count||0); }, 0);
-    speakCount(boxTotal);
+    speakCount(boxItemTotal(currentBox));
   }
 
   /* 큰 디스플레이 갱신 */
   var exp = +row.vals[COL.EXPECT_QTY] || 0;
   var existing = +row.vals[COL.EXISTING_QTY] || 0;
   var target = exp - existing;
-  var recv = row.qtyReceived;
+  var recv = row.qtyReceived || 0;
+  var defRecv = row.qtyDefective || 0;
   var altUsed = (key === normBarcode(row.vals[COL.ALT_BARCODE]) && key !== normBarcode(row.vals[COL.BARCODE]));
   var kind, msg;
-  if (row.isNew) {
+  if (isDef) {
+    kind = 'warn';
+    msg = '🚫 불량 입고 +1 <span style="font-size:.95rem;color:#ff8a8a;font-weight:700">— 이 제품 불량 누적 '+defRecv+'개 (정상 실입고와 분리 기록)</span>';
+  } else if (row.isNew) {
     kind = 'warn';
     msg = '➕ 신규 입고 +'+recv+' <span style="font-size:.95rem;color:var(--mu);font-weight:600">— 품명/컬러/사이즈/원산지를 아래에서 기입하세요</span>';
   } else if (target > 0 && recv > target) {
@@ -1617,7 +1644,7 @@ function handleNormalScan(rowIdx, key) {
     kind = 'warn';
     msg = '⚠️ 예정 수량 0 (초과 +' + recv + ')';
   }
-  updateScanDisplay(kind, msg, row, { target: target, recv: recv, altUsed: altUsed });
+  updateScanDisplay(kind, msg, row, { target: target, recv: recv, defRecv: defRecv, altUsed: altUsed });
 
   renderTable();
   highlightRow(rowIdx);
@@ -1731,6 +1758,10 @@ function updateScanDisplay(kind, msg, row, info) {
   var r = info ? info.recv   : 0;
   document.getElementById('sdQtyExp').textContent  = t;
   document.getElementById('sdQtyRecv').textContent = r;
+  /* 불량 누적 표시 (>0일 때만) */
+  var defEl = document.getElementById('sdQtyDef');
+  var dRecv = info ? (info.defRecv || 0) : 0;
+  if (defEl) { if (dRecv > 0) { defEl.style.display = ''; defEl.textContent = '불량 ' + dRecv; } else { defEl.style.display = 'none'; } }
   var remBlock = document.getElementById('sdQtyRemBlock');
   var remLbl   = document.getElementById('sdQtyRemLbl');
   var remVal   = document.getElementById('sdQtyRem');
@@ -1768,11 +1799,14 @@ function updateBoxCountDisplay() {
     return;
   }
   var items = currentBox.items || [];
-  var total = items.reduce(function(s,it){ return s + (it.count||0); }, 0);
-  var skuCnt = items.length;
+  var defItems = currentBox.defItems || [];
+  var normal = items.reduce(function(s,it){ return s + (it.count||0); }, 0);
+  var defCnt = defItems.reduce(function(s,it){ return s + (it.count||0); }, 0);
+  var total = normal + defCnt;
+  var skuCnt = items.length + defItems.length;
   box.classList.remove('empty');
   num.textContent = total;
-  sub.textContent = total > 0 ? (total + '개 · ' + skuCnt + '종') : '0개';
+  sub.innerHTML = (total > 0 ? (total + '개 · ' + skuCnt + '종') : '0개') + (defCnt > 0 ? ' <span style="color:#ff6b6b;font-weight:800">🚫불량 '+defCnt+'</span>' : '');
 }
 
 /* 큰 디스플레이에서 품명/컬러/사이즈 인라인 편집 시 호출.
@@ -1838,24 +1872,29 @@ function endBox() {
 
 function undoLastScan() {
   if (!lastScans.length) return;
-  var last = lastScans.pop();
+  var last = lastScans[lastScans.length - 1];
   var row = rows[last.rowIdx];
-  if (!row || (row.qtyReceived||0) <= 0) return;
-  row.qtyReceived--;
-  /* 박스에서도 차감 */
+  var isDef = !!last.def;
+  var cur = isDef ? (row && row.qtyDefective || 0) : (row && row.qtyReceived || 0);
+  if (!row || cur <= 0) return;
+  lastScans.pop();
+  if (isDef) row.qtyDefective--; else row.qtyReceived--;
+  /* 박스에서도 차감 — 불량은 defItems, 정상은 items */
   var box = boxes.find(function(b){ return b.id === last.boxId; });
   if (box) {
-    var it = box.items.find(function(x){ return x.rowIdx === last.rowIdx; });
+    var listName = isDef ? 'defItems' : 'items';
+    var list = box[listName] || [];
+    var it = list.find(function(x){ return x.rowIdx === last.rowIdx; });
     if (it) {
       it.count--;
-      if (it.count <= 0) box.items = box.items.filter(function(x){ return x !== it; });
+      if (it.count <= 0) box[listName] = list.filter(function(x){ return x !== it; });
     }
   }
   var exp = +row.vals[COL.EXPECT_QTY] || 0;
   var existing = +row.vals[COL.EXISTING_QTY] || 0;
   var target = exp - existing;
-  var recv = row.qtyReceived;
-  updateScanDisplay('warn', '↶ 마지막 스캔 취소', row, { target: target, recv: recv, altUsed: false });
+  var recv = row.qtyReceived || 0;
+  updateScanDisplay('warn', '↶ 마지막 스캔 취소'+(isDef?' (불량)':''), row, { target: target, recv: recv, defRecv: row.qtyDefective||0, altUsed: false });
   renderTable();
   highlightRow(last.rowIdx);
   updateStats();
@@ -1897,11 +1936,13 @@ function updateStats() {
   var totalSku = rows.length;
   var totalExp = rows.reduce(function(s,r){ return s + (+r.vals[COL.EXPECT_QTY]||0); }, 0);
   var totalRecv = rows.reduce(function(s,r){ return s + (r.qtyReceived||0); }, 0);
+  var totalDef  = rows.reduce(function(s,r){ return s + (r.qtyDefective||0); }, 0);
   var totalExisting = rows.reduce(function(s,r){ return s + (+r.vals[COL.EXISTING_QTY]||0); }, 0);
   var remain = Math.max(0, totalExp - totalExisting - totalRecv);
   document.getElementById('s0').textContent = totalSku;
   document.getElementById('s1').textContent = totalExp;
   document.getElementById('s2').textContent = totalRecv;
+  var s5 = document.getElementById('s5'); if (s5) s5.textContent = totalDef;
   document.getElementById('s3').textContent = remain;
   document.getElementById('s4').textContent = boxes.length;
   renderProgressBar();
@@ -2067,7 +2108,7 @@ function renderTable() {
         '<td><input type="text" class="'+ogCls+'" value="'+escAttr(og)+'" onchange="updateOrigin('+idx+',this.value)" onfocus="this.select()">'+ogMark+'</td>'+
         '<td class="cell-num exp">'+(exp||'')+'</td>'+
         '<td class="cell-num" style="color:var(--mu)">'+(existing||'')+'</td>'+
-        '<td class="cell-num '+(c.kind==='over'?'over':'recv')+'">'+(recv||'')+'</td>'+
+        '<td class="cell-num '+(c.kind==='over'?'over':'recv')+'">'+(recv||'')+((r.qtyDefective||0)>0?' <span style="color:#ff6b6b;font-size:.68rem;font-weight:700">🚫'+r.qtyDefective+'</span>':'')+'</td>'+
         '<td class="cell-num '+(remain<0?'over':(remain>0?'rem':'recv'))+'">'+(target>0?(remain<0?'+'+Math.abs(remain):remain):'')+'</td>'+
       '</tr>';
     activeCnt++;
@@ -2129,11 +2170,45 @@ function renderTable() {
           '<td>'+escH(r.vals[COL.COLOR])+'</td>'+
           '<td>'+escH(r.vals[COL.SIZE])+'</td>'+
           '<td>'+escH(r.vals[COL.ORIGIN])+'</td>'+
-          '<td style="text-align:right"><input type="number" min="0" class="cell-edit recv" style="text-align:right;max-width:72px;color:var(--g);font-weight:700" value="'+it.count+'" onchange="updateDoneCount('+boxJs+','+it.rowIdx+',this.value)" onfocus="this.select()" title="이 박스 입고수량 — 수정 가능"></td>'+
+          '<td style="text-align:right"><input type="number" min="0" class="cell-edit recv" style="text-align:right;max-width:72px;color:var(--g);font-weight:700" value="'+it.count+'" onchange="updateDoneCount('+boxJs+','+it.rowIdx+',0,this.value)" onfocus="this.select()" title="이 박스 입고수량 — 수정 가능"></td>'+
           '<td class="cell-num" style="color:var(--mu)">'+skuRecv+'</td>'+
           '<td class="cell-num exp">'+(exp||'')+'</td>'+
           '<td class="cell-num '+(skuRecv>target?'over':(skuRecv===target?'recv':'rem'))+'" style="text-align:center;font-family:var(--mo);font-size:.74rem">'+statusTxt+'</td>'+
-          '<td style="text-align:center"><button onclick="deleteDoneItem('+boxJs+','+it.rowIdx+')" title="이 줄 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.5);color:var(--r);border-radius:4px;cursor:pointer;font-size:.82rem;font-weight:700;padding:.12rem .5rem;line-height:1.2">✕</button></td>'+
+          '<td style="text-align:center"><button onclick="deleteDoneItem('+boxJs+','+it.rowIdx+',0)" title="이 줄 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.5);color:var(--r);border-radius:4px;cursor:pointer;font-size:.82rem;font-weight:700;padding:.12rem .5rem;line-height:1.2">✕</button></td>'+
+        '</tr>';
+      doneCnt++;
+    });
+    /* 불량(defItems) — 붉은 배경 + 🚫 불량 태그로 별도 행 표시 */
+    (box.defItems||[]).forEach(function(it){
+      if (it.count <= 0) return;
+      var r = rows[it.rowIdx];
+      if (!r) return;
+      if (q) {
+        var hay = [ box.id, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.ALT_BARCODE],
+          r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE] ]
+          .map(function(v){ return v===null||v===undefined?'':String(v).toLowerCase(); }).join('|');
+        if (hay.indexOf(q) === -1) return;
+      }
+      var d = new Date(box.ts);
+      var t = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      var isActiveBox = currentBox && currentBox.id === box.id;
+      var boxLabel = escH(box.id) + (isActiveBox ? ' <span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.25rem">진행</span>' : '');
+      var boxJs = jsStr(box.id);
+      doneHtml +=
+        '<tr style="background:rgba(255,107,107,.07)">'+
+          '<td><span style="font-family:var(--mo);color:var(--y);font-weight:700">'+boxLabel+'</span></td>'+
+          '<td style="color:var(--mu);font-family:var(--mo);font-size:.7rem">'+t+'</td>'+
+          '<td>'+escH(r.vals[COL.CODE])+'</td>'+
+          '<td class="cell-bc">'+escH(r.vals[COL.BARCODE])+'</td>'+
+          '<td class="cell-name" title="'+escAttr(r.vals[COL.NAME])+'">'+escH(r.vals[COL.NAME])+' <span class="tag" style="background:rgba(255,107,107,.18);color:#ff6b6b;font-weight:800">🚫 불량</span></td>'+
+          '<td>'+escH(r.vals[COL.COLOR])+'</td>'+
+          '<td>'+escH(r.vals[COL.SIZE])+'</td>'+
+          '<td>'+escH(r.vals[COL.ORIGIN])+'</td>'+
+          '<td style="text-align:right"><input type="number" min="0" class="cell-edit" style="text-align:right;max-width:72px;color:#ff6b6b;font-weight:700" value="'+it.count+'" onchange="updateDoneCount('+boxJs+','+it.rowIdx+',1,this.value)" onfocus="this.select()" title="이 박스 불량수량 — 수정 가능"></td>'+
+          '<td class="cell-num" style="color:#ff6b6b">'+(r.qtyDefective||0)+'</td>'+
+          '<td class="cell-num" style="color:var(--mu)">—</td>'+
+          '<td class="cell-num" style="text-align:center;color:#ff6b6b;font-family:var(--mo);font-size:.74rem">불량</td>'+
+          '<td style="text-align:center"><button onclick="deleteDoneItem('+boxJs+','+it.rowIdx+',1)" title="이 줄 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.5);color:var(--r);border-radius:4px;cursor:pointer;font-size:.82rem;font-weight:700;padding:.12rem .5rem;line-height:1.2">✕</button></td>'+
         '</tr>';
       doneCnt++;
     });
@@ -2176,15 +2251,17 @@ function jsStr(s) {
 
 /* 처리 완료 영역 — 한 줄(박스×제품)의 입고수량 직접 수정.
    박스 items의 count를 갱신하고 row.qtyReceived를 재계산. 0 입력 시 그 줄 삭제. */
-function updateDoneCount(boxId, rowIdx, val) {
+function updateDoneCount(boxId, rowIdx, def, val) {
   var box = boxes.find(function(b){ return b.id === boxId; });
   if (!box) return;
-  var it = box.items.find(function(x){ return x.rowIdx === rowIdx; });
+  var listName = def ? 'defItems' : 'items';
+  var list = box[listName] || [];
+  var it = list.find(function(x){ return x.rowIdx === rowIdx; });
   if (!it) return;
   var n = parseInt(val, 10);
   if (isNaN(n) || n < 0) n = 0;
   if (n === 0) {
-    box.items = box.items.filter(function(x){ return x !== it; });
+    box[listName] = list.filter(function(x){ return x !== it; });
   } else {
     it.count = n;
   }
@@ -2194,15 +2271,17 @@ function updateDoneCount(boxId, rowIdx, val) {
 }
 
 /* 처리 완료 영역 — 잘못 입력된 한 줄(박스×제품) 삭제 */
-function deleteDoneItem(boxId, rowIdx) {
+function deleteDoneItem(boxId, rowIdx, def) {
   var box = boxes.find(function(b){ return b.id === boxId; });
   if (!box) return;
-  var it = box.items.find(function(x){ return x.rowIdx === rowIdx; });
+  var listName = def ? 'defItems' : 'items';
+  var list = box[listName] || [];
+  var it = list.find(function(x){ return x.rowIdx === rowIdx; });
   if (!it) return;
   var r = rows[rowIdx];
   var nm = r ? (r.vals[COL.NAME] || r.vals[COL.BARCODE] || '') : '';
-  if (!confirm('이 줄을 삭제합니다.\n\n박스: '+boxId+'\n수량: '+it.count+'개'+(nm?'\n품명: '+nm:'')+'\n\n삭제하시겠습니까?')) return;
-  box.items = box.items.filter(function(x){ return x !== it; });
+  if (!confirm('이 줄을 삭제합니다.'+(def?'\n[불량]':'')+'\n\n박스: '+boxId+'\n수량: '+it.count+'개'+(nm?'\n품명: '+nm:'')+'\n\n삭제하시겠습니까?')) return;
+  box[listName] = list.filter(function(x){ return x !== it; });
   recalcRowQtys();
   saveSession();
   renderAll();
@@ -2223,14 +2302,16 @@ function renderBoxList() {
   var html = '';
   /* 완료 목록과 동일한 정렬(마지막 작업 시각 역순) — 두 목록 순서가 어긋나 보이지 않게 */
   boxes.slice().sort(function(a,b){ return boxRecency(b) - boxRecency(a); }).forEach(function(b){
-    var total = b.items.reduce(function(s,i){ return s+i.count; }, 0);
-    var skuCnt = b.items.length;
+    var normal = b.items.reduce(function(s,i){ return s+i.count; }, 0);
+    var defCnt = (b.defItems||[]).reduce(function(s,i){ return s+(i.count||0); }, 0);
+    var total = normal + defCnt;
+    var skuCnt = b.items.length + (b.defItems||[]).length;
     var d = new Date(b.ts);
     var t = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     var isActive = currentBox && currentBox.id === b.id;
     html +=
       '<div class="box-card'+(isActive?' active':'')+'">'+
-        '<div><span class="box-id">'+escH(b.id)+'</span> '+(isActive?'<span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.3rem">진행 중</span>':(b.closed?'':'<span class="tag" style="background:rgba(91,156,246,.15);color:var(--b);margin-left:.3rem">대기</span>'))+'</div>'+
+        '<div><span class="box-id">'+escH(b.id)+'</span> '+(isActive?'<span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.3rem">진행 중</span>':(b.closed?'':'<span class="tag" style="background:rgba(91,156,246,.15);color:var(--b);margin-left:.3rem">대기</span>'))+(defCnt>0?'<span class="tag" style="background:rgba(255,107,107,.18);color:#ff6b6b;margin-left:.3rem">🚫'+defCnt+'</span>':'')+'</div>'+
         '<div class="box-meta">'+t+' · '+skuCnt+' SKU · '+total+'개</div>'+
       '</div>';
   });
@@ -2296,6 +2377,41 @@ function buildModSheet() {
     if (r.originMod) aoa.push([r.r, r.vals[COL.CODE], r.vals[COL.BARCODE], '원산지', r.origOrigin, r.vals[COL.ORIGIN]]);
   });
   return XLSX.utils.aoa_to_sheet(aoa);
+}
+
+/* "불량입고" 시트 — 박스 × SKU 단위 불량 수량 목록 (정상 R열과 완전 분리).
+   불량이 하나도 없으면 null 반환(시트 미생성). */
+function buildDefectSheet() {
+  var aoa = [['박스바코드', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '불량수량']];
+  var any = false;
+  boxes.slice().sort(function(a,b){ return boxRecency(b) - boxRecency(a); }).forEach(function(box){
+    (box.defItems||[]).forEach(function(it){
+      if (!it || it.count <= 0) return;
+      var r = rows[it.rowIdx]; if (!r) return;
+      any = true;
+      var d = new Date(box.ts);
+      var t = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      aoa.push([ box.id, t, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME],
+                 r.vals[COL.COLOR], r.vals[COL.SIZE], r.vals[COL.ORIGIN], it.count ]);
+    });
+  });
+  if (!any) return null;
+  /* SKU별 합계 표 추가 */
+  aoa.push([]);
+  aoa.push(['── SKU별 불량 합계 ──']);
+  aoa.push(['품번', '바코드', '품명', '사이즈', '불량합계']);
+  rows.forEach(function(r){
+    if ((r.qtyDefective||0) > 0) aoa.push([ r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME], r.vals[COL.SIZE], r.qtyDefective ]);
+  });
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
+
+/* 워크북에 불량입고 시트 append (있을 때만) */
+function appendDefectSheet(wb) {
+  var sh = buildDefectSheet();
+  if (!sh) return;
+  if (!wb.SheetNames.includes('불량입고')) XLSX.utils.book_append_sheet(wb, sh, '불량입고');
+  else wb.Sheets['불량입고'] = sh;
 }
 
 /* 전체 다운로드 — 원본 양식 유지. 모든 행(입고된 것 + 미입고).
@@ -2422,10 +2538,12 @@ function downloadAll() {
     } else {
       wb.Sheets['수정사항'] = modSheet;
     }
+    appendDefectSheet(wb);  /* 불량입고 시트 (있을 때만) */
 
     var out = XLSX.write(wb, { bookType:'xlsx', type:'array', cellStyles:true });
     saveBlob(out, '_전체입고결과.xlsx');
-    setMsg('m1','ok','✅ 전체 다운로드 완료 · 수정 셀에 ✎ 표시 + 별도 "수정사항" 시트 포함');
+    var _defN = rows.reduce(function(s,r){ return s+(r.qtyDefective||0); }, 0);
+    setMsg('m1','ok','✅ 전체 다운로드 완료 · 수정 셀에 ✎ 표시 + "수정사항" 시트'+(_defN>0?' + "불량입고" 시트('+_defN+'개)':'')+' 포함');
   } catch(err) {
     console.error(err);
     setMsg('m1','er','❌ 전체 다운로드 실패: '+err.message);
@@ -2519,6 +2637,7 @@ function downloadDone() {
     } else {
       wb.Sheets['수정사항'] = modSheet;
     }
+    appendDefectSheet(wb);  /* 불량입고 시트 (있을 때만) */
 
     var out = XLSX.write(wb, { bookType:'xlsx', type:'array', cellStyles:true });
     saveBlob(out, '_완료건_박스별.xlsx');
@@ -2622,6 +2741,7 @@ function downloadFallback(kind) {
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
   XLSX.utils.book_append_sheet(wb, buildModSheet(), '수정사항');
+  appendDefectSheet(wb);  /* 불량입고 시트 (있을 때만) */
   var out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
   saveBlob(out, fname);
   setMsg('m1','warn','⚠️ 원본 양식 없이 단순 표로 저장됨');
@@ -2777,6 +2897,28 @@ function hidePhotoReqAlert(){
       if (chk) chk.checked = photoReqEnabled;
     }, 100);
   } catch(e){}
+})();
+
+/* ─────────────── 불량입고 모드 ─────────────── */
+function onDefectToggle(checked){
+  defectMode = !!checked;
+  updateDefectBanner();
+}
+function updateDefectBanner(){
+  var b = document.getElementById('defectBanner');
+  if (b) b.style.display = defectMode ? 'block' : 'none';
+  var w = document.getElementById('defectChkWrap');
+  if (w) w.style.boxShadow = defectMode ? '0 0 0 2px rgba(255,107,107,.6)' : 'none';
+}
+/* 안전: 불량모드는 저장하지 않고 항상 '꺼짐'으로 시작 — 켜진 채 방치되어 정상품이
+   불량으로 오기록되는 사고 방지. 작업자가 매번 명시적으로 켜야 함. */
+(function initDefectState(){
+  defectMode = false;
+  setTimeout(function(){
+    var chk = document.getElementById('defectChk');
+    if (chk) chk.checked = false;
+    updateDefectBanner();
+  }, 100);
 })();
 
 /* ─────────────── 소리/음성 알림 (Web Audio + TTS) ─────────────── */
@@ -3724,10 +3866,13 @@ function printFocusCodes() {
 /* boxes를 source of truth로 row.qtyReceived 재계산.
    동기화/병합 직후 호출되어 양쪽 작업 합산 결과를 row에 반영. */
 function recalcRowQtys() {
-  rows.forEach(function(r){ r.qtyReceived = 0; });
+  rows.forEach(function(r){ r.qtyReceived = 0; r.qtyDefective = 0; });
   boxes.forEach(function(b){
     (b.items||[]).forEach(function(it){
       if (rows[it.rowIdx]) rows[it.rowIdx].qtyReceived += (it.count || 0);
+    });
+    (b.defItems||[]).forEach(function(it){
+      if (rows[it.rowIdx]) rows[it.rowIdx].qtyDefective += (it.count || 0);
     });
   });
 }
@@ -3755,6 +3900,20 @@ function mergeBoxes(local, remote) {
         itemMap[it.rowIdx] = loc.items[loc.items.length - 1];
       }
     });
+    /* 불량 트랙(defItems)도 동일 방식으로 병합 (rowIdx 기준 max) */
+    if ((rb.defItems && rb.defItems.length) || (loc.defItems && loc.defItems.length)) {
+      if (!loc.defItems) loc.defItems = [];
+      var defMap = {};
+      loc.defItems.forEach(function(it){ defMap[it.rowIdx] = it; });
+      (rb.defItems||[]).forEach(function(it){
+        if (defMap[it.rowIdx]) {
+          defMap[it.rowIdx].count = Math.max(defMap[it.rowIdx].count||0, it.count||0);
+        } else {
+          loc.defItems.push(JSON.parse(JSON.stringify(it)));
+          defMap[it.rowIdx] = loc.defItems[loc.defItems.length - 1];
+        }
+      });
+    }
     if ((rb.ts||0) > (loc.ts||0)) loc.ts = rb.ts;
     /* 마지막 작업 시각은 더 최근 값 채택 — 완료 목록 정렬의 기준(벽시계라 PC 간 비교 가능) */
     var rl = (rb.lastTs != null ? rb.lastTs : rb.ts) || 0;
