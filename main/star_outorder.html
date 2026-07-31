@@ -4984,6 +4984,29 @@ function cpBuildShipListGroups(){
         status: ''
       };
     });
+    /* 박스번호 기준 그룹 — 같은 박스의 SKU들을 묶어 박스수 셀을 rowspan 으로 병합(가운데 '1').
+       박스번호 1개 = 1박스 → 박스별 '1'의 합계 = 서로 다른 박스번호 수 = 총박스수 로 일치. */
+    function boxSortKey(id){
+      var s = String(id); var m = s.match(/(\d+)\s*$/);
+      return m ? s.slice(0, m.index) + m[1].padStart(12,'0') : s;
+    }
+    var boxes = Object.keys(g.boxSku||{}).sort(function(a,b){
+      var ka=boxSortKey(a), kb=boxSortKey(b); return ka<kb?-1:(ka>kb?1:0);
+    }).map(function(boxId){
+      var skuQ = g.boxSku[boxId];
+      var bItems = Object.keys(skuQ).sort().map(function(bk){
+        var it = g.items[bk] || {}; var meta = stockMeta[normBarcode(bk)] || {};
+        return { barcode:bk, skuId: it.skuId||'', skuName: it.skuName || meta.name || '', qty: skuQ[bk] };
+      });
+      return { boxNo: boxId, boxCount: 1, items: bItems };
+    });
+    /* 박스번호 없는 예외 항목(있다면) — 누락 방지: 박스수 빈칸으로 별도 표기 */
+    var covered = {}; boxes.forEach(function(bx){ bx.items.forEach(function(it){ covered[it.barcode]=true; }); });
+    Object.keys(g.items).sort().forEach(function(bk){
+      if (covered[bk]) return;
+      var it = g.items[bk] || {}; var meta = stockMeta[normBarcode(bk)] || {};
+      boxes.push({ boxNo:'-', boxCount:0, items:[{ barcode:bk, skuId: it.skuId||'', skuName: it.skuName || meta.name || '', qty: it.qty }] });
+    });
     var gk = (g.eta||'') + '|' + (g.center||'');
     var fixedTotal = (workSession.palletTotals||{})[gk];   /* 사용자가 고정 입력한 센터별 총 파렛트수 */
     return {
@@ -4993,7 +5016,8 @@ function cpBuildShipListGroups(){
       boxSum: cpResolveBoxCountForPallet(g.eta, g.center, g.palletNo),  /* 파렛트당 distinct 박스수 (override 반영) */
       totalQty: g.totalQty,
       skuCount: items.length,
-      items: items
+      items: items,
+      boxes: boxes
     };
   });
   /* 정렬: 입고일 → 센터 → 파렛트번호 */
@@ -5012,25 +5036,28 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
   /* 박스 단위 행 — 컬럼 순서: # / SKU ID / 상품명·바코드 / 박스번호(rowspan) / 박스수(rowspan) / 수량 / 비고
    * 박스마다 별도 <tbody> 로 묶어 page-break-inside:avoid 적용 → 박스가 페이지 경계에서 잘리지 않음 */
   var rowCounter = 0;
-  /* SKU(상품줄) 단위 — 박스번호 없이 작업하므로 박스번호 칸은 '-', 박스수는 완료풀에서 합산한 값.
-     각 줄을 별도 <tbody> 로 묶어 page-break-inside:avoid 적용. */
-  var skuTbodies = (g.items||[]).map(function(it){
-    rowCounter++;
-    /* 상품명만 표시 — 바코드/대비바코드/품번/사이즈 줄은 제거해 행을 1줄로(깔끔 + 세로공간 절약) */
-    var nameCell = '<div style="font-weight:700">'+escH(it.skuName||'')+'</div>';
-    var remarkText = it.status || it.expiry || '';
-    /* 박스수: 주력 박스 수(큰 글씨). 0이면 다른 SKU 박스에 혼적(공유)된 것 → '혼적' 표기 */
-    var boxCell = (it.boxCount > 0)
-      ? '<td class="num-emph">'+it.boxCount+'</td>'
-      : '<td><span style="font-size:9pt;color:#555;font-weight:800">혼적</span></td>';
-    return '<tbody><tr>'+
-      '<td>'+rowCounter+'</td>'+
-      '<td style="font-family:monospace">'+escH(it.skuId||'-')+'</td>'+
-      '<td style="text-align:left">'+nameCell+'</td>'+
-      boxCell+
-      '<td class="num-emph">'+it.qty+'</td>'+
-      '<td>'+escH(remarkText)+'</td>'+
-    '</tr></tbody>';
+  /* 박스번호 기준으로 묶어 렌더 — 같은 박스의 SKU 들은 박스수 셀 1개(rowspan)로 병합, 가운데 '1'.
+     박스 1개당 한 <tbody> → page-break-inside:avoid 로 박스가 페이지 경계에서 안 쪼개짐.
+     박스별 '1'의 합계 = 총박스수. */
+  var skuTbodies = (g.boxes||[]).map(function(box){
+    var its = box.items || [];
+    var n = its.length || 1;
+    return '<tbody>' + its.map(function(it, i){
+      rowCounter++;
+      var nameCell = '<div style="font-weight:700">'+escH(it.skuName||'')+'</div>';
+      /* 박스수 셀은 박스의 첫 행에만 (rowspan 으로 병합, 세로 가운데). 박스번호 없는 예외는 빈칸. */
+      var boxCell = (i === 0)
+        ? '<td class="num-emph" rowspan="'+n+'" style="vertical-align:middle">'+(box.boxCount>0 ? box.boxCount : '')+'</td>'
+        : '';
+      return '<tr>'+
+        '<td>'+rowCounter+'</td>'+
+        '<td style="font-family:monospace">'+escH(it.skuId||'-')+'</td>'+
+        '<td style="text-align:left">'+nameCell+'</td>'+
+        boxCell+
+        '<td class="num-emph">'+it.qty+'</td>'+
+        '<td></td>'+
+      '</tr>';
+    }).join('') + '</tbody>';
   }).join('');
 
   return '<section class="ship-page">'+
