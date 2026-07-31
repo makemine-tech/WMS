@@ -4932,7 +4932,7 @@ function cpBuildShipListGroups(){
     var pageKey = eta + '|' + ctr + '|' + pno;
     if (!byPage[pageKey]) byPage[pageKey] = {
       key: pageKey, eta:eta, center:ctr, palletNo:pno,
-      pos: {}, items: {}, totalQty:0, boxSet:{}
+      pos: {}, items: {}, totalQty:0, boxSet:{}, boxSku:{}
     };
     var pg = byPage[pageKey];
     if (r.po) pg.pos[r.po] = true;
@@ -4944,12 +4944,28 @@ function cpBuildShipListGroups(){
     };
     var boxId = s.shipBoxNo || s.srcBoxBarcode || '';
     pg.items[bk].qty += (+s.qty||0);
-    if (boxId) { pg.items[bk].boxSet[boxId] = true; pg.boxSet[boxId] = true; }
+    if (boxId) {
+      pg.items[bk].boxSet[boxId] = true; pg.boxSet[boxId] = true;
+      /* 박스번호별 SKU 수량 누적 — '박스 1개를 주력 SKU에 귀속'해 합계=총박스수 맞추기 위함 */
+      if (!pg.boxSku[boxId]) pg.boxSku[boxId] = {};
+      pg.boxSku[boxId][bk] = (pg.boxSku[boxId][bk]||0) + (+s.qty||0);
+    }
     pg.totalQty += (+s.qty||0);
   });
   /* 객체 → 배열 + 정렬 */
   var groups = Object.keys(byPage).map(function(k){
     var g = byPage[k];
+    /* 박스 1개(박스번호) → 그 박스에서 수량 최다 SKU(주력)에 귀속.
+       이렇게 하면 SKU별 박스수 합계 = 서로 다른 박스번호 수 = 총박스수 로 정확히 일치.
+       (혼적으로 묻어간 SKU 는 박스수 0 — 수량은 그대로 표시) */
+    var ownedBoxes = {};   /* bk → 귀속된 박스 수 */
+    Object.keys(g.boxSku||{}).forEach(function(boxId){
+      var skuQ = g.boxSku[boxId];
+      var mainBk = Object.keys(skuQ).sort(function(a,b){
+        return (skuQ[b]-skuQ[a]) || (a<b?-1:(a>b?1:0));   /* 수량 최다, 동률이면 바코드 오름차순 */
+      })[0];
+      if (mainBk) ownedBoxes[mainBk] = (ownedBoxes[mainBk]||0) + 1;
+    });
     /* SKU(바코드) 단위 행 — 바코드 정렬 */
     var items = Object.keys(g.items).sort().map(function(bk){
       var it = g.items[bk];
@@ -4962,7 +4978,8 @@ function cpBuildShipListGroups(){
         code: meta.code || '',
         size: meta.size || '',
         qty: it.qty,
-        boxCount: Object.keys(it.boxSet||{}).length,   /* 이 SKU가 들어있는 distinct 박스 수 */
+        boxCount: ownedBoxes[bk] || 0,   /* 이 SKU가 '주력'인 박스 수 (합계=총박스수) */
+        sharedBoxCount: Object.keys(it.boxSet||{}).length,  /* 참고: 이 SKU가 걸쳐있는 박스 수(공유 포함) */
         expiry: '',
         status: ''
       };
@@ -5002,11 +5019,15 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
     /* 상품명만 표시 — 바코드/대비바코드/품번/사이즈 줄은 제거해 행을 1줄로(깔끔 + 세로공간 절약) */
     var nameCell = '<div style="font-weight:700">'+escH(it.skuName||'')+'</div>';
     var remarkText = it.status || it.expiry || '';
+    /* 박스수: 주력 박스 수(큰 글씨). 0이면 다른 SKU 박스에 혼적(공유)된 것 → '혼적' 표기 */
+    var boxCell = (it.boxCount > 0)
+      ? '<td class="num-emph">'+it.boxCount+'</td>'
+      : '<td><span style="font-size:9pt;color:#555;font-weight:800">혼적</span></td>';
     return '<tbody><tr>'+
       '<td>'+rowCounter+'</td>'+
       '<td style="font-family:monospace">'+escH(it.skuId||'-')+'</td>'+
       '<td style="text-align:left">'+nameCell+'</td>'+
-      '<td class="num-emph">'+(it.boxCount||0)+'</td>'+
+      boxCell+
       '<td class="num-emph">'+it.qty+'</td>'+
       '<td>'+escH(remarkText)+'</td>'+
     '</tr></tbody>';
