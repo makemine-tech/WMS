@@ -546,6 +546,8 @@ function WHView(p){
   var f2=useState(''),filterSearch=f2[0],setFilterSearch=f2[1];
 
   var toastK=useRef(0);
+  /* ★ 입고 배치 커서 — 선택 슬롯을 넘어선 파렛트는 마지막 배치 위치 다음부터 순서대로 채움 */
+  var fillCursor=useRef(null);
   var wm1=useState(false),whMenuOpen=wm1[0],setWhMenuOpen=wm1[1];
   var o1=useState(false),outSelMode=o1[0],setOutSelMode=o1[1];
   var o2=useState(null),outMeta=o2[0],setOutMeta=o2[1];
@@ -685,9 +687,44 @@ function WHView(p){
     setOutQ(function(q){return q.map(function(it){return mapKey[it.cKey]?Object.assign({},it,{cKey:mapKey[it.cKey]}):it;});});
     setBlock(null);
   }
-  function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};});var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:inForm.exp.trim(),pallets:n,qty:(+inForm.qty||1)*n};dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');}
-  function clickSlot(cKey,sKey){if(locked||didDrag.current)return;if(block){handleBlockClick(cKey);return;}if(pendSet.has(cKey+'||'+sKey))return;var cell=wh.cells[cKey];if(!cell||!cell.type||cell.type==='unused')return;if(!cell.slots)return;var slot=cell.slots[sKey]||null;if(outSelMode){if(!slot)return;var meta=outMeta;onUpdate(function(w){var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});});return;}if(immMode){if(!slot)return;setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});return;}if(moveFrom){if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}if(!slot){withUndo(function(w){w.cells[cKey].slots[sKey]=moveFrom.slot;w.cells[moveFrom.cKey].slots[moveFrom.sKey]=null;return w;});}setMoveFrom(null);return;}if(slot&&selSlots.length===0){setMoveFrom({cKey:cKey,sKey:sKey,slot:slot});return;}if(!slot&&(cell.type==='rack'||cell.type==='shelf')){var idx=selSlots.findIndex(function(s){return s.cKey===cKey&&s.sKey===sKey;});if(idx>=0)setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});else setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});}}
-  function assignIn(item){if(selSlots.length===0){withUndo(function(w){var en=Object.entries(w.cells);for(var i=0;i<en.length;i++){var ck=en[i][0],cc=en[i][1];if(cc.type!=='rack'&&cc.type!=='shelf')continue;if(!cc.slots)continue;var sks=Object.keys(cc.slots);for(var j=0;j<sks.length;j++){if(!cc.slots[sks[j]]){cc.slots[sks[j]]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;}}}return w;});}else{var t=selSlots[0],cc2=wh.cells[t.cKey];if(!cc2||!cc2.slots||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}withUndo(function(w){w.cells[t.cKey].slots[t.sKey]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;});setSelSlots(function(s){return s.slice(1);});}}
+  function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};});var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:inForm.exp.trim(),pallets:n,qty:(+inForm.qty||1)*n};dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});fillCursor.current=null;setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');}
+  function clickSlot(cKey,sKey){if(locked||didDrag.current)return;if(block){handleBlockClick(cKey);return;}if(pendSet.has(cKey+'||'+sKey))return;var cell=wh.cells[cKey];if(!cell||!cell.type||cell.type==='unused')return;if(!cell.slots)return;var slot=cell.slots[sKey]||null;if(outSelMode){if(!slot)return;var meta=outMeta;onUpdate(function(w){var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});});return;}if(immMode){if(!slot)return;setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});return;}if(moveFrom){if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}if(!slot){withUndo(function(w){w.cells[cKey].slots[sKey]=moveFrom.slot;w.cells[moveFrom.cKey].slots[moveFrom.sKey]=null;return w;});}setMoveFrom(null);return;}if(slot&&selSlots.length===0){setMoveFrom({cKey:cKey,sKey:sKey,slot:slot});return;}if(!slot&&(cell.type==='rack'||cell.type==='shelf')){var idx=selSlots.findIndex(function(s){return s.cKey===cKey&&s.sKey===sKey;});if(idx>=0)setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});else{if(selSlots.length===0)fillCursor.current=null;setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});}}}
+  /* 그리드 순서(행→열, 셀 내부 서브슬롯)에서 anchor 다음의 첫 빈 슬롯. anchor=null이면 처음부터 */
+  function findNextEmpty(cells,rows,cols,anchor){
+    var passed=!anchor;
+    for(var r=0;r<rows;r++)for(var c=0;c<cols;c++){
+      var ck=r+'-'+c,cell=cells[ck];
+      if(!cell||(cell.type!=='rack'&&cell.type!=='shelf')||!cell.slots)continue;
+      var dR=cell.divR||1,dC=cell.divC||1;
+      for(var sr=0;sr<dR;sr++)for(var sc=0;sc<dC;sc++){
+        var sk=sr+'-'+sc;
+        if(!passed){if(anchor&&ck===anchor.cKey&&sk===anchor.sKey)passed=true;continue;}
+        if(!cell.slots[sk])return{cKey:ck,sKey:sk};
+      }
+    }
+    return null;
+  }
+  function assignIn(item){
+    if(selSlots.length>0){
+      var t=selSlots[0],cc2=wh.cells[t.cKey];
+      if(!cc2||!cc2.slots||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}
+      withUndo(function(w){w.cells[t.cKey].slots[t.sKey]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;});
+      fillCursor.current={cKey:t.cKey,sKey:t.sKey};
+      setSelSlots(function(s){return s.slice(1);});
+      return;
+    }
+    var anchor=fillCursor.current,placed=null;
+    withUndo(function(w){
+      var found=findNextEmpty(w.cells,w.rows,w.cols,anchor);
+      if(!found&&anchor)found=findNextEmpty(w.cells,w.rows,w.cols,null);
+      if(!found)return w;
+      placed=found;
+      w.cells[found.cKey].slots[found.sKey]=item;
+      w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});
+      return w;
+    });
+    if(placed)fillCursor.current=placed;
+  }
   function dblClick(cKey,sKey){if(locked||didDrag.current||block||pendSet.has(cKey+'||'+sKey))return;var slot=wh.cells[cKey]&&wh.cells[cKey].slots[sKey];if(slot){setCopyN('1');setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}}
   function saveEdit(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=editInfo.data;return w;});setEditInfo(null);}
   /* ★ 슬롯 복사 — 동일 유닛을 입고대기 목록에 N팔 만큼 추가 (입고로 기록) */
@@ -702,14 +739,14 @@ function WHView(p){
     var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:exp,pallets:n,qty:qEach*n};
     dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});
     withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});
-    setEditInfo(null);setTab('ops');
+    fillCursor.current=null;setEditInfo(null);setTab('ops');
   }
   /* ★ 입고대기 일괄삭제 — 배치되지 않은 남은 목록 비우기 */
   function clearInQ(){
     if(!wh.inQ.length)return;
     if(!confirm('입고대기 '+wh.inQ.length+'건을 모두 삭제할까요?\n\n배치되지 않은 남은 목록이 사라집니다. (↩ 되돌리기 가능)'))return;
     withUndo(function(w){return Object.assign({},w,{inQ:[]});});
-    setSelSlots([]);
+    setSelSlots([]);fillCursor.current=null;
   }
   /* ★ 현황 일괄수정 — 한 상품의 모든 파렛트 상품명/유통기한을 한 번에 변경 (같은 이름이면 통합) */
   function openProdEdit(p2){setProdEdit({name:p2.name,newName:p2.name,exps:(p2.exps||[]).map(function(e){return{exp:e.exp||'',newExp:e.exp||'',cnt:e.cnt,qty:e.totalQty};})});}
