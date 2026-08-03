@@ -558,6 +558,9 @@ function WHView(p){
   var tl1=useState([]),_txLog=tl1[0],_setTxLog=tl1[1];
   /* ★ 현황 일괄수정(상품명·유통기한) 모달 */
   var pe1=useState(null),prodEdit=pe1[0],setProdEdit=pe1[1];
+  /* ★ 창고명 수정 / 그리드 확장(행·열 추가) */
+  var wn1=useState(wh.name),whNameEdit=wn1[0],setWhNameEdit=wn1[1];
+  var xg1=useState('1'),expandN=xg1[0],setExpandN=xg1[1];
 
   var pendSet=new Set();
   pendOut.forEach(function(x){pendSet.add(x.cKey+'||'+x.sKey);});
@@ -606,6 +609,29 @@ function WHView(p){
   function chgClr(name,clr){onUpdate(function(w){return Object.assign({},w,{pColors:setClrMap(w.pColors,name,clr)});});setColorPick(null);}
   function toggleSel(key){if(didDrag.current)return;setSel(function(s){var n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});}
   function applySetup(){if(!sel.size)return;withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c);});return w;});setSel(new Set());}
+  /* ★ 창고명 저장 */
+  function saveWhName(){var nm=(whNameEdit||'').trim();if(!nm){alert('창고 이름을 입력하세요');return;}onUpdate(function(w){return Object.assign({},w,{name:nm});});toastK.current++;setSaveFlash(true);setTimeout(function(){setSaveFlash(false);},1600);}
+  /* ★ 그리드 확장 — 상/하/좌/우로 n줄 추가 (기존 유닛 내용 유지, 좌·상 추가 시 좌표 시프트) */
+  function expandGrid(side,n){
+    n=Math.min(Math.max(1,parseInt(n,10)||1),30);
+    var rows=wh.rows,cols=wh.cols;
+    var willR=rows+((side==='top'||side==='bottom')?n:0);
+    var willC=cols+((side==='left'||side==='right')?n:0);
+    if(willR>60||willC>60){alert('그리드는 최대 60행·60열까지 확장할 수 있습니다.');return;}
+    var dr=side==='top'?n:0, dc=side==='left'?n:0;
+    withUndo(function(w){
+      var nrows=w.rows+((side==='top'||side==='bottom')?n:0);
+      var ncols=w.cols+((side==='left'||side==='right')?n:0);
+      var nc={};
+      for(var r=0;r<nrows;r++)for(var c=0;c<ncols;c++)nc[r+'-'+c]={type:null,divR:1,divC:1,slots:{'0-0':null}};
+      var old=w.cells||{};
+      for(var r2=0;r2<w.rows;r2++)for(var c2=0;c2<w.cols;c2++){var oc=old[r2+'-'+c2];if(oc)nc[(r2+dr)+'-'+(c2+dc)]=oc;}
+      var np=(w.pendOut||[]).map(function(p){var pr=String(p.cKey||'').split('-');return Object.assign({},p,{cKey:((+pr[0]||0)+dr)+'-'+((+pr[1]||0)+dc)});});
+      return Object.assign({},w,{rows:nrows,cols:ncols,cells:nc,pendOut:np});
+    });
+    if(dr||dc){setOutQ(function(q){return q.map(function(it){var pr=String(it.cKey||'').split('-');return Object.assign({},it,{cKey:((+pr[0]||0)+dr)+'-'+((+pr[1]||0)+dc)});});});}
+    setSel(new Set());setSelSlots([]);setMoveFrom(null);
+  }
   function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};});var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:inForm.exp.trim(),pallets:n,qty:(+inForm.qty||1)*n};dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');}
   function clickSlot(cKey,sKey){if(locked||didDrag.current)return;if(pendSet.has(cKey+'||'+sKey))return;var cell=wh.cells[cKey];if(!cell||!cell.type||cell.type==='unused')return;if(!cell.slots)return;var slot=cell.slots[sKey]||null;if(outSelMode){if(!slot)return;var meta=outMeta;onUpdate(function(w){var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});});return;}if(immMode){if(!slot)return;setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});return;}if(moveFrom){if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}if(!slot){withUndo(function(w){w.cells[cKey].slots[sKey]=moveFrom.slot;w.cells[moveFrom.cKey].slots[moveFrom.sKey]=null;return w;});}setMoveFrom(null);return;}if(slot&&selSlots.length===0){setMoveFrom({cKey:cKey,sKey:sKey,slot:slot});return;}if(!slot&&(cell.type==='rack'||cell.type==='shelf')){var idx=selSlots.findIndex(function(s){return s.cKey===cKey&&s.sKey===sKey;});if(idx>=0)setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});else setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});}}
   function assignIn(item){if(selSlots.length===0){withUndo(function(w){var en=Object.entries(w.cells);for(var i=0;i<en.length;i++){var ck=en[i][0],cc=en[i][1];if(cc.type!=='rack'&&cc.type!=='shelf')continue;if(!cc.slots)continue;var sks=Object.keys(cc.slots);for(var j=0;j<sks.length;j++){if(!cc.slots[sks[j]]){cc.slots[sks[j]]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;}}}return w;});}else{var t=selSlots[0],cc2=wh.cells[t.cKey];if(!cc2||!cc2.slots||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}withUndo(function(w){w.cells[t.cKey].slots[t.sKey]=item;w.inQ=w.inQ.filter(function(x){return x.id!==item.id;});return w;});setSelSlots(function(s){return s.slice(1);});}}
@@ -903,6 +929,17 @@ function WHView(p){
     })(),
 
     tab==='setup'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
+      /* ★ 창고명 수정 · 그리드 확장 바 */
+      h('div',{style:{background:'rgba(15,23,42,.6)',borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:8,alignItems:'center',overflowX:'auto',flexShrink:0}},
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0,fontWeight:600}},'창고명'),
+        h('input',{value:whNameEdit,onChange:function(e){setWhNameEdit(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')saveWhName();},placeholder:'창고 이름',style:{background:BG,border:'1px solid '+BDR,borderRadius:6,padding:'5px 9px',color:TX,fontSize:13,outline:'none',width:140,flexShrink:0}}),
+        h('button',{style:S('#3B82F6','#fff',{padding:'6px 11px',fontSize:12,borderRadius:6,flexShrink:0}),onClick:saveWhName},'이름저장'),
+        h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 4px'}}),
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0,fontWeight:600}},'확장'),
+        h('input',{type:'number',min:1,max:30,value:expandN,onChange:function(e){setExpandN(e.target.value);},style:{background:BG,border:'1px solid '+BDR,borderRadius:6,padding:'5px 6px',color:TX,fontSize:13,outline:'none',width:46,flexShrink:0,textAlign:'center'}}),
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0}},'줄'),
+        [['top','▲ 위쪽'],['bottom','▼ 아래쪽'],['left','◀ 왼쪽'],['right','▶ 오른쪽']].map(function(x){return h('button',{key:x[0],style:S('rgba(16,185,129,.14)','#34D399',{padding:'6px 10px',fontSize:12,borderRadius:6,flexShrink:0,border:'1px solid rgba(16,185,129,.3)'}),onClick:(function(side){return function(){expandGrid(side,expandN);};})(x[0])},x[1]);}),
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0,marginLeft:2}},wh.rows+'×'+wh.cols)),
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:0,alignItems:'center',overflowX:'auto',flexShrink:0}},
         h('div',{style:{flexShrink:0,paddingRight:12}},h(DivPicker,{val:sDiv,set:setSDiv})),
         h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 10px'}}),
