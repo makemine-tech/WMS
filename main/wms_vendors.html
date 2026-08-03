@@ -48,7 +48,10 @@ h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
 .vmail-add button{background:rgba(96,165,250,.15);color:#93C5FD;border:1px solid rgba(96,165,250,.3);border-radius:7px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 .prow{display:flex;align-items:center;gap:10px;padding:9px 13px;background:rgba(255,255,255,.03);border:1px solid #334155;border-radius:9px;margin-bottom:6px;}
 .prow.unlinked{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.06);}
-.prow .pname{flex:1;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.prow .pname{flex:1;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;border-radius:6px;padding:2px 6px;margin:-2px -6px;transition:background .12s;}
+.prow .pname:hover{background:rgba(96,165,250,.14);}
+.rename-hint{font-size:11px;color:#60A5FA;opacity:.55;margin-left:5px;}
+.prow .pname:hover .rename-hint{opacity:1;}
 .prow .pstale{font-size:10px;color:#64748B;font-weight:500;margin-left:6px;}
 .pzero{display:inline-block;font-size:10px;font-weight:700;color:#FCA5A5;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:1px 7px;margin-left:8px;vertical-align:middle;}
 .sel{background:#0F172A;border:1px solid #334155;border-radius:7px;padding:7px 9px;color:#E2E8F0;font-size:12px;outline:none;font-family:inherit;flex-shrink:0;max-width:170px;}
@@ -200,7 +203,7 @@ function render(user){
     var sel=(_map[k]&&_map[k].vendorId)||'';
     var zero=(_products.indexOf(nm)<0) ? '<span class="pzero">재고 0</span>' : '';
     return '<div class="prow'+(isUnlinked?' unlinked':'')+'">'
-      +'<div class="pname">'+esc(nm)+zero+'</div>'
+      +'<div class="pname" title="클릭 → 상품명 일괄 변경/통합" onclick="renameProduct(\''+encodeURIComponent(nm)+'\')">'+esc(nm)+'<span class="rename-hint">✎ 이름수정</span>'+zero+'</div>'
       +'<select class="sel'+(sel?'':' none')+'" onchange="linkProduct(\''+encodeURIComponent(nm)+'\',this.value)">'
       +vendorOptions(sel)+'</select></div>';
   }
@@ -381,6 +384,68 @@ function linkProduct(encName, vendorId){
   }
 }
 window.linkProduct=linkProduct;
+
+/* ── 상품명 일괄 변경/통합 — 그룹 내 모든 창고의 재고·입고대기·색상·업체연결을 함께 변경 ── */
+function renameProduct(encName){
+  var oldName=decodeURIComponent(encName);
+  var input=prompt('상품명 일괄 변경\n\n"'+oldName+'"\n→ 새 상품명을 입력하세요.\n\n· 그룹 내 모든 창고의 재고·입고대기·업체연결이 함께 변경됩니다.\n· 같은 이름이 이미 있으면 하나로 통합됩니다.', oldName);
+  if(input==null)return;
+  var newName=input.trim();
+  if(!newName){toast('상품명을 입력하세요');return;}
+  if(newName===oldName)return;
+  var merge=(_products.indexOf(newName)>=0)||Object.keys(_map).some(function(k){return _map[k]&&_map[k].name===newName;});
+  var msg='"'+oldName+'"  →  "'+newName+'"\n\n그룹 내 모든 창고에서 변경합니다.';
+  if(merge)msg+='\n\n⚠️ 기존 "'+newName+'" 와(과) 하나로 통합됩니다.';
+  msg+='\n\n계속할까요?';
+  if(!confirm(msg))return;
+  doRename(oldName,newName);
+}
+window.renameProduct=renameProduct;
+
+function doRename(oldName,newName){
+  toast('일괄 변경 중...');
+  db.ref('groups/'+GID).get().then(function(gs){
+    var wids=gs.exists()?Object.keys(gs.val()).filter(function(k){return k!=='_init';}):[];
+    return Promise.all(wids.map(function(wid){
+      return db.ref('warehouses/'+wid).get().then(function(s){return {wid:wid,wh:s.val()};});
+    }));
+  }).then(function(list){
+    var updates={};
+    list.forEach(function(item){
+      var wid=item.wid, wh=item.wh; if(!wh)return;
+      var cells=wh.cells||{};
+      Object.keys(cells).forEach(function(ck){
+        var c=cells[ck]; if(!c||!c.slots)return;
+        Object.keys(c.slots).forEach(function(sk){
+          var slot=c.slots[sk];
+          if(slot&&slot.name===oldName) updates['warehouses/'+wid+'/cells/'+ck+'/slots/'+sk+'/name']=newName;
+        });
+      });
+      if(Array.isArray(wh.inQ)){
+        var changed=false;
+        var nq=wh.inQ.map(function(it){if(it&&it.name===oldName){changed=true;return Object.assign({},it,{name:newName});}return it;});
+        if(changed)updates['warehouses/'+wid+'/inQ']=nq;
+      }
+      if(wh.pColors&&wh.pColors[oldName]!==undefined){
+        var npc=Object.assign({},wh.pColors);
+        var clr=npc[oldName]; delete npc[oldName];
+        if(npc[newName]===undefined)npc[newName]=clr;
+        updates['warehouses/'+wid+'/pColors']=npc;
+      }
+    });
+    var oldK=keyOf(oldName), newK=keyOf(newName);
+    if(_map[oldK]){
+      var vId=_map[oldK].vendorId;
+      updates['vendorConfig/'+GID+'/map/'+oldK]=null;
+      if(!(_map[newK]&&_map[newK].vendorId)) updates['vendorConfig/'+GID+'/map/'+newK]={name:newName, vendorId:vId};
+    }
+    if(Object.keys(updates).length===0){toast('변경할 재고/연결이 없습니다');return;}
+    return db.ref().update(updates).then(function(){
+      return loadAll().then(function(){ renderReload(); toast('일괄 변경 완료 · '+newName); });
+    });
+  }).catch(function(e){toast('변경 실패: '+e.message);});
+}
+window.doRename=doRename;
 
 var _user=null;
 function renderReload(){ if(_user) render(_user); }
