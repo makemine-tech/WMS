@@ -2509,6 +2509,34 @@ function deleteDoneItem(boxId, rowIdx, def) {
   renderAll();
 }
 
+/* 박스 통째 삭제 — 테스트/오입력 박스를 기록에서 완전히 제거.
+   mergeBoxes는 박스 ID union이라 로컬만 지우면 다음 동기화에서 되살아남 →
+   클라우드도 즉시 현재(삭제된) 상태로 덮어써 재생성을 막는다. */
+function deleteBox(boxId) {
+  var box = boxes.find(function(b){ return b.id === boxId; });
+  if (!box) return;
+  var normal = (box.items||[]).reduce(function(s,i){ return s+(i.count||0); }, 0);
+  var defCnt = (box.defItems||[]).reduce(function(s,i){ return s+(i.count||0); }, 0);
+  var total = normal + defCnt;
+  var msg = '박스 "'+boxId+'" 기록을 통째로 삭제합니다.';
+  if (total > 0) msg += '\n\n이 박스에 담긴 실입고 '+total+'개'+(defCnt>0?' (불량 '+defCnt+' 포함)':'')+'가 함께 사라지고, 해당 SKU 실입고 수량에서 차감됩니다.';
+  if (window.WMSync && WMSync.hasGroup()) msg += '\n클라우드(같은 그룹 다른 PC)에서도 삭제됩니다.';
+  msg += '\n\n삭제하시겠습니까?';
+  if (!confirm(msg)) return;
+
+  boxes = boxes.filter(function(b){ return b.id !== boxId; });
+  if (currentBox && currentBox.id === boxId) currentBox = null;
+  /* 이 박스에 속한 최근 스캔 로그도 함께 정리 */
+  lastScans = (lastScans||[]).filter(function(s){ return s.boxId !== boxId; });
+  recalcRowQtys();
+  saveSession();
+  renderAll();
+  /* 클라우드 즉시 반영 — union 병합으로 되살아나지 않도록 삭제 상태로 덮어씀 */
+  if (window.WMSync && WMSync.hasGroup() && WMSync.getFileKey()) {
+    try { WMSync.pushNow({ payload: buildSessionData() }); } catch(e){ console.warn('박스 삭제 클라우드 반영 실패:', e); }
+  }
+}
+
 /* ─────────────── 박스 목록 ─────────────── */
 function toggleBoxList() {
   var l = document.getElementById('boxList');
@@ -2533,8 +2561,11 @@ function renderBoxList() {
     var isActive = currentBox && currentBox.id === b.id;
     html +=
       '<div class="box-card'+(isActive?' active':'')+'">'+
-        '<div><span class="box-id">'+escH(b.id)+'</span> '+(isActive?'<span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.3rem">진행 중</span>':(b.closed?'':'<span class="tag" style="background:rgba(91,156,246,.15);color:var(--b);margin-left:.3rem">대기</span>'))+(defCnt>0?'<span class="tag" style="background:rgba(255,107,107,.18);color:#ff6b6b;margin-left:.3rem">🚫'+defCnt+'</span>':'')+'</div>'+
-        '<div class="box-meta">'+t+' · '+skuCnt+' SKU · '+total+'개</div>'+
+        '<div style="flex:1;min-width:0;display:flex;justify-content:space-between;align-items:center;gap:.5rem">'+
+          '<div><span class="box-id">'+escH(b.id)+'</span> '+(isActive?'<span class="tag" style="background:rgba(74,240,168,.18);color:var(--g);margin-left:.3rem">진행 중</span>':(b.closed?'':'<span class="tag" style="background:rgba(91,156,246,.15);color:var(--b);margin-left:.3rem">대기</span>'))+(defCnt>0?'<span class="tag" style="background:rgba(255,107,107,.18);color:#ff6b6b;margin-left:.3rem">🚫'+defCnt+'</span>':'')+'</div>'+
+          '<div class="box-meta">'+t+' · '+skuCnt+' SKU · '+total+'개</div>'+
+        '</div>'+
+        '<button onclick="event.stopPropagation();deleteBox(\''+escAttr(b.id)+'\')" title="이 박스 기록을 통째로 삭제" style="flex:none;background:transparent;border:1px solid rgba(240,88,88,.35);border-radius:6px;padding:.15rem .5rem;color:rgba(240,88,88,.8);cursor:pointer;font-size:.9rem;line-height:1;transition:background .15s,color .15s" onmouseover="this.style.background=\'rgba(240,88,88,.12)\';this.style.color=\'var(--r)\'" onmouseout="this.style.background=\'transparent\';this.style.color=\'rgba(240,88,88,.8)\'">🗑</button>'+
       '</div>';
   });
   list.innerHTML = html || '<div style="text-align:center;padding:.6rem;color:var(--mu);font-size:.75rem">아직 박스 없음</div>';
