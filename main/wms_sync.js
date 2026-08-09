@@ -178,7 +178,8 @@
     return db.ref('wms_sync/groups/' + currentGroupId + '/' + appName + '/files').once('value').then(function(s){
       var v = s.val(); if (!v) return [];
       return Object.keys(v).map(function(k){
-        return { fileKey: k, ts: +(v[k].ts||0), fileName: (v[k].payload && v[k].payload.fileName) || k };
+        var p = v[k].payload || {};
+        return { fileKey: k, ts: +(v[k].ts||0), fileName: p.fileName || k, jobName: p.jobName || p.fileName || k };
       }).sort(function(a,b){ return b.ts - a.ts; });
     });
   }

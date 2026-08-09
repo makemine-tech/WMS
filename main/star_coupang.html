@@ -330,22 +330,38 @@ h1 em{color:var(--g);font-style:normal}
   <div id="cloudFilesSection" style="display:none;margin-bottom:1.2rem;border:1.5px solid rgba(74,240,168,.35);border-radius:10px;padding:.85rem 1rem;background:linear-gradient(180deg,rgba(74,240,168,.06),rgba(74,240,168,.01))">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem;flex-wrap:wrap">
       <div>
-        <div style="font-weight:900;font-size:1.05rem;color:var(--g)">☁️ 클라우드에 저장된 작업 <span id="cloudFilesCnt" style="font-family:var(--mo);font-size:.78rem;color:var(--mu);font-weight:500;margin-left:.2rem"></span></div>
-        <div style="font-size:.72rem;color:var(--mu);margin-top:.15rem">같은 그룹 멤버가 다른 PC에서 작업 중인 파일. 클릭하면 그 시점부터 이어서 작업 가능합니다.</div>
+        <div style="font-weight:900;font-size:1.05rem;color:var(--g)">☁️ 입고 작업 관리 <span id="cloudFilesCnt" style="font-family:var(--mo);font-size:.78rem;color:var(--mu);font-weight:500;margin-left:.2rem"></span></div>
+        <div style="font-size:.72rem;color:var(--mu);margin-top:.15rem">작업군별 진행 상태. 카드를 클릭하면 그 시점부터 이어서 작업합니다. 새 작업은 아래에서 파일을 올리고 이름을 지정하세요.</div>
       </div>
       <button onclick="loadCloudFiles()" style="font-size:.7rem;padding:.32rem .7rem;border-radius:5px;border:1px solid var(--br);background:transparent;color:var(--mu);cursor:pointer;font-family:var(--mo)">↻ 새로고침</button>
     </div>
     <div id="cloudFilesList" style="display:grid;gap:.4rem"></div>
   </div>
 
-  <div class="pg-t">입고 예정 엑셀 업로드</div>
-  <div class="pg-s">쿠팡 입고 예정 양식 (.xlsx) 드래그 또는 클릭. 클라우드에 같은 파일명 작업이 있으면 자동 이어받기.</div>
+  <div class="pg-t">새 입고 작업 시작</div>
+  <div class="pg-s">쿠팡 입고 예정 양식 (.xlsx) 드래그 또는 클릭 → 이어서 <b>작업군 이름</b>을 지정합니다. 같은 이름의 작업이 있으면 자동 이어받기.</div>
 
   <div class="dz" id="dz">
-    <input type="file" id="fi" accept=".xlsx,.xls" onchange="handleFile(this.files[0])">
+    <input type="file" id="fi" accept=".xlsx,.xls" onchange="pickFile(this.files[0])">
     <span class="dz-i">📊</span>
     <div class="dz-m">.xlsx 파일을 여기에 드롭하세요</div>
     <div class="dz-s">또는 클릭해서 선택</div>
+  </div>
+
+  <!-- 작업군 이름 지정 패널 (파일 선택 후 노출) -->
+  <div id="jobNamePanel" style="display:none;margin-top:1rem;border:1.5px solid var(--g);border-radius:10px;padding:1rem 1.1rem;background:linear-gradient(180deg,rgba(74,240,168,.08),rgba(74,240,168,.01))">
+    <div style="font-weight:900;font-size:1.02rem;color:var(--g);margin-bottom:.25rem">🏷️ 이 입고 작업의 이름을 지어주세요</div>
+    <div style="font-size:.75rem;color:var(--mu);margin-bottom:.6rem">예: <b>아디다스 8/9</b> · <b>뉴발란스 1차</b> · <b>타미힐피거</b> — 여러 분류를 동시에 관리할 때 서로 구분됩니다.</div>
+    <div id="jobNameFileLbl" style="font-size:.72rem;color:var(--mu);font-family:var(--mo);margin-bottom:.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+    <input id="jobNameInput" type="text" placeholder="작업군 이름" maxlength="60" autocomplete="off"
+      oninput="checkJobNameDup()"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();confirmJobName();}"
+      style="width:100%;box-sizing:border-box;padding:.65rem .8rem;border:1px solid var(--br);border-radius:8px;background:var(--s1);color:var(--tx);font-size:1.02rem;font-family:var(--mo)">
+    <div id="jobNameHint" style="font-size:.74rem;margin-top:.45rem;min-height:1.1em"></div>
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-g" onclick="confirmJobName()" style="flex:1">✅ 이 이름으로 시작</button>
+      <button class="btn btn-s" onclick="cancelJobName()" style="padding:.5rem 1.1rem">취소</button>
+    </div>
   </div>
 
   <div id="m0" class="msg" style="display:none"></div>
@@ -734,15 +750,14 @@ function wmsHandleAuthState(state) {
   var banner = document.getElementById('restoreBanner');
   if (banner) banner.style.display = 'none';
 
-  /* 현재 파일이 있으면 클라우드 ref 부착 */
-  if (typeof workbookFile !== 'undefined' && workbookFile) {
-    WMSync.setFileKey(workbookFile.name);
-  } else if (typeof loadSessionData === 'function') {
+  /* 현재 작업이 있으면 클라우드 ref 부착 — 작업군 이름 우선(없으면 파일명) */
+  if (typeof loadSessionData === 'function') {
     var data = loadSessionData();
-    if (data && data.fileName) {
-      WMSync.setFileKey(data.fileName);
+    if (data && (data.jobName || data.fileName)) {
+      jobName = data.jobName || data.fileName;
     }
   }
+  applyJobKey();
   /* 클라우드의 진행 중 작업 목록 로드 (STEP 1에 표시) */
   loadCloudFiles();
   /* 동기화 행 표시 — 그룹 멤버에게만 */
@@ -791,6 +806,7 @@ function loadCloudFiles() {
           }, 0);
           res({
             fileKey: f.fileKey,
+            jobName: p.jobName || p.fileName || f.fileName,
             fileName: p.fileName || f.fileName,
             ts: v.ts || f.ts,
             by: v._by || null,
@@ -807,6 +823,41 @@ function loadCloudFiles() {
   });
 }
 
+/* 작업 상태 분류: 시작 전(todo) / 작업중(active) / 완료(done) */
+function classifyJob(f) {
+  var progress = f.target ? Math.min(100, Math.round(f.recv / f.target * 100)) : (f.recv > 0 ? null : 0);
+  if (!f.recv) return { key: 'todo', progress: 0 };
+  if (progress !== null && progress >= 100) return { key: 'done', progress: 100 };
+  return { key: 'active', progress: progress };
+}
+
+/* 카드 1개 HTML — 클릭 시 이어받기, 별도 🗑 삭제 */
+function cloudFileCard(f) {
+  var d = new Date(f.ts);
+  var timeStr = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  var byStr = f.by ? ' · '+escH(f.by) : '';
+  var st = classifyJob(f);
+  var pctColor = st.key==='done' ? 'var(--g)' : (st.key==='active' ? 'var(--b)' : 'var(--mu)');
+  var pctText  = st.progress === null ? '작업중' : (st.progress + '%');
+  var jn = f.jobName || f.fileName;
+  /* 원본 파일명이 작업군 이름과 다르면 부제로 표시 */
+  var subFile = (f.fileName && f.fileName !== jn) ? '<div style="font-size:.66rem;color:var(--mu);margin-top:.1rem;font-family:var(--mo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 '+escH(f.fileName)+'</div>' : '';
+  return '<div style="display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:stretch">'+
+    '<button onclick="loadCloudFile(\''+escAttr(f.fileKey)+'\')" style="text-align:left;background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.7rem .85rem;color:var(--tx);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:center;transition:border-color .15s,background .15s;min-width:0" onmouseover="this.style.borderColor=\'var(--g)\';this.style.background=\'rgba(74,240,168,.04)\'" onmouseout="this.style.borderColor=\'var(--br)\';this.style.background=\'var(--s1)\'">'+
+      '<div style="min-width:0">'+
+        '<div style="font-weight:800;font-size:.98rem;font-family:var(--mo);color:var(--y);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(jn)+'</div>'+
+        subFile+
+        '<div style="font-size:.7rem;color:var(--mu);margin-top:.18rem;font-family:var(--mo)">'+timeStr+byStr+' · 행 '+f.rows+' · 실입고 '+f.recv+' · 박스 '+f.boxes+'</div>'+
+      '</div>'+
+      '<div style="text-align:right">'+
+        '<div style="font-family:var(--mo);font-size:1.02rem;font-weight:900;color:'+pctColor+';line-height:1">'+pctText+'</div>'+
+        '<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">이어받기 →</div>'+
+      '</div>'+
+    '</button>'+
+    '<button onclick="deleteCloudFile(\''+escAttr(f.fileKey)+'\',\''+escAttr(jn)+'\')" title="이 작업 데이터를 클라우드에서 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.35);border-radius:8px;padding:0 .8rem;color:rgba(240,88,88,.8);cursor:pointer;font-size:1.05rem;font-weight:700;transition:background .15s,color .15s" onmouseover="this.style.background=\'rgba(240,88,88,.12)\';this.style.color=\'var(--r)\'" onmouseout="this.style.background=\'transparent\';this.style.color=\'rgba(240,88,88,.8)\'">🗑</button>'+
+  '</div>';
+}
+
 function renderCloudFiles(files) {
   var section = document.getElementById('cloudFilesSection');
   var list = document.getElementById('cloudFilesList');
@@ -815,27 +866,26 @@ function renderCloudFiles(files) {
   if (!files || !files.length) { section.style.display = 'none'; return; }
   section.style.display = '';
   cnt.textContent = '· ' + files.length + '개';
-  list.innerHTML = files.map(function(f){
-    var d = new Date(f.ts);
-    var timeStr = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-    var byStr = f.by ? ' · '+escH(f.by) : '';
-    var progress = f.target ? Math.min(100, Math.round(f.recv / f.target * 100)) : 0;
-    return '<div style="display:grid;grid-template-columns:1fr auto auto;gap:.4rem;align-items:stretch">'+
-      /* 카드 본문 (클릭 = 이어받기) */
-      '<button onclick="loadCloudFile(\''+escAttr(f.fileKey)+'\')" style="text-align:left;background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.7rem .85rem;color:var(--tx);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:center;transition:border-color .15s,background .15s;min-width:0" onmouseover="this.style.borderColor=\'var(--g)\';this.style.background=\'rgba(74,240,168,.04)\'" onmouseout="this.style.borderColor=\'var(--br)\';this.style.background=\'var(--s1)\'">'+
-        '<div style="min-width:0">'+
-          '<div style="font-weight:800;font-size:.95rem;font-family:var(--mo);color:var(--y);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(f.fileName)+'</div>'+
-          '<div style="font-size:.7rem;color:var(--mu);margin-top:.18rem;font-family:var(--mo)">'+timeStr+byStr+' · 행 '+f.rows+' · 실입고 '+f.recv+' · 박스 '+f.boxes+'</div>'+
-        '</div>'+
-        '<div style="text-align:right">'+
-          '<div style="font-family:var(--mo);font-size:1.05rem;font-weight:900;color:'+(progress>=100?'var(--g)':(progress>0?'var(--b)':'var(--mu)'))+';line-height:1">'+progress+'%</div>'+
-          '<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">이어받기 →</div>'+
-        '</div>'+
-      '</button>'+
-      /* 삭제 버튼 (별도 — 카드 클릭과 분리) */
-      '<button onclick="deleteCloudFile(\''+escAttr(f.fileKey)+'\',\''+escAttr(f.fileName)+'\')" title="이 파일의 클라우드 작업 데이터 삭제" style="background:transparent;border:1px solid rgba(240,88,88,.35);border-radius:8px;padding:0 .8rem;color:rgba(240,88,88,.8);cursor:pointer;font-size:1.05rem;font-weight:700;transition:background .15s,color .15s" onmouseover="this.style.background=\'rgba(240,88,88,.12)\';this.style.color=\'var(--r)\'" onmouseout="this.style.background=\'transparent\';this.style.color=\'rgba(240,88,88,.8)\'">🗑</button>'+
-    '</div>';
-  }).join('');
+
+  /* 상태별 버킷 (각 그룹 내 최신순은 loadCloudFiles 정렬 유지) */
+  var groups = { active: [], todo: [], done: [] };
+  files.forEach(function(f){ groups[classifyJob(f).key].push(f); });
+
+  var defs = [
+    { key: 'active', label: '🟡 작업중', color: 'var(--b)' },
+    { key: 'todo',   label: '⚪ 시작 전', color: 'var(--mu)' },
+    { key: 'done',   label: '🟢 완료',   color: 'var(--g)' }
+  ];
+  var html = '';
+  defs.forEach(function(g){
+    var arr = groups[g.key];
+    if (!arr.length) return;
+    html += '<div style="display:flex;align-items:center;gap:.4rem;margin:.35rem 0 .1rem;font-size:.74rem;font-weight:800;color:'+g.color+';font-family:var(--mo)">'+
+      g.label+' <span style="color:var(--mu);font-weight:500">'+arr.length+'</span>'+
+      '<span style="flex:1;height:1px;background:var(--br)"></span></div>';
+    html += arr.map(cloudFileCard).join('');
+  });
+  list.innerHTML = html;
 }
 
 /* 클라우드 파일 삭제 — 그룹 내 해당 파일 작업 데이터 영구 삭제 */
@@ -847,7 +897,8 @@ function deleteCloudFile(fileKey, fileName) {
     /* 현재 로컬 작업이 이 파일이면 로컬도 정리 */
     try {
       var cur = JSON.parse(localStorage.getItem(SESSION_KEY)||'{}');
-      var curKey = cur.fileName ? WMSync.sanitizeKey(cur.fileName) : null;
+      var curId = cur.jobName || cur.fileName;
+      var curKey = curId ? WMSync.sanitizeKey(curId) : null;
       if (curKey === fileKey) {
         localStorage.removeItem(SESSION_KEY);
       }
@@ -893,6 +944,7 @@ function wmsApplyRemote(data) {
 /* ─────────────── 전역 상태 ─────────────── */
 var workbookRaw = null;     // 원본 파일 ArrayBuffer (다운로드 시 재로드)
 var workbookFile = null;    // File 객체 (이름 등)
+var jobName = null;         // 작업군 이름 — 작업의 고유 식별자(클라우드 fileKey 근거). 없으면 파일명 사용(하위호환)
 var headers = [];           // 헤더 행 배열 (인덱스 = 컬럼 인덱스)
 var rows = [];              // [{r:행번호, vals:{컬럼명->값}, sizeMod:bool, originMod:bool, qtyReceived:N}, ...]
 var byBarcode = {};         // {바코드문자열: rowIndex}
@@ -995,9 +1047,94 @@ function goTo(n) {
   });
   dz.addEventListener('drop', function(ev){
     var f = ev.dataTransfer.files[0];
-    if (f) handleFile(f);
+    if (f) pickFile(f);
   });
 })();
+
+/* ─────────────── 파일 선택 → 작업군 이름 지정 ─────────────── */
+var _pendingFile = null;
+
+/* 파일 선택 진입점(드롭/클릭 공용) — 먼저 작업군 이름을 지정받는다.
+   그룹 미연결(로컬 전용)이면 이름 지정 없이 바로 처리(기존 동작 유지). */
+function pickFile(file) {
+  if (!file) return;
+  if (!/\.xlsx?$/i.test(file.name)) {
+    setMsg('m0','er','❌ .xlsx 파일만 지원합니다');
+    return;
+  }
+  /* 그룹 미연결이면 이름 개념이 없으므로 곧바로 처리 */
+  if (!(window.WMSync && WMSync.hasGroup && WMSync.hasGroup())) {
+    jobName = null;
+    handleFile(file);
+    return;
+  }
+  _pendingFile = file;
+  var base = file.name.replace(/\.xlsx?$/i, '');
+  var panel = document.getElementById('jobNamePanel');
+  var input = document.getElementById('jobNameInput');
+  var lbl   = document.getElementById('jobNameFileLbl');
+  if (lbl)   lbl.textContent = '📄 ' + file.name;
+  if (input) input.value = base;
+  var hint = document.getElementById('jobNameHint');
+  if (hint) hint.innerHTML = '';
+  if (panel) panel.style.display = '';
+  if (input) { input.focus(); input.select(); }
+  checkJobNameDup();
+}
+
+/* 입력한 이름이 클라우드의 기존 작업과 겹치면 '이어받기' 안내를 표시 (디바운스) */
+var _dupTimer = null;
+function checkJobNameDup() {
+  if (_dupTimer) clearTimeout(_dupTimer);
+  _dupTimer = setTimeout(_checkJobNameDupNow, 300);
+}
+function _checkJobNameDupNow() {
+  var input = document.getElementById('jobNameInput');
+  var hint  = document.getElementById('jobNameHint');
+  if (!input || !hint) return;
+  var name = (input.value || '').trim();
+  if (!name) { hint.innerHTML = ''; return; }
+  if (!(window.WMSync && WMSync.listFiles)) { hint.innerHTML = ''; return; }
+  var key = WMSync.sanitizeKey(name);
+  WMSync.listFiles().then(function(files){
+    var hit = (files || []).some(function(f){ return f.fileKey === key; });
+    /* 비동기 사이 입력이 바뀌었으면 무시 */
+    if ((input.value || '').trim() !== name) return;
+    if (hit) {
+      hint.innerHTML = '<span style="color:var(--y)">↩ 같은 이름의 작업이 이미 있습니다 — 시작하면 그 작업을 <b>이어받습니다</b>.</span>';
+    } else {
+      hint.innerHTML = '<span style="color:var(--g)">✅ 새 작업으로 시작됩니다.</span>';
+    }
+  }).catch(function(){ hint.innerHTML = ''; });
+}
+
+function cancelJobName() {
+  _pendingFile = null;
+  var panel = document.getElementById('jobNamePanel');
+  if (panel) panel.style.display = 'none';
+  var fi = document.getElementById('fi');
+  if (fi) fi.value = '';
+  setMsg('m0','inf','업로드를 취소했습니다.');
+}
+
+/* 이름 확정 → 그 이름을 작업 식별자로 삼아 파일 처리 시작 */
+function confirmJobName() {
+  var input = document.getElementById('jobNameInput');
+  var hint  = document.getElementById('jobNameHint');
+  var name  = (input && input.value || '').trim();
+  if (!name) {
+    if (hint) hint.innerHTML = '<span style="color:var(--r)">이름을 입력하세요.</span>';
+    if (input) input.focus();
+    return;
+  }
+  var f = _pendingFile;
+  _pendingFile = null;
+  if (!f) return;
+  jobName = name;
+  var panel = document.getElementById('jobNamePanel');
+  if (panel) panel.style.display = 'none';
+  handleFile(f);
+}
 
 /* ─────────────── 파일 처리 ─────────────── */
 function handleFile(file) {
@@ -1008,10 +1145,8 @@ function handleFile(file) {
   }
   workbookFile = file;
   setMsg('m0','inf','<span class="sp"></span> 분석 중...');
-  /* 파일명 → 클라우드 ref 부착 (그룹 멤버라면 자동 동기) */
-  if (window.WMSync && WMSync.hasGroup()) {
-    WMSync.setFileKey(file.name);
-  }
+  /* 작업군 이름(없으면 파일명) → 클라우드 ref 부착 (그룹 멤버라면 자동 동기) */
+  applyJobKey();
   var reader = new FileReader();
   reader.onload = function(e){
     try {
@@ -1233,6 +1368,7 @@ function buildSessionData() {
     v: 1,
     ts: Date.now(),
     fileName: workbookFile ? workbookFile.name : null,
+    jobName: jobName || (workbookFile ? workbookFile.name : null),
     startedEmpty: !!startedEmpty,
     headers: (headers || []).map(nn),
     rowsLite: rows.map(function(r){
@@ -1324,6 +1460,17 @@ function genSessionName() {
   return '입고세션_' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) +
          '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.xlsx';
 }
+/* 작업의 고유 식별자(클라우드 fileKey 근거). 작업군 이름이 있으면 그 이름, 없으면 파일명(하위호환). */
+function currentJobKey() {
+  return jobName || (workbookFile && workbookFile.name) || null;
+}
+/* 현재 작업군 이름/파일명 기준으로 클라우드 ref 재부착 */
+function applyJobKey() {
+  if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
+    var k = currentJobKey();
+    if (k) { try { WMSync.setFileKey(k); } catch(e){} }
+  }
+}
 function ensureSessionFileName(preferred) {
   var name = preferred
     || (workbookFile && workbookFile.name)
@@ -1331,9 +1478,8 @@ function ensureSessionFileName(preferred) {
     || genSessionName();
   if (!workbookFile) workbookFile = { name: name };
   else if (!workbookFile.name) workbookFile.name = name;
-  if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
-    try { WMSync.setFileKey(name); } catch(e){}
-  }
+  /* 클라우드 키는 작업군 이름 우선(없으면 파일명) */
+  applyJobKey();
   return name;
 }
 
@@ -1354,6 +1500,8 @@ function restoreSession() {
   lastScans = data.lastScans || [];
   photoLog = objToArray(data.photoLog) || [];
   updatePhotoLogUI();
+  /* 작업군 이름 복원 — 클라우드 fileKey 의 근거(없으면 파일명으로 폴백) */
+  jobName = data.jobName || data.fileName || null;
   /* 파일 식별자 복원 — 없으면 다음 저장에서 fileName 이 null 로 덮여 동기화가 꺼진다.
      이름이 아예 없던 세션(예: 이름 없는 백업 복구)엔 자동으로 이름을 부여해 동기화를 살린다. */
   ensureSessionFileName(data.fileName);
@@ -2792,11 +2940,10 @@ function importSessionJson() {
       try {
         localStorage.setItem(SESSION_KEY, JSON.stringify(norm));
       } catch(err){ setMsg('m1','er','❌ 저장 실패(용량): '+err.message); return; }
-      /* 파일명으로 클라우드 ref 부착 — 이후 박스 종료/스캔 시 자동 동기화 */
+      /* 작업군 이름/파일명으로 클라우드 ref 부착 — 이후 박스 종료/스캔 시 자동 동기화 */
       workbookFile = { name: norm.fileName };
-      if (window.WMSync && WMSync.hasGroup()) {
-        try { WMSync.setFileKey(norm.fileName); } catch(e){}
-      }
+      jobName = norm.jobName || norm.fileName;
+      applyJobKey();
       restoreSession();
       setMsg('m1','ok','✅ 세션 가져오기 완료 — 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개. 이어서 스캔하세요.');
     };
@@ -2814,8 +2961,17 @@ function startEmptySession(){
     /* 덮어쓰기 전 자동 백업 — 이번 같은 데이터 유실 사고 방지 */
     try { exportSessionJson(); } catch(e){ console.warn('자동 백업 실패:', e); }
   }
+  /* 작업군 이름 지정 — 상태 초기화 전에 먼저 받아, 취소 시 현재 작업 보존 */
+  var _emptyJobName = null;
+  if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
+    var _now = new Date();
+    var jn = prompt('이 입고 작업의 이름을 지어주세요.\n예: 아디다스, 뉴발란스 1차, 타미힐피거\n\n(여러 분류를 동시에 관리할 때 서로 구분됩니다)', '신규입고 ' + (_now.getMonth()+1) + '/' + _now.getDate());
+    if (jn === null) return; /* 취소 — 아무것도 바꾸지 않음 */
+    _emptyJobName = (jn || '').trim();
+  }
   workbookFile = null;
   workbookRaw = null;
+  jobName = null;
   rows = [];
   byBarcode = {};
   boxes = [];
@@ -2850,14 +3006,15 @@ function startEmptySession(){
   H[COL.EXISTING_QTY]= '직영수량';
   headers = H;
 
-  /* 클라우드 동기를 위한 파일명 자동 부여 (그룹 멤버일 때만) */
+  /* 클라우드 동기를 위한 파일명/작업군 이름 자동 부여 (그룹 멤버일 때만) */
   if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
     var d = new Date();
     var pad = function(n){ return String(n).padStart(2,'0'); };
     var ts = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
     var fname = '신규입고_' + ts + '.xlsx';
+    jobName = _emptyJobName || fname;
     workbookFile = { name: fname };
-    try { WMSync.setFileKey(fname); } catch(e){}
+    applyJobKey();
   }
 
   if (typeof renderTable === 'function') renderTable();
