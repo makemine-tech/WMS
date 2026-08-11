@@ -1147,8 +1147,26 @@ function goToWork() {
   });
 })();
 
-/* ─────────────── 파일 선택 → 작업군 이름 지정 ─────────────── */
-var _pendingFile = null;
+/* ─────────────── 새 작업 진입점 → 작업군 이름 지정 ───────────────
+   파일 업로드 / 자료 없이 시작 / 세션 가져오기 3가지 모두 '작업군 이름'을 먼저
+   받아, 각각 별개의 새 작업(목록 항목)으로 시작한다. 기존 작업은 클라우드 목록에
+   그대로 남으므로 '데이터가 사라진다' 같은 경고는 필요 없다. */
+var _pendingJob = null;   /* { mode:'file'|'empty'|'import', file?, data?, rcv?, label } */
+
+/* 이름 지정 패널 열기 — 진입점 공용 */
+function openJobNamePanel(pending, defaultName, labelText) {
+  _pendingJob = pending;
+  var panel = document.getElementById('jobNamePanel');
+  var input = document.getElementById('jobNameInput');
+  var lbl   = document.getElementById('jobNameFileLbl');
+  if (lbl)   lbl.textContent = labelText || '';
+  if (input) input.value = defaultName || '';
+  var hint = document.getElementById('jobNameHint');
+  if (hint) hint.innerHTML = '';
+  if (panel) panel.style.display = '';
+  if (input) { input.focus(); input.select(); }
+  checkJobNameDup();
+}
 
 /* 파일 선택 진입점(드롭/클릭 공용) — 먼저 작업군 이름을 지정받는다.
    그룹 미연결(로컬 전용)이면 이름 지정 없이 바로 처리(기존 동작 유지). */
@@ -1164,18 +1182,7 @@ function pickFile(file) {
     handleFile(file);
     return;
   }
-  _pendingFile = file;
-  var base = file.name.replace(/\.xlsx?$/i, '');
-  var panel = document.getElementById('jobNamePanel');
-  var input = document.getElementById('jobNameInput');
-  var lbl   = document.getElementById('jobNameFileLbl');
-  if (lbl)   lbl.textContent = '📄 ' + file.name;
-  if (input) input.value = base;
-  var hint = document.getElementById('jobNameHint');
-  if (hint) hint.innerHTML = '';
-  if (panel) panel.style.display = '';
-  if (input) { input.focus(); input.select(); }
-  checkJobNameDup();
+  openJobNamePanel({ mode:'file', file:file }, file.name.replace(/\.xlsx?$/i, ''), '📄 ' + file.name);
 }
 
 /* 입력한 이름이 클라우드의 기존 작업과 겹치면 '이어받기' 안내를 표시 (디바운스) */
@@ -1205,15 +1212,18 @@ function _checkJobNameDupNow() {
 }
 
 function cancelJobName() {
-  _pendingFile = null;
+  var mode = _pendingJob && _pendingJob.mode;
+  _pendingJob = null;
   var panel = document.getElementById('jobNamePanel');
   if (panel) panel.style.display = 'none';
   var fi = document.getElementById('fi');
   if (fi) fi.value = '';
-  setMsg('m0','inf','업로드를 취소했습니다.');
+  setMsg('m0','inf', mode==='empty' ? '자료 없이 시작을 취소했습니다.' :
+                     mode==='import' ? '세션 가져오기를 취소했습니다.' :
+                     '업로드를 취소했습니다.');
 }
 
-/* 이름 확정 → 그 이름을 작업 식별자로 삼아 파일 처리 시작 */
+/* 이름 확정 → 그 이름을 작업 식별자로 삼아 새 작업 시작 (모드별 분기) */
 function confirmJobName() {
   var input = document.getElementById('jobNameInput');
   var hint  = document.getElementById('jobNameHint');
@@ -1223,13 +1233,31 @@ function confirmJobName() {
     if (input) input.focus();
     return;
   }
-  var f = _pendingFile;
-  _pendingFile = null;
-  if (!f) return;
-  jobName = name;
+  var job = _pendingJob;
+  _pendingJob = null;
+  if (!job) return;
   var panel = document.getElementById('jobNamePanel');
   if (panel) panel.style.display = 'none';
-  handleFile(f);
+  /* 새 작업으로 전환하기 전, 현재 진행 중이던 작업을 클라우드에 한 번 확정 저장 —
+     각 작업은 이름(fileKey) 기준으로 클라우드에 남아 목록에서 이어서 열 수 있다. */
+  flushCurrentJobToCloud();
+  if (job.mode === 'file') {
+    jobName = name;
+    handleFile(job.file);
+  } else if (job.mode === 'empty') {
+    doStartEmpty(name);
+  } else if (job.mode === 'import') {
+    doImportSession(job.data, name, job.rcv);
+  }
+}
+
+/* 현재 메모리의 작업을 클라우드에 1회 저장(있을 때만) — 새 작업 전환 시 유실 방지 */
+function flushCurrentJobToCloud() {
+  try {
+    if (rows && rows.length && window.WMSync && WMSync.hasGroup && WMSync.hasGroup() && WMSync.getFileKey && WMSync.getFileKey()) {
+      WMSync.pushNow({ payload: buildSessionData() });
+    }
+  } catch(e){ console.warn('현재 작업 클라우드 저장 실패:', e); }
 }
 
 /* ─────────────── 파일 처리 ─────────────── */
@@ -3114,20 +3142,16 @@ function importSessionJson() {
       catch(err){ setMsg('m1','er','❌ JSON 파일을 읽지 못했습니다 (형식 오류)'); return; }
       if (!data || !data.rowsLite) { setMsg('m1','er','❌ 입고 세션 JSON이 아닙니다'); return; }
       var rcv = (data.rowsLite||[]).reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
-      if (rows && rows.length && !confirm('현재 진행 중인 작업이 있습니다.\n가져오는 세션으로 덮어쓸까요?\n\n가져올 내용: 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개\n\n(현재 작업을 잃고 싶지 않으면 취소 후 먼저 [💾 세션 백업]을 받으세요)')) return;
-      var norm = normalizeSession(data);
-      /* 이름 없는 백업도 동기화되도록 안정적인 이름을 부여하고 저장에 반영 —
-         저장까지 해둬야 다음 새로고침에도 같은 이름이 유지되어 동기화가 계속 살아있다. */
-      if (!norm.fileName) norm.fileName = genSessionName();
-      try {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(norm));
-      } catch(err){ setMsg('m1','er','❌ 저장 실패(용량): '+err.message); return; }
-      /* 작업군 이름/파일명으로 클라우드 ref 부착 — 이후 박스 종료/스캔 시 자동 동기화 */
-      workbookFile = { name: norm.fileName };
-      jobName = norm.jobName || norm.fileName;
-      applyJobKey();
-      restoreSession();
-      setMsg('m1','ok','✅ 세션 가져오기 완료 — 행 '+(data.rowsLite||[]).length+' · 박스 '+(data.boxes||[]).length+' · 실입고 '+rcv+'개. 이어서 스캔하세요.');
+      var base = (data.jobName || (data.fileName ? String(data.fileName).replace(/\.xlsx?$/i,'') : '') || '가져온 세션').trim();
+      /* 그룹 연결 시 — 이름을 먼저 받아 '새 작업'으로 시작(기존 작업은 클라우드 목록에 보존).
+         미연결(로컬 전용) — 바로 적용. '데이터가 사라진다' 경고 없음. */
+      if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
+        openJobNamePanel({ mode:'import', data:data, rcv:rcv },
+          base,
+          '📂 세션 가져오기: ' + f.name + ' · 행 ' + ((data.rowsLite||[]).length) + ' · 박스 ' + ((data.boxes||[]).length));
+      } else {
+        doImportSession(data, base, rcv);
+      }
     };
     reader.onerror = function(){ setMsg('m1','er','❌ 파일 읽기 실패'); };
     reader.readAsText(f);
@@ -3135,22 +3159,43 @@ function importSessionJson() {
   inp.click();
 }
 
+/* 가져온 세션을 chosenName 의 '새 작업'으로 저장·복원 */
+function doImportSession(data, chosenName, rcv){
+  var norm = normalizeSession(data);
+  var name = (chosenName || '').trim();
+  /* 이름을 작업군 식별자로 사용 — 이름 없는 백업도 안정 이름을 부여해 동기화 유지 */
+  norm.jobName = name || norm.jobName || norm.fileName || genSessionName();
+  if (!norm.fileName) norm.fileName = genSessionName();
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(norm));
+  } catch(err){ setMsg('m1','er','❌ 저장 실패(용량): '+err.message); return; }
+  /* restoreSession 이 jobName/파일키/상태 복원 + 화면 전환까지 처리 */
+  restoreSession();
+  /* 새 작업을 클라우드 목록에 즉시 등록 */
+  try {
+    if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup() && WMSync.getFileKey && WMSync.getFileKey()) {
+      WMSync.pushNow({ payload: buildSessionData() });
+    }
+  } catch(e){ console.warn('가져온 작업 등록 실패:', e); }
+  setMsg('m1','ok','✅ 세션 가져오기 완료 — 작업군 「'+escH(norm.jobName)+'」 · 행 '+((data.rowsLite||[]).length)+' · 박스 '+((data.boxes||[]).length)+' · 실입고 '+(rcv||0)+'개. 이어서 스캔하세요.');
+}
+
 /* ─────────────── 자료 없이 시작 (no-data mode) ─────────────── */
+/* 진입점 — 그룹 연결 시 이름을 먼저 받아 '새 작업'으로 시작(기존 작업은 클라우드 목록에 보존).
+   그룹 미연결(로컬 전용)이면 이름 개념이 없으므로 바로 시작. '데이터가 사라진다' 경고 없음. */
 function startEmptySession(){
-  if (rows && rows.length > 0) {
-    var rcv0 = rows.reduce(function(s,r){ return s+(r.qtyReceived||0); }, 0);
-    if (!confirm('⚠️ 현재 진행 중인 작업이 있습니다 (행 '+rows.length+' · 실입고 '+rcv0+'개).\n\n새로 시작하면 이 작업은 사라집니다.\n안전을 위해 [확인]을 누르면 먼저 JSON 백업 파일을 자동으로 내려받은 뒤 시작합니다.\n\n계속할까요?')) return;
-    /* 덮어쓰기 전 자동 백업 — 이번 같은 데이터 유실 사고 방지 */
-    try { exportSessionJson(); } catch(e){ console.warn('자동 백업 실패:', e); }
-  }
-  /* 작업군 이름 지정 — 상태 초기화 전에 먼저 받아, 취소 시 현재 작업 보존 */
-  var _emptyJobName = null;
   if (window.WMSync && WMSync.hasGroup && WMSync.hasGroup()) {
     var _now = new Date();
-    var jn = prompt('이 입고 작업의 이름을 지어주세요.\n예: 아디다스, 뉴발란스 1차, 타미힐피거\n\n(여러 분류를 동시에 관리할 때 서로 구분됩니다)', '신규입고 ' + (_now.getMonth()+1) + '/' + _now.getDate());
-    if (jn === null) return; /* 취소 — 아무것도 바꾸지 않음 */
-    _emptyJobName = (jn || '').trim();
+    openJobNamePanel({ mode:'empty' },
+      '신규입고 ' + (_now.getMonth()+1) + '/' + _now.getDate(),
+      '⚡ 자료 없이 시작 — 스캔하는 바코드를 모두 신규로 등록');
+    return;
   }
+  doStartEmpty(null);
+}
+
+/* 실제 빈 세션 초기화 — chosenName(그룹일 때 작업군 이름) 기준으로 새 작업 시작 */
+function doStartEmpty(chosenName){
   workbookFile = null;
   workbookRaw = null;
   jobName = null;
@@ -3194,9 +3239,11 @@ function startEmptySession(){
     var pad = function(n){ return String(n).padStart(2,'0'); };
     var ts = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
     var fname = '신규입고_' + ts + '.xlsx';
-    jobName = _emptyJobName || fname;
+    jobName = (chosenName || '').trim() || fname;
     workbookFile = { name: fname };
     applyJobKey();
+    /* 새 작업을 클라우드 목록('입고 작업 관리')에 즉시 등록 — 메인에 바로 보이게 */
+    try { WMSync.pushNow({ payload: buildSessionData() }); } catch(e){ console.warn('새 작업 등록 실패:', e); }
   }
 
   if (typeof renderTable === 'function') renderTable();
@@ -3204,7 +3251,7 @@ function startEmptySession(){
   if (typeof renderBoxList === 'function') renderBoxList();
   saveSession();
   goTo(1);
-  setMsg('m1','inf','📝 자료 없이 시작 — 스캔되는 모든 바코드는 자동으로 신규 등록됩니다. 다운로드 시 빈 양식에 결과가 채워집니다.');
+  setMsg('m1','inf','📝 자료 없이 시작'+(jobName?(' — 작업군 「'+escH(jobName)+'」'):'')+' · 스캔되는 모든 바코드는 자동으로 신규 등록됩니다. 다운로드 시 빈 양식에 결과가 채워집니다.');
 }
 
 /* ─────────────── 사진촬영 요망 알림 ─────────────── */
