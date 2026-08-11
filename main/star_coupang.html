@@ -2877,15 +2877,33 @@ function downloadDone() {
       }
     }
 
-    /* 박스×SKU 단위로 행 채우기 — 마지막 작업 시각 역순(화면 완료 목록과 동일) → 박스 안 추가순 */
+    /* 박스×SKU 단위로 행 채우기 — 마지막 작업 시각 역순(화면 완료 목록과 동일) → 박스 안 추가순.
+       정상(items) + 불량(defItems)을 같은 SKU 기준으로 한 행에 합쳐 표기 → 엑셀만 보고도 구분 가능. */
     var records = [];
     var sortedBoxes = boxes.slice().sort(function(a,b){ return boxRecency(b) - boxRecency(a); });
     sortedBoxes.forEach(function(box){
-      box.items.forEach(function(it){
-        if (it.count <= 0) return;
-        records.push({ box: box, rowIdx: it.rowIdx, count: it.count });
+      var perSku = {};   /* rowIdx -> {normal, defect} */
+      var order = [];    /* 박스 안 등장 순서 유지 */
+      (box.items||[]).forEach(function(it){
+        if (!it || (it.count||0) <= 0) return;
+        if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
+        perSku[it.rowIdx].normal += it.count;
+      });
+      (box.defItems||[]).forEach(function(it){
+        if (!it || (it.count||0) <= 0) return;
+        if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
+        perSku[it.rowIdx].defect += it.count;
+      });
+      order.forEach(function(rowIdx){
+        records.push({ box: box, rowIdx: rowIdx, normal: perSku[rowIdx].normal, defect: perSku[rowIdx].defect });
       });
     });
+
+    /* 정상입고/불량입고 열 — 원본 마지막 열 뒤에 새 컬럼으로 추가(헤더 포함) */
+    var normCol = maxC + 1;
+    var defCol  = maxC + 2;
+    setCellRaw(ws, 0, normCol, '정상입고', 's');
+    setCellRaw(ws, 0, defCol,  '불량입고', 's');
 
     var newRowIdx = 1;
     records.forEach(function(rec){
@@ -2897,9 +2915,12 @@ function downloadDone() {
         var type = (typeof v === 'number') ? 'n' : 's';
         setCellRaw(ws, newRowIdx, c, v, type);
       }
-      /* 박스 ID, 박스 내 수량으로 R열 덮어쓰기 */
+      /* 박스 ID + R열(물류실물수량)=정상 실입고 수량 (기존 의미 유지) */
       setCellRaw(ws, newRowIdx, COL.BOX_BARCODE, rec.box.id, 's');
-      setCellRaw(ws, newRowIdx, COL.EXISTING_QTY, rec.count, 'n');
+      setCellRaw(ws, newRowIdx, COL.EXISTING_QTY, rec.normal, 'n');
+      /* 정상입고/불량입고 별도 열 — 불량이 0이어도 정상 열은 항상 기록 */
+      setCellRaw(ws, newRowIdx, normCol, rec.normal, 'n');
+      if (rec.defect > 0) setCellRaw(ws, newRowIdx, defCol, rec.defect, 'n');
       /* 수정 마킹 */
       if (r.nameMod)   markCellAsModified(ws, newRowIdx, COL.NAME,   r.origName,   r.vals[COL.NAME],   '품명 수정');
       if (r.colorMod)  markCellAsModified(ws, newRowIdx, COL.COLOR,  r.origColor,  r.vals[COL.COLOR],  '컬러 수정');
@@ -2908,8 +2929,8 @@ function downloadDone() {
       newRowIdx++;
     });
 
-    /* dimension 갱신 */
-    ws['!ref'] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:Math.max(newRowIdx-1, 0), c:maxC} });
+    /* dimension 갱신 — 불량입고 열까지 포함 */
+    ws['!ref'] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:Math.max(newRowIdx-1, 0), c:defCol} });
 
     /* 수정사항 시트 추가 */
     var modSheet = buildModSheet();
@@ -2934,15 +2955,29 @@ function downloadDone() {
    star_instock에 올리면 박스바코드까지 살려 재고로 잡힘. 원본 xlsx 불필요. */
 function downloadForInstock() {
   if (!boxes || !boxes.length) { setMsg('m1','warn','⚠️ 입고된 박스가 없습니다 — 스캔 후 다시 시도하세요'); return; }
-  /* star_instock/downloadTemplate 과 동일한 헤더(12열) */
-  var aoa = [['박스바코드','브랜드','품번','바코드','대체바코드','품명','소재','컬러','사이즈','원산지','수량','비고']];
+  /* star_instock/downloadTemplate 과 동일한 헤더(0~11열) — star_instock 은 이 12열을 위치로 읽는다.
+     '불량수량' 열(12)은 그 뒤에 추가 → star_instock 재업로드 호환 유지(불량은 재고에 안 잡힘, '수량'=정상만). */
+  var aoa = [['박스바코드','브랜드','품번','바코드','대체바코드','품명','소재','컬러','사이즈','원산지','수량','비고','불량수량']];
   var nn = function(v){ return (v === null || v === undefined) ? '' : v; };
   boxes.slice().sort(function(a,b){ return (a.ts||0) - (b.ts||0); }).forEach(function(box){
+    /* 정상(items)+불량(defItems)을 SKU 기준으로 합쳐 한 행에 표기 */
+    var perSku = {};   /* rowIdx -> {normal, defect} */
+    var order = [];
     (box.items || []).forEach(function(it){
       if (!it || (it.count||0) <= 0) return;
-      var r = rows[it.rowIdx];
+      if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
+      perSku[it.rowIdx].normal += it.count;
+    });
+    (box.defItems || []).forEach(function(it){
+      if (!it || (it.count||0) <= 0) return;
+      if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
+      perSku[it.rowIdx].defect += it.count;
+    });
+    order.forEach(function(rowIdx){
+      var r = rows[rowIdx];
       if (!r) return;
       var v = r.vals || [];
+      var normal = perSku[rowIdx].normal, defect = perSku[rowIdx].defect;
       aoa.push([
         nn(box.id),
         nn(v[COL.BRAND]),
@@ -2954,8 +2989,9 @@ function downloadForInstock() {
         nn(v[COL.COLOR]),
         nn(v[COL.SIZE]),      /* 검수사이즈(작업자 수정본) */
         nn(v[COL.ORIGIN]),
-        it.count,
-        ''
+        normal,               /* 수량 = 정상 실입고 (재고에 잡히는 값) */
+        defect > 0 ? ('불량 '+defect+'개') : '',  /* 비고에 불량 표시 */
+        defect                /* 불량수량 (star_instock 은 이 열을 읽지 않음 — 사람이 확인용) */
       ]);
     });
   });
@@ -2966,7 +3002,8 @@ function downloadForInstock() {
     XLSX.utils.book_append_sheet(wb, ws, '재고입고');
     var out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
     saveBlob(out, '_재고입고용_star_instock.xlsx');
-    setMsg('m1','ok','✅ 재고 입고용 엑셀 저장 완료 · '+(aoa.length-1)+'행 (박스×품목). 재고관리(star_instock) 페이지의 [📊 엑셀 일괄 입고]에 이 파일을 올리면 재고로 잡힙니다.');
+    var _defTot = rows.reduce(function(s,r){ return s+(r.qtyDefective||0); }, 0);
+    setMsg('m1','ok','✅ 재고 입고용 엑셀 저장 완료 · '+(aoa.length-1)+'행 (박스×품목)'+(_defTot>0?' · 불량 '+_defTot+'개는 "불량수량" 열/비고에 표시(재고엔 안 잡힘)':'')+'. 재고관리(star_instock) 페이지의 [📊 엑셀 일괄 입고]에 이 파일을 올리면 재고로 잡힙니다.');
   } catch(err) {
     console.error(err);
     setMsg('m1','er','❌ 재고 입고용 엑셀 저장 실패: '+err.message);
@@ -2989,14 +3026,26 @@ function downloadFallback(kind) {
   /* 원본 워크북 없는 경우 — 단순 표로 */
   var aoa, fname;
   if (kind === 'done') {
-    aoa = [['박스', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '박스내 수량', '예정 Q']];
+    aoa = [['박스', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '정상입고', '불량입고', '예정 Q']];
     boxes.slice().sort(function(a,b){return boxRecency(b)-boxRecency(a);}).forEach(function(box){
       var d = new Date(box.ts);
       var t = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-      box.items.forEach(function(it){
-        if (it.count<=0) return;
-        var r = rows[it.rowIdx];
-        aoa.push([box.id, t, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE], r.vals[COL.ORIGIN], it.count, r.vals[COL.EXPECT_QTY]]);
+      /* 정상(items)+불량(defItems)을 SKU 기준으로 합쳐 한 행에 표기 */
+      var perSku = {}; var order = [];
+      (box.items||[]).forEach(function(it){
+        if (!it || (it.count||0) <= 0) return;
+        if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
+        perSku[it.rowIdx].normal += it.count;
+      });
+      (box.defItems||[]).forEach(function(it){
+        if (!it || (it.count||0) <= 0) return;
+        if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
+        perSku[it.rowIdx].defect += it.count;
+      });
+      order.forEach(function(rowIdx){
+        var r = rows[rowIdx]; if (!r) return;
+        var normal = perSku[rowIdx].normal, defect = perSku[rowIdx].defect;
+        aoa.push([box.id, t, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE], r.vals[COL.ORIGIN], normal, defect, r.vals[COL.EXPECT_QTY]]);
       });
     });
     fname = '_완료건_박스별.xlsx';
