@@ -2989,9 +2989,9 @@ function downloadForInstock() {
         nn(v[COL.COLOR]),
         nn(v[COL.SIZE]),      /* 검수사이즈(작업자 수정본) */
         nn(v[COL.ORIGIN]),
-        normal,               /* 수량 = 정상 실입고 (재고에 잡히는 값) */
-        defect > 0 ? ('불량 '+defect+'개') : '',  /* 비고에 불량 표시 */
-        defect                /* 불량수량 (star_instock 은 이 열을 읽지 않음 — 사람이 확인용) */
+        normal,               /* 수량(K) = 정상 실입고 — star_instock 재고에 잡히는 값 */
+        '',                   /* 비고(L) — 실제 메모용으로 비워둠 */
+        defect                /* 불량수량(M) — star_instock 이 M열로 읽어 별도 집계(재고 미반영) */
       ]);
     });
   });
@@ -3003,7 +3003,7 @@ function downloadForInstock() {
     var out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
     saveBlob(out, '_재고입고용_star_instock.xlsx');
     var _defTot = rows.reduce(function(s,r){ return s+(r.qtyDefective||0); }, 0);
-    setMsg('m1','ok','✅ 재고 입고용 엑셀 저장 완료 · '+(aoa.length-1)+'행 (박스×품목)'+(_defTot>0?' · 불량 '+_defTot+'개는 "불량수량" 열/비고에 표시(재고엔 안 잡힘)':'')+'. 재고관리(star_instock) 페이지의 [📊 엑셀 일괄 입고]에 이 파일을 올리면 재고로 잡힙니다.');
+    setMsg('m1','ok','✅ 재고 입고용 엑셀 저장 완료 · '+(aoa.length-1)+'행 (박스×품목)'+(_defTot>0?' · 불량 '+_defTot+'개는 "불량수량"(M열)로 분리 표기(재고엔 안 잡힘)':'')+'. 재고관리(star_instock) 페이지의 [📊 엑셀 일괄 입고]에 이 파일을 그대로 올리면 정상은 재고로, 불량은 별도로 집계됩니다.');
   } catch(err) {
     console.error(err);
     setMsg('m1','er','❌ 재고 입고용 엑셀 저장 실패: '+err.message);
