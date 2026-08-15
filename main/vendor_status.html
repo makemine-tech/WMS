@@ -296,7 +296,7 @@ function renderReport(info, data){
     +sbtn('qty','수량 많은순')+sbtn('pallet','파렛트순')+sbtn('name','이름순')+'</div>';
 
   var looseHint=_canEdit
-    ? '<div class="loose-hint">✍ <b>낱개</b> 칸을 누르면 <b>창고(센터)별 입력란</b>이 열립니다. 각 창고 수량을 입력하면 <b>합계</b>가 자동 계산되어 <b>총 재고</b>에 즉시 반영·저장됩니다. (담당자에게는 합계만 표시)</div>'
+    ? '<div class="loose-hint">✍ <b>파렛트외 낱개수량</b> 칸을 누르면 <b>창고(센터)별 입력란</b>이 열립니다. 각 창고 수량을 입력하면 <b>합계</b>가 자동 계산되어 <b>총 재고</b>에 즉시 반영·저장됩니다. (담당자에게는 합계만 표시)</div>'
     : '';
 
   var searchBar='<div class="searchbar"><span class="sicon">🔎</span>'
@@ -304,17 +304,17 @@ function renderReport(info, data){
     +'<button class="sclear" id="sclear" onclick="clearSearch()"'+(_search?'':' style="display:none"')+'>✕</button>'
     +'<span class="sresult" id="sresult"></span></div>';
 
-  var legend='<div class="legend">ℹ️ <b>파렛트수량</b> + <b>낱개</b> = <b>총 재고</b> · ‘파렛트’는 파렛트 개수(팔), 나머지는 개수(개) 기준입니다.</div>';
+  var legend='<div class="legend">ℹ️ <b>파렛트내 수량</b> + <b>파렛트외 낱개수량</b> = <b>총 재고</b> · ‘파렛트’는 파렛트 개수(팔), 수량은 개수(개) 기준입니다.</div>';
 
   var body = rows.length===0
     ? '<div class="empty">현재 재고에 등록된 상품이 없습니다.<br><span style="font-size:12px;">창고에서 입고가 이루어지면 자동으로 표시됩니다.</span></div>'
     : searchBar+sortbar+legend+looseHint+'<div class="tbl-wrap"><table>'
-        +'<thead><tr><th class="l">상품명</th><th>파렛트</th><th>파렛트수량</th><th class="loosehead">낱개</th><th>총 재고</th></tr></thead>'
+        +'<thead><tr><th class="l">상품명</th><th>파렛트</th><th>파렛트내 수량</th><th class="loosehead">파렛트외 낱개수량</th><th>총 재고</th></tr></thead>'
         +'<tbody>'
         + rows.map(function(p,i){
             var loose=looseSum(_loose[p._k]);
             var pal=(+p.pallets||0);
-            var stock=(+p.totalQty||0)+loose;               /* 총 재고(개) = 파렛트수량 + 낱개 */
+            var stock=(+p.totalQty||0)+loose;               /* 총 재고(개) = 파렛트내 수량 + 파렛트외 낱개수량 */
             var out=stock<=0;                                /* 재고 없음(낱개 포함 0) */
             var low=!out && pal<=2 && loose===0;             /* 파렛트 소진 임박 & 낱개 없음 */
             var flag=out||low;
@@ -479,7 +479,7 @@ function exportExcel(){
   aoa.push(['업체', vendorName]);
   aoa.push(['기준시각', fmtTime(data.updatedAt)]);
   aoa.push([]);
-  aoa.push(['상품명','파렛트(팔)','파렛트수량(개)','낱개(개)','총 재고(개)']);
+  aoa.push(['상품명','파렛트(팔)','파렛트내 수량(개)','파렛트외 낱개수량(개)','총 재고(개)']);
   (_rows||[]).forEach(function(p){
     var loose=looseSum(_loose[p._k]);
     var pal=(+p.pallets||0), qty=(+p.totalQty||0), sum=qty+loose;
@@ -488,7 +488,7 @@ function exportExcel(){
   });
   aoa.push(['합계', totPal, totQty, totLoose, totQty+totLoose]);
   var ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:24},{wch:11},{wch:12},{wch:12},{wch:14}];
+  ws['!cols']=[{wch:24},{wch:10},{wch:15},{wch:19},{wch:13}];
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '재고현황');
   var fname=String(vendorName).replace(/[\\\/:*?"<>|]/g,'_')+'_재고현황_'+dateStamp()+'.xlsx';
