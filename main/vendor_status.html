@@ -129,12 +129,39 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
 /* 재고 없음 배지 */
 .outbadge{display:inline-flex;align-items:center;gap:4px;background:rgba(148,163,184,.14);color:#CBD5E1;border:1px solid rgba(148,163,184,.4);border-radius:20px;padding:3px 9px;font-size:10.5px;font-weight:800;margin-left:8px;vertical-align:middle;white-space:nowrap;}
 
+/* 재고조사 마감 버튼 강조 */
+.tbtn.hl{background:rgba(52,211,153,.16);border-color:rgba(52,211,153,.5);color:#6EE7B7;}
+.tbtn.hl:hover{background:rgba(52,211,153,.26);color:#A7F3D0;}
+/* 재고조사 이력 오버레이 */
+.hist-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.62);display:none;align-items:flex-start;justify-content:center;padding:32px 14px;overflow-y:auto;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);}
+.hist-card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--bd);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+.hist-card.wide{max-width:820px;}
+.hist-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:15px 18px;border-bottom:1px solid var(--bd);font-size:15px;font-weight:800;background:rgba(255,255,255,.03);}
+.hist-hd-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;}
+.hist-x{background:rgba(255,255,255,.08);border:1px solid var(--bd);color:var(--sub);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:14px;flex-shrink:0;}
+.hist-x:hover{color:var(--tx);background:rgba(255,255,255,.15);}
+.hist-body{padding:16px 18px;max-height:calc(100vh - 160px);overflow-y:auto;}
+.hist-empty{text-align:center;color:var(--sub);padding:34px 10px;font-size:14px;line-height:1.7;}
+.hist-item{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:11px;padding:12px 14px;margin-bottom:10px;}
+.hist-item-main{flex:1;cursor:pointer;min-width:0;}
+.hist-when{font-size:14px;font-weight:800;color:var(--tx);}
+.hist-memo{font-size:12.5px;color:#93C5FD;margin-top:3px;word-break:break-all;}
+.hist-meta{font-size:12px;color:var(--sub);margin-top:4px;font-variant-numeric:tabular-nums;}
+.hist-acts{display:flex;gap:6px;flex-shrink:0;}
+.hbtn{background:rgba(255,255,255,.06);color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.hbtn:hover{background:rgba(255,255,255,.12);}
+.hbtn.del{color:#FCA5A5;border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.1);}
+.hbtn.del:hover{background:rgba(239,68,68,.2);color:#fff;}
+.hist-note{margin-top:14px;font-size:11.5px;color:var(--sub);line-height:1.8;border-top:1px solid var(--bd);padding-top:12px;}
+.hist-note b{color:var(--tx);}
+@media(max-width:640px){ .hist-body{padding:12px;} .hist-item{flex-direction:column;align-items:stretch;} .hist-acts{justify-content:flex-end;} }
+
 .foot-note{font-size:11px;color:var(--sub);margin-top:16px;line-height:1.7;text-align:center;}
 .notreg{max-width:440px;margin:40px auto;background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:32px 26px;text-align:center;}
 
 @media print{
   body{background:#fff;color:#000;}
-  .tools,.tbtn,.searchbar{display:none!important;}
+  .tools,.tbtn,.searchbar,.hist-overlay{display:none!important;}
   .scard,.tbl-wrap,.rpt-head{border-color:#bbb;}
   .scard{background:#f4f6fa;} thead th{background:#eef1f6;color:#333;}
   .rpt-vendor,.scard .v,.num{color:#000!important;}
@@ -354,10 +381,13 @@ function renderReport(info, data){
     ? '<div class="rpt-title">👁 관리자 미리보기 · 재고 현황</div>'
     : '<div class="rpt-title">재고 현황 보고서</div>';
   var rightBtns=_canEdit
-    ? '<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
+    ? '<button class="tbtn hl" onclick="closeInventory()">✅ 재고조사 마감</button>'
+      +'<button class="tbtn" onclick="openHistory()">📜 이력</button>'
+      +'<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
       +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="location.href=\'/wms_vendors.html?gid='+encodeURIComponent(info.gid||'')+'\'">‹ 업체관리</button>'
-    : '<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
+    : '<button class="tbtn" onclick="openHistory()">📜 이력</button>'
+      +'<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
       +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="doLogout()">로그아웃</button>';
   var _ts=data&&data.updatedAt;
@@ -496,19 +526,169 @@ function exportExcel(){
 }
 window.exportExcel=exportExcel;
 
+/* ===================================================================
+   재고조사 마감(스냅샷) & 이력
+   저장 경로: vendorStatus/{gid}/{vid}/snapshots/{id}
+   → 기존 vendorStatus 규칙 재사용: 쓰기(마감·삭제)=관리자, 읽기(조회)=관리자+담당자
+=================================================================== */
+var _histList=[];
+
+function snapPath(){ var i=_lastInfo||{}; if(!i.gid||!i.vendorId) return null; return 'vendorStatus/'+i.gid+'/'+i.vendorId+'/snapshots'; }
+
+/* 관리자: 현재 현황을 이력으로 마감·저장 */
+function closeInventory(){
+  if(!_canEdit) return;
+  var products=(_lastData&&_lastData.products)||{};
+  var keys=Object.keys(products).filter(function(k){ return products[k]&&products[k].name; });
+  if(!keys.length){ alert('저장할 현황이 없습니다.'); return; }
+  var memo=prompt('재고조사 마감 메모 (선택) — 예: 8월 정기 재고조사\n\n[확인]을 누르면 현재 현황이 이력으로 저장됩니다.','');
+  if(memo===null) return;   /* 취소 */
+  var loose={}, sumPal=0, sumQty=0, sumLoose=0, items=0;
+  keys.forEach(function(k){
+    var p=products[k]; var ls=looseSum(_loose[k]);
+    if(ls>0) loose[k]=ls;
+    sumPal+=(+p.pallets||0); sumQty+=(+p.totalQty||0); sumLoose+=ls; items++;
+  });
+  var path=snapPath(); if(!path) return;
+  var snap={
+    closedAt:Date.now(),
+    closedByEmail:(auth.currentUser&&auth.currentUser.email)||'',
+    updatedAt:(_lastData&&_lastData.updatedAt)||Date.now(),
+    memo:String(memo||'').slice(0,120),
+    items:items, sumPal:sumPal, sumQty:sumQty, sumLoose:sumLoose,
+    products:products, loose:loose
+  };
+  db.ref(path).push().set(snap)
+    .then(function(){ alert('✅ 재고조사가 마감·저장되었습니다.'); openHistory(); })
+    .catch(function(e){ alert('저장 실패: '+e.message); });
+}
+window.closeInventory=closeInventory;
+
+function ensureHistOverlay(){
+  var o=document.getElementById('histOverlay');
+  if(!o){ o=document.createElement('div'); o.id='histOverlay'; o.className='hist-overlay';
+    o.onclick=function(e){ if(e.target===o) closeHist(); }; document.body.appendChild(o); }
+  o.style.display='flex';
+  return o;
+}
+function closeHist(){ var o=document.getElementById('histOverlay'); if(o) o.style.display='none'; }
+window.closeHist=closeHist;
+
+/* 이력 목록 열기 (관리자·담당자 공통) */
+function openHistory(){
+  var path=snapPath(); if(!path) return;
+  var o=ensureHistOverlay();
+  o.innerHTML='<div class="hist-card"><div class="hist-hd"><span>📜 재고조사 이력</span><button class="hist-x" onclick="closeHist()">✕</button></div><div class="hist-body"><div class="hist-empty">불러오는 중…</div></div></div>';
+  db.ref(path).get().then(function(s){
+    var val=s.val()||{};
+    _histList=Object.keys(val).map(function(id){ return Object.assign({_id:id}, val[id]); })
+      .sort(function(a,b){ return (b.closedAt||0)-(a.closedAt||0); });
+    renderHistList();
+  }).catch(function(e){
+    var o2=ensureHistOverlay();
+    o2.innerHTML='<div class="hist-card"><div class="hist-hd"><span>📜 재고조사 이력</span><button class="hist-x" onclick="closeHist()">✕</button></div><div class="hist-body"><div class="hist-empty" style="color:#F87171;">불러오기 실패: '+esc(e.message)+'</div></div></div>';
+  });
+}
+window.openHistory=openHistory;
+
+function renderHistList(){
+  var o=ensureHistOverlay();
+  var admin=_canEdit;
+  var items=_histList.length ? _histList.map(function(s){
+    var meta='품목 '+nf(s.items||0)+' · 총 재고 '+nf((s.sumQty||0)+(s.sumLoose||0))+'개 · 파렛트 '+nf(s.sumPal||0)+'팔';
+    return '<div class="hist-item">'
+      +'<div class="hist-item-main" onclick="viewSnapshot(\''+s._id+'\')">'
+        +'<div class="hist-when">📅 '+fmtTime(s.closedAt)+'</div>'
+        +(s.memo?'<div class="hist-memo">'+esc(s.memo)+'</div>':'')
+        +'<div class="hist-meta">'+meta+'</div>'
+      +'</div>'
+      +'<div class="hist-acts">'
+        +'<button class="hbtn" onclick="viewSnapshot(\''+s._id+'\')">보기</button>'
+        +(admin?'<button class="hbtn del" onclick="deleteSnapshot(\''+s._id+'\')">삭제</button>':'')
+      +'</div></div>';
+  }).join('') : '<div class="hist-empty">저장된 재고조사 내역이 없습니다.'+(admin?'<br><span style="font-size:12px;">현황이 완료되면 상단 <b>✅ 재고조사 마감</b> 버튼으로 저장하세요.</span>':'')+'</div>';
+  o.innerHTML='<div class="hist-card"><div class="hist-hd"><span>📜 재고조사 이력</span><button class="hist-x" onclick="closeHist()">✕</button></div>'
+    +'<div class="hist-body">'+items+'</div></div>';
+}
+window.renderHistList=renderHistList;
+
+function viewSnapshot(id){
+  var s=null; for(var i=0;i<_histList.length;i++){ if(_histList[i]._id===id){ s=_histList[i]; break; } }
+  if(!s) return;
+  var o=ensureHistOverlay();
+  o.innerHTML='<div class="hist-card wide">'
+    +'<div class="hist-hd"><span>📅 '+fmtTime(s.closedAt)+' · 재고조사 내역</span>'
+    +'<span class="hist-hd-btns"><button class="hbtn" onclick="renderHistList()">‹ 목록</button><button class="hist-x" onclick="closeHist()">✕</button></span></div>'
+    +'<div class="hist-body">'+snapshotReportHtml(s)+'</div></div>';
+}
+window.viewSnapshot=viewSnapshot;
+
+function deleteSnapshot(id){
+  if(!_canEdit) return;   /* 관리자만 (규칙에서도 강제) */
+  var path=snapPath(); if(!path) return;
+  if(!confirm('이 재고조사 내역을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.')) return;
+  db.ref(path+'/'+id).remove().then(function(){
+    _histList=_histList.filter(function(x){ return x._id!==id; });
+    renderHistList();
+  }).catch(function(e){ alert('삭제 실패: '+e.message); });
+}
+window.deleteSnapshot=deleteSnapshot;
+
+/* 저장 당시 내역을 읽기전용 표로 렌더 */
+function snapshotReportHtml(s){
+  var products=s.products||{}, loose=s.loose||{};
+  var rows=Object.keys(products).map(function(k){ return Object.assign({_k:k}, products[k]); }).filter(function(p){ return p&&p.name; });
+  rows.sort(function(a,b){ return (b.totalQty||0)-(a.totalQty||0); });
+  var tPal=0,tQty=0,tLoose=0;
+  var body=rows.map(function(p){
+    var ls=looseSum(loose[p._k]); var stock=(+p.totalQty||0)+ls; var out=stock<=0;
+    tPal+=(+p.pallets||0); tQty+=(+p.totalQty||0); tLoose+=ls;
+    return '<tr'+(out?' class="lowrow"':'')+'><td class="l"><span class="pn">'+esc(p.name)+'</span>'+(out?' <span class="outbadge">재고없음</span>':'')+'</td>'
+      +'<td class="num">'+nf(p.pallets)+'<span class="u">팔</span></td>'
+      +'<td class="num">'+nf(p.totalQty)+'<span class="u">개</span></td>'
+      +'<td class="num loosecell">'+(ls?nf(ls):'—')+(ls?'<span class="u">개</span>':'')+'</td>'
+      +'<td class="num sumcell"><span class="sumv">'+nf(stock)+'<span class="u">개</span></span></td></tr>';
+  }).join('');
+  var grand=tQty+tLoose;
+  var cards='<div class="cards">'
+    +'<div class="scard a"><div class="v">'+nf(rows.length)+'</div><div class="l">상품 품목</div></div>'
+    +'<div class="scard b"><div class="v">'+nf(grand)+'</div><div class="l">총 재고 (낱개포함·개)</div></div>'
+    +'<div class="scard c"><div class="v">'+nf(tPal)+'</div><div class="l">총 파렛트 (팔)</div></div>'
+    +'</div>';
+  var table=rows.length
+    ? '<div class="tbl-wrap"><table>'
+      +'<thead><tr><th class="l">상품명</th><th>파렛트</th><th>파렛트내 수량</th><th class="loosehead">파렛트외 낱개수량</th><th>총 재고</th></tr></thead>'
+      +'<tbody>'+body+'</tbody>'
+      +'<tfoot><tr><td class="l">합계 · '+rows.length+'개 품목</td>'
+        +'<td class="num">'+nf(tPal)+'<span class="u">팔</span></td>'
+        +'<td class="num">'+nf(tQty)+'<span class="u">개</span></td>'
+        +'<td class="num">'+nf(tLoose)+'<span class="u">개</span></td>'
+        +'<td class="num sumv">'+nf(grand)+'<span class="u">개</span></td></tr></tfoot>'
+      +'</table></div>'
+    : '<div class="empty">저장 당시 등록된 상품이 없습니다.</div>';
+  var note='<div class="hist-note">🔒 읽기 전용 · 마감시각 <b>'+fmtTime(s.closedAt)+'</b>'
+    +(s.closedByEmail?' · 마감자 '+esc(s.closedByEmail):'')
+    +' · 현황 기준시각 '+fmtTime(s.updatedAt)
+    +(s.memo?'<br>메모: '+esc(s.memo):'')+'</div>';
+  return cards+table+note;
+}
+window.snapshotReportHtml=snapshotReportHtml;
+
 /* 업체 담당자 본인 — 이메일로 자기 업체 현황 (vendorStatus 요약본 실시간) */
 function loadOwnByEmail(user){
   var ek=emKey(user.email);
   db.ref('vendorByEmail/'+ek).get().then(function(snap){
     if(!snap.exists()){ renderNotRegistered(user.email); return; }
     var info=snap.val();
-    var lastStatus=null;
-    function rerender(){ if(lastStatus!==null) renderReport(info, lastStatus); }
+    var st={products:null, updatedAt:null};
+    function rerender(){ if(st.products!==null) renderReport(info, st); }
     /* 낱개수량 먼저 구독(읽기전용) */
     db.ref('vendorLoose/'+info.gid+'/'+info.vendorId).on('value', function(s){ _loose=s.val()||{}; rerender(); }, function(){ /* 낱개 읽기 실패 무시 */ });
-    db.ref('vendorStatus/'+info.gid+'/'+info.vendorId).on('value', function(s){ lastStatus=s.val()||{}; rerender(); }, function(err){
+    /* 요약본을 products·updatedAt 하위경로로만 구독 → 이력(snapshots)은 실시간 피드에서 제외(용량 절약) */
+    db.ref('vendorStatus/'+info.gid+'/'+info.vendorId+'/products').on('value', function(s){ st.products=s.val()||{}; rerender(); }, function(err){
       app.innerHTML='<div class="center" style="color:#F87171;">현황을 불러오지 못했습니다: '+esc(err.message)+'</div>';
     });
+    db.ref('vendorStatus/'+info.gid+'/'+info.vendorId+'/updatedAt').on('value', function(s){ st.updatedAt=s.val()||null; rerender(); }, function(){ /* 무시 */ });
   }).catch(function(e){
     app.innerHTML='<div class="center" style="color:#F87171;">확인 실패: '+esc(e.message)+'</div>';
   });
