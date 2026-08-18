@@ -39,7 +39,7 @@ h1 em{color:var(--g);font-style:normal}
 .btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
 
 /* 통계 */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.9rem}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-bottom:.9rem}
 .sc{background:var(--s1);border:1px solid var(--br);border-radius:8px;padding:.62rem .85rem}
 .sc-l{font-size:.62rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;margin-bottom:.16rem}
 .sc-v{font-size:1.5rem;font-weight:900}
@@ -207,6 +207,7 @@ h1 em{color:var(--g);font-style:normal}
   <div class="sc"><div class="sc-l">총 재고</div><div class="sc-v" style="color:var(--g)" id="s1">—</div></div>
   <div class="sc"><div class="sc-l">누적 입고</div><div class="sc-v" style="color:var(--b)" id="s2">—</div></div>
   <div class="sc"><div class="sc-l">누적 출고</div><div class="sc-v" style="color:var(--r)" id="s3">—</div></div>
+  <div class="sc"><div class="sc-l">불량</div><div class="sc-v" style="color:#ff6b6b" id="s4">—</div></div>
 </div>
 
 <!-- 액션 바 -->
@@ -278,7 +279,7 @@ h1 em{color:var(--g);font-style:normal}
   <table class="tbl">
     <thead><tr>
       <th>바코드</th><th>품명</th><th>브랜드</th><th>품번</th><th>컬러</th><th>사이즈</th><th>원산지</th>
-      <th>박스</th><th style="text-align:right">입고</th><th style="text-align:right">출고</th><th style="text-align:right">재고</th><th>비고</th>
+      <th>박스</th><th style="text-align:right">입고</th><th style="text-align:right">출고</th><th style="text-align:right">재고</th><th style="text-align:right">불량</th><th>비고</th>
     </tr></thead>
     <tbody id="stockBody"></tbody>
   </table>
@@ -438,7 +439,7 @@ h1 em{color:var(--g);font-style:normal}
 <script>
 /* ─────────────── 전역 상태 ─────────────── */
 /* 002.xlsx 컬럼 매핑 (0-indexed) */
-var COL = { BOX:0, BRAND:1, CODE:2, BARCODE:3, ALT:4, NAME:5, MATERIAL:6, COLOR:7, SIZE:8, ORIGIN:9, QTY:10, NOTE:11 };
+var COL = { BOX:0, BRAND:1, CODE:2, BARCODE:3, ALT:4, NAME:5, MATERIAL:6, COLOR:7, SIZE:8, ORIGIN:9, QTY:10, NOTE:11, DEFECT:12 };
 var logs = [];          /* 전체 입출고 로그 [{key, ts, type, source, box, barcode, ...meta, qty, by}] */
 var stockGroups = [];   /* 바코드별 집계 결과 (검색/렌더용) */
 var scanMode = 'in';    /* 'in' | 'out' */
@@ -556,6 +557,7 @@ function handleExcel(file){
         var bc = r[COL.BARCODE];
         if (bc===null||bc===undefined||String(bc).trim()==='') continue;
         var qty = +r[COL.QTY] || 0;
+        var defQty = +r[COL.DEFECT] || 0;   /* 불량수량(있으면) — 정상 재고와 분리 집계, 재고엔 안 잡힘 */
         entries.push({
           type:'in', source:'excel', batchId:batchId, batchName:batchName,
           box: cell(r,COL.BOX), brand: cell(r,COL.BRAND), code: cell(r,COL.CODE),
@@ -563,6 +565,7 @@ function handleExcel(file){
           name: cell(r,COL.NAME), material: cell(r,COL.MATERIAL),
           color: cell(r,COL.COLOR), size: cell(r,COL.SIZE), origin: cell(r,COL.ORIGIN),
           qty: qty,
+          defQty: defQty,
           note: String(cell(r,COL.NOTE)||'').trim()
         });
       }
@@ -582,7 +585,8 @@ function handleExcel(file){
       });
       chain.then(function(){
         var totQ = entries.reduce(function(s,e){ return s+e.qty; }, 0);
-        setMsg('m0','ok','✅ 엑셀 일괄 입고 완료 · '+entries.length+'행 · 총 '+totQ+'개 입고');
+        var totDef = entries.reduce(function(s,e){ return s+(e.defQty||0); }, 0);
+        setMsg('m0','ok','✅ 엑셀 일괄 입고 완료 · '+entries.length+'행 · 정상 '+totQ+'개 입고'+(totDef>0?' · 불량 '+totDef+'개(재고 미반영·별도 집계)':''));
       }).catch(function(err){
         setMsg('m0','er','❌ 입고 등록 실패: '+(err&&err.message||err));
       });
@@ -917,11 +921,12 @@ function aggregateStockByBox(asOfTs){
     var box = (lg.box==null?'':String(lg.box).trim()) || '(미지정)';
     var key = box + '||' + bc;
     if (!map[key]) {
-      map[key] = { box: box, barcode: lg.barcode, inQty:0, outQty:0, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
+      map[key] = { box: box, barcode: lg.barcode, inQty:0, outQty:0, defQty:0, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
     }
     var g = map[key];
     var q = +lg.qty || 0;
     if (lg.type === 'out') g.outQty += q; else g.inQty += q;
+    g.defQty += +lg.defQty || 0;
     if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) { g.lastInTs = lg.ts||0; g.meta = lg; }
     var n = (lg.note==null?'':String(lg.note).trim());
     if (n && (lg.ts||0) >= g.lastNoteTs) { g.lastNoteTs = lg.ts||0; g.lastNote = n; }
@@ -941,10 +946,11 @@ function aggregateStock(asOfTs){
     if (asOfTs != null && (lg.ts||0) > asOfTs) return;
     var bc = normBarcode(lg.barcode);
     if (!bc) return;
-    if (!map[bc]) map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, boxes:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
+    if (!map[bc]) map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, defQty:0, boxes:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
     var g = map[bc];
     var q = +lg.qty || 0;
     if (lg.type === 'out') g.outQty += q; else g.inQty += q;
+    g.defQty += +lg.defQty || 0;
     if (lg.box) g.boxes[String(lg.box).trim()] = 1;
     if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) { g.lastInTs = lg.ts||0; g.meta = lg; }
     var n = (lg.note==null?'':String(lg.note).trim());
@@ -963,13 +969,13 @@ function dlStockCurrent(){
   var fset = getFilteredBcSet();
   if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
   if (!snap.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'+(fset?' (검색 결과 일치 0)':'')); return; }
-  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','비고']];
+  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','불량','비고']];
   snap.forEach(function(g){
     var m = g.meta || {};
     rows.push([(g.boxList||[]).join(', '), g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
-               g.stock, g.lastNote||'']);
+               g.stock, (g.defQty||0), g.lastNote||'']);
   });
-  var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:24}];
+  var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:8},{wch:24}];
   var fname = '현재고수량_'+ymd(Date.now())+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '현재고', cols);
   setMsg('m0','ok','✅ 현재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
@@ -984,13 +990,13 @@ function dlStockByBoxCurrent(){
   if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
   snap = snap.filter(function(g){ return g.stock !== 0; });
   if (!snap.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'+(fset?' (검색 결과 일치 0)':'')); return; }
-  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','비고']];
+  var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','불량','비고']];
   snap.forEach(function(g){
     var m = g.meta || {};
     rows.push([g.box, g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
-               g.stock, g.lastNote||'']);
+               g.stock, (g.defQty||0), g.lastNote||'']);
   });
-  var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:24}];
+  var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:8},{wch:24}];
   var fname = '박스별현재고_'+ymd(Date.now())+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '박스별현재고', cols);
   setMsg('m0','ok','✅ 박스별 재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (박스×바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
@@ -1013,7 +1019,7 @@ function dlLogHistory(){
     return true;
   }).slice().sort(function(a,b){ return (a.ts||0)-(b.ts||0); });
   if (!filtered.length) { setMsg('m0','warn','⚠️ 해당 조건에 일치하는 입출고 내역이 없습니다'+(fset?' (검색 결과 적용)':'')); return; }
-  var rows = [['일시','구분','입력원','박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','수량','비고','작업자']];
+  var rows = [['일시','구분','입력원','박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','수량','불량','비고','작업자']];
   var totIn=0, totOut=0;
   filtered.forEach(function(lg){
     var q = +lg.qty||0;
@@ -1021,10 +1027,10 @@ function dlLogHistory(){
     rows.push([
       fmtDt(lg.ts), lg.type==='out'?'출고':'입고', lg.source==='excel'?'엑셀':'스캔',
       lg.box||'', lg.barcode||'', lg.name||'', lg.brand||'', lg.code||'',
-      lg.color||'', lg.size||'', lg.origin||'', q, lg.note||'', lg.by||''
+      lg.color||'', lg.size||'', lg.origin||'', q, (+lg.defQty||0), lg.note||'', lg.by||''
     ]);
   });
-  var cols=[{wch:20},{wch:6},{wch:6},{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:8},{wch:24},{wch:24}];
+  var cols=[{wch:20},{wch:6},{wch:6},{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:8},{wch:8},{wch:24},{wch:24}];
   var label = (typeF==='in'?'입고':typeF==='out'?'출고':'입출고');
   var fname = label+'내역_'+(startStr||'전체')+'_'+(endStr||'전체')+(fset?'_검색결과':'');
   saveXlsx(rows, fname, label+'내역', cols);
@@ -1042,13 +1048,13 @@ function dlStockAtDate(){
   if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
   if (!snap.length) { setMsg('m0','warn','⚠️ 해당 일자 이전 입출고 기록이 없습니다'+(fset?' (검색 결과 적용)':'')); return; }
   var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지',
-               '마감재고('+dStr+')','비고']];
+               '마감재고('+dStr+')','불량','비고']];
   snap.forEach(function(g){
     var m = g.meta || {};
     rows.push([(g.boxList||[]).join(', '), g.barcode, m.name||'', m.brand||'', m.code||'', m.color||'', m.size||'', m.origin||'',
-               g.stock, g.lastNote||'']);
+               g.stock, (g.defQty||0), g.lastNote||'']);
   });
-  var cols=[{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:14},{wch:24}];
+  var cols=[{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:14},{wch:8},{wch:24}];
   var fname = '마감재고_'+dStr+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '마감재고_'+dStr, cols);
   setMsg('m0','ok','✅ '+dStr+' 마감재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 기준), 마감재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
@@ -1057,15 +1063,15 @@ function dlStockAtDate(){
 /* 업로드 양식(.xlsx) 다운로드 — 002 양식 헤더 + 예시 1행 */
 function downloadTemplate(){
   try {
-    var headers = ['박스바코드','브랜드','품번','바코드','대체바코드','품명','소재','컬러','사이즈','원산지','수량','비고'];
-    var sample  = ['ASC0515327','STAR','ST-001','4570158735506','','샘플 상품명','면 100%','BLACK','M','대한민국',10,'예: 파손/반품/샘플 등'];
+    var headers = ['박스바코드','브랜드','품번','바코드','대체바코드','품명','소재','컬러','사이즈','원산지','수량','비고','불량수량'];
+    var sample  = ['ASC0515327','STAR','ST-001','4570158735506','','샘플 상품명','면 100%','BLACK','M','대한민국',10,'예: 파손/반품/샘플 등',0];
     var aoa = [headers, sample];
     var ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{wch:16},{wch:10},{wch:12},{wch:16},{wch:16},{wch:24},{wch:14},{wch:10},{wch:8},{wch:10},{wch:8},{wch:24}];
+    ws['!cols'] = [{wch:16},{wch:10},{wch:12},{wch:16},{wch:16},{wch:24},{wch:14},{wch:10},{wch:8},{wch:10},{wch:8},{wch:24},{wch:10}];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '재고입고양식');
     XLSX.writeFile(wb, 'STAR_재고입고_업로드양식.xlsx');
-    setMsg('m0','ok','✅ 업로드 양식을 다운로드했습니다 — 1행은 헤더, 2행은 예시입니다. 예시 행을 지우고 데이터를 채워 업로드하세요. (L열: 비고 — 선택)');
+    setMsg('m0','ok','✅ 업로드 양식을 다운로드했습니다 — 1행은 헤더, 2행은 예시입니다. 예시 행을 지우고 데이터를 채워 업로드하세요. (K열: 수량=정상 · L열: 비고 · M열: 불량수량 — 재고엔 안 잡히고 별도 집계)');
   } catch(err){
     setMsg('m0','er','❌ 양식 생성 실패: '+(err&&err.message||err));
   }
@@ -1079,12 +1085,13 @@ function rebuildStock(){
     var bc = normBarcode(lg.barcode);
     if (!bc) return;
     if (!map[bc]) {
-      map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, boxes:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
+      map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, defQty:0, boxes:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
     }
     var g = map[bc];
     var q = +lg.qty || 0;
     if (lg.type === 'out') g.outQty += q;
     else g.inQty += q;
+    g.defQty += +lg.defQty || 0;   /* 불량 누적 — 재고(inQty-outQty)엔 영향 없음 */
     if (lg.box) g.boxes[String(lg.box).trim()] = 1;
     /* 메타는 가장 최근 입고 로그 기준 */
     if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) {
@@ -1117,14 +1124,15 @@ function rebuildAndRender(){
 }
 
 function updateStats(){
-  var totIn = 0, totOut = 0, totStock = 0;
+  var totIn = 0, totOut = 0, totStock = 0, totDef = 0;
   stockGroups.forEach(function(g){
-    totIn += g.inQty; totOut += g.outQty; totStock += g.stock;
+    totIn += g.inQty; totOut += g.outQty; totStock += g.stock; totDef += (g.defQty||0);
   });
   document.getElementById('s0').textContent = stockGroups.length;
   document.getElementById('s1').textContent = totStock;
   document.getElementById('s2').textContent = totIn;
   document.getElementById('s3').textContent = totOut;
+  var s4 = document.getElementById('s4'); if (s4) s4.textContent = totDef;
 }
 
 /* ─────────────── 검색 (바코드만) ─────────────── */
@@ -1355,7 +1363,7 @@ function renderStock(){
       '<span style="color:var(--mu);font-size:.72rem">'+
       '바코드 스캔이나 엑셀 입고/출고를 하면 여기 자동 표시됩니다.<br>'+
       '전체 재고를 보려면 위 <strong style="color:var(--g)">📂 전체 보기</strong>를 누르세요.</span>';
-    tb.innerHTML = '<tr><td colspan="12" class="empty-row">' + msg + '</td></tr>';
+    tb.innerHTML = '<tr><td colspan="13" class="empty-row">' + msg + '</td></tr>';
     return;
   }
 
@@ -1379,12 +1387,13 @@ function renderStock(){
       '<td class="cell-num" style="color:var(--b)">'+g.inQty+'</td>'+
       '<td class="cell-num" style="color:var(--r)">'+g.outQty+'</td>'+
       '<td class="cell-stock '+stockCls+'">'+g.stock+'</td>'+
+      '<td class="cell-num" style="color:'+((g.defQty||0)>0?'#ff6b6b':'var(--mu)')+'">'+(g.defQty||0)+'</td>'+
       '<td class="cell-note" title="'+escH(note)+'">'+escH(note)+'</td>'+
     '</tr>';
   }).join('');
 
   if (truncated) {
-    tb.innerHTML += '<tr><td colspan="12" class="empty-row" style="color:var(--y)">'+
+    tb.innerHTML += '<tr><td colspan="13" class="empty-row" style="color:var(--y)">'+
       '⚠️ 표시 한도 초과 — '+data.length+'종 중 '+RENDER_LIMIT+'종만 표시. '+
       '검색이나 「최근 작업」 모드로 좁혀 보세요.</td></tr>';
   }
