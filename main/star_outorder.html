@@ -631,6 +631,14 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   align-self:flex-end;
   line-height:1;
   padding:0;
+  white-space:nowrap;
+}
+/* 박스번호 뒷 4자리 — 마커 뒤에 붙는다. 작업자가 읽어야 하므로 마커보다 조금 크게. */
+.prod-label .pl-box-no{
+  font-size:8pt;font-weight:900;
+  font-family:'Courier New',monospace;
+  letter-spacing:.3pt;
+  color:#000;
 }
 /* ③ 하단 — 1pt 가는선(겹침 방지) + 소비자주의문 + 주소 */
 .prod-label .pl-bottom{
@@ -3316,7 +3324,7 @@ function cpProcessRelabelScan(raw){
     Object.keys(contents).forEach(function(bc){
       var q = +contents[bc] || 0;
       if (q <= 0) return;
-      items.push({ barcode: bc, qty: q, srcIdx: -1 });
+      items.push({ barcode: bc, qty: q, srcIdx: -1, box: boxId });
       total += q;
     });
     if (!items.length) {
@@ -4216,8 +4224,9 @@ function cpPrintProductLabels(){
     cpFlash('warn','⚠️ 인쇄할 박스 정보가 없습니다 (혼적/잔류 박스는 처리 대기에서 라벨 출력)');
     return;
   }
+  var evBox = (cpLastDisplayEv.type === 'box') ? (cpLastDisplayEv.input || '') : '';
   cpPrintLabelsFromItems(cpLastDisplayEv.scans.map(function(s){
-    return { barcode:s.barcode, qty:s.qty, srcIdx:s.srcIdx };
+    return { barcode:s.barcode, qty:s.qty, srcIdx:s.srcIdx, box: s.srcBoxBarcode || evBox };
   }));
 }
 
@@ -4254,7 +4263,21 @@ function cpResolveAltBarcode(bc){
   }
   return '';
 }
-/* 라벨 HTML 배열 생성 — items: [{barcode, qty, srcIdx}, ...] (인쇄 함수들이 공유) */
+/* 라벨 우상단 박스 표기 — 박스번호 뒷 4자리.
+ * 스캔 경로에서 박스를 알면(박스 스캔·입고대기·처리대기) 그 번호를 그대로 쓰고,
+ * 모르면(덧방 상품 1장·모아뽑기) 입고 로그에서 역추적하되 후보가 정확히 1개일 때만 쓴다.
+ * 여러 박스에 흩어져 있는 SKU 는 어느 박스에서 나왔는지 알 수 없으므로 표기를 생략한다
+ * (틀린 박스번호를 찍느니 비워두는 편이 안전). 4자리보다 짧은 박스번호는 그대로 표기. */
+function cpBoxSuffix(box, barcode){
+  var b = normBoxId(box || '');
+  if (!b) {
+    var cand = stockBoxes[normBarcode(barcode)] || [];
+    if (cand.length === 1) b = normBoxId(cand[0]);
+  }
+  if (!b) return '';
+  return b.length > 4 ? b.slice(-4) : b;
+}
+/* 라벨 HTML 배열 생성 — items: [{barcode, qty, srcIdx, box}, ...] (인쇄 함수들이 공유) */
 function cpBuildProdLabels(items){
   var rows = (workSession && workSession.rows) || [];
   var labels = [];
@@ -4277,12 +4300,22 @@ function cpBuildProdLabels(items){
     var labelBc = altBc || origBc;
     var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(origBc));
     var qty = +it.qty || 1;
-    /* 사내 규약 마커 — 받는 쪽에 '대체' 단어 노출 X */
-    var altMarkerHtml = hasAlt
-      ? '<div class="pl-alt-marker" title="원바코드 '+escH(origBc)+' → 대체 '+escH(altBc)+'">'+escH(cpAltMarker(origBc, altBc))+'</div>'
+    /* 우상단 한 줄 — 사내 규약 마커(받는 쪽에 '대체' 단어 노출 X) + 박스번호 뒷 4자리.
+     * 마커가 먼저, 그 뒤에 박스번호. 둘 중 하나만 있어도 줄은 나온다. */
+    var boxSuffix = cpBoxSuffix(it.box, origBc);
+    var markerText = hasAlt ? cpAltMarker(origBc, altBc) : '';
+    var altMarkerHtml = (markerText || boxSuffix)
+      ? '<div class="pl-alt-marker"'
+        + (hasAlt ? ' title="원바코드 '+escAttrLocal(origBc)+' → 대체 '+escAttrLocal(altBc)+'"' : '')
+        + '>'
+        + (markerText ? escH(markerText) : '')
+        + (markerText && boxSuffix ? ' ' : '')
+        + (boxSuffix ? '<span class="pl-box-no">'+escH(boxSuffix)+'</span>' : '')
+        + '</div>'
       : '';
-    /* 라벨 내용 서명 — 동일 서명끼리는 바코드 렌더·폰트축소를 1회만 하고 나머지는 복제(속도) */
-    var sig = [labelBc,name,code,size,material,color,origin,ctrAbbr,hasAlt?1:0].join('␟');
+    /* 라벨 내용 서명 — 동일 서명끼리는 바코드 렌더·폰트축소를 1회만 하고 나머지는 복제(속도).
+     * ⚠ boxSuffix 를 반드시 포함 — 빠지면 내용이 같은 다른 박스 라벨끼리 복제되어 박스번호가 섞인다. */
+    var sig = [labelBc,name,code,size,material,color,origin,ctrAbbr,hasAlt?1:0,boxSuffix].join('␟');
     for (var i=0; i<qty; i++) {
       labels.push(
         '<div class="prod-label" data-sig="'+escAttrLocal(sig)+'">'+
@@ -5503,7 +5536,7 @@ function cpRefreshPending(){
 function cpPrintLabelsForAllPending(){
   var items = (workSession||{}).pending||[];
   if (!items.length) { cpFlash('warn','⚠️ 대기 항목 없음'); return; }
-  cpPrintLabelsFromItems(items.map(function(p){return { barcode:p.barcode, qty:p.qty, srcIdx:p.srcIdx };}));
+  cpPrintLabelsFromItems(items.map(function(p){return { barcode:p.barcode, qty:p.qty, srcIdx:p.srcIdx, box:p.srcBoxBarcode||'' };}));
 }
 
 /* 처리 대기 — 항목별 개별 삭제 (id 기준) */
@@ -6712,7 +6745,7 @@ function cpStagingPrintLabels(){
   var matched = stg.filter(function(it){return !it.unmatched;});
   if (!matched.length) { cpFlash('warn','⚠️ 인쇄할 매칭 SKU 없음'); return; }
   cpPrintLabelsFromItems(matched.map(function(it){
-    return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx };
+    return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx, box: it.srcBoxBarcode || '' };
   }));
 }
 
@@ -6725,7 +6758,7 @@ function cpStagingPrintBoxProductLabels(batchKey){
   });
   if (!items.length) { cpFlash('warn','⚠️ 박스에 매칭 SKU 없음'); return; }
   cpPrintLabelsFromItems(items.map(function(it){
-    return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx };
+    return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx, box: it.srcBoxBarcode || '' };
   }));
 }
 
