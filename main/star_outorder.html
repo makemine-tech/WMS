@@ -956,6 +956,14 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-popup-hdr .x:hover{color:var(--tx)}
 .cp-popup-body{padding:.95rem 1.1rem;overflow:auto;flex:1;display:flex;flex-direction:column;gap:.95rem}
 .cp-popup-sec .lbl{font-size:.72rem;color:var(--mu);font-family:var(--mo);letter-spacing:.04em;font-weight:800;margin-bottom:.5rem}
+/* 선택 도구줄 — 목록이 길 때 하나씩 클릭하지 않도록 전체선택/해제 + 현재 선택 수 */
+.cp-sel-bar{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem}
+.cp-sel-bar .lbl{margin-bottom:0;flex:1 1 auto;min-width:0}
+.cp-sel-bar .cnt{font-family:var(--mo);font-size:.72rem;font-weight:900;color:var(--g);white-space:nowrap}
+.cp-sel-bar .cnt.none{color:var(--r)}
+.cp-sel-btn{background:var(--s2);color:var(--tx);border:1px solid var(--br);border-radius:6px;font-family:var(--mo);font-size:.72rem;font-weight:800;padding:.3rem .6rem;cursor:pointer;white-space:nowrap}
+.cp-sel-btn:hover{border-color:var(--g);color:var(--g)}
+.cp-sel-btn:disabled{opacity:.4;cursor:default;border-color:var(--br);color:var(--mu)}
 .cp-item-cb{display:flex;align-items:center;gap:.55rem;padding:.55rem .7rem;background:#0a0d13;border:1px solid var(--br);border-radius:7px;cursor:pointer;font-family:var(--mo);font-size:.84rem;margin-bottom:.32rem}
 .cp-item-cb:hover{border-color:var(--mu)}
 .cp-item-cb.sel{background:rgba(74,240,168,.06);border-color:var(--g)}
@@ -1467,7 +1475,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   </div>
   <div class="cp-popup-body">
     <div class="cp-popup-sec">
-      <div class="lbl">같이 담을 SKU 선택 (체크된 것만 출고박스로 이동)</div>
+      <div class="cp-sel-bar">
+        <div class="lbl">같이 담을 SKU 선택 (체크된 것만 출고박스로 이동)</div>
+        <span class="cnt" id="cpShipPopupSelCnt"></span>
+        <button type="button" class="cp-sel-btn" id="cpShipSelAllBtn" onclick="cpPopupSelectAll(true)" title="목록의 모든 SKU 를 선택">전체선택</button>
+        <button type="button" class="cp-sel-btn" id="cpShipSelNoneBtn" onclick="cpPopupSelectAll(false)" title="모든 선택 해제 — 필요한 것만 골라 체크할 때">전체취소</button>
+      </div>
       <div id="cpShipPopupItems"></div>
     </div>
     <div class="cp-popup-sec">
@@ -5599,7 +5612,7 @@ function cpOpenShipPopup(pickedId){
   if (itemsEl) {
     itemsEl.innerHTML = cands.map(function(p){
       var meta = stockMeta[normBarcode(p.barcode)] || {};
-      return '<label class="cp-item-cb sel" data-pid="'+escH(p.id)+'">'+
+      return '<label class="cp-item-cb sel" data-pid="'+escH(p.id)+'" data-qty="'+(+p.qty||0)+'">'+
         '<input type="checkbox" checked onchange="cpToggleItemCb(this)">'+
         '<span class="src">📦 '+escH(p.srcBoxBarcode)+'</span>'+
         '<span class="bc">'+escH(p.barcode)+'</span>'+
@@ -5620,12 +5633,44 @@ function cpOpenShipPopup(pickedId){
       '<span class="info">새 박스 자동 생성 (다음 순차 번호 — 기존 박스 번호 재사용 안 함)</span>' +
     '</label>';
   }
+  cpRefreshPopupSelCount();
   document.getElementById('cpShipPopupBack').classList.add('open');
   document.getElementById('cpShipPopupBox').classList.add('open');
 }
 function cpToggleItemCb(input){
   var label = input.closest('.cp-item-cb');
   if (label) label.classList.toggle('sel', input.checked);
+  cpRefreshPopupSelCount();
+}
+/* 전체선택 / 전체취소 — 목록이 길 때 하나씩 클릭하지 않도록 */
+function cpPopupSelectAll(on){
+  document.querySelectorAll('#cpShipPopupItems .cp-item-cb').forEach(function(lab){
+    var inp = lab.querySelector('input[type=checkbox]');
+    if (!inp) return;
+    inp.checked = !!on;
+    lab.classList.toggle('sel', !!on);
+  });
+  cpRefreshPopupSelCount();
+}
+/* 선택 수 표시 + 버튼 상태 — 이미 전부 선택/전부 해제면 해당 버튼을 비활성화 */
+function cpRefreshPopupSelCount(){
+  var labs = document.querySelectorAll('#cpShipPopupItems .cp-item-cb');
+  var total = labs.length, sel = 0, selQty = 0, totQty = 0;
+  labs.forEach(function(lab){
+    var q = +(lab.getAttribute('data-qty')||0);
+    totQty += q;
+    var inp = lab.querySelector('input[type=checkbox]');
+    if (inp && inp.checked) { sel++; selQty += q; }
+  });
+  var el = document.getElementById('cpShipPopupSelCnt');
+  if (el) {
+    el.textContent = sel + '/' + total + ' 종 · ' + selQty + '/' + totQty + '개';
+    el.classList.toggle('none', sel === 0);
+  }
+  var allBtn = document.getElementById('cpShipSelAllBtn');
+  var noneBtn = document.getElementById('cpShipSelNoneBtn');
+  if (allBtn)  allBtn.disabled  = (total === 0 || sel === total);
+  if (noneBtn) noneBtn.disabled = (total === 0 || sel === 0);
 }
 function cpToggleBoxOpt(input){
   var all = document.querySelectorAll('.cp-box-opt');
