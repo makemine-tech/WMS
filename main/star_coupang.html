@@ -95,6 +95,30 @@ h1 em{color:var(--g);font-style:normal}
 .pra-sub{font-size:.84rem;font-weight:700;color:var(--r);opacity:.88;margin-top:.35rem;letter-spacing:.01em}
 @keyframes praPulse{0%,100%{box-shadow:0 0 0 0 rgba(240,88,88,.55)}50%{box-shadow:0 0 0 10px rgba(240,88,88,0)}}
 
+/* ─── 검수요청사항 알림 (P열) — 요청사항이 있는 제품 스캔 시 전체화면 경고 ─── */
+.note-alert-bg{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:11000;display:none;align-items:center;justify-content:center;padding:1rem}
+.note-alert-bg.open{display:flex}
+.note-alert{width:min(96%,900px);max-height:94vh;overflow-y:auto;background:linear-gradient(180deg,#1c1608,#141824);border:4px solid var(--y);border-radius:16px;padding:1.3rem 1.5rem 1.4rem;box-shadow:0 0 0 6px rgba(240,196,74,.12),0 24px 70px rgba(0,0,0,.75);animation:naPulse 1.15s ease-in-out infinite}
+.na-hd{font-size:2.2rem;font-weight:900;color:var(--y);text-align:center;letter-spacing:.05em;line-height:1.15}
+.na-sub{font-size:.82rem;font-weight:700;color:var(--mu);text-align:center;margin-top:.3rem;letter-spacing:.02em}
+.na-sku{display:flex;flex-wrap:wrap;gap:.35rem .9rem;justify-content:center;margin-top:.75rem;font-size:.9rem;font-family:var(--mo);color:var(--tx)}
+.na-sku span{background:var(--s2);border:1px solid var(--br);border-radius:6px;padding:.22rem .6rem}
+.na-sku b{color:var(--g)}
+.na-body{font-size:2.5rem;font-weight:900;color:#fff;line-height:1.4;text-align:center;padding:1.1rem 1rem;margin:.9rem 0 .3rem;background:rgba(240,196,74,.1);border:2px dashed rgba(240,196,74,.6);border-radius:12px;white-space:pre-wrap;word-break:break-word}
+.na-cnt{font-size:.76rem;color:var(--mu);text-align:center;font-family:var(--mo)}
+.na-acts{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center;margin-top:1rem}
+.na-btn{border:none;border-radius:9px;padding:.85rem 1.5rem;font-size:1.05rem;font-weight:900;cursor:pointer;letter-spacing:.01em}
+.na-btn.ok{background:var(--y);color:#0f1117;box-shadow:0 0 0 3px rgba(240,196,74,.2)}
+.na-btn.keep{background:transparent;color:var(--o);border:2px solid var(--o)}
+.na-btn:disabled{opacity:.35;cursor:not-allowed}
+.na-btn.ok:focus-visible{outline:3px solid #fff;outline-offset:2px}
+@keyframes naPulse{0%,100%{box-shadow:0 0 0 0 rgba(240,196,74,.5),0 24px 70px rgba(0,0,0,.75)}50%{box-shadow:0 0 0 16px rgba(240,196,74,0),0 24px 70px rgba(0,0,0,.75)}}
+@media (max-width:640px){.na-hd{font-size:1.55rem}.na-body{font-size:1.65rem}.na-btn{font-size:.92rem;padding:.7rem 1rem}}
+/* 테이블/디스플레이의 요청사항 표시 */
+.note-tag{display:inline-block;margin-left:.3rem;color:var(--y);font-weight:900;cursor:help}
+.sd-note{margin-top:.5rem;padding:.5rem .8rem;background:rgba(240,196,74,.1);border:1.5px solid rgba(240,196,74,.5);border-radius:8px;color:var(--y);font-size:1.05rem;font-weight:800;line-height:1.4;white-space:pre-wrap;word-break:break-word;display:none}
+.sd-note.on{display:block}
+
 /* ─── 큰 스캔 결과 디스플레이 ─── */
 .scan-display{margin:.55rem 0 .9rem;border:2px solid var(--br);border-radius:10px;background:linear-gradient(180deg,#0f1320,#0c0f18);padding:.95rem 1.1rem;transition:border-color .2s,background .2s;position:relative;overflow:hidden}
 .scan-display.ok{border-color:var(--g);background:linear-gradient(180deg,rgba(74,240,168,.08),rgba(74,240,168,.02))}
@@ -460,6 +484,7 @@ h1 em{color:var(--g);font-style:normal}
         <input type="checkbox" id="soundChk" onchange="onSoundToggle(this.checked)">
         <span>🔊 소리 알림</span>
       </label>
+      <button class="btn btn-s" onclick="resetNoteAcks()" style="font-size:.72rem;padding:.4rem .8rem" title="검수요청사항 알림의 '확인 완료' 기록을 모두 지웁니다 — 다음 스캔부터 다시 표시됩니다 (작업자 교대 시 유용)">📢 요청사항 알림 초기화</button>
       <span id="photoLogCnt" style="font-size:.7rem;color:var(--p);font-family:var(--mo);font-weight:700;padding:.3rem .55rem;background:rgba(192,132,252,.08);border:1px solid rgba(192,132,252,.3);border-radius:5px">📷 촬영 로그 0건</span>
       <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
     </div>
@@ -512,6 +537,8 @@ h1 em{color:var(--g);font-style:normal}
       <div class="pra-main">📸 사진촬영 해주세요!</div>
       <div class="pra-sub">신규 제품 — 라벨/박스 사진을 찍어두세요</div>
     </div>
+    <!-- 검수요청사항 상시 표시 (P열 값이 있는 제품을 스캔했을 때) -->
+    <div class="sd-note" id="sdNote"></div>
   </div>
   </div><!-- /scan-sticky -->
 
@@ -578,6 +605,21 @@ h1 em{color:var(--g);font-style:normal}
 </div>
 
 </div><!-- .app -->
+
+<!-- 검수요청사항 알림 (P열) — 요청사항이 있는 제품을 스캔하면 전체화면으로 표시 -->
+<div class="note-alert-bg" id="noteAlertBg">
+  <div class="note-alert" role="alertdialog" aria-labelledby="naHd" aria-describedby="naBody">
+    <div class="na-hd" id="naHd">📢 알림! 검수 요청사항</div>
+    <div class="na-sub">이 제품은 업체에서 별도 검수를 요청했습니다 — 내용을 확인한 뒤 진행하세요</div>
+    <div class="na-sku" id="naSku"></div>
+    <div class="na-body" id="naBody">—</div>
+    <div class="na-cnt" id="naCnt"></div>
+    <div class="na-acts">
+      <button class="na-btn ok" id="naOkBtn" onclick="ackNoteAlert('once')" disabled>✅ 확인 완료 — 진행 (이 바코드 다시 안 뜸)</button>
+      <button class="na-btn keep" id="naKeepBtn" onclick="ackNoteAlert('always')" disabled>🔁 계속 알림 — 스캔할 때마다 표시</button>
+    </div>
+  </div>
+</div>
 
 <!-- 박스바코드 생성/인쇄 모달 -->
 <div class="modal-bg" id="boxGenModal" onclick="if(event.target===this)closeBoxGenModal()">
@@ -1088,7 +1130,15 @@ var SESSION_KEY = 'star_coupang_v1';
    G=6 성별 | H=7 소재 | I=8 sku단위무게 | J=9 포장사이즈 | K=10 컬러
    L=11 검수사이즈(작업자 수정) | M=12 사이즈(US) | N=13 물류실물사이즈 | O=14 원산지(작업자 수정)
    P=15 (빈) | Q=16 입고수량(예정) | R=17 물류실물수량(실제 받은 수량) | S=18 =Q-R(잔여) */
-var COL = { BOX_BARCODE:0, BRAND:1, CODE:2, BARCODE:3, ALT_BARCODE:4, NAME:5, GENDER:6, MATERIAL:7, WEIGHT:8, PKGSIZE:9, COLOR:10, SIZE:11, SIZE_US:12, REAL_SIZE:13, ORIGIN:14, EXPECT_QTY:16, EXISTING_QTY:17 };
+var COL = { BOX_BARCODE:0, BRAND:1, CODE:2, BARCODE:3, ALT_BARCODE:4, NAME:5, GENDER:6, MATERIAL:7, WEIGHT:8, PKGSIZE:9, COLOR:10, SIZE:11, SIZE_US:12, REAL_SIZE:13, ORIGIN:14, INSPECT_NOTE:15, EXPECT_QTY:16, EXISTING_QTY:17 };
+
+/* ─── 검수요청사항(P열) 알림 상태 ───
+   noteAck[바코드]=1 : 확인 완료 → 다음부터 안 뜸
+   noteAlways[바코드]=1 : '계속 알림' 선택 → 스캔할 때마다 매번 뜸
+   둘 다 세션에 저장되어 새로고침/다른 PC 동기화 후에도 유지된다. */
+var noteAck = {};
+var noteAlways = {};
+var pendingNote = null;   /* 현재 알림창에 떠 있는 { key, text, rowIdx } */
 
 /* ─────────────── 메시지 ─────────────── */
 function setMsg(id, kind, html) {
@@ -1335,6 +1385,9 @@ function handleFile(file) {
               });
               boxes = p.boxes || [];
               lastScans = p.lastScans || [];
+              /* 검수요청사항 확인 기록도 이어받음 — 다른 PC에서 이미 확인한 건 다시 뜨지 않게 */
+              if (p.noteAck && typeof p.noteAck === 'object') noteAck = p.noteAck;
+              if (p.noteAlways && typeof p.noteAlways === 'object') noteAlways = p.noteAlways;
               recalcRowQtys();
               msg += ' · ☁️ 클라우드 작업 이어받음 (박스 '+boxes.length+'개)';
             }
@@ -1363,6 +1416,7 @@ function parseWorkbook(wb) {
   headers = aoa[0].map(function(h){ return h===null||h===undefined ? '' : String(h); });
   rows = [];
   byBarcode = {};
+  noteAck = {}; noteAlways = {};   /* 새 파일 = 새 작업 — 검수요청사항 확인 기록 초기화 */
   for (var i=1; i<aoa.length; i++) {
     var rawRow = aoa[i];
     if (!rawRow || !rawRow.length) continue;
@@ -1406,6 +1460,7 @@ function parseResultWorkbook(aoa) {
   headers = aoa[0].map(function(h){ return h===null||h===undefined ? '' : String(h); });
   rows = [];
   byBarcode = {};
+  noteAck = {}; noteAlways = {};   /* 결과 파일 복원 = 새 작업 — 검수요청사항 확인 기록 초기화 */
   var rowMap = {};      /* 정규화 바코드 → rowIdx */
   var boxMap = {};      /* 박스ID → box */
   var boxOrder = [];
@@ -1513,7 +1568,9 @@ function buildSessionData() {
     boxes: boxes || [],
     currentBox: currentBox || null,
     lastScans: (lastScans || []).slice(-200),
-    photoLog: photoLog || []
+    photoLog: photoLog || [],
+    noteAck: noteAck || {},
+    noteAlways: noteAlways || {}
   };
   /* 안전망 — boxes/lastScans 내부의 잔여 undefined까지 제거 */
   return JSON.parse(JSON.stringify(data));
@@ -1624,6 +1681,8 @@ function restoreSession() {
   relinkCurrentBox(); /* 복원 직후 currentBox 를 boxes 항목과 같은 객체로 연결 — 이후 스캔 유실 방지 */
   lastScans = data.lastScans || [];
   photoLog = objToArray(data.photoLog) || [];
+  noteAck = (data.noteAck && typeof data.noteAck === 'object') ? data.noteAck : {};
+  noteAlways = (data.noteAlways && typeof data.noteAlways === 'object') ? data.noteAlways : {};
   updatePhotoLogUI();
   /* 작업군 이름 복원 — 클라우드 fileKey 의 근거(없으면 파일명으로 폴백) */
   jobName = data.jobName || data.fileName || null;
@@ -1714,6 +1773,8 @@ function finishWorkAndClear() {
 
 /* ─────────────── 스캔 핸들러 ─────────────── */
 function onBoxKey(ev) {
+  /* 검수요청사항 알림이 떠 있으면 스캔을 받지 않는다 — 확인 후 진행 */
+  if (noteAlertOpen()) { ev.preventDefault(); ev.target.value = ''; return; }
   if (ev.key !== 'Enter') return;
   ev.preventDefault();
   var val = ev.target.value.trim();
@@ -1886,8 +1947,11 @@ function handleNormalScan(rowIdx, key) {
   lastScans.push({ rowIdx: rowIdx, barcode: key, boxId: currentBox.id, def: isDef, ts: Date.now() });
   if (lastScans.length > 200) lastScans = lastScans.slice(-200);
 
-  /* 카운트 음성 — 이 박스 누적 수량(정상+불량)을 한국어로. */
-  if (!(firstScanOfSku && photoReqEnabled)) {
+  /* 카운트 음성 — 이 박스 누적 수량(정상+불량)을 한국어로.
+     검수요청사항 알림이 뜰 스캔에서만 생략한다('알림!' 음성과 겹치지 않게).
+     요청사항이 없는 평소 스캔은 기존 그대로 일·이·삼… 카운트 음성 유지. */
+  var willNoteAlert = willShowNoteAlert(rowIdx, key);
+  if (!(firstScanOfSku && photoReqEnabled) && !willNoteAlert) {
     speakCount(boxItemTotal(currentBox));
   }
 
@@ -1927,9 +1991,14 @@ function handleNormalScan(rowIdx, key) {
   renderBoxList();
   updateUndoBtn();
   saveSession();
+
+  /* 검수요청사항(P열) — 입고 기록이 끝난 뒤 알림. 확인 전까지 계속 뜬다. */
+  maybeShowNoteAlert(rowIdx, key);
 }
 
 function onProdKey(ev) {
+  /* 검수요청사항 알림이 떠 있으면 스캔을 받지 않는다 — 확인 후 진행 */
+  if (noteAlertOpen()) { ev.preventDefault(); ev.target.value = ''; return; }
   if (ev.key !== 'Enter') return;
   ev.preventDefault();
   var val = ev.target.value.trim();
@@ -1998,6 +2067,13 @@ function updateScanDisplay(kind, msg, row, info) {
   var detail = document.getElementById('sdDetail');
   d.className = 'scan-display ' + kind;
   m.innerHTML = msg;
+  /* 검수요청사항(P열) 상시 표시 — 알림 확인 여부와 무관하게 스캔한 제품의 요청사항을 계속 보여준다 */
+  var sn = document.getElementById('sdNote');
+  if (sn) {
+    var nt = getInspectNote(row);
+    if (nt) { sn.textContent = '📢 검수요청: ' + nt; sn.classList.add('on'); }
+    else { sn.textContent = ''; sn.classList.remove('on'); }
+  }
   if (!row) {
     detail.classList.add('hidden');
     currentDisplayRow = -1;
@@ -2373,6 +2449,9 @@ function renderTable() {
     var ogMark = r.originMod?'<span class="tag tag-mod">수정</span>':'';
     var nameMark = r.nameMod?'<span class="tag tag-mod">수정</span>':'';
     var colorMark = r.colorMod?'<span class="tag tag-mod">수정</span>':'';
+    /* 검수요청사항(P열)이 있으면 품명 옆에 📢 — 마우스 올리면 내용 표시 */
+    var noteN = getInspectNote(r);
+    var noteMark = noteN ? '<span class="note-tag" title="검수요청: '+escAttr(noteN)+'">📢</span>' : '';
 
     activeHtml +=
       '<tr id="tr-'+idx+'" class="'+rowCls+'">'+
@@ -2380,7 +2459,7 @@ function renderTable() {
         '<td>'+escH(r.vals[COL.CODE])+'</td>'+
         '<td class="cell-bc">'+escH(r.vals[COL.BARCODE])+'</td>'+
         '<td class="cell-bc-alt">'+escH(r.vals[COL.ALT_BARCODE])+'</td>'+
-        '<td class="cell-name" title="'+escAttr(r.vals[COL.NAME])+'">'+escH(r.vals[COL.NAME])+nameMark+'</td>'+
+        '<td class="cell-name" title="'+escAttr(r.vals[COL.NAME])+'">'+escH(r.vals[COL.NAME])+nameMark+noteMark+'</td>'+
         '<td>'+escH(r.vals[COL.COLOR])+colorMark+'</td>'+
         '<td><input type="text" class="'+szCls+'" value="'+escAttr(sz)+'" onchange="updateSize('+idx+',this.value)" onfocus="this.select()">'+szMark+'</td>'+
         '<td><input type="text" class="'+ogCls+'" value="'+escAttr(og)+'" onchange="updateOrigin('+idx+',this.value)" onfocus="this.select()">'+ogMark+'</td>'+
@@ -3054,7 +3133,7 @@ function downloadFallback(kind) {
   /* 원본 워크북 없는 경우 — 단순 표로 */
   var aoa, fname;
   if (kind === 'done') {
-    aoa = [['박스', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '정상입고', '불량입고', '예정 Q']];
+    aoa = [['박스', '시간', '품번', '바코드', '품명', '컬러', '사이즈', '원산지', '검수요청사항', '정상입고', '불량입고', '예정 Q']];
     boxes.slice().sort(function(a,b){return boxRecency(b)-boxRecency(a);}).forEach(function(box){
       var d = new Date(box.ts);
       var t = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
@@ -3073,7 +3152,7 @@ function downloadFallback(kind) {
       order.forEach(function(rowIdx){
         var r = rows[rowIdx]; if (!r) return;
         var normal = perSku[rowIdx].normal, defect = perSku[rowIdx].defect;
-        aoa.push([box.id, t, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE], r.vals[COL.ORIGIN], normal, defect, r.vals[COL.EXPECT_QTY]]);
+        aoa.push([box.id, t, r.vals[COL.CODE], r.vals[COL.BARCODE], r.vals[COL.NAME], r.vals[COL.COLOR], r.vals[COL.SIZE], r.vals[COL.ORIGIN], getInspectNote(r), normal, defect, r.vals[COL.EXPECT_QTY]]);
       });
     });
     fname = '_완료건_박스별.xlsx';
@@ -3207,6 +3286,7 @@ function doStartEmpty(chosenName){
   pendingUnknownBarcode = null;
   pendingUnknownRaw = null;
   photoLog = [];
+  noteAck = {}; noteAlways = {};
   boxPattern = null; prodPattern = null; pendingBoxOverride = null; pendingProdOverride = null;
   updatePhotoLogUI();
   startedEmpty = true;
@@ -3228,7 +3308,7 @@ function doStartEmpty(chosenName){
   H[COL.SIZE_US]     = '사이즈(US)';
   H[COL.REAL_SIZE]   = '실측사이즈';
   H[COL.ORIGIN]      = '원산지';
-  H[15]              = '(예비)';
+  H[COL.INSPECT_NOTE]= '검수요청사항';
   H[COL.EXPECT_QTY]  = '입고수량';
   H[COL.EXISTING_QTY]= '직영수량';
   headers = H;
@@ -3284,6 +3364,128 @@ function hidePhotoReqAlert(){
     }, 100);
   } catch(e){}
 })();
+
+/* ─────────────── 검수요청사항(P열) 알림 ─────────────── */
+/* 행의 P열 요청사항 텍스트 (없으면 '') */
+function getInspectNote(row){
+  if (!row || !row.vals) return '';
+  var v = row.vals[COL.INSPECT_NOTE];
+  if (v === null || v === undefined) return '';
+  return String(v).trim();
+}
+/* 알림 판단 기준 키 — 대비바코드로 찍어도 같은 SKU면 같은 키 */
+function noteKeyOf(row, scannedKey){
+  return getBarcodeKey(row) || scannedKey || '';
+}
+/* 이 스캔에서 알림이 뜰지 — 음성 충돌 방지용으로 스캔 처리 중 미리 물어본다 */
+function willShowNoteAlert(rowIdx, scannedKey){
+  var row = rows[rowIdx];
+  var note = getInspectNote(row);
+  var nKey = noteKeyOf(row, scannedKey);
+  if (!note || !nKey) return false;
+  /* '계속 알림'이면 매번, 아니면 확인 전까지만 */
+  if (!noteAlways[nKey] && noteAck[nKey]) return false;
+  return true;
+}
+/* 스캔 직후 호출 — 요청사항이 있으면 전체화면 알림. 이미 확인한 바코드는 건너뜀. */
+function maybeShowNoteAlert(rowIdx, scannedKey){
+  if (!willShowNoteAlert(rowIdx, scannedKey)) return;
+  var row = rows[rowIdx];
+  showNoteAlert(noteKeyOf(row, scannedKey), getInspectNote(row), rowIdx);
+}
+function showNoteAlert(nKey, note, rowIdx){
+  var bg = document.getElementById('noteAlertBg');
+  if (!bg) return;
+  var row = rows[rowIdx];
+  pendingNote = { key: nKey, text: note, rowIdx: rowIdx };
+
+  /* 제품 식별 정보 */
+  var parts = [];
+  var push = function(label, v){
+    if (v === null || v === undefined || String(v).trim() === '') return;
+    parts.push('<span>'+label+' <b>'+escH(v)+'</b></span>');
+  };
+  push('바코드', row && row.vals[COL.BARCODE]);
+  push('품번',   row && row.vals[COL.CODE]);
+  push('품명',   row && row.vals[COL.NAME]);
+  push('컬러',   row && row.vals[COL.COLOR]);
+  push('사이즈', row && row.vals[COL.SIZE]);
+  document.getElementById('naSku').innerHTML = parts.join('');
+  document.getElementById('naBody').textContent = note;
+  document.getElementById('naCnt').textContent = noteAlways[nKey]
+    ? '🔁 계속 알림 상태 — 이 바코드는 스캔할 때마다 표시됩니다'
+    : '이 제품의 첫 스캔입니다 — 확인하면 이번 작업 동안 다시 뜨지 않습니다';
+  bg.classList.add('open');
+  /* 알림 중 스캔 입력이 쌓이지 않게 스캔칸에서 포커스를 뺀다 (확인 후 되돌림) */
+  try { document.getElementById('prodInp').blur(); } catch(e){}
+
+  /* 소리 + TTS '알림!' — 스캐너 특성상 소리 알림 체크와 무관하게 항상 울린다 */
+  playNoteAlertSound();
+
+  /* 스캔 중 날아온 Enter 로 즉시 닫히는 사고 방지 — 0.7초 뒤에 버튼 활성화 */
+  var ok = document.getElementById('naOkBtn');
+  var keep = document.getElementById('naKeepBtn');
+  ok.disabled = true; keep.disabled = true;
+  clearTimeout(showNoteAlert._t);
+  showNoteAlert._t = setTimeout(function(){
+    ok.disabled = false; keep.disabled = false;
+    try { ok.focus(); } catch(e){}
+  }, 700);
+}
+/* 확인 처리 — mode: 'once'(다음부턴 안 뜸) | 'always'(매번 뜸) */
+function ackNoteAlert(mode){
+  var bg = document.getElementById('noteAlertBg');
+  if (bg) bg.classList.remove('open');
+  clearTimeout(showNoteAlert._t);
+  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch(e){}
+  if (pendingNote && pendingNote.key) {
+    if (mode === 'always') {
+      noteAlways[pendingNote.key] = 1;
+      delete noteAck[pendingNote.key];
+    } else {
+      noteAck[pendingNote.key] = 1;
+      delete noteAlways[pendingNote.key];
+    }
+    saveSession();
+  }
+  pendingNote = null;
+  /* 알림 중 스캐너가 흘린 입력은 버리고 다시 스캔칸으로 */
+  var inp = document.getElementById('prodInp');
+  if (inp && !inp.disabled) { inp.value = ''; try { inp.focus(); } catch(e){} }
+}
+/* 알림창이 떠 있는지 */
+function noteAlertOpen(){
+  var bg = document.getElementById('noteAlertBg');
+  return !!(bg && bg.classList.contains('open'));
+}
+/* 알림 확인 기록 초기화 — 처음부터 다시 뜨게 한다 */
+function resetNoteAcks(){
+  if (!confirm('검수요청사항 "확인 완료" 기록을 모두 지웁니다.\n다음 스캔부터 요청사항 알림이 다시 표시됩니다. 진행할까요?')) return;
+  noteAck = {}; noteAlways = {};
+  saveSession();
+  setMsg('m1','ok','🔄 검수요청사항 알림 기록을 초기화했습니다 — 다음 스캔부터 다시 표시됩니다.');
+}
+/* 알림음 — 강한 경고 3발 + TTS '알림'.
+   '초과' 음성(260ms 시작)이 끝난 뒤에 나오도록 950ms 뒤에 발화한다. */
+function playNoteAlertSound(){
+  playBeep(1320, 0.14, 0,    0.9);
+  playBeep(1320, 0.14, 0.18, 0.9);
+  playBeep(1760, 0.20, 0.36, 0.9);
+  setTimeout(function(){ speakKo('알림', { rate: 1.2 }); }, 950);
+}
+/* 알림창이 떠 있는 동안 Enter/Space 로 확인 (스캐너 Enter 는 0.7초 가드로 차단됨) */
+document.addEventListener('keydown', function(ev){
+  if (!noteAlertOpen()) return;
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  var ok = document.getElementById('naOkBtn');
+  /* 가드(0.7초) 중이면 스캐너가 흘린 Enter 이므로 삼킨다 */
+  if (!ok || ok.disabled) { ev.preventDefault(); return; }
+  /* 버튼에 포커스가 있으면 브라우저 기본 클릭에 맡긴다 ('계속 알림' 선택 보존) */
+  var ae = document.activeElement;
+  if (ae && (ae.id === 'naOkBtn' || ae.id === 'naKeepBtn')) return;
+  ev.preventDefault();
+  ackNoteAlert('once');
+});
 
 /* ─────────────── 불량입고 모드 ─────────────── */
 function onDefectToggle(checked){
@@ -3952,20 +4154,20 @@ function downloadPhotoLogCsv(){
 }
 
 function loadSampleNotice() {
-  setMsg('m0','inf','💡 D열 바코드 또는 E열 대비바코드로 매칭됩니다. 사이즈(L)·원산지(N)는 작업 중 인라인 수정 가능. 다운로드 시 R(직영수량) = R + 실입고로 갱신, 수정된 사이즈/원산지 반영.');
+  setMsg('m0','inf','💡 D열 바코드 또는 E열 대비바코드로 매칭됩니다. 사이즈(L)·원산지(N)는 작업 중 인라인 수정 가능. <b style="color:var(--y)">P열 = 검수요청사항</b> — 값이 있으면 그 제품 스캔 시 큰 알림창 + 음성(알림!)이 뜨고, 작업자가 확인을 눌러야 진행됩니다. 다운로드 시 R(직영수량) = R + 실입고로 갱신, 수정된 사이즈/원산지 반영.');
 }
 
 /* 기본 양식(.xlsx) 다운로드 — 쿠팡 입고 양식 헤더 + 예시 1행
    COL: BOX_BARCODE:0, BRAND:1, CODE:2, BARCODE:3, ALT_BARCODE:4, NAME:5,
         GENDER:6, MATERIAL:7, WEIGHT:8, PKGSIZE:9, COLOR:10,
-        SIZE:11, SIZE_US:12, REAL_SIZE:13, ORIGIN:14, (15:예비),
+        SIZE:11, SIZE_US:12, REAL_SIZE:13, ORIGIN:14, INSPECT_NOTE:15(검수요청사항),
         EXPECT_QTY:16, EXISTING_QTY:17 */
 function downloadCoupangTemplate() {
   try {
     var headers = [
       '박스바코드','브랜드','품번','바코드','대비바코드','상품명',
       '성별','소재','중량(g)','패키지사이즈','컬러',
-      '검수사이즈','사이즈(US)','실측사이즈','원산지','(예비)',
+      '검수사이즈','사이즈(US)','실측사이즈','원산지','검수요청사항',
       '입고수량','직영수량'
     ];
     var sample = [
@@ -3984,7 +4186,7 @@ function downloadCoupangTemplate() {
       '9',          /* M 사이즈(US) */
       '270',        /* N 실측사이즈 */
       '대한민국',   /* O 원산지 (작업자 수정 가능) */
-      '',           /* P 예비 */
+      '박스 개봉 후 지퍼 파손 여부 확인',  /* P 검수요청사항 — 스캔 시 큰 알림으로 표시 */
       10,           /* Q 입고수량 (예정수량) ★ */
       0             /* R 직영수량 (실입고 — 보통 0으로 시작) */
     ];
@@ -3993,13 +4195,13 @@ function downloadCoupangTemplate() {
     ws['!cols'] = [
       {wch:14},{wch:10},{wch:12},{wch:16},{wch:16},{wch:24},
       {wch:8},{wch:12},{wch:8},{wch:14},{wch:10},
-      {wch:12},{wch:10},{wch:12},{wch:10},{wch:8},
+      {wch:12},{wch:10},{wch:12},{wch:10},{wch:30},
       {wch:10},{wch:10}
     ];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '쿠팡입고양식');
     XLSX.writeFile(wb, 'STAR_쿠팡입고_업로드양식.xlsx');
-    setMsg('m0','ok','✅ 양식을 다운로드했습니다 — 1행 헤더, 2행 예시. 박스바코드(A) 비워두고 D(바코드)·Q(입고수량)만 채우면 됩니다. 작업 중 박스ID·실입고는 자동 갱신.');
+    setMsg('m0','ok','✅ 양식을 다운로드했습니다 — 1행 헤더, 2행 예시. 박스바코드(A) 비워두고 D(바코드)·Q(입고수량)만 채우면 됩니다. 작업 중 박스ID·실입고는 자동 갱신. <b style="color:var(--y)">P열 「검수요청사항」</b>에 내용을 적으면 그 제품을 스캔할 때 큰 알림 + 음성으로 작업자에게 표시됩니다.');
   } catch(err){
     setMsg('m0','er','❌ 양식 생성 실패: '+(err && err.message || err));
   }
@@ -4369,6 +4571,11 @@ function syncWithCloud(opts) {
       });
       lastScans.sort(function(a,b){ return a.ts - b.ts; });
       if (lastScans.length > 200) lastScans = lastScans.slice(-200);
+      /* 5) 검수요청사항 확인 기록 합집합 — 어느 PC에서든 확인했으면 확인으로 본다.
+            단 '계속 알림'으로 지정된 바코드는 계속 뜨도록 확인 기록에서 뺀다. */
+      Object.keys(p.noteAlways || {}).forEach(function(k){ noteAlways[k] = 1; });
+      Object.keys(p.noteAck || {}).forEach(function(k){ if (!noteAlways[k]) noteAck[k] = 1; });
+      Object.keys(noteAlways).forEach(function(k){ delete noteAck[k]; });
       renderTable();
       renderBoxList();
       updateStats();
