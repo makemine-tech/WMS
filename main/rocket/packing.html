@@ -484,16 +484,21 @@
   .wo-doc { font-family: 'Pretendard','Malgun Gothic',sans-serif; color:#111; }
   .wo-title { font-size: 21pt; font-weight: 800; text-align: center; letter-spacing:-.5px; margin: 0 0 2mm; }
   .wo-sub { font-size: 9pt; color:#555; text-align:center; margin-bottom: 4mm; }
-  .wo-table { width: 100%; border-collapse: collapse; font-size: 11pt; table-layout: fixed; }
-  .wo-table th, .wo-table td { border: 1px solid #222; padding: 5px 6px; text-align: center; vertical-align: middle; word-break: keep-all; overflow-wrap: anywhere; }
-  .wo-table th { background:#eef0f3; font-weight: 800; font-size: 10pt; }
-  .wo-table td.wo-center { font-weight: 800; font-size: 12.5pt; }
+  /* 열이 9개(출고지·배차방식 포함)라 A4 세로에서 폭이 빡빡함 → 본문 폰트/여백을 한 단계 낮춤 */
+  .wo-table { width: 100%; border-collapse: collapse; font-size: 10pt; table-layout: fixed; }
+  .wo-table th, .wo-table td { border: 1px solid #222; padding: 4px 4px; text-align: center; vertical-align: middle; word-break: keep-all; overflow-wrap: anywhere; }
+  .wo-table th { background:#eef0f3; font-weight: 800; font-size: 9.5pt; }
+  .wo-table td.wo-center { font-weight: 800; font-size: 11.5pt; }
   .wo-table td.wo-center small { display:block; font-weight:600; font-size:8.5pt; color:#555; margin-top:1px; }
-  .wo-table td.wo-addr { font-size: 9.5pt; line-height: 1.3; }
-  .wo-table td.wo-time { font-size: 10.5pt; font-weight: 700; white-space: nowrap; }
-  .wo-table td.wo-pallet { font-weight: 800; }
+  .wo-table td.wo-addr { font-size: 9pt; line-height: 1.3; }
+  /* 셀 전체 nowrap 이면 '(시각 미검출)' 같은 부가문구가 옆 칸을 침범 → 날짜/시각만 nowrap */
+  .wo-table td.wo-time { font-size: 10pt; font-weight: 700; line-height: 1.3; }
+  .wo-nowrap { white-space: nowrap; }
+  .wo-table td.wo-pallet { font-weight: 800; font-size: 9.5pt; line-height: 1.25; }
   .wo-table td.wo-remark { font-weight: 700; }
-  .wo-table td.wo-exp { font-size: 10pt; }
+  .wo-table td.wo-origin { font-size: 9.5pt; font-weight: 700; line-height: 1.25; }
+  .wo-table td.wo-dispatch { font-size: 10pt; font-weight: 800; line-height: 1.25; }
+  .wo-table td.wo-exp { font-size: 9.5pt; }
   .wo-table td.wo-qty { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
   .wo-miss { color:#c0392b; font-weight:700; }
   .wo-table tbody tr.wo-grp-first td { border-top: 2px solid #000; }
@@ -1011,6 +1016,9 @@ const H = {
   palletTotal:  ["파렛트수", "팔레트수"],
   palletNo:     ["파렛트번호", "팔레트번호"],
   expiry:       ["유통(소비)기한", "유통기한", "소비기한"],
+  /* 선택 열 — 있으면 작업지시서에 표기, 없으면 '-' */
+  origin:       ["출고지", "출고 지", "출고장"],
+  dispatch:     ["배차방식", "배차 방식", "배차"],
 };
 
 let RAW_ROWS = [];
@@ -1048,8 +1056,10 @@ function parseExcel(file) {
           palletT:  findCol(headers, H.palletTotal),
           palletN:  findCol(headers, H.palletNo),
           expiry:   findCol(headers, H.expiry),
+          origin:   findCol(headers, H.origin),
+          dispatch: findCol(headers, H.dispatch),
         };
-        // 발주현황은 있으면 사용, 없으면 빈값 처리 (필수 아님)
+        // 발주현황·출고지·배차방식은 있으면 사용, 없으면 빈값 처리 (필수 아님)
         const required = ["po","skuId","skuName","center","eta","qty","box","palletT","palletN","expiry"];
         const missing = required.filter(k => idx[k] === -1);
         if (missing.length) {
@@ -1071,6 +1081,8 @@ function parseExcel(file) {
             palletT: Number(r[idx.palletT] || 0),
             palletN: Number(r[idx.palletN] || 0),
             expiry:  String(r[idx.expiry] ?? "").trim(),
+            origin:   idx.origin   !== -1 ? String(r[idx.origin]   ?? "").trim() : "",
+            dispatch: idx.dispatch !== -1 ? String(r[idx.dispatch] ?? "").trim() : "",
           }))
           .filter(r => r.center && r.palletT && r.palletN);
 
@@ -2586,12 +2598,15 @@ function buildWorkOrderStage() {
     e.pallets.add(pid);
     for (const it of g.items) {
       const sid = it.skuId || it.skuName || it.status;
-      if (!e.skus.has(sid)) e.skus.set(sid, { skuName: it.skuName, status: it.status, expiry: it.expiry, qty: 0, pallets: new Set() });
+      if (!e.skus.has(sid)) e.skus.set(sid, { skuName: it.skuName, status: it.status, expiry: it.expiry, qty: 0, pallets: new Set(), origins: new Set(), dispatches: new Set() });
       const s = e.skus.get(sid);
       s.qty += (+it.qty || 0);
       s.pallets.add(pid);
       if (!s.status && it.status) s.status = it.status;
       if (!s.expiry && it.expiry) s.expiry = it.expiry;
+      /* 출고지·배차방식 — 같은 품목이라도 파렛트/출고건마다 다를 수 있어 값을 모두 모은다 */
+      if (it.origin)   s.origins.add(it.origin);
+      if (it.dispatch) s.dispatches.add(it.dispatch);
     }
   }
   const entries = [...byCenter.values()].sort((a, b) =>
@@ -2606,17 +2621,20 @@ function buildWorkOrderStage() {
     const centerTotalPallet = e.pallets.size;
     totalPallet += centerTotalPallet;
     const addrHtml = info.addr ? escapeHtml(info.addr) : '<span class="wo-miss">— (명세서 미검출)</span>';
-    const timeHtml = info.time ? escapeHtml(info.time)
-      : (e.etaKey ? etaToMD(e.etaKey) + ' <span class="wo-miss" style="font-weight:600;font-size:8pt;">(시각 미검출)</span>' : '<span class="wo-miss">—</span>');
+    const timeHtml = info.time ? `<span class="wo-nowrap">${escapeHtml(info.time)}</span>`
+      : (e.etaKey ? `<span class="wo-nowrap">${etaToMD(e.etaKey)}</span>` + ' <span class="wo-miss" style="font-weight:600;font-size:8pt;">(시각 미검출)</span>' : '<span class="wo-miss">—</span>');
     const centerHtml = escapeHtml(e.center) + (info.code ? `<small>${escapeHtml(info.code)}</small>` : '');
     const palletHtml = `총 ${centerTotalPallet}파렛트`;   // 입고처 단위 총 파렛트수 (엑셀 상품별 수치 아님)
     if (!skus.length) {
-      rowsHtml += `<tr class="wo-grp-first"><td class="wo-center">${centerHtml}</td><td class="wo-addr">${addrHtml}</td><td class="wo-time">${timeHtml}</td><td class="wo-pallet">${palletHtml}</td><td colspan="3" style="color:#999">상품 없음</td></tr>`;
+      rowsHtml += `<tr class="wo-grp-first"><td class="wo-center">${centerHtml}</td><td class="wo-addr">${addrHtml}</td><td class="wo-time">${timeHtml}</td><td class="wo-pallet">${palletHtml}</td><td colspan="5" style="color:#999">상품 없음</td></tr>`;
       continue;
     }
     skus.forEach((s, si) => {
       totalQty += s.qty;
       const remark = escapeHtml(s.status || s.skuName || '');
+      /* 한 품목에 값이 여러 개면 모두 표기 (예: 트럭1 / 트럭2) */
+      const originTxt   = [...s.origins].join(' / ');
+      const dispatchTxt = [...s.dispatches].join(' / ');
       rowsHtml += `<tr class="${si === 0 ? 'wo-grp-first' : ''}">`;
       if (si === 0) {
         rowsHtml += `<td class="wo-center" rowspan="${rs}">${centerHtml}</td>` +
@@ -2625,6 +2643,8 @@ function buildWorkOrderStage() {
           `<td class="wo-pallet" rowspan="${rs}">${palletHtml}</td>`;
       }
       rowsHtml += `<td class="wo-remark">${remark || '-'}</td>` +
+        `<td class="wo-origin">${originTxt ? escapeHtml(originTxt) : '<span class="wo-miss">-</span>'}</td>` +
+        `<td class="wo-dispatch">${dispatchTxt ? escapeHtml(dispatchTxt) : '<span class="wo-miss">-</span>'}</td>` +
         `<td class="wo-exp">${formatExpiry(s.expiry)}</td>` +
         `<td class="wo-qty">${fmt(s.qty)}</td></tr>`;
     });
@@ -2634,8 +2654,8 @@ function buildWorkOrderStage() {
     <div class="wo-title">쿠팡 출고 체크리스트</div>
     <div class="wo-sub">발행 ${escapeHtml(issued)} · 입고처 ${entries.length}곳 · 총 ${totalPallet}파렛트 · 총수량 ${fmt(totalQty)}</div>
     <table class="wo-table">
-      <colgroup><col style="width:13%"><col style="width:22%"><col style="width:15%"><col style="width:12%"><col style="width:14%"><col style="width:12%"><col style="width:12%"></colgroup>
-      <thead><tr><th>입고처</th><th>주소</th><th>입고예약시간</th><th>출고파렛트수</th><th>비고</th><th>소비기한</th><th>수량</th></tr></thead>
+      <colgroup><col style="width:10%"><col style="width:15%"><col style="width:11%"><col style="width:9%"><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:10%"><col style="width:8%"></colgroup>
+      <thead><tr><th>입고처</th><th>주소</th><th>입고예약시간</th><th>출고파렛트수</th><th>비고</th><th>출고지</th><th>배차방식</th><th>소비기한</th><th>수량</th></tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
   </div>`;
