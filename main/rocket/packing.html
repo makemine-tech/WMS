@@ -160,6 +160,9 @@
     border-radius: 50%;
   }
   .vendor-chip button:hover { color: var(--danger); background: rgba(220,38,38,.08); }
+  /* PDF 목록 칩 — 클릭하면 원본 인쇄 (프린터 아이콘은 hover 시 진해짐) */
+  .vendor-chip .chip-print { font-size: 12px; opacity: .45; }
+  .vendor-chip:hover .chip-print { opacity: 1; }
   .vendor-chip.is-active button { color: rgba(255,255,255,.75); }
   .vendor-chip.is-active button:hover { color: #fff; background: rgba(255,255,255,.15); }
 
@@ -735,7 +738,7 @@
       </div>
       <button class="btn" id="btnPdfReset">PDF 초기화</button>
     </div>
-    <div class="status-bar" id="pdfStatus">PDF가 업로드되면 거래명세서·라벨이 자동 분류되어 인쇄에 포함됩니다.</div>
+    <div class="status-bar" id="pdfStatus">PDF가 업로드되면 거래명세서·라벨이 자동 분류되어 인쇄에 포함됩니다. 아래 목록에서 파일을 클릭하면 그 원본 PDF를 그대로 인쇄합니다.</div>
     <div class="vendor-chips" id="pdfList" style="margin-top:10px;"></div>
   </section>
 
@@ -1781,9 +1784,11 @@ function renderPdfList() {
     for (const it of list) {
       const pickN = pickPagesForCategory(it).length;
       const centers = [...new Set(it.pages.map(p=>p.center).filter(Boolean))].join(', ');
-      html += `<span class="vendor-chip" title="${escapeHtml(it.name)}">
+      html += `<span class="vendor-chip" data-pdfprint="${escapeHtml(c.k)}::${escapeHtml(it.name)}"
+        title="${escapeHtml(it.name)}&#10;클릭하면 이 원본 PDF를 그대로 인쇄합니다 (${it.numPages}페이지 전체)">
         <strong>${c.emoji} ${escapeHtml(PDF_CAT[c.k].label)}</strong>
         <span style="color:var(--text-sub);">${escapeHtml(centers||'-')} · ${it.numPages}p→${pickN}p</span>
+        <span class="chip-print" aria-hidden="true">🖨</span>
         <button data-pdfdel="${escapeHtml(c.k)}::${escapeHtml(it.name)}" title="삭제">×</button>
       </span>`;
     }
@@ -1807,12 +1812,71 @@ document.getElementById('btnPdfReset').addEventListener('click', () => {
   setPdfStatus('PDF 초기화됨.');
 });
 document.getElementById('pdfList').addEventListener('click', e => {
+  /* ① 삭제 버튼 — 인쇄보다 먼저 처리 (칩 클릭으로 번지지 않게) */
   const del = e.target.getAttribute('data-pdfdel');
-  if (!del) return;
-  const [cat, name] = del.split('::');
-  pdfStore[cat] = pdfStore[cat].filter(x => x.name !== name);
-  renderPdfList(); updatePrintButtonsState();
+  if (del) {
+    const [cat, name] = del.split('::');
+    pdfStore[cat] = pdfStore[cat].filter(x => x.name !== name);
+    renderPdfList(); updatePrintButtonsState();
+    return;
+  }
+  /* ② 칩 본체 클릭 — 업로드한 원본 PDF 를 그대로 인쇄 */
+  const chip = e.target.closest('.vendor-chip[data-pdfprint]');
+  if (!chip) return;
+  const [cat, name] = chip.getAttribute('data-pdfprint').split('::');
+  printOriginalPdf(cat, name);
 });
+
+/* ── 업로드한 원본 PDF 인쇄 ──
+ * 목록 칩을 누르면 그 파일을 가공 없이(페이지 선별·재배치 없이) 그대로 인쇄한다.
+ * 원본 File 을 blob URL 로 만들어 화면 밖 iframe 에 띄우고 그 프레임만 인쇄.
+ * 브라우저가 iframe 안의 PDF 인쇄를 막는 경우를 대비해 '새 창으로 열기' 안내를 남긴다. */
+let pdfPrintUrl = null;
+function firePrintFrame(fr) {          /* 실제 인쇄 호출 (분리해 두면 실패 처리·테스트가 쉬움) */
+  fr.contentWindow.focus();
+  fr.contentWindow.print();
+}
+function printOriginalPdf(cat, name) {
+  const it = (pdfStore[cat] || []).find(x => x.name === name);
+  if (!it || !it.file) {
+    setPdfStatus('원본 파일을 찾을 수 없습니다 — PDF를 다시 업로드해 주세요.', 'err');
+    return;
+  }
+  /* 이전 인쇄 프레임/URL 정리 */
+  const old = document.getElementById('pdfOriginalFrame');
+  if (old) old.remove();
+  if (pdfPrintUrl) { try { URL.revokeObjectURL(pdfPrintUrl); } catch(_){} }
+  pdfPrintUrl = URL.createObjectURL(it.file);
+
+  const fr = document.createElement('iframe');
+  fr.id = 'pdfOriginalFrame';
+  /* display:none 이면 PDF 뷰어가 로드되지 않는 브라우저가 있어 화면 밖으로 밀어둔다 */
+  fr.style.cssText = 'position:fixed;left:-10000px;top:0;width:800px;height:1000px;border:0;';
+  fr.src = pdfPrintUrl;
+
+  /* 인쇄창을 바로 못 여는 경우(브라우저 정책 등) — 팝업 차단에 걸리지 않도록
+     window.open 을 자동 호출하지 않고, 사용자가 누를 수 있는 링크를 남긴다. */
+  const openInTab = () => {
+    const el = document.getElementById('pdfStatus');
+    el.className = 'status-bar err';
+    el.innerHTML = '브라우저가 인쇄창을 바로 열지 못했습니다 — ' +
+      '<a href="' + pdfPrintUrl + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:underline">원본 PDF 열기 ▸</a>' +
+      ' 를 눌러 새 탭에서 Ctrl+P 로 인쇄하세요. (' + escapeHtml(name) + ')';
+  };
+  let fired = false;
+  const guard = setTimeout(() => { if (!fired) openInTab(); }, 4000);
+  fr.onload = () => {
+    fired = true;
+    clearTimeout(guard);
+    /* PDF 뷰어가 뜨는 데 약간의 여유를 준 뒤 인쇄 */
+    setTimeout(() => {
+      try { firePrintFrame(fr); }
+      catch (err) { console.warn('iframe 인쇄 실패:', err); openInTab(); }
+    }, 250);
+  };
+  document.body.appendChild(fr);
+  setPdfStatus('원본 PDF 인쇄 준비 중 — ' + name + ' (' + it.numPages + '페이지)');
+}
 
 /* PDF Dropzone */
 (function bindPdfDropzone(){
