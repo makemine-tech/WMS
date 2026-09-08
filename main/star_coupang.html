@@ -1189,6 +1189,29 @@ var COL = { BOX_BARCODE:0, BRAND:1, CODE:2, BARCODE:3, ALT_BARCODE:4, NAME:5, GE
    ══════════════════════════════════════════════════════════════ */
 var shipPlan = null;   /* {fileName, targets:{바코드norm:[{center,need}]}} */
 var shipDone = {};     /* {센터: {바코드norm: 확정분리수량}} — 박스 마감으로 확정된 누적 */
+var shipCbox = {};     /* {센터: {seq:N, id:'인천26-001'}} — 현재 열려 있는 수집박스 */
+
+/* 센터의 현재 수집박스 ID — 없으면 001 로 생성.
+   분리한 물건은 원 박스에서 물리적으로 빠져나오므로, 원 박스ID 로 재고를 잡으면
+   장부에는 있는데 박스에는 없는 상태가 된다. 그래서 별도 박스번호를 부여한다. */
+function cpxCenterSlug(c){
+  var t = String(c||'').replace(/\s+/g,'');
+  return t || 'OUT';
+}
+function cpxCurCbox(center){
+  if (!shipCbox[center]) shipCbox[center] = { seq: 1 };
+  var o = shipCbox[center];
+  o.id = cpxCenterSlug(center) + '-' + String(o.seq).replace(/^(\d)$/,'00$1').replace(/^(\d\d)$/,'0$1');
+  return o.id;
+}
+/* 수집박스 마감 → 다음 번호로. 파렛트/박스가 찼을 때 작업자가 누른다. */
+function cpxCloseCbox(center){
+  if (!shipCbox[center]) { cpxCurCbox(center); return; }
+  shipCbox[center].seq = (shipCbox[center].seq||1) + 1;
+  var nid = cpxCurCbox(center);
+  cpxRender(); saveSession();
+  setMsg('m1','ok','📦 '+escH(center)+' 수집박스 마감 — 다음 박스: <b>'+escH(nid)+'</b>. 새 용기에 이 번호 라벨을 붙이세요.');
+}
 
 function cpxOn(){ return !!(shipPlan && shipPlan.targets && Object.keys(shipPlan.targets).length); }
 
@@ -1267,7 +1290,8 @@ function cpxRender(){
     }).join('') : '<div class="cpx-empty">없음</div>';
   } else {
     sl.innerHTML = a.ship.length ? a.ship.map(function(x,i){
-      return '<div class="cpx-row"><span class="cpx-ctr">'+esc(x.center)+'</span>'+
+      return '<div class="cpx-row"><span class="cpx-ctr" title="담을 수집박스">'+esc(x.center)+
+             '<div style="font-size:.62rem;font-weight:700;color:var(--mu);font-family:var(--mo)">'+esc(cpxCurCbox(x.center))+'</div></span>'+
              '<span class="cpx-nm">'+esc(x.name||'')+'</span>'+
              '<span class="cpx-bc">'+esc(x.bc)+'</span>'+
              '<span class="cpx-q"><input type="number" min="0" value="'+x.qty+'" data-i="'+i+'" '+
@@ -1299,9 +1323,9 @@ function cpxRender(){
   if (!currentBox){
     foot.innerHTML = '<span class="msg">박스 바코드를 먼저 스캔하세요.</span>';
   } else if (confirmed){
-    foot.innerHTML = '<span class="msg">✅ 이 박스는 분리 확정 완료 — 박스 완료를 눌러 마감하세요.</span>';
+    foot.innerHTML = '<span class="msg">✅ 이 박스는 분리 확정 완료 — 박스 완료를 눌러 마감하세요.</span>' + cpxCboxBtns();
   } else if (!a.ship.length){
-    foot.innerHTML = '<span class="msg">출고대기 없음 — 다음 박스를 스캔하면 자동으로 마감됩니다.</span>';
+    foot.innerHTML = '<span class="msg">출고대기 없음 — 다음 박스를 스캔하면 자동으로 마감됩니다.</span>' + cpxCboxBtns();
   } else {
     var centers = Object.keys(a.byCenter);
     var whole = (centers.length===1 && a.normal.length===0)
@@ -1309,6 +1333,22 @@ function cpxRender(){
     foot.innerHTML = '<span class="msg">⚠️ 분리 수량을 확인하고 확정하세요. 확정 전에는 다음 박스로 넘어갈 수 없습니다.</span>'
                    + whole + '<button class="cpx-btn" onclick="cpxConfirm(false)">✅ 분리 확정</button>';
   }
+}
+/* 센터별 수집박스 마감 버튼 — 파렛트/박스가 차면 누른다 */
+function cpxCboxBtns(){
+  if (!cpxOn()) return '';
+  var esc = (typeof escH==='function') ? escH : function(x){ return x; };
+  var used = {};
+  (boxes||[]).forEach(function(b){
+    if (b.shipAlloc && b.shipAlloc.ship) b.shipAlloc.ship.forEach(function(x){ used[x.center]=true; });
+  });
+  var cs = Object.keys(used);
+  if (!cs.length) return '';
+  return cs.sort().map(function(c){
+    return '<button class="btn btn-s" style="font-size:.7rem;padding:.35rem .6rem" '+
+           'onclick="cpxCloseCbox(\''+esc(c).replace(/'/g,"")+'\')" '+
+           'title="이 용기가 가득 찼을 때 누르세요 — 다음 번호로 넘어갑니다">📦 '+esc(cpxCurCbox(c))+' 마감</button>';
+  }).join('');
 }
 /* 수량 직접 수정 — 임시 저장 후 재계산 없이 그 값만 반영 */
 var _cpxEdit = {};
@@ -1324,7 +1364,8 @@ function cpxConfirm(whole){
   var fin = [];
   a.ship.forEach(function(x, i){
     var q = whole ? x.qty : (_cpxEdit[i] != null ? _cpxEdit[i] : x.qty);
-    if (q > 0) fin.push({ center:x.center, bc:x.bc, rowIdx:x.rowIdx, name:x.name, qty:q });
+    if (q > 0) fin.push({ center:x.center, bc:x.bc, rowIdx:x.rowIdx, name:x.name, qty:q,
+                          cbox: cpxCurCbox(x.center), srcBox: currentBox.id });
   });
   fin.forEach(function(x){ cpxAddDone(x.center, x.bc, x.qty); });
   currentBox.shipAlloc = { ship: fin, ts: Date.now() };
@@ -1387,12 +1428,26 @@ function cpxPickPlan(file){
 /* ── 출고대기 분리 목록 엑셀 ── */
 function cpxDownloadShipList(){
   if (!cpxOn()) return;
-  var aoa = [['박스바코드','센터','바코드','품명','분리수량']];
+  var aoa = [['수집박스','센터','바코드','품명','분리수량','원박스']];
   (boxes||[]).forEach(function(b){
     if (!b.shipAlloc || !b.shipAlloc.ship) return;
     b.shipAlloc.ship.forEach(function(x){
-      aoa.push([b.id, x.center, x.bc, x.name||'', x.qty]);
+      aoa.push([x.cbox||'', x.center, x.bc, x.name||'', x.qty, b.id]);
     });
+  });
+  /* 수집박스별 집계 — 출고에서 박스ID 하나로 찍을 단위 */
+  var cb = {};
+  (boxes||[]).forEach(function(b){
+    ((b.shipAlloc&&b.shipAlloc.ship)||[]).forEach(function(x){
+      var k = (x.cbox||'')+'\u0000'+x.bc;
+      if (!cb[k]) cb[k] = { cbox:x.cbox||'', center:x.center, bc:x.bc, name:x.name||'', qty:0 };
+      cb[k].qty += x.qty;
+    });
+  });
+  aoa.push([]); aoa.push(['── 수집박스별 집계 (출고 시 이 번호를 스캔) ──']);
+  aoa.push(['수집박스','센터','바코드','품명','수량']);
+  Object.keys(cb).sort().forEach(function(k){
+    var x = cb[k]; aoa.push([x.cbox, x.center, x.bc, x.name, x.qty]);
   });
   if (aoa.length===1){ setMsg('m1','er','❌ 확정된 출고대기 분리 내역이 없습니다.'); return; }
   /* 부족분 요약 */
@@ -1850,7 +1905,8 @@ function buildSessionData() {
     noteAck: noteAck || {},
     noteAlways: noteAlways || {},
     shipPlan: shipPlan || null,
-    shipDone: shipDone || {}
+    shipDone: shipDone || {},
+    shipCbox: shipCbox || {}
   };
   /* 안전망 — boxes/lastScans 내부의 잔여 undefined까지 제거 */
   return JSON.parse(JSON.stringify(data));
@@ -1971,6 +2027,7 @@ function restoreSession() {
   currentBox = data.currentBox || null;
   shipPlan = data.shipPlan || null;
   shipDone = data.shipDone || {};
+  shipCbox = data.shipCbox || {};
   relinkCurrentBox(); /* 복원 직후 currentBox 를 boxes 항목과 같은 객체로 연결 — 이후 스캔 유실 방지 */
   lastScans = data.lastScans || [];
   photoLog = objToArray(data.photoLog) || [];
@@ -3407,11 +3464,36 @@ function downloadForInstock() {
       if (!perSku[it.rowIdx]) { perSku[it.rowIdx] = { normal:0, defect:0 }; order.push(it.rowIdx); }
       perSku[it.rowIdx].defect += it.count;
     });
+    /* 입고+동시출고 — 분리분은 원 박스에서 물리적으로 빠져나갔다.
+       원 박스ID 로 재고를 잡으면 장부엔 있는데 박스엔 없는 상태가 되므로,
+       분리분은 원 박스 수량에서 차감하고 수집박스ID(예: 인천26-001) 행으로 따로 낸다. */
+    var _ship = {};   /* rowIdx -> { 수집박스ID: 수량 } */
+    ((box.shipAlloc && box.shipAlloc.ship) || []).forEach(function(x){
+      if (!x || (x.qty||0) <= 0) return;
+      var cb = x.cbox || (String(x.center||'OUT').replace(/\s+/g,'') + '-001');
+      if (!_ship[x.rowIdx]) _ship[x.rowIdx] = {};
+      _ship[x.rowIdx][cb] = (_ship[x.rowIdx][cb] || 0) + x.qty;
+      if (!perSku[x.rowIdx]) { perSku[x.rowIdx] = { normal:0, defect:0 }; order.push(x.rowIdx); }
+    });
     order.forEach(function(rowIdx){
       var r = rows[rowIdx];
       if (!r) return;
       var v = r.vals || [];
       var normal = perSku[rowIdx].normal, defect = perSku[rowIdx].defect;
+      /* 분리분을 원 박스 수량에서 차감 + 수집박스 행 별도 생성 */
+      var sp = _ship[rowIdx];
+      if (sp) {
+        Object.keys(sp).forEach(function(cb){
+          var q = sp[cb];
+          normal -= q;
+          aoa.push([ nn(cb), nn(v[COL.BRAND]), nn(v[COL.CODE]), nn(v[COL.BARCODE]),
+                     nn(v[COL.ALT_BARCODE]), nn(v[COL.NAME]), nn(v[COL.MATERIAL]),
+                     nn(v[COL.COLOR]), nn(v[COL.SIZE]), nn(v[COL.ORIGIN]),
+                     q, '출고대기(원박스 '+nn(box.id)+')', 0 ]);
+        });
+        if (normal < 0) normal = 0;
+      }
+      if (normal <= 0 && defect <= 0) return;   /* 원 박스에 남은 게 없으면 행 생략 */
       aoa.push([
         nn(box.id),
         nn(v[COL.BRAND]),
