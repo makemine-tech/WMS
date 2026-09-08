@@ -2160,7 +2160,6 @@ function restoreSession() {
   ensureSessionFileName(data.fileName);
   /* boxes를 source of truth로 row.qtyReceived 재계산 — 다른 작업장 데이터 합산 후에도 정합성 보장 */
   recalcRowQtys();
-  try{ cpxRecalcDone(); }catch(e){}   /* 진행 누적은 분리 박스에서 유도 — 어긋남 방지 */
   /* 입고+동시출고 — 복원 시 패널/버튼 상태 재현 */
   try{
     if (cpxOn()){
@@ -2477,10 +2476,9 @@ function handleNormalScan(rowIdx, key) {
   }
   updateScanDisplay(kind, msg, row, { target: target, recv: recv, defRecv: defRecv, altUsed: altUsed });
 
-  renderTable();
-  highlightRow(rowIdx);
+  scheduleListRender(rowIdx);   /* 아래 목록·박스목록은 합쳐서 갱신 (연속 스캔 시 한 번만) */
   updateStats();
-  renderBoxList();
+
   updateUndoBtn();
   saveSession();
 
@@ -2771,8 +2769,7 @@ function endBox() {
   document.getElementById('endBoxBtn').disabled = true;
   currentBox = null;
   document.getElementById('boxInp').focus();
-  renderTable();   /* 완료 목록 즉시 갱신 — 완료한 박스를 최상단에 반영 */
-  renderBoxList();
+  flushListRender();   /* 대기 중인 목록 렌더까지 앞당겨 즉시 반영 */
   saveSession();
   playBoxDoneSound();
   /* 박스 완료 시 자동 동기화 (토글 ON일 때만).
@@ -5012,6 +5009,29 @@ function printFocusCodes() {
 
 /* boxes를 source of truth로 row.qtyReceived 재계산.
    동기화/병합 직후 호출되어 양쪽 작업 합산 결과를 row에 반영. */
+/* ── 목록 렌더 합치기 ──
+   아래 표(수백 행)와 박스 목록을 매 스캔마다 다시 그리면 스캔 1회가 수십~수백 ms 걸려
+   연속 스캔이 밀린다. 작업자가 보는 큰 화면·동시출고 패널은 즉시 갱신하고,
+   무거운 목록만 짧게 모아 한 번에 그린다. 스캔이 멈추면 바로 최신 상태가 된다.
+   (하이라이트가 사라지지 않도록 렌더 후 마지막 행을 다시 표시) */
+var _listRenderTimer = null, _listRenderRow = -1;
+function scheduleListRender(rowIdx){
+  if (rowIdx != null) _listRenderRow = rowIdx;
+  if (_listRenderTimer) return;
+  _listRenderTimer = setTimeout(function(){
+    _listRenderTimer = null;
+    try { renderTable(); renderBoxList(); } catch(e){ console.warn('목록 렌더 실패:', e); }
+    if (_listRenderRow >= 0) { try { highlightRow(_listRenderRow); } catch(e){} }
+    _listRenderRow = -1;
+  }, 150);
+}
+/* 즉시 반영이 필요한 곳(박스 완료·삭제·다운로드 직전 등)에서 대기 중인 렌더를 앞당긴다 */
+function flushListRender(){
+  if (_listRenderTimer) { clearTimeout(_listRenderTimer); _listRenderTimer = null; }
+  try { renderTable(); renderBoxList(); } catch(e){}
+  _listRenderRow = -1;
+}
+
 function recalcRowQtys() {
   rows.forEach(function(r){ r.qtyReceived = 0; r.qtyDefective = 0; });
   boxes.forEach(function(b){
@@ -5022,6 +5042,9 @@ function recalcRowQtys() {
       if (rows[it.rowIdx]) rows[it.rowIdx].qtyDefective += (it.count || 0);
     });
   });
+  /* 동시출고 진행 누적도 같은 원천(boxes)에서 다시 계산한다.
+     박스/줄 삭제로 기록을 지우면 그만큼 필요수량이 되살아나야 하기 때문. */
+  try{ if (typeof cpxRecalcDone === 'function') cpxRecalcDone(); }catch(e){}
 }
 
 /* 로컬 boxes와 클라우드 boxes를 박스 ID 기준 병합.
@@ -5135,7 +5158,6 @@ function syncWithCloud(opts) {
       Object.keys(p.noteAlways || {}).forEach(function(k){ noteAlways[k] = 1; });
       Object.keys(p.noteAck || {}).forEach(function(k){ if (!noteAlways[k]) noteAck[k] = 1; });
       Object.keys(noteAlways).forEach(function(k){ delete noteAck[k]; });
-      try{ cpxRecalcDone(); }catch(e){}   /* 병합된 분리 박스 기준으로 진행 누적 재계산 */
       renderTable();
       renderBoxList();
       updateStats();
