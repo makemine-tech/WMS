@@ -125,6 +125,8 @@ h1 em{color:var(--g);font-style:normal}
 .cpx-nrow .s{font-weight:800;color:var(--tx)}
 .cpx-nrow .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mu)}
 .cpx-nrow .q{font-weight:900;font-family:var(--mo);color:var(--tx)}
+.cpx-nrow .w{flex:0 0 auto;font-size:.66rem;font-weight:800;color:var(--mu);border:1px solid var(--br);border-radius:4px;padding:.05rem .3rem;white-space:nowrap}
+.cpx-nrow .w.ok{color:#7dd3fc;border-color:rgba(56,189,248,.45)}
 .cpx-empty{padding:.5rem;text-align:center;color:var(--mu);font-size:.72rem}
 .cpx-foot{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.45rem .7rem;border-top:1px solid rgba(56,189,248,.28);background:rgba(56,189,248,.05)}
 .cpx-foot .msg{flex:1;min-width:0;font-size:.76rem;color:var(--mu)}
@@ -1226,6 +1228,24 @@ function cpxCboxId(center, boxId){
 
 function cpxOn(){ return !!(shipPlan && shipPlan.targets && Object.keys(shipPlan.targets).length); }
 
+/* 진행 누적(shipDone)을 '이미 분리된 박스'에서 다시 계산한다.
+   누적을 따로 들고 다니면 목록 재업로드·다른 PC 동기화·되돌리기에서 어긋난다.
+   분리 박스가 사실이므로 항상 거기서 유도한다. */
+function cpxRecalcDone(){
+  var d = {};
+  (boxes||[]).forEach(function(b){
+    if (!b || !b.shipCenter) return;
+    (b.items||[]).forEach(function(i){
+      var key = i.planBc || normBarcode(i.barcode);
+      if (!key) return;
+      if (!d[b.shipCenter]) d[b.shipCenter] = {};
+      d[b.shipCenter][key] = (d[b.shipCenter][key] || 0) + (+i.count || 0);
+    });
+  });
+  shipDone = d;
+  return d;
+}
+
 /* 확정 누적 조회/가산 */
 function cpxDoneQty(center, bc){ return (shipDone[center] && shipDone[center][bc]) || 0; }
 function cpxAddDone(center, bc, q){
@@ -1268,6 +1288,9 @@ function cpxAllocate(box){
   var out = { ship: [], normal: [], byCenter: {} };
   if (!box || !cpxOn()) return out;
   var tot = cpxCenterRemainTotals();
+  /* 이번 박스 안에서 이미 배분한 양 — 같은 목록키가 여러 행에 걸쳐 있어도 필요수량을 넘기지 않게 */
+  var usedNow = {};
+  var uKey = function(c, k){ return c + '::' + k; };
   (box.items || []).forEach(function(it){
     var left = it.count || 0;
     if (left <= 0) return;
@@ -1282,15 +1305,27 @@ function cpxAllocate(box){
     });
     ent.forEach(function(e){
       if (left <= 0) return;
-      var rem = Math.max(0, (e.need||0) - cpxDoneQty(e.center, key));
+      var rem = Math.max(0, (e.need||0) - cpxDoneQty(e.center, key) - (usedNow[uKey(e.center,key)]||0));
       if (rem <= 0) return;
       var take = Math.min(rem, left);
       left -= take;
+      usedNow[uKey(e.center,key)] = (usedNow[uKey(e.center,key)]||0) + take;
       out.ship.push({ center:e.center, bc:key, scanBc:bc, rowIdx:it.rowIdx, name:nm, size:sz, qty:take, need:e.need,
                       done:cpxDoneQty(e.center, key) });
       out.byCenter[e.center] = (out.byCenter[e.center]||0) + take;
     });
-    if (left > 0) out.normal.push({ bc:bc, rowIdx:it.rowIdx, name:nm, size:sz, qty:left });
+    if (left > 0) {
+      /* 왜 출고대기로 안 갔는지 — 현장에서 바로 원인을 알 수 있게 표시한다 */
+      var why = '';
+      if (!key) why = '목록에 없음';
+      else {
+        var full = (shipPlan.targets[key]||[]).map(function(e){
+          return e.center + ' ' + (cpxDoneQty(e.center, key) + (usedNow[uKey(e.center,key)]||0)) + '/' + (e.need||0);
+        }).join(', ');
+        why = '필요수량 충족 (' + full + ')';
+      }
+      out.normal.push({ bc:bc, rowIdx:it.rowIdx, name:nm, size:sz, qty:left, why:why, planKey:key });
+    }
   });
   return out;
 }
@@ -1346,6 +1381,7 @@ function cpxRender(){
       return '<div class="cpx-nrow"><span class="b">' + esc(x.bc) + '</span>' +
              '<span class="s">' + esc(x.size||'') + '</span>' +
              '<span class="n">' + esc(x.name||'') + '</span>' +
+             (x.why ? '<span class="w' + (x.why==='목록에 없음' ? '' : ' ok') + '">' + esc(x.why) + '</span>' : '') +
              '<span class="q">' + x.qty + '</span></div>';
     }).join('') : '<div class="cpx-empty">없음</div>') +
   '</div>';
@@ -1448,6 +1484,10 @@ function cpxPickPlan(file){
       });
       if (!n){ setMsg('m1','er','❌ 동시출고 목록에서 유효한 행을 찾지 못했습니다 — 바코드/수량/센터명 3열인지 확인하세요.'); return; }
       shipPlan = { fileName: file.name, targets: targets };
+      /* 진행 누적은 '이미 분리된 박스'에서 다시 계산한다.
+         목록을 다시 올릴 때 예전 누적이 남아 있으면 필요수량이 이미 찬 것으로
+         보여 전부 일반입고로 빠지는 사고가 난다 (테스트 반복 시 특히). */
+      cpxRecalcDone();
       var cts = {}, tq = 0;
       Object.keys(targets).forEach(function(bc){ targets[bc].forEach(function(e){ cts[e.center]=(cts[e.center]||0)+e.need; tq+=e.need; }); });
       var summary = Object.keys(cts).sort().map(function(c){ return c+' '+cts[c]+'개'; }).join(' · ');
@@ -2105,7 +2145,7 @@ function restoreSession() {
   boxes = data.boxes || [];
   currentBox = data.currentBox || null;
   shipPlan = data.shipPlan || null;
-  shipDone = data.shipDone || {};
+  shipDone = data.shipDone || {};   /* 아래 recalcRowQtys 뒤 cpxRecalcDone() 으로 다시 계산 */
   /* shipCbox(수집박스 마감)는 폐지 — 분리 번호는 '센터명-원박스번호'로 자동 */
   relinkCurrentBox(); /* 복원 직후 currentBox 를 boxes 항목과 같은 객체로 연결 — 이후 스캔 유실 방지 */
   lastScans = data.lastScans || [];
@@ -2120,6 +2160,7 @@ function restoreSession() {
   ensureSessionFileName(data.fileName);
   /* boxes를 source of truth로 row.qtyReceived 재계산 — 다른 작업장 데이터 합산 후에도 정합성 보장 */
   recalcRowQtys();
+  try{ cpxRecalcDone(); }catch(e){}   /* 진행 누적은 분리 박스에서 유도 — 어긋남 방지 */
   /* 입고+동시출고 — 복원 시 패널/버튼 상태 재현 */
   try{
     if (cpxOn()){
@@ -5094,6 +5135,7 @@ function syncWithCloud(opts) {
       Object.keys(p.noteAlways || {}).forEach(function(k){ noteAlways[k] = 1; });
       Object.keys(p.noteAck || {}).forEach(function(k){ if (!noteAlways[k]) noteAck[k] = 1; });
       Object.keys(noteAlways).forEach(function(k){ delete noteAck[k]; });
+      try{ cpxRecalcDone(); }catch(e){}   /* 병합된 분리 박스 기준으로 진행 누적 재계산 */
       renderTable();
       renderBoxList();
       updateStats();
