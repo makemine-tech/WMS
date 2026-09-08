@@ -82,6 +82,17 @@ h1 em{color:var(--g);font-style:normal}
 .scan-feedback.er{background:rgba(240,88,88,.08);border-color:var(--r);color:var(--r)}
 .scan-feedback.warn{background:rgba(240,196,74,.08);border-color:var(--y);color:var(--y)}
 .scan-actions{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.55rem}
+/* 라벨 + ✕ 한 덩어리 칩 — ✕ 만 누르면 초기화 (직관적으로 '지우기') */
+.chip-x{display:inline-flex;align-items:stretch;border:1px solid rgba(192,132,252,.35);border-radius:6px;overflow:hidden;background:rgba(192,132,252,.08)}
+.chip-x > span,.chip-x .lbl{display:inline-flex;align-items:center;font-size:.72rem;font-weight:800;color:var(--p);font-family:var(--mo);padding:.32rem .55rem;background:transparent;border:none}
+.chip-x .lbl{cursor:pointer;font-family:inherit}
+.chip-x .lbl:hover{background:rgba(192,132,252,.16)}
+.chip-x .x{background:transparent;border:none;border-left:1px solid rgba(192,132,252,.35);color:var(--mu);font-size:.8rem;font-weight:900;padding:0 .5rem;cursor:pointer;line-height:1}
+.chip-x .x:hover{color:#fff;background:rgba(240,88,88,.55)}
+.chip-x.cpx{border-color:rgba(56,189,248,.45);background:rgba(56,189,248,.1)}
+.chip-x.cpx .lbl{color:#7dd3fc}
+.chip-x.cpx .lbl:hover{background:rgba(56,189,248,.18)}
+.chip-x.cpx .x{border-left-color:rgba(56,189,248,.45)}
 .scan-actions .btn{padding:.42rem .85rem;font-size:.76rem}
 .opt-chk{display:inline-flex;align-items:center;gap:.32rem;font-size:.74rem;cursor:pointer;color:var(--mu);padding:.32rem .5rem;border:1px solid var(--br);border-radius:5px;background:var(--s2);transition:all .15s;user-select:none}
 .opt-chk:hover{border-color:var(--mu)}
@@ -528,29 +539,32 @@ body.sd-collapsed .sd-fold{top:.3rem}
         <input type="text" id="prodInp" class="scan-inp" placeholder="제품을 스캔하세요" autocomplete="off" onkeydown="onProdKey(event)" disabled>
       </div>
     </div>
+    <!-- 1줄: 작업 버튼 -->
     <div class="scan-actions">
       <button class="btn btn-g" onclick="endBox()" id="endBoxBtn" disabled style="font-size:.76rem;padding:.42rem .85rem" title="이 박스의 작업을 완료로 확정 — 처리 완료 목록에 반영되고 동기화(저장)됩니다">✅ 박스 완료</button>
       <button class="btn btn-s" onclick="undoLastScan()" id="undoBtn" disabled style="font-size:.76rem;padding:.42rem .85rem">↶ 마지막 스캔 취소</button>
-      <label class="opt-chk" id="defectChkWrap" title="켜면 이후 스캔이 '불량'으로 기록됩니다. 실입고(정상)와 분리 집계되고 엑셀엔 별도 시트로 저장됩니다." style="border:1px solid rgba(255,107,107,.5);background:rgba(255,107,107,.08)">
-        <input type="checkbox" id="defectChk" onchange="onDefectToggle(this.checked)" style="accent-color:#ff6b6b">
-        <span style="color:#ff8a8a;font-weight:800">🚫 불량입고 진행</span>
-      </label>
-      <label class="opt-chk" title="신규 SKU(처음 등록되는 바코드)를 첫 스캔할 때 '📸 촬영해주세요' 큰 알림 표시. 기본값 꺼짐.">
-        <input type="checkbox" id="photoReqChk" onchange="onPhotoReqToggle(this.checked)">
-        <span>📸 신규 SKU 촬영요망</span>
-      </label>
       <label class="opt-chk" title="신규 SKU 첫 스캔 시 비프음 + '사진 촬영해 주세요' 음성 출력 (한국어 TTS). 기본값 꺼짐.">
         <input type="checkbox" id="soundChk" onchange="onSoundToggle(this.checked)">
         <span>🔊 소리 알림</span>
       </label>
-      <button class="btn btn-s" onclick="document.getElementById('cpxFi').click()" style="font-size:.72rem;padding:.4rem .8rem;border-color:#38bdf8;color:#7dd3fc" title="입고와 동시에 출고할 물량 목록을 올립니다 — 바코드/수량/센터명 3열. 올리면 스캔 중 출고대기가 자동 분류됩니다">🚚 동시출고 목록</button>
+      <label class="opt-chk" title="신규 SKU(처음 등록되는 바코드)를 첫 스캔할 때 '📸 촬영해주세요' 큰 알림 표시. 기본값 꺼짐.">
+        <input type="checkbox" id="photoReqChk" onchange="onPhotoReqToggle(this.checked)">
+        <span>📸 신규 촬영요망</span>
+      </label>
+      <label class="opt-chk" id="defectChkWrap" title="켜면 이후 스캔이 '불량'으로 기록됩니다. 실입고(정상)와 분리 집계되고 엑셀엔 별도 시트로 저장됩니다." style="border:1px solid rgba(255,107,107,.5);background:rgba(255,107,107,.08)">
+        <input type="checkbox" id="defectChk" onchange="onDefectToggle(this.checked)" style="accent-color:#ff6b6b">
+        <span style="color:#ff8a8a;font-weight:800">🚫 불량입고 진행</span>
+      </label>
+      <button class="btn btn-s" onclick="resetNoteAcks()" style="font-size:.72rem;padding:.4rem .8rem" title="검수요청사항 알림의 '확인 완료' 기록을 모두 지웁니다 — 다음 스캔부터 다시 표시됩니다 (작업자 교대 시 유용)">📢 요청사항 알림 초기화</button>
+      <!-- 촬영 로그 — ✕ 를 누르면 로그 초기화 -->
+      <span class="chip-x" id="photoLogChip"><span id="photoLogCnt">📷 촬영 로그 0건</span><button class="x" onclick="clearPhotoLog()" title="촬영 로그를 지웁니다 (사진 파일은 건드리지 않습니다)">✕</button></span>
+      <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
+    </div>
+    <!-- 2줄: 동시출고 -->
+    <div class="scan-actions" style="margin-top:.35rem">
+      <span class="chip-x cpx" id="cpxChip"><button class="lbl" onclick="document.getElementById('cpxFi').click()" title="입고와 동시에 출고할 물량 목록을 올립니다 — 바코드/수량/센터명 3열. 올리면 스캔 중 출고대기가 자동 분류됩니다">🚚 동시출고 목록</button><button class="x" id="cpxClrBtn" onclick="cpxClearPlan()" style="display:none" title="올린 동시출고 목록을 초기화합니다 — 분리된 박스는 원 박스로 되돌아갑니다 (입고 스캔 수량은 유지)">✕</button></span>
       <input type="file" id="cpxFi" accept=".xlsx,.xls,.csv" style="display:none" onchange="cpxPickPlan(this.files[0]); this.value='';">
       <span id="cpxPlanInfo" style="font-size:.7rem;color:#7dd3fc;font-weight:700"></span>
-      <button class="btn btn-s" id="cpxDlBtn" onclick="cpxDownloadShipList()" style="display:none;font-size:.72rem;padding:.4rem .8rem" title="확정된 출고대기 분리 내역을 엑셀로 내려받습니다 — 출고 담당자에게 그대로 넘기면 됩니다">📤 출고대기 목록</button>
-      <button class="btn btn-s" id="cpxClrBtn" onclick="cpxClearPlan()" style="display:none;font-size:.72rem;padding:.4rem .8rem;border-color:#ff6b6b;color:#ff8a8a" title="잘못 올린 동시출고 목록을 초기화합니다 — 목록과 분리 진행이 지워지고 평소 입고검수 화면으로 돌아갑니다 (입고 스캔 수량은 유지)">✕ 동시출고 초기화</button>
-      <button class="btn btn-s" onclick="resetNoteAcks()" style="font-size:.72rem;padding:.4rem .8rem" title="검수요청사항 알림의 '확인 완료' 기록을 모두 지웁니다 — 다음 스캔부터 다시 표시됩니다 (작업자 교대 시 유용)">📢 요청사항 알림 초기화</button>
-      <span id="photoLogCnt" style="font-size:.7rem;color:var(--p);font-family:var(--mo);font-weight:700;padding:.3rem .55rem;background:rgba(192,132,252,.08);border:1px solid rgba(192,132,252,.3);border-radius:5px">📷 촬영 로그 0건</span>
-      <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
     </div>
   </div>
 
@@ -1539,7 +1553,7 @@ function cpxClearPlan(){
   shipPlan = null; shipDone = {};
   var fi = document.getElementById('cpxFi'); if (fi) fi.value = '';
   var pi = document.getElementById('cpxPlanInfo'); if (pi) pi.textContent = '';
-  var dl = document.getElementById('cpxDlBtn'); if (dl) dl.style.display = 'none';
+  /* 출고대기 목록 버튼은 폐지 — 하단 처리완료 목록이 같은 정보를 보여준다 */
   var cb = document.getElementById('cpxClrBtn'); if (cb) cb.style.display = 'none';
   relinkCurrentBox();
   recalcRowQtys();
@@ -1550,42 +1564,6 @@ function cpxClearPlan(){
     + '. 실입고 수량은 그대로입니다. 필요하면 [🚚 동시출고 목록]으로 다시 올리세요.');
 }
 
-/* ── 출고대기 분리 목록 엑셀 ── */
-function cpxDownloadShipList(){
-  if (!cpxOn()) return;
-  var aoa = [['분리박스','센터','바코드','사이즈','품명','수량','원박스']];
-  var split = (boxes||[]).filter(function(b){ return b && b.shipCenter; })
-                         .sort(function(a,b){ return String(a.id).localeCompare(String(b.id),'ko',{numeric:true}); });
-  split.forEach(function(b){
-    (b.items||[]).forEach(function(i){
-      var r = rows[i.rowIdx] || {}; var v = r.vals || [];
-      aoa.push([b.id, b.shipCenter, i.planBc || i.barcode, v[COL.SIZE]==null?'':v[COL.SIZE],
-                v[COL.NAME]==null?'':v[COL.NAME], i.count, b.srcBoxBarcode||'']);
-    });
-  });
-  if (aoa.length===1){ setMsg('m1','er','❌ 분리된 출고대기 내역이 없습니다 — 박스를 완료하면 자동으로 분리됩니다.'); return; }
-  /* 센터별 집계 — 출고에서 박스ID 하나로 찍을 단위 */
-  aoa.push([]); aoa.push(['── 분리박스별 집계 (출고 시 이 번호를 스캔) ──']);
-  aoa.push(['분리박스','센터','수량','SKU 종수']);
-  split.forEach(function(b){
-    var q = (b.items||[]).reduce(function(s,i){ return s+(+i.count||0); }, 0);
-    aoa.push([b.id, b.shipCenter, q, (b.items||[]).length]);
-  });
-  /* 부족분 요약 */
-  aoa.push([]); aoa.push(['── 센터별 집계 ──']);
-  aoa.push(['센터','바코드','필요','분리','부족']);
-  Object.keys(shipPlan.targets).forEach(function(bc){
-    shipPlan.targets[bc].forEach(function(e){
-      var d = cpxDoneQty(e.center, bc);
-      aoa.push([e.center, bc, e.need, d, Math.max(0, e.need-d)]);
-    });
-  });
-  var wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '출고대기분리');
-  var out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
-  saveBlob(out, (jobName||'작업')+'_출고대기분리목록.xlsx');
-  setMsg('m1','ok','✅ 출고대기 분리 목록 저장 완료 — 박스바코드가 들어 있어 출고에서 역추적됩니다.');
-}
 /* ─── 검수요청사항(P열) 알림 상태 ───
    noteAck[바코드]=1 : 확인 완료 → 다음부터 안 뜸
    noteAlways[바코드]=1 : '계속 알림' 선택 → 스캔할 때마다 매번 뜸
@@ -2167,8 +2145,6 @@ function restoreSession() {
         shipPlan.targets[bc].forEach(function(e){ _cts[e.center]=(_cts[e.center]||0)+e.need; }); });
       document.getElementById('cpxPlanInfo').textContent = '🚚 ' +
         Object.keys(_cts).sort().map(function(c){ return c+' '+_cts[c]+'개'; }).join(' · ');
-      if ((boxes||[]).some(function(b){ return b.shipCenter; }))
-        document.getElementById('cpxDlBtn').style.display = '';
       cpxRender();
     }
   }catch(e){}
@@ -4207,6 +4183,15 @@ function recordPhotoEvent(barcode, row){
   photoLog.push(entry);
   updatePhotoLogUI();
   saveSession();
+}
+/* 촬영 로그 초기화 — 칩의 ✕ 버튼. 사진 파일은 건드리지 않고 기록만 지운다. */
+function clearPhotoLog(){
+  if (!photoLog.length){ setMsg('m1','warn','⚠️ 지울 촬영 로그가 없습니다.'); return; }
+  if (!confirm('촬영 로그 ' + photoLog.length + '건을 지웁니다.\n\n촬영한 사진 파일은 그대로이고, 이 목록만 비웁니다.\n계속할까요?')) return;
+  var n = photoLog.length;
+  photoLog = [];
+  updatePhotoLogUI(); saveSession();
+  setMsg('m1','ok','📷 촬영 로그 ' + n + '건을 지웠습니다.');
 }
 function updatePhotoLogUI(){
   var cnt = document.getElementById('photoLogCnt');
