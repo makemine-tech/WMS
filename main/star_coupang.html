@@ -517,6 +517,7 @@ h1 em{color:var(--g);font-style:normal}
       <input type="file" id="cpxFi" accept=".xlsx,.xls,.csv" style="display:none" onchange="cpxPickPlan(this.files[0]); this.value='';">
       <span id="cpxPlanInfo" style="font-size:.7rem;color:#7dd3fc;font-weight:700"></span>
       <button class="btn btn-s" id="cpxDlBtn" onclick="cpxDownloadShipList()" style="display:none;font-size:.72rem;padding:.4rem .8rem" title="확정된 출고대기 분리 내역을 엑셀로 내려받습니다 — 출고 담당자에게 그대로 넘기면 됩니다">📤 출고대기 목록</button>
+      <button class="btn btn-s" id="cpxClrBtn" onclick="cpxClearPlan()" style="display:none;font-size:.72rem;padding:.4rem .8rem;border-color:#ff6b6b;color:#ff8a8a" title="잘못 올린 동시출고 목록을 초기화합니다 — 목록과 분리 진행이 지워지고 평소 입고검수 화면으로 돌아갑니다 (입고 스캔 수량은 유지)">✕ 동시출고 초기화</button>
       <button class="btn btn-s" onclick="resetNoteAcks()" style="font-size:.72rem;padding:.4rem .8rem" title="검수요청사항 알림의 '확인 완료' 기록을 모두 지웁니다 — 다음 스캔부터 다시 표시됩니다 (작업자 교대 시 유용)">📢 요청사항 알림 초기화</button>
       <span id="photoLogCnt" style="font-size:.7rem;color:var(--p);font-family:var(--mo);font-weight:700;padding:.3rem .55rem;background:rgba(192,132,252,.08);border:1px solid rgba(192,132,252,.3);border-radius:5px">📷 촬영 로그 0건</span>
       <span id="undoHint" style="font-size:.68rem;color:var(--mu);font-family:var(--mo)"></span>
@@ -1272,6 +1273,9 @@ function cpxBoxHasShip(box){
 function cpxRender(){
   var wrap = document.getElementById('cpxWrap');
   if (!wrap) return;
+  /* 초기화 버튼은 목록이 올라와 있을 때만 보인다 (업로드·세션복원 어느 쪽이든) */
+  var clr = document.getElementById('cpxClrBtn');
+  if (clr) clr.style.display = cpxOn() ? '' : 'none';
   if (!cpxOn()){ wrap.classList.remove('on'); return; }
   wrap.classList.add('on');
   var a = cpxAllocate(currentBox);
@@ -1372,8 +1376,7 @@ function cpxConfirm(whole){
   _cpxEdit = {};
   touchBox(currentBox.id);
   var sum = fin.reduce(function(s,x){ return s+x.qty; },0);
-  updateScanDisplay('complete', '🚚 분리 확정 — '+sum+'개',
-    null);
+  restoreLastScanDisplay('complete', '🚚 분리 확정 — '+sum+'개');
   cpxRender(); renderBoxList(); saveSession();
   document.getElementById('cpxDlBtn').style.display = '';
 }
@@ -1425,6 +1428,41 @@ function cpxPickPlan(file){
   };
   fr.readAsArrayBuffer(file);
 }
+/* ── 동시출고 목록 초기화 ──
+   목록을 잘못 올렸을 때 되돌린다. 입고 스캔 수량(실입고)은 절대 건드리지 않고,
+   동시출고 관련(목록·센터별 진행·수집박스번호·박스별 분리확정)만 지운다.
+   지우면 그 분량은 전부 일반입고로 돌아간다. */
+function cpxClearPlan(){
+  if (!cpxOn()){ setMsg('m1','warn','⚠️ 초기화할 동시출고 목록이 없습니다.'); return; }
+  var withAlloc = (boxes||[]).filter(function(b){ return b && b.shipAlloc && (b.shipAlloc.ship||[]).length; });
+  var splitQty = withAlloc.reduce(function(s,b){
+    return s + (b.shipAlloc.ship||[]).reduce(function(t,x){ return t + (+x.qty||0); }, 0); }, 0);
+  var kinds = Object.keys(shipPlan.targets||{}).length;
+
+  var msg = '동시출고 목록을 초기화합니다.\n\n'
+          + '· 올린 목록: ' + kinds + '종\n';
+  if (withAlloc.length) {
+    msg += '· 이미 [분리 확정]한 내역: 박스 ' + withAlloc.length + '개 · ' + splitQty + '개\n'
+         + '   → 이 분리 기록도 함께 지워지고 전량 일반입고로 돌아갑니다.\n';
+  }
+  msg += '\n입고 스캔 수량(실입고)은 그대로 유지됩니다.\n계속할까요?';
+  if (!confirm(msg)) return;
+  if (withAlloc.length &&
+      !confirm('확정된 분리 ' + splitQty + '개가 삭제됩니다.\n정말 초기화할까요?')) return;
+
+  shipPlan = null; shipDone = {}; shipCbox = {};
+  withAlloc.forEach(function(b){ delete b.shipAlloc; });
+  var fi = document.getElementById('cpxFi'); if (fi) fi.value = '';
+  var pi = document.getElementById('cpxPlanInfo'); if (pi) pi.textContent = '';
+  var dl = document.getElementById('cpxDlBtn'); if (dl) dl.style.display = 'none';
+  var cb = document.getElementById('cpxClrBtn'); if (cb) cb.style.display = 'none';
+  cpxWarnBlocked(false);
+  cpxRender(); renderBoxList(); updateStats(); saveSession();
+  restoreLastScanDisplay('ok', '✕ 동시출고 초기화 완료 — 평소 입고검수로 돌아갑니다');
+  setMsg('m1','ok','✕ 동시출고 목록을 초기화했습니다 — 목록 '+kinds+'종'
+    + (withAlloc.length ? ' · 분리 확정 '+splitQty+'개' : '') + ' 삭제. 실입고 수량은 그대로입니다. 필요하면 [🚚 동시출고 목록]으로 다시 올리세요.');
+}
+
 /* ── 출고대기 분리 목록 엑셀 ── */
 function cpxDownloadShipList(){
   if (!cpxOn()) return;
@@ -2056,6 +2094,8 @@ function restoreSession() {
   document.getElementById('restoreBanner').style.display = 'none';
   goTo(1);
   renderAll();
+  /* 복원 직후에도 마지막 스캔 상품 정보(품명·사이즈·원산지 + 수량)를 그대로 띄운다 */
+  restoreLastScanDisplay('ok', '↩ 작업 복원 — 마지막 스캔 상품입니다. 이어서 스캔하세요');
   /* 모드별 안내 — 자료없이 시작은 재업로드 불필요 */
   if (startedEmpty) {
     setMsg('m1','ok','↩ 진행 중 작업을 복원했습니다 — 이어서 스캔하세요. (자료 없이 시작 모드 · 작업 내용 보존됨)');
@@ -2429,6 +2469,29 @@ function onProdKey(ev) {
   handleNormalScan(rowIdx, key);
 }
 
+/* 마지막으로 스캔한 상품을 큰 디스플레이에 다시 띄운다.
+   새로고침·세션 복원·박스 완료·동시출고 초기화 뒤에도 품명/컬러/사이즈/원산지 편집칸과
+   예정수량·실입고·잔여가 계속 보여야 한다(현장에서 가장 많이 쓰는 화면).
+   되살릴 스캔이 없으면 기존처럼 안내 문구만 띄운다. */
+function restoreLastScanDisplay(kind, msg){
+  var scans = lastScans || [];
+  for (var i = scans.length - 1; i >= 0; i--) {
+    var s = scans[i];
+    if (!s || s.undone) continue;
+    var row = rows[s.rowIdx];
+    if (!row) continue;
+    var exp = +row.vals[COL.EXPECT_QTY] || 0;
+    var existing = +row.vals[COL.EXISTING_QTY] || 0;
+    updateScanDisplay(kind || 'ok', msg || '↩ 마지막 스캔 — 이어서 스캔하세요', row,
+      { target: exp - existing, recv: row.qtyReceived || 0,
+        defRecv: row.qtyDefective || 0, altUsed: false });
+    return true;
+  }
+  updateScanDisplay(kind === 'idle' ? 'idle' : (kind || 'idle'),
+                    msg || '대기 중 — 박스 바코드부터 스캔하세요', null);
+  return false;
+}
+
 /* 스캔 결과 큰 디스플레이 갱신.
    kind: 'idle' | 'ok' | 'complete' | 'warn' | 'er'
    msg: 큰 메시지 텍스트 (HTML 허용)
@@ -2589,7 +2652,8 @@ function endBox() {
   commitCurrentBox();        /* ★ currentBox 를 boxes 에 확정 반영 — 이게 없으면 방금 찍은 수량이 유실됨 */
   touchBox(currentBox.id);   /* 종료 시각 갱신 → 방금 끝낸 박스가 완료 목록 맨 위로 순차 정렬 */
   var doneId = currentBox.id;
-  updateScanDisplay('complete', '✅ 박스 완료: '+escH(doneId)+'<div style="font-size:.9rem;font-weight:700;margin-top:.35rem;color:var(--mu)">다음 박스를 스캔하세요</div>', null);
+  /* 박스 완료 후에도 마지막 상품 정보는 남긴다 — 사이즈·원산지 확인/수정이 계속 필요하다 */
+  restoreLastScanDisplay('complete', '✅ 박스 완료: '+escH(doneId)+'<div style="font-size:.9rem;font-weight:700;margin-top:.35rem;color:var(--mu)">다음 박스를 스캔하세요</div>');
   document.getElementById('boxState').textContent = '대기';
   document.getElementById('boxState').classList.remove('act');
   document.getElementById('prodState').textContent = '박스 먼저 스캔';
