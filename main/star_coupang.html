@@ -1234,6 +1234,24 @@ function cpxCenterRemainTotals(){
   });
   return t;
 }
+/* 스캔한 상품에 대응하는 '동시출고 목록의 키'를 찾는다.
+   목록에는 대체바코드(예: A…)를 적고 현장에서는 제품바코드를 찍는 경우처럼
+   표기가 달라도 같은 SKU 로 인식돼야 한다.
+   찾는 순서: ① 찍은 값 → ② 그 상품의 D열 바코드 → ③ E열 대비바코드.
+   확정 누적(shipDone)·엑셀 출력은 모두 이 키로 통일한다. */
+function cpxPlanKey(scannedBc, row){
+  if (!cpxOn()) return '';
+  var t = shipPlan.targets || {};
+  if (scannedBc && t[scannedBc]) return scannedBc;
+  if (row && row.vals) {
+    var d = normBarcode(row.vals[COL.BARCODE]);
+    if (d && t[d]) return d;
+    var e = normBarcode(row.vals[COL.ALT_BARCODE]);
+    if (e && t[e]) return e;
+  }
+  return '';
+}
+
 /* 이 박스의 스캔 내역을 출고대기 / 일반입고로 배분.
    확정(shipDone)은 건드리지 않고 계산만 한다 — 마감 시점에만 확정. */
 function cpxAllocate(box){
@@ -1246,17 +1264,19 @@ function cpxAllocate(box){
     var bc = normBarcode(it.barcode);
     var row = rows[it.rowIdx] || {};
     var nm  = (row.vals && row.vals[COL.NAME]) || '';
-    var ent = (shipPlan.targets[bc] || []).slice().sort(function(a,b){
+    /* 목록 키(대체바코드일 수 있음)로 대조 — 찍은 값과 달라도 같은 SKU 면 잡힌다 */
+    var key = cpxPlanKey(bc, row);
+    var ent = (key ? (shipPlan.targets[key] || []) : []).slice().sort(function(a,b){
       return (tot[a.center]||0) - (tot[b.center]||0) || String(a.center).localeCompare(String(b.center),'ko');
     });
     ent.forEach(function(e){
       if (left <= 0) return;
-      var rem = Math.max(0, (e.need||0) - cpxDoneQty(e.center, bc));
+      var rem = Math.max(0, (e.need||0) - cpxDoneQty(e.center, key));
       if (rem <= 0) return;
       var take = Math.min(rem, left);
       left -= take;
-      out.ship.push({ center:e.center, bc:bc, rowIdx:it.rowIdx, name:nm, qty:take, need:e.need,
-                      done:cpxDoneQty(e.center, bc) });
+      out.ship.push({ center:e.center, bc:key, scanBc:bc, rowIdx:it.rowIdx, name:nm, qty:take, need:e.need,
+                      done:cpxDoneQty(e.center, key) });
       out.byCenter[e.center] = (out.byCenter[e.center]||0) + take;
     });
     if (left > 0) out.normal.push({ bc:bc, rowIdx:it.rowIdx, name:nm, qty:left });
@@ -1289,7 +1309,7 @@ function cpxRender(){
     sl.innerHTML = cs.length ? cs.map(function(x){
       return '<div class="cpx-row done"><span class="cpx-ctr">'+esc(x.center)+'</span>'+
              '<span class="cpx-nm">'+esc(x.name||'')+'</span>'+
-             '<span class="cpx-bc">'+esc(x.bc)+'</span>'+
+             '<span class="cpx-bc">'+esc(x.bc)+(x.scanBc && x.scanBc!==x.bc ? '<br><span style="opacity:.7">스캔 '+esc(x.scanBc)+'</span>' : '')+'</span>'+
              '<span class="cpx-q">'+x.qty+'</span></div>';
     }).join('') : '<div class="cpx-empty">없음</div>';
   } else {
@@ -1297,7 +1317,7 @@ function cpxRender(){
       return '<div class="cpx-row"><span class="cpx-ctr" title="담을 수집박스">'+esc(x.center)+
              '<div style="font-size:.62rem;font-weight:700;color:var(--mu);font-family:var(--mo)">'+esc(cpxCurCbox(x.center))+'</div></span>'+
              '<span class="cpx-nm">'+esc(x.name||'')+'</span>'+
-             '<span class="cpx-bc">'+esc(x.bc)+'</span>'+
+             '<span class="cpx-bc">'+esc(x.bc)+(x.scanBc && x.scanBc!==x.bc ? '<br><span style="opacity:.7">스캔 '+esc(x.scanBc)+'</span>' : '')+'</span>'+
              '<span class="cpx-q"><input type="number" min="0" value="'+x.qty+'" data-i="'+i+'" '+
              'onchange="cpxEditQty('+i+', this.value)" title="실제 분리한 수량 — 다르면 고치세요. 차액은 일반입고로 넘어갑니다"></span></div>';
     }).join('') : '<div class="cpx-empty">이 박스에는 출고대기 없음</div>';
@@ -1368,7 +1388,7 @@ function cpxConfirm(whole){
   var fin = [];
   a.ship.forEach(function(x, i){
     var q = whole ? x.qty : (_cpxEdit[i] != null ? _cpxEdit[i] : x.qty);
-    if (q > 0) fin.push({ center:x.center, bc:x.bc, rowIdx:x.rowIdx, name:x.name, qty:q,
+    if (q > 0) fin.push({ center:x.center, bc:x.bc, scanBc:x.scanBc||x.bc, rowIdx:x.rowIdx, name:x.name, qty:q,
                           cbox: cpxCurCbox(x.center), srcBox: currentBox.id });
   });
   fin.forEach(function(x){ cpxAddDone(x.center, x.bc, x.qty); });
@@ -1405,9 +1425,10 @@ function cpxPickPlan(file){
       var targets = {}, n = 0, bad = [];
       aoa.forEach(function(r, i){
         if (!r || r.length < 3) return;
-        var bc = normBarcode(String(r[0]||'').trim());
-        var q  = parseInt(String(r[1]||'').replace(/[^0-9-]/g,''),10);
-        var ct = String(r[2]||'').trim();
+        var unq = function(v){ return String(v==null?'':v).trim().replace(/^["']+|["']+$/g,'').trim(); };
+        var bc = normBarcode(unq(r[0]));
+        var q  = parseInt(unq(r[1]).replace(/[^0-9-]/g,''),10);
+        var ct = unq(r[2]);
         if (!bc || !ct || isNaN(q) || q<=0){ if (i>0 && (r[0]||r[2])) bad.push(i+1); return; }
         if (!targets[bc]) targets[bc] = [];
         var ex = targets[bc].find(function(x){ return x.center===ct; });
