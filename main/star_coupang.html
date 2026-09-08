@@ -156,6 +156,19 @@ h1 em{color:var(--g);font-style:normal}
 .scan-display.er{border-color:var(--r);background:linear-gradient(180deg,rgba(240,88,88,.10),rgba(240,88,88,.02))}
 .scan-display.idle{border-color:var(--br);background:#0c0f18}
 .sd-msg{font-size:1.9rem;font-weight:900;line-height:1.15;margin-bottom:.7rem;letter-spacing:-.01em}
+/* ─── 스캔화면 접기 — 아래 목록/검색을 볼 때 상단이 화면을 다 먹지 않게 ───
+   접으면 상세(상품정보·수량·동시출고 패널)만 숨기고 한 줄 상태만 남는다.
+   스캔 입력칸과 버튼은 그대로 살아 있어 접은 채로도 계속 스캔할 수 있다. */
+body.sd-collapsed #sdDetail,
+body.sd-collapsed #cpxWrap,
+body.sd-collapsed #cpxBlocked,
+body.sd-collapsed #photoReqAlert,
+body.sd-collapsed #sdNote{display:none !important}
+body.sd-collapsed .scan-display{padding:.45rem .8rem;margin:.35rem 0 .5rem}
+body.sd-collapsed .sd-msg{font-size:1.15rem;margin-bottom:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.sd-collapsed .scan-panel{padding:.6rem .85rem;margin-bottom:.35rem}
+body.sd-collapsed .scan-sticky{box-shadow:0 4px 10px rgba(0,0,0,.4)}
+#sdFoldBtn{border-color:var(--b);color:#9dc3ff}
 .scan-display.ok .sd-msg{color:var(--g)}
 .scan-display.complete .sd-msg{color:#6affc0;text-shadow:0 0 14px rgba(74,240,168,.4)}
 .scan-display.warn .sd-msg{color:var(--y)}
@@ -499,6 +512,7 @@ h1 em{color:var(--g);font-style:normal}
       </div>
     </div>
     <div class="scan-actions">
+      <button class="btn btn-s" id="sdFoldBtn" onclick="toggleScanFold()" style="font-size:.76rem;padding:.42rem .85rem" title="스캔 화면(상품정보·수량·동시출고)을 접어 아래 목록/검색을 넓게 봅니다. 접은 상태에서도 스캔은 그대로 됩니다.">⌃ 스캔화면 접기</button>
       <button class="btn btn-g" onclick="endBox()" id="endBoxBtn" disabled style="font-size:.76rem;padding:.42rem .85rem" title="이 박스의 작업을 완료로 확정 — 처리 완료 목록에 반영되고 동기화(저장)됩니다">✅ 박스 완료</button>
       <button class="btn btn-s" onclick="undoLastScan()" id="undoBtn" disabled style="font-size:.76rem;padding:.42rem .85rem">↶ 마지막 스캔 취소</button>
       <label class="opt-chk" id="defectChkWrap" title="켜면 이후 스캔이 '불량'으로 기록됩니다. 실입고(정상)와 분리 집계되고 엑셀엔 별도 시트로 저장됩니다." style="border:1px solid rgba(255,107,107,.5);background:rgba(255,107,107,.08)">
@@ -2489,6 +2503,39 @@ function onProdKey(ev) {
   /* 정상 매칭 → 공통 처리 */
   handleNormalScan(rowIdx, key);
 }
+
+/* ─── 스캔화면 접기/펼치기 ───
+   상단 스캔 영역이 화면을 다 차지해 아래 목록·검색·완료 목록을 못 보던 문제.
+   접으면 상세(상품정보·수량·동시출고 패널)만 숨고 한 줄 상태는 남는다.
+   스캔 입력칸은 그대로라 접은 채로도 계속 찍을 수 있다. 상태는 PC 별로 기억. */
+var SD_FOLD_KEY = 'star_coupang_sdFold';
+function applyScanFold(folded){
+  document.body.classList.toggle('sd-collapsed', !!folded);
+  var b = document.getElementById('sdFoldBtn');
+  if (b) {
+    b.textContent = folded ? '⌄ 스캔화면 펼치기' : '⌃ 스캔화면 접기';
+    b.title = folded
+      ? '접어둔 스캔 화면(상품정보·수량·동시출고)을 다시 펼칩니다.'
+      : '스캔 화면(상품정보·수량·동시출고)을 접어 아래 목록/검색을 넓게 봅니다. 접은 상태에서도 스캔은 그대로 됩니다.';
+  }
+}
+function toggleScanFold(){
+  var folded = !document.body.classList.contains('sd-collapsed');
+  applyScanFold(folded);
+  try { localStorage.setItem(SD_FOLD_KEY, folded ? '1' : '0'); } catch(e){}
+  /* 스캐너 입력이 끊기지 않게 포커스를 스캔칸으로 되돌린다 */
+  var inp = document.getElementById('prodInp');
+  if (!inp || inp.disabled) inp = document.getElementById('boxInp');
+  if (inp) { try { inp.focus(); } catch(e){} }
+}
+(function initScanFold(){
+  var saved = null;
+  try { saved = localStorage.getItem(SD_FOLD_KEY); } catch(e){}
+  var folded = (saved === '1');
+  if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', function(){ applyScanFold(folded); });
+  else applyScanFold(folded);
+})();
 
 /* 마지막으로 스캔한 상품을 큰 디스플레이에 다시 띄운다.
    새로고침·세션 복원·박스 완료·동시출고 초기화 뒤에도 품명/컬러/사이즈/원산지 편집칸과
