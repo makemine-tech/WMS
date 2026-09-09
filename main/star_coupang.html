@@ -214,12 +214,20 @@ body.sd-collapsed .sd-fold{top:.3rem}
 .box-count-box .bc-lbl{font-size:.74rem;font-weight:800;color:#555;letter-spacing:.04em}
 .box-count-box .bc-num{font-size:4.3rem;font-weight:900;line-height:.95;color:#000;font-family:var(--mo);letter-spacing:-.03em}
 .box-count-box .bc-sub{font-size:.82rem;font-weight:800;color:#444;font-family:var(--mo)}
+/* 방금 스캔한 1개의 행선지 — 출고면 센터명, 아니면 '일반'.
+   목록이 쌓이면 센터별 열만으론 지금 찍은 게 어디로 가는지 못 알아본다.
+   숫자 바로 밑에 크게 한 줄로 박아 멀리서도 읽히게 한다. */
+.box-count-box .bc-dest{margin-top:.3rem;padding:.16rem .7rem;border-radius:999px;font-size:1.5rem;font-weight:900;line-height:1.15;letter-spacing:-.01em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.box-count-box .bc-dest.ship{background:#0b63c5;color:#fff}
+.box-count-box .bc-dest.norm{background:#e2e5ea;color:#333}
+.box-count-box .bc-dest.def{background:#c62828;color:#fff}
 .box-count-box.empty{background:#3a3a3a}
 .box-count-box.empty .bc-num{color:#777}
 .box-count-box.empty .bc-lbl,.box-count-box.empty .bc-sub{color:#999}
 @media(max-width:720px){
-  .box-count-box{flex-direction:row;gap:.6rem;padding:.6rem .9rem}
+  .box-count-box{flex-direction:row;gap:.6rem;padding:.6rem .9rem;flex-wrap:wrap}
   .box-count-box .bc-num{font-size:2.8rem}
+  .box-count-box .bc-dest{font-size:1.2rem}
 }
 
 /* 왼쪽 영역 — 제품 정보 */
@@ -591,6 +599,7 @@ body.sd-collapsed .sd-fold{top:.3rem}
           <div class="bc-lbl">이 박스</div>
           <div class="bc-num" id="sdBoxNum">—</div>
           <div class="bc-sub" id="sdBoxSub"></div>
+          <div class="bc-dest" id="sdBoxDest" style="display:none"></div>
         </div>
       </div>
       <!-- 오른쪽: 수량 매우 크게 -->
@@ -1343,6 +1352,22 @@ function cpxAllocate(box){
   });
   return out;
 }
+/* 방금 스캔한 그 1개가 어디로 가는지 — 출고면 센터명, 아니면 '일반'.
+   센터별 열은 목록이 쌓일수록 길어져서, 지금 찍은 물건이 인천14인지 시흥인지
+   즉시 구분이 안 된다. 큰 숫자 옆에 한 줄로 띄우기 위한 계산.
+   배분은 ship 을 먼저 채우고 남은 수량이 일반으로 가므로,
+   '마지막 1개'의 행선지는 일반 잔여가 있으면 일반, 없으면 마지막 ship 센터다. */
+function cpxScanDest(rowIdx){
+  if (!cpxOn() || !currentBox || rowIdx === null || rowIdx === undefined || rowIdx < 0) return null;
+  var a;
+  try{ a = cpxAllocate(currentBox); }catch(e){ return null; }
+  var norm = a.normal.filter(function(x){ return x.rowIdx === rowIdx && x.qty > 0; });
+  if (norm.length) return { ship:false, label:'일반' };
+  var sh = a.ship.filter(function(x){ return x.rowIdx === rowIdx && x.qty > 0; });
+  if (sh.length) return { ship:true, label: sh[sh.length-1].center };
+  return null;
+}
+
 /* ── 화면 ──
    작업자는 화면에서 멀리 떨어져 있다. '어느 센터로 무엇을 몇 개 빼는지'가
    한눈에 들어와야 하므로 센터별 열로 나누고 바코드·사이즈·수량을 크게 띄운다.
@@ -2599,6 +2624,9 @@ function updateScanDisplay(kind, msg, row, info) {
   if (!row) {
     detail.classList.add('hidden');
     currentDisplayRow = -1;
+    /* 박스 시작처럼 상품 없이 뜨는 메시지에서도 '이 박스' 수량·행선지는 갱신해야
+       이전 박스의 값이 남아 있지 않는다 */
+    updateBoxCountDisplay();
     return;
   }
   detail.classList.remove('hidden');
@@ -2670,6 +2698,7 @@ function updateBoxCountDisplay() {
     box.classList.add('empty');
     num.textContent = '—';
     sub.textContent = '';
+    setBoxDestLabel(null);
     return;
   }
   var items = currentBox.items || [];
@@ -2681,6 +2710,26 @@ function updateBoxCountDisplay() {
   box.classList.remove('empty');
   num.textContent = total;
   sub.innerHTML = (total > 0 ? (total + '개 · ' + skuCnt + '종') : '0개') + (defCnt > 0 ? ' <span style="color:#ff6b6b;font-weight:800">🚫불량 '+defCnt+'</span>' : '');
+  /* 지금 화면에 떠 있는 상품의 행선지 — 동시출고 목록이 있을 때만 */
+  var lastDef = false;
+  for (var li = (lastScans||[]).length - 1; li >= 0; li--) {
+    var ls = lastScans[li];
+    if (!ls || ls.undone) continue;
+    if (ls.rowIdx === currentDisplayRow) lastDef = !!ls.def;
+    break;
+  }
+  if (lastDef && cpxOn()) setBoxDestLabel({ def:true, label:'불량' });
+  else setBoxDestLabel(cpxScanDest(currentDisplayRow));
+}
+
+/* '이 박스' 흰 박스 안 행선지 배지 — dest 없으면 숨김 */
+function setBoxDestLabel(dest){
+  var el = document.getElementById('sdBoxDest');
+  if (!el) return;
+  if (!dest) { el.style.display = 'none'; el.textContent = ''; return; }
+  el.style.display = '';
+  el.className = 'bc-dest ' + (dest.def ? 'def' : (dest.ship ? 'ship' : 'norm'));
+  el.textContent = (dest.def ? '🚫 ' : (dest.ship ? '🚚 ' : '📦 ')) + dest.label;
 }
 
 /* 큰 디스플레이에서 품명/컬러/사이즈 인라인 편집 시 호출.
