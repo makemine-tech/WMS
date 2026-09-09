@@ -693,7 +693,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .ship-list-area{display:none}
 /* 적재리스트 1박스 = 1페이지 고정. A4 세로 - @page margin 10mm = 인쇄영역 190mm × 277mm.
  * ⚠ 폭도 반드시 190mm(=210-좌우10mm) 여야 함. 210mm면 오른쪽 20mm(비고/수량 칸)가 잘림.
- * 콘텐츠 넘침 시 cpFitShipPageToA4 가 폰트 축소 → 그래도 안 들어가면 zoom 비율 적용. */
+ * 콘텐츠 넘침 시 cpFitShipPageToA4 가 폰트 축소 → 그래도 안 들어가면
+ * .flow 로 전환해 다음 장으로 이어 인쇄한다(잘라내지 않는다). */
 .ship-list-area .ship-page{
   width:190mm;height:270mm;background:#fff;color:#111;
   padding:6mm 4mm 4mm;box-sizing:border-box;
@@ -703,6 +704,13 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   overflow:hidden;
 }
 .ship-list-area .ship-page:last-child{page-break-after:auto}
+/* 한 장에 도저히 안 들어가는 파렛트 — 잘라내지 말고 다음 장으로 흘린다.
+ * 예전엔 zoom 으로 줄여 넣으려 했으나 zoom 은 페이지 박스(270mm)까지 같이 줄여
+ * 넘침 비율이 그대로였다 → 뒤쪽 SKU 가 overflow:hidden 에 잘려 인쇄물에서 사라졌다.
+ * (SKU 80종이면 21종, 200종이면 145종이 통째로 안 찍히던 원인)
+ * flex 컨테이너는 페이지 분할이 안 되므로 블록 흐름으로 되돌린다. */
+.ship-list-area .ship-page.flow{display:block;height:auto;min-height:270mm;overflow:visible}
+.ship-list-area .ship-page.flow .ship-foot{margin-top:6mm}
 /* 박스 단위 (tbody) 가 페이지 사이에서 잘리지 않게.
  * 박스가 너무 크면 어쩔 수 없이 잘리지만 가능한 보존. */
 .ship-sku-table tbody{page-break-inside:avoid;break-inside:avoid}
@@ -5207,13 +5215,16 @@ function cpFitShipPageToA4(pageEl){
     void pageEl.offsetHeight;
     if (pageEl.scrollHeight <= pageEl.clientHeight + 1) return; /* 들어감 — 종료 */
   }
-  /* 2차 fallback: 최저 폰트로도 안 들어가면 zoom 비율로 전체 축소 (비율 유지) */
-  var avail = pageEl.clientHeight;
-  var need  = pageEl.scrollHeight;
-  if (need > avail + 1) {
-    var ratio = avail / need;
-    if (ratio < 0.4) ratio = 0.4; /* 하한 — 더 작아지면 가독성 X */
-    pageEl.style.zoom = ratio.toFixed(3);
+  /* 2차: 최저 폰트로도 안 들어가면 '여러 장으로 이어 인쇄'.
+     예전엔 zoom 으로 줄였는데 zoom 은 페이지 박스(270mm)까지 같이 줄어
+     넘침이 그대로 남았고, 남은 SKU 는 overflow:hidden 에 잘려 아예 안 찍혔다.
+     이제는 읽을 수 있는 크기로 되돌린 뒤 다음 장으로 흘려보낸다 —
+     장수는 늘어도 적재리스트가 통째로 다 나오는 게 우선. */
+  if (pageEl.scrollHeight > pageEl.clientHeight + 1) {
+    var readable = SHIP_FIT_STEPS[2];   /* 7.5pt — 여러 장이 되더라도 현장에서 읽히는 크기 */
+    Object.keys(readable).forEach(function(k){ pageEl.style.setProperty(k, readable[k]); });
+    pageEl.style.zoom = '';
+    pageEl.classList.add('flow');
     void pageEl.offsetHeight;
   }
 }
@@ -5281,6 +5292,10 @@ function cpPrintShipList(){
   area.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;visibility:hidden';
   requestAnimationFrame(function(){
     area.querySelectorAll('.ship-page').forEach(function(pg){ cpFitShipPageToA4(pg); });
+    /* SKU 가 많아 한 장에 못 담는 파렛트는 다음 장으로 이어 인쇄된다 —
+       종이 수가 예고와 달라지므로 미리 알려준다 (2부 렌더라 2로 나눔) */
+    var flowed = Math.round(area.querySelectorAll('.ship-page.flow').length / 2);
+    if (flowed) cpFlash('warn','ℹ️ SKU가 많은 파렛트 '+flowed+'개는 한 장을 넘겨 <b>여러 장에 이어서</b> 인쇄됩니다 — 전체 목록이 다 나오도록 종이를 넉넉히 두세요');
     area.style.cssText = savedCss;
     document.body.classList.add('printing-shiplist');
     setTimeout(function(){
