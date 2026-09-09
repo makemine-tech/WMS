@@ -218,6 +218,9 @@ h1 em{color:var(--g);font-style:normal}
   <span class="btn dz-mini" style="background:var(--r);color:#fff">📤 엑셀 일괄 출고
     <input type="file" accept=".xlsx,.xls" onchange="handleExcelOut(this.files[0]);this.value='';">
   </span>
+  <span class="btn dz-mini" id="delListBtn" style="display:none;background:#2a0d12;color:#ff8a8a;border:1.5px solid var(--r);font-weight:900" title="현재고 다운로드 양식 그대로 사용 — 올린 목록의 입출고 기록을 통째로 삭제합니다. 재고가 남아 있어도 목록에서 완전히 사라지며 복구할 수 없습니다.">🗑️ 엑셀 목록 삭제
+    <input type="file" accept=".xlsx,.xls" onchange="handleExcelDelete(this.files[0]);this.value='';">
+  </span>
   <button class="btn btn-s" onclick="downloadTemplate()">📄 입고 양식</button>
   <button class="btn btn-s" onclick="downloadOutTemplate()">📄 출고 양식</button>
   <a class="btn btn-y" href="/star_outorder.html" style="text-decoration:none;color:#0f1117;display:inline-flex;align-items:center">📋 출고지시서</a>
@@ -832,6 +835,124 @@ function handleExcelOut(file){
         setMsg('m0','ok','✅ 엑셀 일괄 출고 완료 · '+entries.length+'행 · 총 '+totQ+'개 출고'+(unknownBc?' · 미등록 '+unknownBc+'행':''));
       }).catch(function(err){
         setMsg('m0','er','❌ 출고 등록 실패: '+(err&&err.message||err));
+      });
+    } catch(err){
+      console.error(err);
+      setMsg('m0','er','❌ 엑셀 분석 실패: '+err.message);
+    }
+  };
+  reader.onerror = function(){ setMsg('m0','er','❌ 파일 읽기 실패'); };
+  reader.readAsArrayBuffer(file);
+}
+
+/* ─────────────── 엑셀 목록 삭제 ───────────────
+   양식: 현재고 다운로드와 동일 (박스바코드/바코드/품명/브랜드/품번/컬러/사이즈/원산지/현재고/불량/비고).
+   현재고를 받아 지울 행만 남겨 올리면 그 목록의 입출고 기록을 통째로 지운다.
+   출고(수량 차감)와 다르다 — 재고가 남아 있어도 목록 자체가 사라진다. 복구 불가.
+   매칭 기준: 바코드(필수) + 박스바코드(있으면 그 박스만, 비면 그 바코드 전체).
+   박스 칸에 'A, B' 처럼 여러 개가 있으면(현재고 양식) 그 박스들 모두 대상. */
+function handleExcelDelete(file){
+  if (!file) return;
+  if (!/\.xlsx?$/i.test(file.name)) { setMsg('m0','er','❌ .xlsx 파일만 지원합니다'); return; }
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  if (!isAdmin) { setMsg('m0','er','❌ 목록 삭제는 관리자만 할 수 있습니다'); return; }
+  if (!logs.length) { setMsg('m0','warn','⚠️ 삭제할 데이터가 없습니다'); return; }
+  setMsg('m0','inf','<span>삭제 목록 분석 중...</span>');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+      if (aoa.length < 2) { setMsg('m0','er','❌ 데이터 행이 없습니다'); return; }
+
+      /* 엑셀 행 → 삭제 조건. 같은 바코드가 여러 행이면 조건을 합친다. */
+      var want = {};          /* bcNorm → { all:bool, boxes:{박스명:1} } */
+      var rowCnt = 0;
+      for (var i=1; i<aoa.length; i++) {
+        var r = aoa[i];
+        if (!r || !r.length) continue;
+        var bcNorm = normBarcode(r[1]);
+        if (!bcNorm) continue;   /* 바코드 없는 줄(빈 줄·합계 줄)은 건너뛴다 */
+        rowCnt++;
+        if (!want[bcNorm]) want[bcNorm] = { all:false, boxes:{} };
+        var boxCell = (r[0]==null ? '' : String(r[0]).trim());
+        if (!boxCell) { want[bcNorm].all = true; continue; }
+        boxCell.split(',').forEach(function(b){
+          var t = b.trim();
+          if (!t) return;
+          /* '(미지정)' = 박스 없이 등록된 재고 */
+          want[bcNorm].boxes[t === '(미지정)' ? '' : t] = 1;
+        });
+      }
+      if (!rowCnt) { setMsg('m0','er','❌ 바코드가 있는 행이 없습니다 — 현재고 다운로드 양식(B열=바코드)인지 확인하세요'); return; }
+
+      /* 조건에 걸리는 로그 수집 */
+      var victims = logs.filter(function(lg){
+        var w = want[normBarcode(lg.barcode)];
+        if (!w) return false;
+        if (w.all) return true;
+        return !!w.boxes[(lg.box==null?'':String(lg.box).trim())];
+      });
+      if (!victims.length) {
+        setMsg('m0','warn','⚠️ 일치하는 재고가 없습니다 — 삭제된 항목 없음 (엑셀 '+rowCnt+'행)');
+        return;
+      }
+
+      /* 무엇이 사라지는지 미리 집계 — 바코드별 현재고·건수 */
+      var byBc = {};
+      victims.forEach(function(lg){
+        var k = normBarcode(lg.barcode);
+        if (!byBc[k]) byBc[k] = { barcode: lg.barcode, name: lg.name||'', cnt:0, inQ:0, outQ:0 };
+        var g = byBc[k]; g.cnt++;
+        var q = +lg.qty||0;
+        if (lg.type === 'out') g.outQ += q; else g.inQ += q;
+        if (!g.name && lg.name) g.name = lg.name;
+      });
+      var bcKeys = Object.keys(byBc);
+      var matchedRows = bcKeys.length;
+      var missRows = 0;
+      Object.keys(want).forEach(function(k){ if (!byBc[k]) missRows++; });
+      var totStock = bcKeys.reduce(function(s,k){ return s + (byBc[k].inQ - byBc[k].outQ); }, 0);
+      /* 출고지시서·마감응축 로그는 개별 취소가 막혀 있는 기록 — 포함되면 분명히 알린다 */
+      var special = victims.filter(function(lg){ return lg.source==='outorder' || lg.source==='closing'; }).length;
+
+      var preview = bcKeys.slice(0, 10).map(function(k){
+        var g = byBc[k];
+        return '   · ' + g.barcode + (g.name ? ' / ' + g.name : '') + ' — 현재고 ' + (g.inQ - g.outQ) + '개 (기록 ' + g.cnt + '건)';
+      }).join('\n');
+      var msg =
+        '🗑️ 엑셀 목록 삭제\n\n' +
+        '아래 목록이 재고관리에서 완전히 사라집니다:\n' +
+        '  • 삭제 대상: ' + matchedRows + '종\n' +
+        '  • 지워질 입출고 기록: ' + victims.length + '건\n' +
+        '  • 함께 사라지는 현재고: ' + totStock + '개\n' +
+        (missRows  ? '  • 일치 없음(건너뜀): ' + missRows + '종\n' : '') +
+        (special   ? '  • ⚠ 출고지시서/마감응축 기록 포함: ' + special + '건\n' : '') +
+        '\n' + preview + (bcKeys.length > 10 ? '\n   · … 외 ' + (bcKeys.length-10) + '종' : '') + '\n\n' +
+        '※ 재고가 남아 있어도 목록째 삭제되며, 같은 그룹의 모든 PC에 즉시 반영됩니다.\n' +
+        '※ 복구할 수 없습니다.\n\n' +
+        '정말 삭제하시겠습니까?';
+      if (!confirm(msg)) { setMsg('m0','warn','⚠️ 목록 삭제 취소됨'); return; }
+
+      setMsg('m0','inf','<span>'+victims.length+'건 삭제 중...</span>');
+      var basePath = 'wms_sync/groups/' + groupId + '/star_instock/logs/';
+      /* 한 번에 너무 큰 update 는 실패할 수 있어 500건씩 나눠 보낸다 */
+      var chunks = [];
+      for (var s=0; s<victims.length; s+=500) chunks.push(victims.slice(s, s+500));
+      var chain = Promise.resolve();
+      chunks.forEach(function(part){
+        chain = chain.then(function(){
+          var updates = {};
+          part.forEach(function(lg){ updates[basePath + lg.key] = null; });
+          return firebase.database().ref().update(updates);
+        });
+      });
+      chain.then(function(){
+        setMsg('m0','ok','✅ 목록 삭제 완료 — '+matchedRows+'종 · 기록 '+victims.length+'건 삭제 (현재고 '+totStock+'개 함께 제거)'+(missRows?' · 일치 없음 '+missRows+'종':''));
+        flashScan('warn','목록 삭제 완료 — '+matchedRows+'종이 재고관리에서 제거되었습니다');
+      }).catch(function(err){
+        setMsg('m0','er','❌ 삭제 실패: '+(err&&err.message||err));
       });
     } catch(err){
       console.error(err);
@@ -1615,6 +1736,9 @@ function toggleFab(){
 }
 
 function refreshFabUI(){
+  /* 목록 삭제(되돌릴 수 없음)는 다른 위험 기능과 같이 관리자에게만 노출 */
+  var delBtn = document.getElementById('delListBtn');
+  if (delBtn) delBtn.style.display = isAdmin ? '' : 'none';
   var secR = document.getElementById('fabSecRetention');
   var secD = document.getElementById('fabSecDanger');
   var secRO = document.getElementById('fabSecReadonly');
