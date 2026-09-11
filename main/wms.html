@@ -34,6 +34,9 @@ input,button,textarea{font-family:inherit;}
 .ch{transition:box-shadow .14s;}
 .ch:hover{box-shadow:inset 0 0 0 100px rgba(255,255,255,.09);}
 .ch:active{box-shadow:inset 0 0 0 100px rgba(255,255,255,.16);}
+.collbl{border-radius:8px;transition:background .12s,color .12s;}
+.collbl:hover{background:rgba(251,191,36,.14);color:#FBBF24!important;}
+.collbl:active{background:rgba(251,191,36,.26);}
 @keyframes tIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
 @keyframes tOut{0%{opacity:1}70%{opacity:1}100%{opacity:0}}
 .toast{position:fixed;top:54px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;padding:6px 20px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;pointer-events:none;white-space:nowrap;animation:tIn .18s ease forwards,tOut 2s .1s forwards;}
@@ -602,6 +605,29 @@ function MainView(p){
 }
 
 /* ═══ WH VIEW ═══ */
+function colAlphaG(c){var s=String.fromCharCode(65+(c%26));if(c>=26)s=String.fromCharCode(65+Math.floor(c/26)-1)+s;return s;}
+/* ★ 큰 글씨 라벨 인쇄 — 100×150mm 가로(150 넓이 × 100 높이) 한 장에 텍스트 하나. 첫 장은 더 크게(표지).
+   숨김 iframe 에 문서를 써서 그 창만 인쇄 → 창고 화면은 그대로 */
+function printBigLabels(texts){
+  function em(t){var w=0;for(var i=0;i<t.length;i++)w+=(t[i]==='-'?0.42:0.7);return w;}
+  var pages=texts.map(function(t,i){
+    var fs=i===0?Math.min(88,136/em(t)):Math.min(70,136/em(t));
+    var s=String(t).replace(/[&<>]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[ch];});
+    return '<div class="pg"><div class="t" style="font-size:'+fs.toFixed(1)+'mm">'+s+'</div></div>';
+  }).join('');
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>라벨 인쇄</title><style>'
+    +'@page{size:150mm 100mm;margin:0}html,body{margin:0;padding:0;background:#fff}'
+    +'.pg{width:150mm;height:100mm;display:flex;align-items:center;justify-content:center;overflow:hidden;box-sizing:border-box;page-break-after:always;break-after:page}'
+    +'.pg:last-child{page-break-after:auto;break-after:auto}'
+    +'.t{font-family:Arial,"Helvetica Neue","Malgun Gothic",sans-serif;font-weight:900;line-height:1;letter-spacing:-.01em;color:#000;white-space:nowrap}'
+    +'</style></head><body>'+pages+'</body></html>';
+  var fr=document.createElement('iframe');
+  fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(fr);
+  var d=fr.contentWindow.document;d.open();d.write(html);d.close();
+  setTimeout(function(){try{fr.contentWindow.focus();fr.contentWindow.print();}catch(e){alert('인쇄 실패: '+e.message);}setTimeout(function(){if(fr.parentNode)fr.parentNode.removeChild(fr);},60000);},300);
+}
+
 /* ★ 유닛 말풍선 — 누른 칸 옆에 분할 슬롯 구성을 크게(상품명·유통기한·수량).
    위치는 매 렌더마다 칸 DOM([data-cell]) 기준으로 재계산 → 팬·줌해도 칸을 따라감. 오른쪽→왼쪽→아래→위 순으로 자리 찾음 */
 function UnitPop(p){
@@ -923,6 +949,15 @@ function WHView(p){
     dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});
     onUpdate(function(w){var c2=w.cells[cKey];if(!c2||!c2.slots||!c2.slots[sKey])return w;var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);nc[cKey].slots[sKey]=null;
       return Object.assign({},w,{cells:nc,pendOut:(w.pendOut||[]).filter(function(x){return !(x.cKey===cKey&&x.sKey===sKey);}),txLog:(w.txLog||[]).concat([txEntry]),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
+  /* ★ 열 라벨 인쇄 — 표지(A) 1장 + 그 열의 랙·보관 칸만 A-1, A-2 … (빈공간·미사용 제외) */
+  function printColLabels(c){
+    var L=colAlphaG(c),nums=[];
+    for(var r=0;r<wh.rows;r++){var cell=wh.cells[r+'-'+c];if(cell&&(cell.type==='rack'||cell.type==='shelf'))nums.push(r+1);}
+    if(!nums.length){alert(L+'열에는 랙(보관) 칸이 없습니다.');return;}
+    var list=nums.length<=15?nums.map(function(n){return L+'-'+n;}).join(', '):(L+'-'+nums[0]+' ~ '+L+'-'+nums[nums.length-1]+' 중 '+nums.length+'칸');
+    if(!confirm('🏷 '+L+'열 라벨 인쇄 (100×150 가로)\n\n표지 "'+L+'" 1장 + 위치 '+nums.length+'장 = 총 '+(nums.length+1)+'장\n'+list+'\n\n인쇄할까요?'))return;
+    printBigLabels([L].concat(nums.map(function(n){return L+'-'+n;})));
+  }
   /* ★ 말풍선 수정 — 더블탭 수정창과 동일 */
   function popEdit(cKey,sKey){var slot=wh.cells[cKey]&&wh.cells[cKey].slots&&wh.cells[cKey].slots[sKey];if(!slot)return;setUnitPop(null);setCopyN('1');setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}
   /* ★ 슬롯 복사 — 동일 유닛을 입고대기 목록에 N팔 만큼 추가 (입고로 기록) */
@@ -1041,7 +1076,9 @@ function WHView(p){
     function lblCell(k,txt,w,ht){return h('div',{key:k,style:{width:w,height:ht,display:'flex',alignItems:'center',justifyContent:'center',fontSize:LFS,fontWeight:700,color:LCLR,lineHeight:1,pointerEvents:'none',userSelect:'none',fontVariantNumeric:'tabular-nums'}},txt);}
     function corner(k){return h('div',{key:k,style:{width:LW,height:LH,flexShrink:0}});}
     function colAlpha(c){var s=String.fromCharCode(65+(c%26));if(c>=26)s=String.fromCharCode(65+Math.floor(c/26)-1)+s;return s;}
-    function colStrip(pre){var a=[];for(var c=0;c<wh.cols;c++)a.push(lblCell(pre+c,colAlpha(c),BASE,LH));return h('div',{style:{display:'grid',gridTemplateColumns:'repeat('+wh.cols+','+BASE+'px)',gap:GAP,flexShrink:0}},a);}
+    /* ★ 열 문자(A,B,C…) 클릭 → 그 열 라벨 인쇄(100×150 가로) */
+    function colLbl(k,c){return h('div',{key:k,className:'collbl',title:colAlpha(c)+'열 라벨 인쇄 (100×150)',onClick:function(e){e.stopPropagation();if(didDrag.current)return;printColLabels(c);},style:{width:BASE,height:LH,display:'flex',alignItems:'center',justifyContent:'center',fontSize:LFS,fontWeight:700,color:LCLR,lineHeight:1,cursor:'pointer',userSelect:'none',fontVariantNumeric:'tabular-nums'}},colAlpha(c));}
+    function colStrip(pre){var a=[];for(var c=0;c<wh.cols;c++)a.push(colLbl(pre+c,c));return h('div',{style:{display:'grid',gridTemplateColumns:'repeat('+wh.cols+','+BASE+'px)',gap:GAP,flexShrink:0}},a);}
     function rowStrip(pre){var a=[];for(var r=0;r<wh.rows;r++)a.push(lblCell(pre+r,String(r+1),LW,BASE));return h('div',{style:{display:'grid',gridTemplateRows:'repeat('+wh.rows+','+BASE+'px)',gap:GAP,flexShrink:0}},a);}
     var gridInner=h('div',{style:{display:'inline-grid',gridTemplateColumns:'repeat('+wh.cols+','+BASE+'px)',gap:GAP,flexShrink:0}},cells);
     return h('div',{style:{display:'inline-flex',flexDirection:'column',gap:GAP,padding:8,userSelect:'none'}},
