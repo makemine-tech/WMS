@@ -28,12 +28,13 @@
     N:'엔',O:'오',P:'피',Q:'큐',R:'알',S:'에스',T:'티',U:'유',V:'브이',W:'더블유',X:'엑스',Y:'와이',Z:'제트'};
   /* 단독으로 말하면 알파벳인지 숫자인지 헷갈리는 소리: "이"=E 또는 2, "오"=O 또는 5 */
   var AMB={'이':{L:'E',n:2},'오':{L:'O',n:5}};
-  var ACT={'입고':'in','출고':'out','뭐야':'what','뭐있어':'what','뭐있지':'what','뭐지':'what','뭐':'what','무엇':'what',
+  var ACT={'입고대기':'inq','출고대기':'outq','입고':'in','출고':'out','뭐야':'what','뭐있어':'what','뭐있지':'what','뭐지':'what','뭐':'what','무엇':'what',
     '확인':'what','이동':'move','옮겨':'move','옮기기':'move','취소':'undo','되돌려':'undo','되돌리기':'undo'};
-  var MARK={'층':'lvl','단':'lvl','개':'qty','박스':'qty','에서':'from','으로':'to','로':'to'};
+  var MARK={'층':'lvl','단':'lvl','개':'qty','박스':'qty','에서':'from','으로':'to','로':'to','대기':'wait',
+    '파렛트':'pal','팔레트':'pal','파레트':'pal','팔렛트':'pal','빠레트':'pal','빠렛트':'pal','팔렛':'pal','파렛':'pal','플레이트':'pal'};
   /* 해석에 쓰지 않고 건너뛰는 말 (알파벳·숫자로 잘못 읽히지 않게 긴 말 우선) */
-  var IGNORE=['유통기한','유통','기한','까지','수량','위치','상품','제품','번지','번','칸','랙','파렛트','팔레트','에요','이요','요',
-    '있어','있지','있나','있니','있는지','들어있어',
+  var IGNORE=['유통기한','유통','기한','까지','수량','위치','상품','제품','번지','번','칸','랙','에요','이요','요',
+    '있어','있지','있나','있니','있는지','들어있어','씩','등록','목록',
     '을','를','은','는','좀','해줘','해','주세요','줘','거','하나'];
 
   var DICT={}, MAXLEN=1;
@@ -155,6 +156,8 @@
         if(w.length<=2){ out.push({t:'let',v:w.toUpperCase()}); return; }
         out.push({t:'unk',v:w}); return;
       }
+      /* "18팔"의 "팔" = 파렛트 (숫자 8일 수도 있어 표시해 두고 해석 단계에서 결정) */
+      if(w==='팔'&&out.length&&out[out.length-1].t==='num'){ out.push({t:'mark',v:'pal',amb8:true}); return; }
       if(AMB.hasOwnProperty(w)){ out.push({t:'amb',v:w}); return; }
       var i=0, run='';
       function flush(){ if(run){ out.push(numFromRun(run)); run=''; } }
@@ -184,7 +187,7 @@
     var pre=prenorm(text);
     var fp=findProduct(pre, opts.products);
     var tk=tokenize(fp.rest);
-    var R={text:String(text||''), action:null, product:fp.product, productFuzzy:false, exp:null, qty:null, loc:null, loc2:null, warn:[], leftovers:[]};
+    var R={text:String(text||''), action:null, product:fp.product, productFuzzy:false, exp:null, qty:null, pallets:null, loc:null, loc2:null, warn:[], leftovers:[]};
     if(!R.product&&opts.products&&opts.products.length){
       var fz=fuzzyProductFromTokens(tk, opts.products);
       if(fz){ R.product=fz; R.productFuzzy=true; }
@@ -213,8 +216,18 @@
     function nextIdx(k){ return k+1<tk.length?k+1:-1; }
     function isMark(k,m){ return k>=0&&k<tk.length&&tk[k].t==='mark'&&tk[k].v===m; }
 
-    /* 3) 동작 (마지막 동작 단어) */
-    tk.forEach(function(x,k){ if(x.t==='act'){ R.action=x.v; used[k]=true; } });
+    /* 3) 동작 (마지막 동작 단어). "입고 대기"처럼 띄어 말해도 입고대기로 */
+    tk.forEach(function(x,k){
+      if(x.t==='act'){ R.action=x.v; used[k]=true;
+        if((x.v==='in'||x.v==='out')&&isMark(k+1,'wait')){ R.action=x.v==='in'?'inq':'outq'; used[k+1]=true; } }
+      else if(x.t==='mark'&&x.v==='wait') used[k]=true;
+    });
+    /* 대기 등록이 아니면 "팔"은 숫자 8 */
+    if(!(R.action==='inq'||R.action==='outq'||opts.draft)){
+      tk.forEach(function(x,k){ if(x.amb8){ tk[k]={t:'num',v:8,s:'8',dg:true}; } });
+    }
+    /* 파렛트 수: 숫자 + 파렛트/팔 */
+    tk.forEach(function(x,k){ if(x.t==='num'&&!used[k]&&isMark(k+1,'pal')&&R.pallets==null){ R.pallets=x.v; used[k]=used[k+1]=true; } });
     /* 4) 유통기한: 6·8자리 숫자 또는 년월일 세 숫자 */
     for(var e=0;e<tk.length;e++){
       var x=tk[e]; if(x.t!=='num'||used[e]) continue;
@@ -269,7 +282,8 @@
     if(locs.length&&locs[0].row!=null&&locs[0].lvl==null&&free.length){
       var f=free[0]; if(tk[f].v>=1&&tk[f].v<=9){ locs[0].lvl=tk[f].v; used[f]=true; free.shift(); R.warn.push('"층" 없이 말해 '+tk[f].v+'층으로 해석했어요'); }
     }
-    if(R.action==='in'&&R.qty==null&&free.length===1){ var fq=free[0]; R.qty=tk[fq].v; used[fq]=true; free=[]; R.warn.push('"개" 없이 말해 수량 '+R.qty+'개로 해석했어요'); }
+    if((R.action==='in'||R.action==='inq')&&R.qty==null&&free.length===1&&!(R.action==='inq'&&R.pallets==null)){ var fq=free[0]; R.qty=tk[fq].v; used[fq]=true; free=[]; R.warn.push('"개" 없이 말해 수량 '+R.qty+'개로 해석했어요'); }
+    if(R.action==='inq'&&R.pallets==null&&R.qty!=null&&free.length===1){ var fp2=free[0]; R.pallets=tk[fp2].v; used[fp2]=true; free=[]; R.warn.push('"파렛트" 없이 말해 '+R.pallets+'파렛트로 해석했어요'); }
     R.loc=locs[0]||null; R.loc2=locs[1]||null;
     tk.forEach(function(x,k){
       if(used[k]) return;
@@ -290,6 +304,7 @@
     if(R.product) s+=R.productFuzzy?1:2;
     if(R.exp) s+=2;
     if(R.qty!=null) s+=1;
+    if(R.pallets!=null) s+=1;
     s-=R.leftovers.length;
     return s;
   }
