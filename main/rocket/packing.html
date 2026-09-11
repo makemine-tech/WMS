@@ -2115,13 +2115,16 @@ function isRcCenter(center) {
          pdfStore.truck.some(it => it.pages.some(p => p.centerNorm === normCenter(center)));
 }
 
-/* 페이지 텍스트에서 특정 센터명을 substring으로 안전 검색
-   (PDF.js 한글 추출이 깨지거나 공백이 끼어도 매칭되도록) */
+/* 페이지 ↔ 센터 매칭
+   - 센터명이 추출된 페이지는 정확 일치만 인정 ("대구" ≠ "대구8", 주소의 "대구광역시"에도 안 걸리게)
+   - 추출 실패 페이지만 텍스트 substring fallback (PDF.js 한글 추출이 깨지거나 공백이 끼는 경우)
+     단, 센터명 뒤에 숫자가 이어지면 다른 센터 (대구 → 대구8 오매칭 방지) */
 function pageMatchesCenter(page, cn) {
-  if (page.centerNorm && page.centerNorm === cn) return true;
-  // fallback: 텍스트 전체 normalize 후 substring
+  if (!cn) return false;
+  if (page.centerNorm) return page.centerNorm === cn;
   const cleanText = String(page.text || '').replace(/\s+/g, '').toLowerCase();
-  return cn && cleanText.includes(cn);
+  const esc = cn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(esc + '(?!\\d)').test(cleanText);
 }
 
 /* PDF 1개에서 센터별 후보 페이지 인덱스 (출력 정책 적용 후) */
