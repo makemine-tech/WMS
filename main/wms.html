@@ -606,6 +606,9 @@ function MainView(p){
    위치는 매 렌더마다 칸 DOM([data-cell]) 기준으로 재계산 → 팬·줌해도 칸을 따라감. 오른쪽→왼쪽→아래→위 순으로 자리 찾음 */
 function UnitPop(p){
   var wh=p.wh,k=p.k,pendSet=p.pendSet||new Set(),boxRef=useRef(null),arRef=useRef(null);
+  var amSt=useState(null),armed=amSt[0],setArmed=amSt[1];   /* 즉출 1차 누름 슬롯 — 3초 안에 [확정] 한 번 더 누르면 출고 */
+  useEffect(function(){setArmed(null);},[k]);
+  useEffect(function(){if(armed==null)return;var t=setTimeout(function(){setArmed(null);},3000);return function(){clearTimeout(t);};},[armed]);
   var cell=(wh.cells||{})[k]||{},dR=cell.divR||1,dC=cell.divC||1,slots=cell.slots||{},ct=CT[cell.type];
   var pr=String(k).split('-'),cc=+pr[1],cl=String.fromCharCode(65+(cc%26));if(cc>=26)cl=String.fromCharCode(65+Math.floor(cc/26)-1)+cl;
   var lbl=cl+'-'+(+pr[0]+1);
@@ -615,14 +618,23 @@ function UnitPop(p){
     if(!s){cards.push(h('div',{key:sk,style:{border:'1px dashed #334155',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#64748B',minHeight:64}},'빈 칸'));return;}
     used++;tq+=(+s.qty||0);
     var clr=(wh.pColors&&wh.pColors[s.name])||'#94A3B8',est=getExpSt(s.exp),pend=pendSet.has(k+'||'+sk);
-    cards.push(h('div',{key:sk,style:{position:'relative',overflow:'hidden',borderRadius:8,padding:'8px 9px 8px 13px',background:BG,border:'1px solid '+(pend?'#F59E0B':BDR),minWidth:0}},
+    var isArm=armed===sk;
+    function pbtn(bg,fg,bd){return {background:bg,color:fg,border:'1px solid '+bd,borderRadius:6,padding:'6px 0',width:46,fontSize:12,fontWeight:800,cursor:'pointer',fontFamily:'inherit',lineHeight:1.1};}
+    cards.push(h('div',{key:sk,style:{position:'relative',overflow:'hidden',borderRadius:8,padding:'8px 7px 8px 13px',background:BG,border:'1px solid '+(isArm?'#EF4444':(pend?'#F59E0B':BDR)),minWidth:0,display:'flex',gap:6,alignItems:'center'}},
       h('div',{style:{position:'absolute',left:0,top:0,bottom:0,width:5,background:clr}}),
-      h('div',{style:{fontSize:15,fontWeight:700,color:'#F1F5F9',lineHeight:1.3,wordBreak:'keep-all',overflowWrap:'anywhere'}},s.name),
-      h('div',{style:{fontSize:12,color:'#94A3B8',marginTop:3,display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
-        s.exp?fmtExp(s.exp):'기한없음',
-        est!=='ok'&&h('span',{style:{fontSize:10,fontWeight:800,borderRadius:4,padding:'0 4px',background:EM[est].bg,color:EM[est].clr}},EM[est].label),
-        pend&&h('span',{style:{fontSize:10,fontWeight:800,borderRadius:4,padding:'0 4px',background:'rgba(245,158,11,.2)',color:'#FCD34D'}},'출고대기')),
-      h('div',{style:{fontSize:14,fontWeight:700,color:TX,marginTop:2}},(+s.qty||0).toLocaleString()+'개')));
+      h('div',{style:{flex:1,minWidth:0}},
+        h('div',{style:{fontSize:15,fontWeight:700,color:'#F1F5F9',lineHeight:1.3,wordBreak:'keep-all',overflowWrap:'anywhere'}},s.name),
+        h('div',{style:{fontSize:12,color:'#94A3B8',marginTop:3,display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
+          s.exp?fmtExp(s.exp):'기한없음',
+          est!=='ok'&&h('span',{style:{fontSize:10,fontWeight:800,borderRadius:4,padding:'0 4px',background:EM[est].bg,color:EM[est].clr}},EM[est].label),
+          pend&&h('span',{style:{fontSize:10,fontWeight:800,borderRadius:4,padding:'0 4px',background:'rgba(245,158,11,.2)',color:'#FCD34D'}},'출고대기')),
+        h('div',{style:{fontSize:14,fontWeight:700,color:TX,marginTop:2}},(+s.qty||0).toLocaleString()+'개')),
+      /* 우측 버튼: 즉출(한 번 더 눌러 확정) · 수정 */
+      h('div',{style:{display:'flex',flexDirection:'column',gap:4,flexShrink:0}},
+        h('button',{style:isArm?pbtn('#DC2626','#fff','#EF4444'):pbtn('rgba(239,68,68,.15)','#F87171','rgba(239,68,68,.45)'),title:'출고대기 없이 바로 출고',
+          onClick:function(e){e.stopPropagation();if(isArm){setArmed(null);if(p.onOut)p.onOut(sk);}else setArmed(sk);}},isArm?'확정':'즉출'),
+        !pend&&h('button',{style:pbtn('rgba(96,165,250,.15)','#60A5FA','rgba(96,165,250,.4)'),title:'상품명·수량·유통기한 수정',
+          onClick:function(e){e.stopPropagation();setArmed(null);if(p.onEdit)p.onEdit(sk);}},'수정'))));
   })(sr+'-'+sc);}
   function place(){
     var el=boxRef.current,ar=arRef.current;if(!el)return;
@@ -643,7 +655,7 @@ function UnitPop(p){
   }
   React.useLayoutEffect(place);
   useEffect(function(){window.addEventListener('resize',place);return function(){window.removeEventListener('resize',place);};});
-  var bw=Math.min(dC>=3?420:300,window.innerWidth-16);
+  var bw=Math.min(dC>=3?520:(dC===2?380:300),window.innerWidth-16);
   return h('div',{ref:boxRef,style:{position:'fixed',left:-9999,top:0,zIndex:10000,width:bw,background:CARD,border:'1px solid #475569',borderRadius:12,color:TX,boxShadow:'0 10px 30px rgba(0,0,0,.55)',boxSizing:'border-box',cursor:'pointer'},onClick:function(e){e.stopPropagation();p.onClose();},onPointerDown:function(e){e.stopPropagation();},title:'누르면 닫힘'},   /* 말풍선 어디를 눌러도 닫힘 */
     h('div',{ref:arRef}),
     h('div',{style:{maxHeight:'70vh',overflowY:'auto',padding:12}},
@@ -654,7 +666,7 @@ function UnitPop(p){
         h('button',{style:{marginLeft:'auto',background:'#334155',border:'none',color:TX,borderRadius:6,width:28,height:28,cursor:'pointer',fontSize:14,flexShrink:0},onClick:p.onClose},'✕')),
       h('div',{style:{fontSize:12,color:'#94A3B8',marginBottom:9}},(dR*dC)+'칸 중 '+used+'칸 사용'),
       h('div',{style:{display:'grid',gridTemplateColumns:'repeat('+dC+',minmax(0,1fr))',gap:6}},cards),
-      h('div',{style:{fontSize:12,color:'#94A3B8',marginTop:9,display:'flex',justifyContent:'space-between',fontWeight:600}},h('span',null,'합계 '+used+'팔'),h('span',null,tq.toLocaleString()+'개'))));
+      h('div',{style:{fontSize:12,color:'#94A3B8',marginTop:9,display:'flex',justifyContent:'space-between',fontWeight:600}},h('span',null,'합계 '+used+'팔'),h('span',null,tq.toLocaleString()+'개'))));   /* 즉출 대기 중에도 높이 변화 없게(버튼이 손가락 밑에서 움직이지 않게) 안내줄 없음 — 버튼이 빨간 [확정]으로 바뀜 */
 }
 
 function WHView(p){
@@ -905,6 +917,14 @@ function WHView(p){
   }
   function dblClick(cKey,sKey){if(locked||didDrag.current||block||pendSet.has(cKey+'||'+sKey))return;var slot=wh.cells[cKey]&&wh.cells[cKey].slots[sKey];if(slot){setCopyN('1');setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}}
   function saveEdit(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=editInfo.data;return w;});setEditInfo(null);}
+  /* ★ 말풍선 즉시출고 — 출고대기 없이 바로 출고: 출고일지(txLogs) 기록 + 슬롯 비움 + 되돌리기 스냅샷 (confirmPend 와 동일 방식). 출고대기 걸린 슬롯이면 대기도 함께 제거 */
+  function instantOut(cKey,sKey){var cell=wh.cells[cKey],slot=cell&&cell.slots&&cell.slots[sKey];if(!slot)return;
+    var txEntry={id:uid(),type:'out',date:todayStr(),name:slot.name,exp:slot.exp||'',pallets:1,qty:slot.qty||0};
+    dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});
+    onUpdate(function(w){var c2=w.cells[cKey];if(!c2||!c2.slots||!c2.slots[sKey])return w;var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nc=deep(w.cells);nc[cKey].slots[sKey]=null;
+      return Object.assign({},w,{cells:nc,pendOut:(w.pendOut||[]).filter(function(x){return !(x.cKey===cKey&&x.sKey===sKey);}),txLog:(w.txLog||[]).concat([txEntry]),undoStack:(w.undoStack||[]).slice(-29).concat([snap])});});}
+  /* ★ 말풍선 수정 — 더블탭 수정창과 동일 */
+  function popEdit(cKey,sKey){var slot=wh.cells[cKey]&&wh.cells[cKey].slots&&wh.cells[cKey].slots[sKey];if(!slot)return;setUnitPop(null);setCopyN('1');setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}
   /* ★ 슬롯 복사 — 동일 유닛을 입고대기 목록에 N팔 만큼 추가 (입고로 기록) */
   function copySlot(){
     if(!editInfo)return;
@@ -1133,7 +1153,7 @@ function WHView(p){
   var anyMode=outSelMode||immMode||moveFrom||selSlots.length>0||!!block;
   return h('div',{ref:rootRef,style:{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
     saveFlash&&h('div',{key:String(toastK.current),className:'toast'},'저장 완료'),
-    unitPop&&tab==='ops'&&h(UnitPop,{wh:wh,k:unitPop.k,pendSet:pendSet,onClose:function(){setUnitPop(null);}}),
+    unitPop&&tab==='ops'&&h(UnitPop,{wh:wh,k:unitPop.k,pendSet:pendSet,onClose:function(){setUnitPop(null);},onOut:function(sk){instantOut(unitPop.k,sk);},onEdit:function(sk){popEdit(unitPop.k,sk);}}),
     tip&&!unitPop&&h('div',{style:{position:'fixed',left:Math.min(tip.x+14,window.innerWidth-180),top:Math.max(tip.y-70,8),background:'rgba(15,23,42,.97)',border:'1px solid #334155',borderRadius:8,padding:'7px 10px',fontSize:12,color:TX,zIndex:9999,pointerEvents:'none',boxShadow:'0 4px 14px rgba(0,0,0,.45)',whiteSpace:'nowrap',lineHeight:1.45,fontWeight:600}},h('div',{style:{color:TX,marginBottom:2}},tip.name),h('div',{style:{fontSize:11,color:'#94A3B8',fontWeight:500}},(tip.exp?fmtExp(tip.exp):'기한없음')+' · '+tip.qty+'개')),
     h('div',{style:{position:'sticky',top:0,zIndex:10,flexShrink:0}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 8px',height:48,display:'flex',alignItems:'center',gap:5}},
