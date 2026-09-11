@@ -28,6 +28,8 @@
     N:'엔',O:'오',P:'피',Q:'큐',R:'알',S:'에스',T:'티',U:'유',V:'브이',W:'더블유',X:'엑스',Y:'와이',Z:'제트'};
   /* 단독으로 말하면 알파벳인지 숫자인지 헷갈리는 소리: "이"=E 또는 2, "오"=O 또는 5 */
   var AMB={'이':{L:'E',n:2},'오':{L:'O',n:5}};
+  var LET_DIG={e:2,o:5};            /* 알파벳으로 받아 적혔지만 소리가 숫자인 것: E(이)=2, O(오)=5 */
+  var DIG_LET={'2':'E','5':'O'};    /* 숫자로 받아 적혔지만 자리상 알파벳이어야 하는 것: 2(이)=E, 5(오)=O */
   var ACT={'입고대기':'inq','출고대기':'outq','입고':'in','출고':'out','뭐야':'what','뭐있어':'what','뭐있지':'what','뭐지':'what','뭐':'what','무엇':'what',
     '확인':'what','이동':'move','옮겨':'move','옮기기':'move','취소':'undo','되돌려':'undo','되돌리기':'undo'};
   var MARK={'층':'lvl','단':'lvl','개':'qty','박스':'qty','에서':'from','으로':'to','로':'to','대기':'wait',
@@ -153,7 +155,14 @@
       if(/^\d+$/.test(w)){ out.push({t:'num',v:parseInt(w,10),s:w,dg:true}); return; }
       if(/^[a-z]+$/.test(w)){
         if(ENG_LAT.hasOwnProperty(w)){ out.push({t:'num',v:ENG_LAT[w],s:String(ENG_LAT[w])}); return; }
-        if(w.length<=2){ out.push({t:'let',v:w.toUpperCase()}); return; }
+        if(w.length===1){ out.push({t:'let',v:w.toUpperCase()}); return; }
+        /* 열은 항상 알파벳 한 글자(AA·AE 열 없음) → "AE"는 "에이 이"(A-2)가 붙어 들린 것: 둘째 글자는 소리로 숫자 (E=이=2, O=오=5) */
+        if(w.length===2){
+          out.push({t:'let',v:w[0].toUpperCase()});
+          if(LET_DIG.hasOwnProperty(w[1])) out.push({t:'num',v:LET_DIG[w[1]],s:String(LET_DIG[w[1]]),dg:true,fromLet:true});
+          else out.push({t:'let',v:w[1].toUpperCase()});
+          return;
+        }
         out.push({t:'unk',v:w}); return;
       }
       /* "18팔"의 "팔" = 파렛트 (숫자 8일 수도 있어 표시해 두고 해석 단계에서 결정) */
@@ -209,9 +218,36 @@
       var a=AMB[x.v], prev=tk[k-1], next=tk[k+1];
       var letterOk=!cols||cols.indexOf(a.L)>=0;
       if(prev&&prev.t==='let'){ tk[k]={t:'num',v:a.n,s:String(a.n),dg:true}; return; }
-      if(letterOk&&next&&next.t==='num'){ tk[k]={t:'let',v:a.L}; return; }
+      /* 위치는 "알파벳 + 숫자" — 뒤에 숫자(또는 또 다른 이/오)가 오면 첫 소리가 알파벳 ("이 이 3층" → E-2 3층) */
+      if(letterOk&&next&&(next.t==='num'||next.t==='amb')){ tk[k]={t:'let',v:a.L}; return; }
       tk[k]={t:'num',v:a.n,s:String(a.n),dg:true};
     });
+    /* 2-1) 위치 규칙: 앞은 알파벳 한 글자, 뒤는 숫자
+       - 알파벳 뒤에 E/O가 또 오면(예: "a e 2층") 그 E/O는 숫자 2/5 */
+    for(var lq=0;lq+1<tk.length;lq++){
+      if(tk[lq].t==='let'&&tk[lq+1].t==='let'&&LET_DIG.hasOwnProperty(tk[lq+1].v.toLowerCase())){
+        var dv=LET_DIG[tk[lq+1].v.toLowerCase()]; tk[lq+1]={t:'num',v:dv,s:String(dv),dg:true,fromLet:true};
+      }
+    }
+    var isMarkRaw=function(k,m){ return k>=0&&k<tk.length&&tk[k].t==='mark'&&tk[k].v===m; };
+    /*  - 알파벳이 하나도 없이 위치를 말한 경우(예: "이 이 3층" → "22 3층") → 앞 숫자 2/5 를 E/O 로 */
+    var hasLet=tk.some(function(x){ return x.t==='let'; });
+    var isWaitReg=tk.some(function(x,k){ return x.t==='act'&&(x.v==='inq'||x.v==='outq'||((x.v==='in'||x.v==='out')&&isMarkRaw(k+1,'wait'))); });
+    var locCtx=!isWaitReg&&(tk.some(function(x){ return x.t==='act'&&(x.v==='in'||x.v==='out'||x.v==='what'); })||tk.some(function(x){ return x.t==='mark'&&x.v==='lvl'; }));
+    if(!hasLet&&locCtx){
+      for(var nz=0;nz<tk.length;nz++){
+        var nt=tk[nz]; if(nt.t!=='num') continue;
+        if(isMarkRaw(nz+1,'lvl')||isMarkRaw(nz+1,'qty')||isMarkRaw(nz+1,'pal')) break;   /* 층·수량 숫자 전에 위치 숫자가 없음 */
+        if(nt.s.length>3) continue;   /* 유통기한 같은 긴 숫자는 위치 아님 */
+        var L0=DIG_LET[nt.s.charAt(0)];
+        if(!L0||(cols&&cols.indexOf(L0)<0)) break;
+        if(nt.s.length>=2){ tk.splice(nz,1,{t:'let',v:L0},{t:'num',v:parseInt(nt.s.slice(1),10),s:nt.s.slice(1),dg:true}); }
+        else if(tk[nz+1]&&tk[nz+1].t==='num'){ tk[nz]={t:'let',v:L0}; }
+        else break;
+        R.warn.push('알파벳 없이 들려 앞 소리 "'+(L0==='E'?'이':'오')+'"를 '+L0+'열로 해석했어요');
+        break;
+      }
+    }
     var used=tk.map(function(){ return false; });
     function nextIdx(k){ return k+1<tk.length?k+1:-1; }
     function isMark(k,m){ return k>=0&&k<tk.length&&tk[k].t==='mark'&&tk[k].v===m; }

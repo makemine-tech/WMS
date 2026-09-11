@@ -34,6 +34,7 @@ select{margin-bottom:10px;}
 .gsrc{font-size:10.5px;color:var(--sub);border:1px solid var(--bd);border-radius:5px;padding:1px 5px;white-space:nowrap;}
 .gact{font-size:11px;font-weight:800;color:#93C5FD;white-space:nowrap;}
 .g2{font-size:12.5px;color:var(--sub);margin-top:3px;}
+.gclr{background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.4);border-radius:7px;padding:4px 9px;font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;}
 .gbar{height:6px;background:rgba(255,255,255,.07);border-radius:4px;margin-top:7px;overflow:hidden;}
 .gbar i{display:block;height:100%;background:var(--green);}
 .empty{font-size:12.5px;color:var(--sub);padding:12px 4px;line-height:1.6;}
@@ -191,7 +192,8 @@ function renderLists(){
     var pct=g.total?Math.round((g.total-g.left)/g.total*100):0, isAct=act&&act.id===g.id;
     return '<div class="grp'+(isAct?' act':'')+(g.left<=0?' done':'')+'" onclick="pickGroup(\''+esc(g.id).replace(/'/g,"\\'")+'\')">'
       +'<div class="g1"><span class="gname">'+esc(g.product)+'</span>'+(g.src==='real'?'<span class="gsrc">창고 입고대기</span>':'<span class="gsrc">음성·직접 등록</span>')
-      +(isAct?'<span class="gact">▶ 진행 중</span>':'')+'</div>'
+      +(isAct?'<span class="gact">▶ 진행 중</span>':'')
+      +'<button class="gclr" onclick="event.stopPropagation();resetGroup(\''+esc(g.id).replace(/'/g,"\\'")+'\')">초기화</button></div>'
       +'<div class="g2">'+esc(g.exp?V.fmtExp(g.exp):'유통기한 무관')+(g.qty?' · 파렛트당 '+g.qty+'개':'')+' · 남은 <b style="color:var(--tx)">'+g.left+'</b> / '+g.total+'팔</div>'
       +'<div class="gbar"><i style="width:'+pct+'%"></i></div></div>';
   }).join(''):'<div class="empty">'+(S.MODE==='in'?'입고대기 목록이 없어요. 아래 버튼을 누르고 <b>"서리태 십오 이칠공칠공칠 백이십오개 십팔 파렛트 입고대기"</b>처럼 말하거나, 직접 입력하세요.':'출고대기 목록이 없어요. <b>"서리태 삼십 오 파렛트 출고대기"</b>처럼 말하거나 직접 입력하세요. (목록 없이 출고하면 매번 "네"로 확인)')+'</div>';
@@ -217,6 +219,23 @@ function renderLog(){
 function setMode(m){ S.MODE=m; save(); renderLists(); renderCur(); }
 function pickGroup(id){ var g=findGroup(id); if(!g) return; S.ACTIVE[g.type]=id; S.MODE=g.type; save(); renderLists(); renderCur(); }
 window.setMode=setMode; window.pickGroup=pickGroup;
+/* 대기 목록 초기화 — 음성·직접 등록분은 목록에서 지움 / 창고 실제 입고대기는(시험 모드라 지우지 않고) 진행 수만 처음으로.
+   이미 시험으로 넣고 뺀 칸은 그대로 두고, 그 내역의 되돌리기 연결만 끊음 */
+function resetGroup(id){
+  var g=findGroup(id); if(!g) return;
+  var used=g.total-g.left;
+  var msg=g.src==='real'
+    ? '"'+g.product+' '+(g.exp?V.fmtExp(g.exp):'')+'" 창고 입고대기의 진행 수('+used+'팔 사용)를 처음으로 되돌릴까요?\n(시험 모드 — 창고의 실제 입고대기는 그대로)'
+    : '"'+g.product+' '+(g.exp?V.fmtExp(g.exp):'')+'" '+(g.type==='in'?'입고대기':'출고대기')+' 목록('+g.left+'/'+g.total+'팔 남음)을 지울까요?';
+  if(!confirm(msg)) return;
+  if(g.src==='real') delete S.REALUSED[g.key];
+  else S.GROUPS=S.GROUPS.filter(function(x){ return x.id!==id; });
+  S.UNDO.forEach(function(u){ if(u.gid===id) u.gid=null; });
+  if(S.ACTIVE[g.type]===id) S.ACTIVE[g.type]=null;
+  S.LOG.unshift({t:nowHM(), s:'🧹 초기화 · '+(g.type==='in'?'입고대기':'출고대기')+' '+groupLine(g)});
+  save(); renderAll(); renderSay('🧹 '+g.product+' '+(g.src==='real'?'진행 수를 처음으로 되돌렸어요':'목록을 지웠어요'),'done');
+}
+window.resetGroup=resetGroup;
 function setMicUI(state){
   var b=document.getElementById('micBtn'), st=document.getElementById('micSt'), hn=document.getElementById('hint'); if(!b) return;
   var M={cmd:['mic on','● 듣는 중… (말이 끝나면 자동 종료)','듣는 중'], fill:['mic on','● 이어서 말씀하세요','이어서 듣는 중'],
