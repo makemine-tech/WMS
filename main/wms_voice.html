@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>음성 입출고 (시험) — 메이크창고</title>
+<title>음성 입출고 — 메이크창고</title>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
@@ -17,10 +17,10 @@ body{background:var(--bg);font-family:system-ui,-apple-system,'Segoe UI',sans-se
 .top{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
 .back{background:rgba(255,255,255,.06);color:var(--sub);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap;}
 .ttl{font-size:17px;font-weight:800;flex:1;min-width:0;}
-.testb{font-size:11px;font-weight:800;color:#FCD34D;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);border-radius:6px;padding:2px 7px;white-space:nowrap;}
+.liveb{font-size:11px;font-weight:800;color:#6EE7B7;background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.45);border-radius:6px;padding:2px 7px;white-space:nowrap;}
 select,.fin{width:100%;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:9px;padding:9px 10px;font-size:14px;font-family:inherit;}
 select{margin-bottom:10px;}
-.notice{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:9px 11px;font-size:12px;color:#FDE68A;line-height:1.6;margin-bottom:12px;}
+.notice{background:rgba(52,211,153,.07);border:1px solid rgba(52,211,153,.3);border-radius:10px;padding:9px 11px;font-size:12px;color:#A7F3D0;line-height:1.6;margin-bottom:12px;}
 .sec{font-size:12.5px;color:var(--sub);font-weight:800;margin:4px 2px 7px;letter-spacing:.02em;}
 .tabs{display:flex;gap:6px;margin-bottom:8px;}
 .tab{flex:1;padding:10px 0;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--sub);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit;}
@@ -31,7 +31,6 @@ select{margin-bottom:10px;}
 .grp.done{opacity:.45;}
 .g1{display:flex;align-items:center;gap:8px;}
 .gname{font-size:15px;font-weight:800;flex:1;min-width:0;}
-.gsrc{font-size:10.5px;color:var(--sub);border:1px solid var(--bd);border-radius:5px;padding:1px 5px;white-space:nowrap;}
 .gact{font-size:11px;font-weight:800;color:#93C5FD;white-space:nowrap;}
 .g2{font-size:12.5px;color:var(--sub);margin-top:3px;}
 .gclr{background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.4);border-radius:7px;padding:4px 9px;font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;}
@@ -92,26 +91,32 @@ firebase.initializeApp({
 });
 var auth=firebase.auth(), db=firebase.database(), V=window.WMSVoice;
 var app=document.getElementById('app');
-var GID=(new URLSearchParams(location.search).get('gid'))||localStorage.getItem('wms_adminGroupId')||'';
-var WHS=[], WH=null, WHID=null, whRef=null, PRODUCTS=[];
+var QS=new URLSearchParams(location.search);
+var GID=QS.get('gid')||localStorage.getItem('wms_adminGroupId')||'', WANT_WID=QS.get('wid')||'';
+var WHS=[], WH=null, WHID=null, whRef=null, PRODUCTS=[], USER=null;
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-var rec=null, listening=false, pending=null;
+var rec=null, listening=false, pending=null, busy=false;
 
-/* ── 시험 상태 (이 폰에만 저장, 창고 원본은 안 바꿈) ──
-   GROUPS: 음성·직접입력으로 만든 대기 목록 {id,type:'in'|'out',product,exp,qty,total,left}
-   REALUSED: 창고 실제 입고대기 묶음에서 시험으로 쓴 파렛트 수 {묶음키:수}
-   SIM: 칸 시험 변경 {'r-c|슬롯': 상품 또는 null(비움)}  UNDO: 되돌리기 스택  LOG: 처리 내역 */
-var S={GROUPS:[], REALUSED:{}, SIM:{}, UNDO:[], LOG:[], ACTIVE:{in:null,out:null}, MODE:'in'};
+/* ── 실제 적용 모드 ──
+   입고대기 = 창고의 실제 입고대기(warehouses/{wid}/inQ, 파렛트당 1건) — 창고관리 화면과 같은 목록
+   출고대기 = 음성 출고 목록(warehouses/{wid}/voiceOut/{id} = {product,exp,qty,total,left,...})
+   입고대기 등록 → inQ 추가 + 입출고 일지(txLogs) '입고' 기록 (창고관리 입고와 동일)
+   위치 입고 → inQ 1건을 칸으로 이동 / 출고 → 칸 비움 + 일지 '출고' 기록 (말풍선 즉출과 동일)
+   U(이 폰): ACTIVE·MODE·UNDO(되돌리기)·LOG(처리 내역) */
+var U={ACTIVE:{in:null,out:null}, MODE:'in', UNDO:[], LOG:[]};
 var DRAFT=null;   /* 대기 등록 중인 초안 {type,product,exp,qty,pallets,awaiting} */
+var PAL=['#B22222','#FF0000','#FF6666','#FFCCCC','#CC7A00','#FFA500','#FFC04D','#FFE5B3','#B3B300','#FFFF00','#FFFF66','#FFFFCC','#006400','#008000','#4CAF50','#C8E6C9','#00008B','#0000FF','#6666FF','#CCCCFF','#000033','#000080','#333399','#9999CC','#004D40','#008080','#4DB6AC','#B2DFDB','#4B0082','#800080','#B366B3','#E6CCE6','#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF'];
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
-function stKey(){ return 'wms_voice_sim:'+GID+':'+WHID; }
-function save(){ lsSet(stKey(), JSON.stringify(S)); }
-function load(){ try{ var o=JSON.parse(lsGet(stKey())||'null'); if(o&&o.GROUPS) S=Object.assign({GROUPS:[],REALUSED:{},SIM:{},UNDO:[],LOG:[],ACTIVE:{in:null,out:null},MODE:'in'},o); else resetState(true); }catch(e){ resetState(true); } }
-function resetState(silent){ S={GROUPS:[], REALUSED:{}, SIM:{}, UNDO:[], LOG:[], ACTIVE:{in:null,out:null}, MODE:'in'}; DRAFT=null; if(!silent){ save(); renderAll(); } }
-function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function uKey(){ return 'wms_voice_u:'+GID+':'+WHID; }
+function saveU(){ U.UNDO=U.UNDO.slice(-50); U.LOG=U.LOG.slice(0,60); lsSet(uKey(), JSON.stringify(U)); }
+function loadU(){ try{ var o=JSON.parse(lsGet(uKey())||'null'); U=Object.assign({ACTIVE:{in:null,out:null},MODE:'in',UNDO:[],LOG:[]},o||{}); }catch(e){ U={ACTIVE:{in:null,out:null},MODE:'in',UNDO:[],LOG:[]}; } }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function pad(n){ return (n<10?'0':'')+n; }
+function todayStr(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function nowHM(){ var d=new Date(); return pad(d.getMonth()+1)+'/'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes()); }
 function josa(w, pair){
   var a=pair.split('/'), s=String(w).trim(), ch=s.slice(-1), code=ch.charCodeAt(0), has=false, rieul=false;
   if(code>=0xAC00&&code<=0xD7A3){ var jong=(code-0xAC00)%28; has=jong>0; rieul=jong===8; }
@@ -119,41 +124,45 @@ function josa(w, pair){
   if(pair==='으로/로') return s+(has&&!rieul?a[0]:a[1]);
   return s+(has?a[0]:a[1]);
 }
-function nowHM(){ var d=new Date(), p=function(x){return (x<10?'0':'')+x;}; return p(d.getHours())+':'+p(d.getMinutes()); }
+function addLog(s){ U.LOG.unshift({t:nowHM(), s:s}); saveU(); renderLog(); }
+function whPath(){ return 'warehouses/'+WHID; }
+function inQArr(){ var q=WH&&WH.inQ; if(!q) return []; return Array.isArray(q)?q.filter(Boolean):Object.keys(q).map(function(k){return q[k];}).filter(Boolean); }
+function fail(e){ console.warn(e); renderSay('저장 실패: '+(e&&e.message||e)+' — 다시 시도해 주세요','bad'); speak('저장에 실패했어요. 다시 시도해 주세요'); }
 
-/* ── 대기 목록 (창고 실제 입고대기 + 시험 등록분) ── */
-function realInGroups(){
+/* ── 대기 목록 ── */
+function inGroups(){
   var m={}, order=[];
-  (WH&&WH.inQ||[]).forEach(function(it){ if(!it||!it.name) return; var k=it.name+'|'+(it.exp||'')+'|'+(+it.qty||0);
-    if(!m[k]){ m[k]={id:'r:'+k, key:k, src:'real', type:'in', product:it.name, exp:String(it.exp||''), qty:+it.qty||0, total:0}; order.push(k); } m[k].total++; });
-  return order.map(function(k){ var g=m[k]; g.left=Math.max(0,g.total-(S.REALUSED[k]||0)); return g; });
+  inQArr().forEach(function(it){ if(!it||!it.name) return; var k=it.name+'|'+String(it.exp||'')+'|'+(+it.qty||0);
+    if(!m[k]){ m[k]={id:k, type:'in', product:it.name, exp:String(it.exp||''), qty:+it.qty||0, items:[]}; order.push(k); } m[k].items.push(it); });
+  return order.map(function(k){ var g=m[k]; g.left=g.items.length; g.total=g.left; return g; });
 }
-function groupsOf(type){ return (type==='in'?realInGroups():[]).concat(S.GROUPS.filter(function(g){return g.type===type;})); }
-function findGroup(id){ var all=groupsOf('in').concat(groupsOf('out')); for(var i=0;i<all.length;i++) if(all[i].id===id) return all[i]; return null; }
+function outGroups(){
+  var vo=(WH&&WH.voiceOut)||{};
+  return Object.keys(vo).map(function(id){ var x=vo[id]||{}; return {id:id, type:'out', product:x.product, exp:String(x.exp||''), qty:+x.qty||0, total:+x.total||0, left:Math.max(0,+x.left||0), createdAt:x.createdAt||0}; })
+    .filter(function(g){ return g.product; }).sort(function(a,b){ return a.createdAt-b.createdAt; });
+}
+function groupsOf(type){ return type==='in'?inGroups():outGroups(); }
+function findGroup(type,id){ var l=groupsOf(type); for(var i=0;i<l.length;i++) if(l[i].id===id) return l[i]; return null; }
 function activeGroup(type){
-  var g=S.ACTIVE[type]&&findGroup(S.ACTIVE[type]);
+  var g=U.ACTIVE[type]&&findGroup(type,U.ACTIVE[type]);
   if(g&&g.left>0) return g;
   var nx=groupsOf(type).filter(function(x){return x.left>0;})[0]||null;
-  S.ACTIVE[type]=nx?nx.id:null; return nx;
-}
-function useGroup(g, d){   /* 파렛트 1개 사용(d=+1) / 되돌림(d=-1) */
-  if(g.src==='real') S.REALUSED[g.key]=Math.max(0,(S.REALUSED[g.key]||0)+d);
-  else { var own=S.GROUPS.filter(function(x){return x.id===g.id;})[0]; if(own) own.left=Math.max(0,Math.min(own.total,own.left-d)); }
+  U.ACTIVE[type]=nx?nx.id:null; return nx;
 }
 function groupLine(g){ return g.product+' · '+(g.exp?V.fmtExp(g.exp):'유통기한 무관')+(g.qty?' · '+g.qty+'개':''); }
 
 /* ── 화면 ── */
 function renderShell(){
   app.innerHTML=
-    '<div class="top"><a class="back" href="/wms.html">‹ 창고관리</a><div class="ttl">🎙 음성 입출고</div><span class="testb">시험 모드</span></div>'
+    '<div class="top"><a class="back" href="/wms.html">‹ 창고관리</a><div class="ttl">🎙 음성 입출고</div><span class="liveb">실제 적용</span></div>'
     +'<select id="whSel" onchange="selectWh(this.value)">'+WHS.map(function(w){return '<option value="'+esc(w.id)+'"'+(w.id===WHID?' selected':'')+'>'+esc(w.name)+'</option>';}).join('')+'</select>'
-    +'<div class="notice">🧪 <b>시험 모드</b> — 입고·출고는 <b>이 폰 화면에서만 흉내</b>내고 창고 기록은 바꾸지 않습니다. 창고의 실제 입고대기·재고를 읽어 대조합니다.'
-    +(SR?'':'<br>⚠ 이 브라우저는 음성 인식을 지원하지 않아요(안드로이드 크롬 권장). 아래 입력칸으로 문장 시험은 가능합니다.')+'</div>'
+    +'<div class="notice">✅ <b>실제 적용</b> — 말한 입고·출고가 <b>창고관리 기록에 바로 반영</b>됩니다. 잘못 처리했으면 <b>"취소"</b>라고 말하거나 아래 [↩ 마지막 되돌리기]를 누르세요.'
+    +(SR?'':'<br>⚠ 이 브라우저는 음성 인식을 지원하지 않아요(안드로이드 크롬 권장). 아래 입력칸으로도 처리할 수 있어요.')+'</div>'
     +'<div class="sec">① 대기 목록 — 먼저 상품을 등록하고, 진행할 목록을 고르세요</div>'
     +'<div class="tabs"><button class="tab in" id="tabIn" onclick="setMode(\'in\')"></button><button class="tab out" id="tabOut" onclick="setMode(\'out\')"></button></div>'
     +'<div id="lists"></div>'
     +'<details><summary>＋ 대기 목록 직접 입력</summary><div class="form">'
-      +'<select class="fin full" id="fType"><option value="in">입고대기</option><option value="out">출고대기</option></select>'
+      +'<select class="fin full" id="fType"><option value="in">입고대기 (창고 입고대기에 추가)</option><option value="out">출고대기</option></select>'
       +'<input class="fin full" id="fName" list="prodList" placeholder="상품명 (등록된 상품)">'
       +'<input class="fin" id="fExp" inputmode="numeric" placeholder="유통기한 YYMMDD">'
       +'<input class="fin" id="fQty" inputmode="numeric" placeholder="파렛트당 수량">'
@@ -163,14 +172,14 @@ function renderShell(){
     +'<div id="draftBox"></div>'
     +'<div class="sec">② 위치 말하기 — "에이 원 3층 입고" · "에이 원 3층 출고" · "에이 원 3층 뭐야"</div>'
     +'<div class="box"><div class="lb"><span>알아들은 말</span><span id="micSt">대기</span></div><div class="heard interim" id="heard">아래 버튼을 누르고 말하세요</div></div>'
-    +'<div class="box" id="resBox" style="display:none"><div class="lb"><span>해석 · 대조</span></div><div class="grid" id="resGrid"></div><div id="chks"></div></div>'
+    +'<div class="box" id="resBox" style="display:none"><div class="lb"><span>해석 · 처리</span></div><div class="grid" id="resGrid"></div><div id="chks"></div></div>'
     +'<div id="sayBox"></div>'
-    +'<div class="typ"><input id="typIn" placeholder="문장 직접 입력해 시험" autocomplete="off"><button class="btn2" onclick="typedTest()">해석</button></div>'
-    +'<details open><summary>처리 내역 (시험)</summary><div id="logBox"></div><div class="logbar"><button class="btn2" onclick="doUndo()">↩ 마지막 되돌리기</button><button class="btn2" onclick="if(confirm(\'시험 내역과 시험 등록 목록을 모두 지울까요?\'))resetState()">시험 초기화</button></div></details>'
+    +'<div class="typ"><input id="typIn" placeholder="문장 직접 입력 (예: 에이 원 3층 입고)" autocomplete="off"><button class="btn2" onclick="typedTest()">처리</button></div>'
+    +'<details open><summary>처리 내역 (이 폰)</summary><div id="logBox"></div><div class="logbar"><button class="btn2" onclick="doUndo()">↩ 마지막 되돌리기</button></div></details>'
     +'<details><summary>말하는 예시</summary>'
       +['서리태 십오 이칠공칠공칠 백이십오개 십팔 파렛트 입고대기','에이 원 3층 입고','에이 원 2층 입고','서리태 삼십 오 파렛트 출고대기','에이 십이 4층 출고','에이 십이 4층 뭐야','취소']
-        .map(function(t){return '<button class="ex" onclick="exTest(this)">'+esc(t)+'</button>';}).join('')
-      +'<div class="hint" style="text-align:left;margin-top:8px;line-height:1.7">· 등록: 상품 · 유통기한 · 파렛트당 수량 · 파렛트 수 + "입고대기"/"출고대기" (말이 끊기면 빠진 것만 다시 물어봐요)<br>· 위치: 알파벳(에이·비 / A) + 번호(일·원·1·십·텐) + 층(1층 = 맨 아래)<br>· "입고/출고"를 빼고 위치만 말하면 위에서 고른 탭(입고/출고)으로 처리</div>'
+        .map(function(t){return '<button class="ex" onclick="exFill(this)">'+esc(t)+'</button>';}).join('')
+      +'<div class="hint" style="text-align:left;margin-top:8px;line-height:1.7">· 예시를 누르면 입력칸에 채워져요 — [처리]를 눌러야 실제 반영돼요<br>· 등록: 상품 · 유통기한 · 파렛트당 수량 · 파렛트 수 + "입고대기"/"출고대기" (말이 끊기면 빠진 것만 다시 물어봐요)<br>· 위치: 알파벳 한 글자 + 번호 + 층 (1층 = 맨 아래)<br>· "입고/출고"를 빼고 위치만 말하면 위에서 고른 탭으로 처리</div>'
     +'</details>'
     +'<div class="dock"><div class="dock-in"><div class="cur" id="cur"></div><button class="mic" id="micBtn" onclick="micPress()">🎙 눌러서 말하기</button>'
     +'<div class="hint" id="hint">탭하고 말하면 말이 끝날 때 자동으로 멈춰요 · 블루투스 버튼(Enter·Space·→)도 가능</div></div></div>';
@@ -181,28 +190,27 @@ function renderAll(){ renderLists(); renderDraft(); renderLog(); renderCur(); re
 function renderDatalist(){ var d=document.getElementById('prodList'); if(d) d.innerHTML=PRODUCTS.slice().sort().map(function(p){return '<option value="'+esc(p)+'">';}).join(''); }
 function renderLists(){
   var box=document.getElementById('lists'); if(!box) return;
-  var gi=groupsOf('in'), go=groupsOf('out');
+  var gi=inGroups(), go=outGroups();
   var li=gi.reduce(function(s,g){return s+g.left;},0), lo=go.reduce(function(s,g){return s+g.left;},0);
   document.getElementById('tabIn').textContent='입고대기 '+li+'팔';
   document.getElementById('tabOut').textContent='출고대기 '+lo+'팔';
-  document.getElementById('tabIn').className='tab in'+(S.MODE==='in'?' on':'');
-  document.getElementById('tabOut').className='tab out'+(S.MODE==='out'?' on':'');
-  var list=S.MODE==='in'?gi:go, act=activeGroup(S.MODE);
+  document.getElementById('tabIn').className='tab in'+(U.MODE==='in'?' on':'');
+  document.getElementById('tabOut').className='tab out'+(U.MODE==='out'?' on':'');
+  var list=U.MODE==='in'?gi:go, act=activeGroup(U.MODE);
   box.innerHTML=list.length?list.map(function(g){
-    var pct=g.total?Math.round((g.total-g.left)/g.total*100):0, isAct=act&&act.id===g.id;
-    return '<div class="grp'+(isAct?' act':'')+(g.left<=0?' done':'')+'" onclick="pickGroup(\''+esc(g.id).replace(/'/g,"\\'")+'\')">'
-      +'<div class="g1"><span class="gname">'+esc(g.product)+'</span>'+(g.src==='real'?'<span class="gsrc">창고 입고대기</span>':'<span class="gsrc">음성·직접 등록</span>')
-      +(isAct?'<span class="gact">▶ 진행 중</span>':'')
-      +'<button class="gclr" onclick="event.stopPropagation();resetGroup(\''+esc(g.id).replace(/'/g,"\\'")+'\')">초기화</button></div>'
-      +'<div class="g2">'+esc(g.exp?V.fmtExp(g.exp):'유통기한 무관')+(g.qty?' · 파렛트당 '+g.qty+'개':'')+' · 남은 <b style="color:var(--tx)">'+g.left+'</b> / '+g.total+'팔</div>'
-      +'<div class="gbar"><i style="width:'+pct+'%"></i></div></div>';
-  }).join(''):'<div class="empty">'+(S.MODE==='in'?'입고대기 목록이 없어요. 아래 버튼을 누르고 <b>"서리태 십오 이칠공칠공칠 백이십오개 십팔 파렛트 입고대기"</b>처럼 말하거나, 직접 입력하세요.':'출고대기 목록이 없어요. <b>"서리태 삼십 오 파렛트 출고대기"</b>처럼 말하거나 직접 입력하세요. (목록 없이 출고하면 매번 "네"로 확인)')+'</div>';
+    var isAct=act&&act.id===g.id, idq=esc(g.id).replace(/'/g,"\\'");
+    var prog=g.type==='out'&&g.total?'<div class="gbar"><i style="width:'+Math.round((g.total-g.left)/g.total*100)+'%"></i></div>':'';
+    return '<div class="grp'+(isAct?' act':'')+(g.left<=0?' done':'')+'" onclick="pickGroup(\''+g.type+'\',\''+idq+'\')">'
+      +'<div class="g1"><span class="gname">'+esc(g.product)+'</span>'+(isAct?'<span class="gact">▶ 진행 중</span>':'')
+      +'<button class="gclr" onclick="event.stopPropagation();resetGroup(\''+g.type+'\',\''+idq+'\')">초기화</button></div>'
+      +'<div class="g2">'+esc(g.exp?V.fmtExp(g.exp):'유통기한 무관')+(g.qty?' · 파렛트당 '+g.qty+'개':'')+' · 남은 <b style="color:var(--tx)">'+g.left+'</b>'+(g.type==='out'?' / '+g.total:'')+'팔</div>'+prog+'</div>';
+  }).join(''):'<div class="empty">'+(U.MODE==='in'?'입고대기가 없어요. 아래 버튼을 누르고 <b>"서리태 십오 이칠공칠공칠 백이십오개 십팔 파렛트 입고대기"</b>처럼 말하거나, 직접 입력하세요. (창고관리의 입고대기와 같은 목록이에요)':'출고대기가 없어요. <b>"서리태 삼십 오 파렛트 출고대기"</b>처럼 말하거나 직접 입력하세요. (목록 없이 출고하면 매번 "네"로 확인)')+'</div>';
 }
 function renderCur(){
   var c=document.getElementById('cur'); if(!c) return;
   if(DRAFT){ c.textContent='📝 '+(DRAFT.type==='in'?'입고대기':'출고대기')+' 등록 중 — 빠진 항목을 말씀하세요'; return; }
-  var g=activeGroup(S.MODE);
-  c.textContent=(S.MODE==='in'?'입고':'출고')+' 진행: '+(g?g.product+' '+(g.exp?V.fmtExp(g.exp):'')+' · '+g.left+'팔 남음':'(대기 목록 없음)');
+  var g=activeGroup(U.MODE);
+  c.textContent=(U.MODE==='in'?'입고':'출고')+' 진행: '+(g?g.product+' '+(g.exp?V.fmtExp(g.exp):'')+' · '+g.left+'팔 남음':'(대기 목록 없음)');
 }
 function renderDraft(){
   var b=document.getElementById('draftBox'); if(!b) return;
@@ -214,26 +222,27 @@ function renderDraft(){
 }
 function renderLog(){
   var b=document.getElementById('logBox'); if(!b) return;
-  b.innerHTML=S.LOG.length?S.LOG.slice(0,30).map(function(x){ return '<div class="log"><span class="t">'+esc(x.t)+'</span><span>'+esc(x.s)+'</span></div>'; }).join(''):'<div class="empty">아직 없어요</div>';
+  b.innerHTML=U.LOG.length?U.LOG.slice(0,30).map(function(x){ return '<div class="log"><span class="t">'+esc(x.t)+'</span><span>'+esc(x.s)+'</span></div>'; }).join(''):'<div class="empty">아직 없어요</div>';
 }
-function setMode(m){ S.MODE=m; save(); renderLists(); renderCur(); }
-function pickGroup(id){ var g=findGroup(id); if(!g) return; S.ACTIVE[g.type]=id; S.MODE=g.type; save(); renderLists(); renderCur(); }
+function setMode(m){ U.MODE=m; saveU(); renderLists(); renderCur(); }
+function pickGroup(type,id){ U.ACTIVE[type]=id; U.MODE=type; saveU(); renderLists(); renderCur(); }
 window.setMode=setMode; window.pickGroup=pickGroup;
-/* 대기 목록 초기화 — 음성·직접 등록분은 목록에서 지움 / 창고 실제 입고대기는(시험 모드라 지우지 않고) 진행 수만 처음으로.
-   이미 시험으로 넣고 뺀 칸은 그대로 두고, 그 내역의 되돌리기 연결만 끊음 */
-function resetGroup(id){
-  var g=findGroup(id); if(!g) return;
-  var used=g.total-g.left;
-  var msg=g.src==='real'
-    ? '"'+g.product+' '+(g.exp?V.fmtExp(g.exp):'')+'" 창고 입고대기의 진행 수('+used+'팔 사용)를 처음으로 되돌릴까요?\n(시험 모드 — 창고의 실제 입고대기는 그대로)'
-    : '"'+g.product+' '+(g.exp?V.fmtExp(g.exp):'')+'" '+(g.type==='in'?'입고대기':'출고대기')+' 목록('+g.left+'/'+g.total+'팔 남음)을 지울까요?';
+
+/* 대기 목록 초기화 — 입고대기: 창고 입고대기에서 그 묶음(배치 안 된 것) 삭제 / 출고대기: 목록 삭제 */
+function resetGroup(type,id){
+  var g=findGroup(type,id); if(!g) return;
+  var msg=type==='in'
+    ? '입고대기 "'+g.product+' · '+(g.exp?V.fmtExp(g.exp):'')+' · '+g.qty+'개" '+g.left+'팔을 창고 입고대기에서 삭제할까요?\n(창고관리 화면의 입고대기에서도 사라집니다)'
+    : '출고대기 "'+g.product+(g.exp?' · '+V.fmtExp(g.exp):'')+'" ('+g.left+'/'+g.total+'팔 남음) 목록을 지울까요?';
   if(!confirm(msg)) return;
-  if(g.src==='real') delete S.REALUSED[g.key];
-  else S.GROUPS=S.GROUPS.filter(function(x){ return x.id!==id; });
-  S.UNDO.forEach(function(u){ if(u.gid===id) u.gid=null; });
-  if(S.ACTIVE[g.type]===id) S.ACTIVE[g.type]=null;
-  S.LOG.unshift({t:nowHM(), s:'🧹 초기화 · '+(g.type==='in'?'입고대기':'출고대기')+' '+groupLine(g)});
-  save(); renderAll(); renderSay('🧹 '+g.product+' '+(g.src==='real'?'진행 수를 처음으로 되돌렸어요':'목록을 지웠어요'),'done');
+  var p;
+  if(type==='in'){ var ids={}; g.items.forEach(function(it){ ids[it.id]=1; });
+    var nq=inQArr().filter(function(it){ return !ids[it.id]; });
+    p=db.ref(whPath()+'/inQ').set(nq.length?nq:null); if(WH) WH.inQ=nq; }
+  else { p=db.ref(whPath()+'/voiceOut/'+id).remove(); if(WH&&WH.voiceOut) delete WH.voiceOut[id]; }
+  p.then(function(){ addLog('🧹 초기화 · '+(type==='in'?'입고대기':'출고대기')+' '+groupLine(g)+' '+g.left+'팔'); }).catch(fail);
+  if(U.ACTIVE[type]===id) U.ACTIVE[type]=null;
+  saveU(); renderAll(); renderSay('🧹 '+g.product+' '+(type==='in'?'입고대기':'출고대기')+' 목록을 지웠어요','done');
 }
 window.resetGroup=resetGroup;
 function setMicUI(state){
@@ -302,25 +311,24 @@ function keepAwake(){ try{ if(navigator.wakeLock&&!wakeLock) navigator.wakeLock.
 /* ── 명령 처리 ── */
 function parseOpts(){ var cols=[]; for(var c=0;c<(WH&&WH.cols||0);c++) cols.push(V.colName(c)); return {products:PRODUCTS, cols:cols, draft:!!DRAFT}; }
 function handleCommand(alts){
+  if(!WH){ renderSay('창고 정보를 불러오는 중이에요. 잠시 후 다시 말씀해 주세요','bad'); return; }
   var R=V.parseBest(alts, parseOpts());
   showHeard(alts[R.altIndex||0], false);
   var regF=!!(R.product||R.exp||R.qty!=null||R.pallets!=null);
-  if(R.action==='inq'||R.action==='outq'){ if(DRAFT) fillDraft(R); else startDraft(R); return; }   /* 등록 중이면 이어 붙이기 */
+  if(R.action==='inq'||R.action==='outq'){ if(DRAFT) fillDraft(R); else startDraft(R); return; }
   if(R.action==='undo'){ if(DRAFT){ cancelDraft(); return; } doUndo(); return; }
   if(DRAFT&&!R.action&&(regF||R.leftovers.length)){ fillDraft(R); return; }
-  /* "서리태 십오"처럼 동작 없이 상품 정보만 (말이 끊긴 앞부분) → 등록 시작, 종류는 위 탭 기준 */
-  if(!DRAFT&&!R.action&&!R.loc&&regF){ startDraft(R, S.MODE); return; }
-  if(!R.action&&R.loc){ R.action=S.MODE; R.warn.push('"입고/출고" 없이 말해 위 탭('+(S.MODE==='in'?'입고':'출고')+')으로 처리했어요'); }
+  if(!DRAFT&&!R.action&&!R.loc&&regF){ startDraft(R, U.MODE); return; }
+  if(!R.action&&R.loc){ R.action=U.MODE; R.warn.push('"입고/출고" 없이 말해 위 탭('+(U.MODE==='in'?'입고':'출고')+')으로 처리했어요'); }
   if(R.action==='in') return doIn(R);
   if(R.action==='out') return doOut(R);
   if(R.action==='what') return doWhat(R);
   if(R.action==='move') return finish(R, {ok:false, lines:[{t:'이동은 이 화면에서 지원하지 않아요','k':'ng'}], say:'이동은 지원하지 않아요. 출고 후 입고로 해 주세요.'});
   finish(R, {ok:false, lines:[{t:'무엇을 할지 못 알아들었어요','k':'ng'}], say:'위치와 함께 입고, 출고, 뭐야 중 하나를 말씀해 주세요'});
 }
-/* 결과 표시 + 음성 안내 (+ 확인 질문이면 자동으로 네/아니오 듣기) */
 function finish(R, ev){
-  (R.warn||[]).forEach(function(w){ ev.lines.unshift({t:w,k:'wn'}); });
-  renderResult(R, ev);
+  (R&&R.warn||[]).forEach(function(w){ ev.lines.unshift({t:w,k:'wn'}); });
+  if(R) renderResult(R, ev);
   if(ev.ask){ pending=ev; renderSay(ev.ask,'ask'); setMicUI('ask'); speak(ev.ask,function(){ if(pending===ev) listen('confirm'); }); }
   else { pending=null; renderSay(ev.say, ev.ok?'done':'bad'); setMicUI(idleState()); speak(ev.say); }
   renderLists(); renderCur();
@@ -338,7 +346,6 @@ function fillDraft(R){
   if(R.exp) DRAFT.exp=R.exp;
   if(R.qty!=null) DRAFT.qty=R.qty;
   if(R.pallets!=null) DRAFT.pallets=R.pallets;
-  /* 숫자만 말한 경우 → 지금 묻고 있는 항목에 */
   if(R.leftovers.length===1&&/^\d+$/.test(R.leftovers[0])&&(DRAFT.awaiting==='qty'||DRAFT.awaiting==='pallets')&&DRAFT[DRAFT.awaiting]==null) DRAFT[DRAFT.awaiting]=parseInt(R.leftovers[0],10);
   continueDraft(R);
 }
@@ -366,29 +373,51 @@ function continueDraft(R){
 }
 function cancelDraft(){ DRAFT=null; pending=null; renderDraft(); renderSay('등록을 취소했어요','info'); setMicUI('idle'); speak('등록을 취소했어요'); }
 window.cancelDraft=cancelDraft;
-function addGroup(d){
-  var g={id:'v:'+uid(), src:'voice', type:d.type, product:d.product, exp:d.exp||'', qty:d.qty!=null?d.qty:0, total:d.pallets, left:d.pallets};
-  S.GROUPS.push(g); S.ACTIVE[d.type]=g.id; S.MODE=d.type;
-  S.LOG.unshift({t:nowHM(), s:'📝 '+(d.type==='in'?'입고대기':'출고대기')+' 등록 · '+groupLine(g)+' × '+g.total+'팔'});
-  save(); return g;
+function pickClr(name){ var pc=(WH&&WH.pColors)||{}; if(pc[name]) return pc[name]; var used={}; Object.keys(pc).forEach(function(k){ used[pc[k]]=1; }); return PAL.filter(function(c){return !used[c];})[0]||PAL[0]; }
+function safeKey(s){ return !/[.#$\/\[\]]/.test(s); }
+/* 등록 실행 — 입고대기: 창고 inQ 추가 + 일지 '입고' / 출고대기: voiceOut 추가 */
+function registerGroup(d){
+  if(d.type==='in'){
+    var items=[]; for(var i=0;i<d.pallets;i++) items.push({id:uid(), name:d.product, qty:+d.qty||1, exp:String(d.exp||'')});
+    var nq=inQArr().concat(items), upd={inQ:nq};
+    if(safeKey(d.product)&&!(WH.pColors&&WH.pColors[d.product])) upd['pColors/'+d.product]=pickClr(d.product);
+    var tx={id:uid(), type:'in', date:todayStr(), name:d.product, exp:String(d.exp||''), pallets:d.pallets, qty:(+d.qty||1)*d.pallets};
+    var txRef=db.ref('txLogs/'+WHID).push();
+    WH.inQ=nq;   /* 즉시 반영(연속 말하기 대비) — 서버 값이 곧 덮어씀 */
+    var gkey=d.product+'|'+String(d.exp||'')+'|'+(+d.qty||1);
+    U.ACTIVE.in=gkey; U.MODE='in';
+    U.UNDO.push({t:'reg', ids:items.map(function(x){return x.id;}), txKey:txRef.key, label:'입고대기 등록 · '+d.product+' '+d.pallets+'팔'});
+    Promise.all([db.ref(whPath()).update(upd), txRef.set(tx)]).catch(fail);
+    addLog('📝 입고대기 등록 · '+d.product+' · '+V.fmtExp(d.exp)+' · '+d.qty+'개 × '+d.pallets+'팔');
+  } else {
+    var vref=db.ref(whPath()+'/voiceOut').push();
+    var o={product:d.product, exp:String(d.exp||''), qty:d.qty!=null?+d.qty:0, total:d.pallets, left:d.pallets, createdAt:Date.now(), by:(USER&&USER.email)||''};
+    if(!WH.voiceOut) WH.voiceOut={}; WH.voiceOut[vref.key]=o;
+    U.ACTIVE.out=vref.key; U.MODE='out';
+    U.UNDO.push({t:'oreg', voId:vref.key, label:'출고대기 등록 · '+d.product+' '+d.pallets+'팔'});
+    vref.set(o).catch(fail);
+    addLog('📝 출고대기 등록 · '+d.product+(d.exp?' · '+V.fmtExp(d.exp):'')+' × '+d.pallets+'팔');
+  }
+  saveU();
 }
 function manualAdd(){
   var t=document.getElementById('fType').value, n=document.getElementById('fName').value.trim();
   var e=document.getElementById('fExp').value.replace(/\D/g,''), q=parseInt(document.getElementById('fQty').value,10), p=parseInt(document.getElementById('fPal').value,10);
   if(e.length===8) e=e.slice(2);
   if(!n){ alert('상품명을 입력하세요'); return; }
+  if(!safeKey(n)){ alert('상품명에 . # $ / [ ] 는 쓸 수 없어요'); return; }
   if(PRODUCTS.indexOf(n)<0&&!confirm('"'+n+'"은(는) 창고에 등록된 상품명이 아니에요. 그래도 추가할까요?')) return;
   if(t==='in'&&!V.validYMD(e)){ alert('유통기한을 YYMMDD 6자리로 입력하세요'); return; }
   if(e&&!V.validYMD(e)){ alert('유통기한이 올바르지 않아요'); return; }
   if(t==='in'&&!(q>0)){ alert('파렛트당 수량을 입력하세요'); return; }
-  if(!(p>0)){ alert('파렛트 수를 입력하세요'); return; }
-  addGroup({type:t, product:n, exp:e, qty:q>0?q:null, pallets:p});
+  if(!(p>0&&p<=500)){ alert('파렛트 수를 입력하세요'); return; }
+  registerGroup({type:t, product:n, exp:e, qty:q>0?q:null, pallets:p});
   ['fName','fExp','fQty','fPal'].forEach(function(id){ document.getElementById(id).value=''; });
-  renderAll();
+  renderAll(); renderSay('✓ '+(t==='in'?'입고대기':'출고대기')+'에 추가했어요 — '+n+' '+p+'팔','done');
 }
 window.manualAdd=manualAdd;
 
-/* ② 위치 → 칸 확인 */
+/* ② 위치 → 칸 */
 function cellAt(L){
   if(!L||L.row==null) return {err:'위치(알파벳 + 번호)를 알아듣지 못했어요'};
   var nm=L.col+'-'+L.row, sy=V.sayLoc({col:L.col,row:L.row}), c=V.colIndex(L.col), r=L.row-1;
@@ -397,12 +426,11 @@ function cellAt(L){
   if(!cell||(cell.type!=='rack'&&cell.type!=='shelf')) return {err:josa(nm,'은/는')+' 랙(보관) 칸이 아니에요', sayErr:josa(sy,'은/는')+' 랙 칸이 아니에요'};
   return {key:key, cell:cell, dR:cell.divR||1, dC:cell.divC||1, name:nm, sy:sy};
 }
-function simGet(key, sk, real){ var k=key+'|'+sk; return S.SIM.hasOwnProperty(k)?S.SIM[k]:real; }
 function levelOf(ci, lvl){
   if(lvl==null) return {err:'몇 층인지 알아듣지 못했어요'};
   if(lvl<1||lvl>ci.dR) return {err:josa(ci.name,'은/는')+' '+ci.dR+'층까지 있어요', sayErr:josa(ci.sy,'은/는')+' '+ci.dR+'층까지 있어요'};
   var sr=ci.dR-lvl, arr=[];   /* 1층 = 맨 아래 줄 */
-  for(var sc=0;sc<ci.dC;sc++){ var sk=sr+'-'+sc; arr.push({sk:sk, slot:simGet(ci.key, sk, (ci.cell.slots||{})[sk]||null)}); }
+  for(var sc=0;sc<ci.dC;sc++){ var sk=sr+'-'+sc; arr.push({sk:sk, slot:(ci.cell.slots||{})[sk]||null}); }
   return {slots:arr};
 }
 function locCheck(R){
@@ -410,21 +438,22 @@ function locCheck(R){
   var lv=levelOf(ci,R.loc.lvl); if(lv.err) return {err:lv.err, sayErr:lv.sayErr||lv.err};
   return {ci:ci, lv:lv, say:V.sayLoc(R.loc), label:ci.name+' '+R.loc.lvl+'층'};
 }
+function setSlotLocal(key, sk, val){ var c=WH.cells[key]; if(!c.slots) c.slots={}; if(val) c.slots[sk]=val; else delete c.slots[sk]; }
 function doIn(R){
   var lc=locCheck(R); if(lc.err) return finish(R,{ok:false,lines:[{t:lc.err,k:'ng'}],say:lc.sayErr});
   var g=activeGroup('in');
-  if(!g) return finish(R,{ok:false,lines:[{t:'입고대기 목록이 없어요 — 먼저 상품을 등록하세요','k':'ng'}],say:'입고대기 목록이 없어요. 먼저 상품, 유통기한, 수량, 파렛트 수를 말하고 입고대기라고 말씀해 주세요.'});
+  if(!g) return finish(R,{ok:false,lines:[{t:'입고대기가 없어요 — 먼저 상품을 등록하세요','k':'ng'}],say:'입고대기가 없어요. 먼저 상품, 유통기한, 수량, 파렛트 수를 말하고 입고대기라고 말씀해 주세요.'});
   var empty=lc.lv.slots.filter(function(x){return !x.slot;})[0];
   if(!empty){ var o=lc.lv.slots[0].slot; return finish(R,{ok:false,lines:[{t:lc.label+'에 이미 '+o.name+' ('+V.fmtExp(o.exp)+') 있음','k':'ng'}],say:lc.say+'에는 이미 '+josa(o.name,'이/가')+' 있어요'}); }
-  var k=lc.ci.key+'|'+empty.sk;
-  S.UNDO.push({t:'in', k:k, had:S.SIM.hasOwnProperty(k), prev:S.SIM[k], gid:g.id, label:lc.label+' 입고 · '+g.product});
-  S.SIM[k]={name:g.product, qty:g.qty, exp:g.exp};
-  useGroup(g, 1);
-  var g2=findGroup(g.id), left=g2?g2.left:0;
-  S.LOG.unshift({t:nowHM(), s:'✅ '+lc.label+' 입고 · '+groupLine(g)+' (남은 '+left+'팔)'});
-  var nx=left>0?null:activeGroup('in');
-  save();
-  finish(R,{ok:true,lines:[{t:lc.label+' 입고 · '+groupLine(g),'k':'ok'},{t:'남은 '+left+' / '+g.total+'팔'+(nx?' · 다음: '+nx.product:''),'k':'ok'}],
+  var item=g.items[0], key=lc.ci.key, sk=empty.sk;
+  var nq=inQArr().filter(function(x){ return x.id!==item.id; });
+  var upd={}; upd['cells/'+key+'/slots/'+sk]=item; upd.inQ=nq.length?nq:null;
+  setSlotLocal(key, sk, item); WH.inQ=nq;   /* 즉시 반영 */
+  U.UNDO.push({t:'in', key:key, sk:sk, item:item, label:lc.label+' 입고 · '+item.name});
+  db.ref(whPath()).update(upd).catch(fail);
+  var left=g.left-1, nx=left>0?null:activeGroup('in');
+  addLog('✅ '+lc.label+' 입고 · '+groupLine(g)+' (남은 '+left+'팔)');
+  finish(R,{ok:true,lines:[{t:lc.label+' 입고 · '+groupLine(g),'k':'ok'},{t:'입고대기 남은 '+left+'팔'+(nx?' · 다음: '+nx.product:''),'k':'ok'}],
     say:lc.say+' 입고. '+(left>0?left+'파렛트 남았어요':g.product+' 입고대기 끝났어요'+(nx?'. 다음은 '+nx.product+'예요':''))});
 }
 function doOut(R){
@@ -440,20 +469,32 @@ function doOut(R){
     return finish(R,{ok:false,lines:[{t:'다름: 실제는 '+s1.name+' · '+V.fmtExp(s1.exp)+' · '+(+s1.qty||0)+'개 / 출고할 것: '+want,'k':'ng'}],
       say:lc.say+'에는 '+josa(s1.name+', '+V.sayExp(s1.exp),'이/가')+' 있어요. 해당 제품이 아닙니다.'});
   }
-  if(!g){   /* 출고대기 목록 없이 출고 → 내용 읽고 확인 */
+  if(!g){
     return finish(R,{ok:true,lines:[{t:'출고대기 목록 없음 — 칸 내용 확인 후 출고','k':'wn'},{t:'기록: '+cand.slot.name+' · '+V.fmtExp(cand.slot.exp)+' · '+(+cand.slot.qty||0)+'개','k':'ok'}],
       ask:lc.say+'에 '+josa(cand.slot.name+', '+V.sayExp(cand.slot.exp),'이/가')+' 있어요. 출고할까요?', out1:{lc:lc, sk:cand.sk, slot:cand.slot, R:R}});
   }
   performOut(R, lc, cand.sk, cand.slot, g);
 }
 function performOut(R, lc, sk, slot, g){
-  var k=lc.ci.key+'|'+sk;
-  S.UNDO.push({t:'out', k:k, had:S.SIM.hasOwnProperty(k), prev:S.SIM[k], gid:g?g.id:null, label:lc.label+' 출고 · '+slot.name});
-  S.SIM[k]=null;
-  if(g) useGroup(g, 1);
-  var g2=g&&findGroup(g.id), left=g2?g2.left:null;
-  S.LOG.unshift({t:nowHM(), s:'📤 '+lc.label+' 출고 · '+slot.name+' '+V.fmtExp(slot.exp)+(left!=null?' (남은 '+left+'팔)':'')});
-  save();
+  var key=lc.ci.key;
+  /* 확인 질문 사이에 다른 사람이 바꿨는지 최신 값으로 다시 확인 */
+  var nowSlot=((WH.cells[key]||{}).slots||{})[sk];
+  if(!nowSlot||nowSlot.id!==slot.id) return finish(R,{ok:false,lines:[{t:'그 사이 칸 내용이 바뀌었어요','k':'ng'}],say:'그 사이 칸 내용이 바뀌었어요. 다시 확인해 주세요.'});
+  var tx={id:uid(), type:'out', date:todayStr(), name:slot.name, exp:String(slot.exp||''), pallets:1, qty:+slot.qty||0};
+  var txRef=db.ref('txLogs/'+WHID).push();
+  var upd={}; upd['cells/'+key+'/slots/'+sk]=null;
+  var po=WH.pendOut; var poArr=Array.isArray(po)?po:(po?Object.keys(po).map(function(k){return po[k];}):[]);
+  var poN=poArr.filter(function(x){ return x&&!(x.cKey===key&&x.sKey===sk); });
+  var poGone=poArr.filter(function(x){ return x&&x.cKey===key&&x.sKey===sk; });   /* 창고관리 출고대기에 걸려 있던 건 — 되돌리기 때 복원 */
+  if(poGone.length){ upd.pendOut=poN.length?poN:null; WH.pendOut=poN; }
+  setSlotLocal(key, sk, null);
+  if(g&&WH.voiceOut&&WH.voiceOut[g.id]) WH.voiceOut[g.id].left=Math.max(0,(+WH.voiceOut[g.id].left||0)-1);
+  U.UNDO.push({t:'out', key:key, sk:sk, item:slot, txKey:txRef.key, voId:g?g.id:null, po:poGone, label:lc.label+' 출고 · '+slot.name});
+  var ps=[db.ref(whPath()).update(upd), txRef.set(tx)];
+  if(g) ps.push(db.ref(whPath()+'/voiceOut/'+g.id+'/left').transaction(function(v){ return Math.max(0,(+v||0)-1); }));
+  Promise.all(ps).catch(fail);
+  var left=g?Math.max(0,g.left-1):null;
+  addLog('📤 '+lc.label+' 출고 · '+slot.name+' '+V.fmtExp(slot.exp)+(left!=null?' (남은 '+left+'팔)':''));
   finish(R,{ok:true,lines:[{t:lc.label+' 출고 · '+slot.name+' · '+V.fmtExp(slot.exp),'k':'ok'}].concat(left!=null?[{t:'출고대기 남은 '+left+' / '+g.total+'팔','k':'ok'}]:[]),
     say:lc.say+' 출고. '+(left!=null?(left>0?left+'파렛트 남았어요':g.product+' 출고대기 끝났어요'):'')});
 }
@@ -472,13 +513,39 @@ function doWhat(R){
   finish(R,{ok:true,lines:got.map(function(x){return {t:x.slot.name+' · '+V.fmtExp(x.slot.exp)+' · '+(+x.slot.qty||0)+'개',k:'ok'};}),
     say:say+', '+got.map(function(x){return x.slot.name+', '+V.sayExp(x.slot.exp);}).join(', ')+'입니다'});
 }
+/* 되돌리기 — 방금 이 폰에서 한 것을 정확히 반대로 (그 사이 다른 사람이 바꿨으면 막음) */
 function doUndo(){
-  var u=S.UNDO.pop();
+  var u=U.UNDO[U.UNDO.length-1];
   if(!u){ renderSay('되돌릴 내역이 없어요','info'); speak('되돌릴 내역이 없어요'); return; }
-  if(u.had) S.SIM[u.k]=u.prev; else delete S.SIM[u.k];
-  var g=u.gid&&findGroup(u.gid); if(g) useGroup(g,-1);
-  S.LOG.unshift({t:nowHM(), s:'↩ 되돌림 · '+u.label});
-  save(); renderAll(); renderSay('↩ 되돌렸어요: '+u.label,'done'); speak('되돌렸어요');
+  var ok=true, msg='';
+  if(u.t==='in'){
+    var cur=((WH.cells[u.key]||{}).slots||{})[u.sk];
+    if(!cur||cur.id!==u.item.id){ ok=false; msg='그 칸이 이미 바뀌어서 되돌릴 수 없어요'; }
+    else { var nq=inQArr().concat([u.item]); var upd={}; upd['cells/'+u.key+'/slots/'+u.sk]=null; upd.inQ=nq;
+      setSlotLocal(u.key,u.sk,null); WH.inQ=nq; db.ref(whPath()).update(upd).catch(fail); }
+  } else if(u.t==='out'){
+    var cur2=((WH.cells[u.key]||{}).slots||{})[u.sk];
+    if(cur2){ ok=false; msg='그 칸에 이미 다른 물건이 있어서 되돌릴 수 없어요'; }
+    else { var up2={}; up2['cells/'+u.key+'/slots/'+u.sk]=u.item; setSlotLocal(u.key,u.sk,u.item);
+      if(u.po&&u.po.length){ var pc=WH.pendOut, pa=(Array.isArray(pc)?pc:(pc?Object.keys(pc).map(function(k){return pc[k];}):[])).filter(Boolean).concat(u.po); up2.pendOut=pa; WH.pendOut=pa; }
+      var ps=[db.ref(whPath()).update(up2)]; if(u.txKey) ps.push(db.ref('txLogs/'+WHID+'/'+u.txKey).remove());
+      if(u.voId){ ps.push(db.ref(whPath()+'/voiceOut/'+u.voId).transaction(function(o){ if(!o) return o; o.left=Math.min(+o.total||0,(+o.left||0)+1); return o; }));
+        if(WH.voiceOut&&WH.voiceOut[u.voId]) WH.voiceOut[u.voId].left=Math.min(+WH.voiceOut[u.voId].total||0,(+WH.voiceOut[u.voId].left||0)+1); }
+      Promise.all(ps).catch(fail); }
+  } else if(u.t==='reg'){
+    var ids={}; u.ids.forEach(function(i){ ids[i]=1; });
+    var before=inQArr(), nq2=before.filter(function(x){ return !ids[x.id]; }), removed=before.length-nq2.length;
+    if(!removed){ ok=false; msg='이미 모두 배치돼서 등록을 되돌릴 수 없어요'; }
+    else { WH.inQ=nq2; var ps2=[db.ref(whPath()+'/inQ').set(nq2.length?nq2:null)];
+      if(removed===u.ids.length&&u.txKey) ps2.push(db.ref('txLogs/'+WHID+'/'+u.txKey).remove());
+      else msg='배치된 '+(u.ids.length-removed)+'팔은 그대로 두고 남은 '+removed+'팔만 지웠어요';
+      Promise.all(ps2).catch(fail); }
+  } else if(u.t==='oreg'){
+    db.ref(whPath()+'/voiceOut/'+u.voId).remove().catch(fail); if(WH.voiceOut) delete WH.voiceOut[u.voId];
+  }
+  if(!ok){ renderSay('↩ '+msg,'bad'); speak(msg); return; }
+  U.UNDO.pop(); addLog('↩ 되돌림 · '+u.label+(msg?' ('+msg+')':''));
+  saveU(); renderAll(); renderSay('↩ 되돌렸어요: '+u.label+(msg?' — '+msg:''),'done'); speak('되돌렸어요');
 }
 window.doUndo=doUndo;
 function handleConfirm(alts){
@@ -488,8 +555,8 @@ function handleConfirm(alts){
 }
 function confirmYes(){
   if(!pending) return; var ev=pending; pending=null;
-  if(ev.reg&&DRAFT){ var g=addGroup(DRAFT); DRAFT=null; renderAll();
-    renderSay('✓ 등록했어요 — '+groupLine(g)+' × '+g.total+'팔. 이제 위치만 말씀하세요 (예: 에이 원 3층 '+(g.type==='in'?'입고':'출고')+')','done'); setMicUI('idle');
+  if(ev.reg&&DRAFT){ var d=DRAFT; DRAFT=null; registerGroup(d); renderAll();
+    renderSay('✓ 등록했어요 — '+d.product+(d.exp?' · '+V.fmtExp(d.exp):'')+' × '+d.pallets+'팔. 이제 위치만 말씀하세요 (예: 에이 원 3층 '+(d.type==='in'?'입고':'출고')+')','done'); setMicUI('idle');
     speak('등록했어요. 이제 위치만 말씀하세요'); return; }
   if(ev.out1){ performOut(ev.out1.R, ev.out1.lc, ev.out1.sk, ev.out1.slot, null); return; }
   setMicUI(idleState());
@@ -517,9 +584,9 @@ function renderSay(text, kind){
   b.innerHTML='<div class="say'+(kind==='done'?' done':kind==='bad'?' bad':'')+'">🔊 '+esc(text)
     +(kind==='ask'?'<div class="yn"><button style="background:#059669;color:#fff" onclick="confirmYes()">네</button><button style="background:#334155;color:#E2E8F0" onclick="confirmNo()">아니오</button></div>':'')+'</div>';
 }
-function typedTest(){ var i=document.getElementById('typIn'); var t=(i&&i.value||'').trim(); if(!t) return; if(pending&&V.yesNo(t)){ handleConfirm([t]); return; } pending=null; handleCommand([t]); }
-function exTest(el){ var i=document.getElementById('typIn'); if(i) i.value=el.textContent; pending=null; handleCommand([el.textContent]); }
-window.typedTest=typedTest; window.exTest=exTest;
+function typedTest(){ var i=document.getElementById('typIn'); var t=(i&&i.value||'').trim(); if(!t) return; if(pending&&V.yesNo(t)){ handleConfirm([t]); i.value=''; return; } pending=null; handleCommand([t]); i.value=''; }
+function exFill(el){ var i=document.getElementById('typIn'); if(i){ i.value=el.textContent; i.focus(); } }
+window.typedTest=typedTest; window.exFill=exFill;
 
 /* ── 데이터 ── */
 function collectProducts(list){
@@ -527,17 +594,17 @@ function collectProducts(list){
   list.forEach(function(w){
     if(!w) return;
     Object.keys(w.pColors||{}).forEach(function(n){ s[n]=1; });
-    (w.inQ||[]).forEach(function(it){ if(it&&it.name) s[it.name]=1; });
+    var q=w.inQ; (Array.isArray(q)?q:(q?Object.keys(q).map(function(k){return q[k];}):[])).forEach(function(it){ if(it&&it.name) s[it.name]=1; });
     Object.keys(w.cells||{}).forEach(function(k){ var c=w.cells[k]; if(!c||!c.slots) return; Object.keys(c.slots).forEach(function(sk){ var x=c.slots[sk]; if(x&&x.name) s[x.name]=1; }); });
   });
   return Object.keys(s);
 }
 function selectWh(id){
   if(whRef) whRef.off();
-  WHID=id; lsSet('wms_voice_wh:'+GID, id); load(); DRAFT=null; pending=null;
+  WHID=id; lsSet('wms_voice_wh:'+GID, id); loadU(); DRAFT=null; pending=null;
   whRef=db.ref('warehouses/'+id);
   whRef.on('value',function(s){
-    WH=s.val(); if(WH){ WH.rows=+WH.rows||0; WH.cols=+WH.cols||0; if(!Array.isArray(WH.inQ)) WH.inQ=WH.inQ?Object.values(WH.inQ):[]; }
+    WH=s.val(); if(WH){ WH.rows=+WH.rows||0; WH.cols=+WH.cols||0; if(!WH.cells) WH.cells={}; }
     PRODUCTS=collectProducts(WHS.map(function(w){ return w.id===id?WH:w.raw; }));
     renderAll();
   });
@@ -551,7 +618,7 @@ function start(){
     .then(function(list){
       WHS=list.filter(function(x){return x&&x.raw;}).map(function(x){ return {id:x.id, name:x.raw.name||x.id, raw:x.raw}; });
       if(!WHS.length){ app.innerHTML='<div class="center">창고를 불러오지 못했어요.</div>'; return; }
-      var saved=lsGet('wms_voice_wh:'+GID); WHID=WHS.some(function(w){return w.id===saved;})?saved:WHS[0].id;
+      var saved=WANT_WID||lsGet('wms_voice_wh:'+GID); WHID=WHS.some(function(w){return w.id===saved;})?saved:WHS[0].id;
       PRODUCTS=collectProducts(WHS.map(function(w){return w.raw;}));
       renderShell(); selectWh(WHID);
     });
@@ -559,8 +626,9 @@ function start(){
 }
 auth.onAuthStateChanged(function(user){
   if(!user){ location.replace('/wms_login.html?return='+encodeURIComponent('/wms_voice.html'+location.search)); return; }
+  USER=user;
   db.ref('superadmins/'+user.uid).get().then(function(a){
-    if(a.exists()){ if(!GID){ app.innerHTML='<div class="center">그룹이 지정되지 않았어요. 창고관리 메뉴에서 들어와 주세요.</div>'; return; } start(); return; }
+    if(a.exists()){ if(!GID){ app.innerHTML='<div class="center">그룹이 지정되지 않았어요. 창고관리에서 들어와 주세요.</div>'; return; } start(); return; }
     db.ref('userGroup/'+user.uid).get().then(function(g){
       if(!g.exists()){ app.innerHTML='<div class="center">작업 그룹에 등록되어 있지 않아요.</div>'; return; }
       if(!GID) GID=g.val();
