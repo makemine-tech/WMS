@@ -364,7 +364,83 @@
     return null;
   }
 
+
+  /* ── 단답 전용 해석 ─────────────────────────────────────────
+     문답형에서는 "지금 무엇을 묻고 있는지" 를 알기 때문에
+     문장 전체를 해석할 필요 없이 그 한 가지만 뽑으면 된다.
+     오인식에도 훨씬 강하다 — 후보가 그 종류로 좁혀지기 때문. */
+
+  /* 한글을 자모로 풀고 헷갈리는 소리를 하나로 모은다.
+     "서리태"를 "설이대"로 받아적어도 자모 거리로는 가깝다. */
+  var CHO=['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+  var JUNG=['ㅏ','ㅐ','ㅑ','ㅒ','ㅓ','ㅔ','ㅕ','ㅖ','ㅗ','ㅘ','ㅙ','ㅚ','ㅛ','ㅜ','ㅝ','ㅞ','ㅟ','ㅠ','ㅡ','ㅢ','ㅣ'];
+  var JONG=['','ㄱ','ㄲ','ㄳ','ㄴ','ㄵ','ㄶ','ㄷ','ㄹ','ㄺ','ㄻ','ㄼ','ㄽ','ㄾ','ㄿ','ㅀ','ㅁ','ㅂ','ㅄ','ㅅ','ㅆ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+  /* 된소리·거센소리는 예사소리로, 비슷한 모음은 하나로 */
+  var SIM={'ㄲ':'ㄱ','ㅋ':'ㄱ','ㄸ':'ㄷ','ㅌ':'ㄷ','ㅃ':'ㅂ','ㅍ':'ㅂ','ㅆ':'ㅅ','ㅉ':'ㅈ','ㅊ':'ㅈ',
+           'ㅐ':'ㅔ','ㅒ':'ㅖ','ㅚ':'ㅔ','ㅙ':'ㅔ','ㅞ':'ㅔ','ㅟ':'ㅣ','ㅢ':'ㅣ'};
+  function jamo(s){
+    var out='';
+    for(var i=0;i<s.length;i++){
+      var c=s.charCodeAt(i);
+      if(c>=0xAC00&&c<=0xD7A3){ var n=c-0xAC00;
+        out+=CHO[Math.floor(n/588)]+JUNG[Math.floor((n%588)/28)]+JONG[n%28]; }
+      else out+=s[i];
+    }
+    return out;
+  }
+  function phon(s){ var j=jamo(compact(s)), o=''; for(var i=0;i<j.length;i++) o+=(SIM[j[i]]||j[i]); return o; }
+
+  /* 등록된 상품 중 발음이 가장 가까운 것.
+     rel = 자모 편집거리 / 상품명 길이 (0 이면 완전일치) */
+  function matchProduct(text, products){
+    var t=phon(text); if(!t||!products||!products.length) return null;
+    var best=null;
+    products.forEach(function(name){
+      variants(name).forEach(function(v){
+        var p=phon(v); if(!p) return;
+        var rel=lev(t,p)/Math.max(p.length,1);
+        if(!best||rel<best.rel) best={name:name, rel:rel};
+      });
+    });
+    return best?{name:best.name, rel:best.rel, exact:best.rel===0}:null;
+  }
+
+  /* 순우리말 숫자 — "열여덟"=18, "두"=2. 일반 문장 해석에는 쓰지 않고
+     단답(수량·파렛트수·층)에서 한자어 숫자가 안 잡혔을 때만 보조로 쓴다. */
+  var NAT_T={'아흔':90,'여든':80,'일흔':70,'예순':60,'쉰':50,'마흔':40,'서른':30,'스물':20,'스무':20,'열':10};
+  var NAT_U={'다섯':5,'여섯':6,'일곱':7,'여덟':8,'여덜':8,'아홉':9,'하나':1,'둘':2,'셋':3,'넷':4,'한':1,'두':2,'세':3,'네':4};
+  function nativeNum(text){
+    var c=compact(text);
+    var TK=Object.keys(NAT_T), UK=Object.keys(NAT_U);
+    for(var i=0;i<c.length;i++){
+      var v=0, j=i, hit=false, a, b;
+      for(a=0;a<TK.length;a++){ if(c.substr(j,TK[a].length)===TK[a]){ v=NAT_T[TK[a]]; j+=TK[a].length; hit=true; break; } }
+      for(b=0;b<UK.length;b++){ if(c.substr(j,UK[b].length)===UK[b]){ v+=NAT_U[UK[b]]; j+=UK[b].length; hit=true; break; } }
+      if(hit) return v;
+    }
+    return null;
+  }
+  /* 단답에서 첫 숫자 하나 ("삼층"→3, "백이십오개"→125, "18"→18) */
+  function firstNum(text){
+    var tk=tokenize(prenorm(String(text||'').toLowerCase()));
+    for(var i=0;i<tk.length;i++) if(tk[i].t==='num') return tk[i].v;
+    return nativeNum(text);
+  }
+  /* 단답에서 숫자만 이어붙이기 (유통기한 "이칠공칠공삼"→"270703") */
+  function digitsOf(text){
+    var tk=tokenize(prenorm(String(text||'').toLowerCase())), s='';
+    tk.forEach(function(x){ if(x.t==='num') s+=(x.dg?x.s:String(x.v)); });
+    return s;
+  }
+  /* 단답에서 유닛 하나 ("씨 이"→C2, "C2"→C2) — 층은 보지 않음 */
+  function matchUnit(text, cols){
+    var L=parse(text,{cols:cols}).loc;
+    if(L&&L.row!=null) return {col:L.col, row:L.row};
+    return null;
+  }
+
   var API={parse:parse, parseBest:parseBest, sayLoc:sayLoc, sayExp:sayExp, locLabel:locLabel, fmtExp:fmtExp, yesNo:yesNo,
-    colIndex:colIndex, colName:colName, validYMD:validYMD, variants:variants, _tokenize:tokenize};
+    colIndex:colIndex, colName:colName, validYMD:validYMD, variants:variants, _tokenize:tokenize,
+    matchProduct:matchProduct, firstNum:firstNum, digitsOf:digitsOf, matchUnit:matchUnit, phon:phon, nativeNum:nativeNum};
   if(typeof module!=='undefined'&&module.exports) module.exports=API; else root.WMSVoice=API;
 })(this);

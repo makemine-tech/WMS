@@ -34,15 +34,17 @@ function client() {
   return _client;
 }
 
-/* ─── 어휘 목록 만들기 ───
-   상품명은 강하게, 위치 알파벳·동작어는 중간 세기로 올린다.
-   boost 는 20 을 넘기면 오히려 없는 말을 만들어내므로 올리지 않는다. */
-const LETTER_SAY = ['에이','비','씨','디','이','에프','지','에이치','아이','제이','케이','엘','엠',
-  '엔','오','피','큐','알','에스','티','유','브이','더블유','엑스','와이','제트'];
-const COMMAND_WORDS = ['입고','출고','입고대기','출고대기','파렛트','유통기한','수량','층','개','씩',
-  '취소','되돌려','뭐야','뭐 있어','이동','등록'];
+/* ─── 질문별 어휘 만들기 ───
+   문답형에서는 지금 무엇을 묻는지 알기 때문에, 그 종류의 말만 올린다.
+   후보가 좁을수록 오인식이 준다. boost 는 20 을 넘기면 없는 말을 지어내므로 올리지 않는다. */
+const LETTER_SAY = {A:'에이',B:'비',C:'씨',D:'디',E:'이',F:'에프',G:'지',H:'에이치',I:'아이',J:'제이',
+  K:'케이',L:'엘',M:'엠',N:'엔',O:'오',P:'피',Q:'큐',R:'알',S:'에스',T:'티',U:'유',V:'브이',
+  W:'더블유',X:'엑스',Y:'와이',Z:'제트'};
+const SINO = ['영','공','일','이','삼','사','오','육','칠','팔','구','십','백'];
+const NATIVE = ['하나','둘','셋','넷','다섯','여섯','일곱','여덟','아홉','열','스물','서른','마흔','쉰'];
+const YESNO = ['네','예','맞아요','아니오','아니요','아뇨','취소'];
 
-function buildPhrases(rawProducts) {
+function buildPhrases(slot, products, cols) {
   const seen = new Set();
   const out = [];
   const add = (value, boost) => {
@@ -51,11 +53,42 @@ function buildPhrases(rawProducts) {
     seen.add(v);
     out.push({ value: v, boost });
   };
-  (Array.isArray(rawProducts) ? rawProducts : []).slice(0, MAX_PHRASES).forEach((p) => add(p, 20));
-  LETTER_SAY.forEach((l) => add(l, 12));
-  COMMAND_WORDS.forEach((w) => add(w, 12));
+  const prods = Array.isArray(products) ? products : [];
+  const colList = (Array.isArray(cols) && cols.length) ? cols : Object.keys(LETTER_SAY);
+
+  switch (slot) {
+    case 'product':
+      prods.slice(0, MAX_PHRASES).forEach((p) => add(p, 20));
+      break;
+    case 'unit':
+      /* 이 창고에 실제로 있는 열만 — 없는 열은 아예 후보에서 뺀다 */
+      colList.forEach((c) => {
+        const u = String(c).toUpperCase();
+        add(LETTER_SAY[u] || u, 18);
+        add(u, 18);
+      });
+      SINO.forEach((n) => add(n, 10));
+      break;
+    case 'lvl':
+    case 'num':
+      SINO.forEach((n) => add(n, 15));
+      NATIVE.forEach((n) => add(n, 15));
+      break;
+    case 'exp':
+      SINO.forEach((n) => add(n, 15));
+      ['년', '월', '일'].forEach((n) => add(n, 10));
+      break;
+    case 'yesno':
+      YESNO.forEach((n) => add(n, 18));
+      break;
+    default:
+      prods.slice(0, 300).forEach((p) => add(p, 20));
+      colList.forEach((c) => add(LETTER_SAY[String(c).toUpperCase()] || String(c), 12));
+      SINO.forEach((n) => add(n, 8));
+  }
   return out.slice(0, MAX_PHRASES);
 }
+
 
 function recognizeConfig(phrases) {
   const config = {
@@ -110,7 +143,7 @@ exports.sttVoice = onCall(
       throw new HttpsError('invalid-argument', '녹음이 너무 길어요 — 한 문장씩 말씀해 주세요');
     }
 
-    const phrases = buildPhrases(data.phrases);
+    const phrases = buildPhrases(data.slot, data.products, data.cols);
     const recognizer = `projects/${PROJECT_ID}/locations/${STT_LOCATION}/recognizers/_`;
 
     /* 1차: 어휘 부스트 켜고 시도.
@@ -145,7 +178,7 @@ exports.sttVoice = onCall(
 
     const alts = altsFrom(response);
     const ms = Date.now() - t0;
-    logger.info('STT 완료', { uid, adapted, phrases: phrases.length, bytes: audio.length, alts: alts.length, ms });
+    logger.info('STT 완료', { uid, slot: data.slot || '-', adapted, phrases: phrases.length, bytes: audio.length, alts: alts.length, ms });
     return { ok: true, alts, adapted, model: 'short', ms };
   }
 );
