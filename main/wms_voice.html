@@ -99,14 +99,19 @@ body{background:var(--bg);font-family:system-ui,-apple-system,'Segoe UI',sans-se
 .ubox{position:absolute;top:9px;right:9px;z-index:4;pointer-events:none;}
 .urig{background:rgba(0,0,0,.74);border:1px solid var(--bd);border-radius:7px;padding:6px;
   box-shadow:0 2px 12px rgba(0,0,0,.55);width:max-content;}
-.uhd{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:5px;}
-.ucode{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:13px;letter-spacing:.02em;}
+.uhd{display:flex;align-items:baseline;justify-content:flex-end;min-height:14px;margin-bottom:4px;}
 .uact{font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;white-space:nowrap;}
 .uact.in{color:#064E3B;background:var(--green);}
 .uact.out{color:#450A0A;background:var(--red);}
-.ubody{position:relative;display:flex;gap:4px;align-items:flex-end;}
-.ulane{width:52px;flex:none;align-self:stretch;border-bottom:1px solid rgba(255,255,255,.13);}
-.uunit{width:52px;flex:none;display:flex;flex-direction:column;gap:2px;}
+.ubody{position:relative;display:flex;gap:4px;align-items:flex-start;padding-bottom:20px;}
+/* 파렛트가 기다리는 바닥 — 1층보다 한 칸 아래라 어느 층이든 올라가는 것이 보인다 */
+.ufloor{position:absolute;left:0;right:0;bottom:1px;height:1px;background:rgba(255,255,255,.16);}
+/* 유닛 번호는 따로 적지 않고 배경 글씨로 */
+.uwm{position:absolute;left:0;right:0;top:0;bottom:20px;display:flex;align-items:center;
+  justify-content:center;font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:24px;
+  letter-spacing:-.02em;color:rgba(255,255,255,.13);white-space:nowrap;z-index:0;}
+.ulane{width:52px;flex:none;}
+.uunit{width:52px;flex:none;display:flex;flex-direction:column;gap:2px;position:relative;z-index:1;}
 .ulv{position:relative;height:16px;border:1px solid rgba(59,130,246,.42);border-radius:2px;}
 .urig.shelf .ulv{border-color:rgba(245,158,11,.42);}
 .ulv.tgt{border-color:var(--amber);}
@@ -446,9 +451,11 @@ function ubDraw(ci, L, kind, item, skipLvl){
   var rack=ci.cell.type!=='shelf';
   var levels=ubLevels(ci);
   var h='<div class="urig'+(rack?' rack':' shelf')+'">'
-    +'<div class="uhd"><span class="ucode">'+esc(ci.name)+'</span>'
+    +'<div class="uhd">'
       +(kind?'<span class="uact '+kind+'">'+(kind==='in'?'적치':'즉시출고')+'</span>':'')+'</div>'
     +'<div class="ubody">'
+      +'<div class="uwm">'+esc(ci.name)+'</div>'
+      +'<div class="ufloor"></div>'
       +'<div class="ulane" id="ulane"></div>'
       +'<div class="uunit">'
         +levels.map(function(x){
@@ -472,17 +479,23 @@ function ubDraw(ci, L, kind, item, skipLvl){
 function ubRest(rig){
   var m=rig.querySelector('#upalm'), one=rig.querySelector('[data-ulv="1"]');
   if(!m||!one) return null;
-  var rr=rig.getBoundingClientRect(), o=one.getBoundingClientRect();
+  /* top 은 위치 기준이 되는 .ubody 에서 재야 한다 (.urig 로 재면 머리줄만큼 어긋난다) */
+  var base=rig.querySelector('.ubody')||rig;
+  var rr=base.getBoundingClientRect(), o=one.getBoundingClientRect();
   m.style.transition='none';
-  m.style.top=(o.top-rr.top+1)+'px';
+  /* 1층 바로 아래 바닥에서 기다린다 — 1층에 넣을 때도 올라가는 것이 보인다 */
+  m.style.top=(o.bottom-rr.top+2)+'px';
   m.style.transform='translate(0,0)';
   m.style.opacity='0';
   void m.offsetWidth;
   return m;
 }
+/* 바닥에서 n층까지의 높이 — 1층도 한 칸은 올라간다 */
 function ubLift(rig,n){
   var a=rig.querySelector('[data-ulv="'+n+'"]'), b=rig.querySelector('[data-ulv="1"]');
-  return (a&&b)?(a.getBoundingClientRect().top-b.getBoundingClientRect().top):0;
+  if(!a||!b) return 0;
+  var ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+  return ar.top-(br.bottom+2);
 }
 function ubInset(rig,n){
   var t=rig.querySelector('[data-ulv="'+n+'"]'), m=rig.querySelector('#upalm');
