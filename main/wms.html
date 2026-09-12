@@ -705,6 +705,7 @@ function WHView(p){
 
   var v1=useState('ops'),tab=v1[0],setTab=v1[1];
   var v2=useState({s:1,x:0,y:0}),pz=v2[0],setPz=v2[1];
+  var vpSt=useState({w:0,h:0}),vp=vpSt[0],setVp=vpSt[1];   /* 배치도 보이는 영역 크기 — 미니맵용 */
   var v3=useState(new Set()),sel=v3[0],setSel=v3[1];
   var v4=useState('rack'),sType=v4[0],setSType=v4[1];
   var v5=useState({r:1,c:1}),sDiv=v5[0],setSDiv=v5[1];
@@ -789,6 +790,20 @@ function WHView(p){
     root.addEventListener('wheel',onWheel,{passive:false});root.addEventListener('mousedown',onMD);window.addEventListener('mousemove',onMM);window.addEventListener('mouseup',onMU);root.addEventListener('touchstart',onTS,{passive:false});root.addEventListener('touchmove',onTM,{passive:false});root.addEventListener('touchend',onTE,{passive:true});
     return function(){root.removeEventListener('wheel',onWheel);root.removeEventListener('mousedown',onMD);window.removeEventListener('mousemove',onMM);window.removeEventListener('mouseup',onMU);root.removeEventListener('touchstart',onTS);root.removeEventListener('touchmove',onTM);root.removeEventListener('touchend',onTE);};
   },[]);
+
+  /* 보이는 영역 크기를 재고, 창 크기가 바뀌면 다시 잰다 */
+  useEffect(function(){
+    var w=wrapRef.current; if(!w) return;
+    function measure(){
+      var r=w.getBoundingClientRect();
+      setVp(function(q){ return (Math.abs(q.w-r.width)<1&&Math.abs(q.h-r.height)<1)?q:{w:r.width,h:r.height}; });
+    }
+    measure();
+    var ro=null;
+    if(window.ResizeObserver){ ro=new ResizeObserver(measure); ro.observe(w); }
+    window.addEventListener('resize',measure);
+    return function(){ if(ro) ro.disconnect(); window.removeEventListener('resize',measure); };
+  },[tab]);
 
   function zBtn(f){var w=wrapRef.current;if(!w)return;var rc=w.getBoundingClientRect();var cx=rc.width/2,cy=rc.height/2;setPz(function(q){var ns=Math.min(Math.max(q.s*f,0.25),7);return{s:ns,x:cx-(cx-q.x)*(ns/q.s),y:cy-(cy-q.y)*(ns/q.s)};});}
   function resetPz(){setPz({s:1,x:0,y:0});}
@@ -1091,7 +1106,55 @@ function WHView(p){
       h('div',{style:{display:'flex',gap:GAP,alignItems:'flex-start'}},rowStrip('rl'),gridInner,rowStrip('rr')),
       h('div',{style:{display:'flex',gap:GAP}},corner('bl'),colStrip('cb'),corner('br')));
   }
-  function GW(ops){return h('div',{ref:wrapRef,onMouseMove:onTipMove,onMouseLeave:onTipLeave,onPointerDown:function(e){onTipDown(e,ops);},onContextMenu:function(e){onGridCtx(e,ops);},onClick:function(e){onGridClick(e,ops);},onPointerMove:onTipPointerMove,onPointerUp:onTipUp,onPointerCancel:onTipUp,style:{flex:1,overflow:'hidden',position:'relative',cursor:'grab',background:BG,touchAction:'none'}},h('div',{style:{position:'absolute',top:0,left:0,transform:'translate('+pz.x+'px,'+pz.y+'px) scale('+pz.s+')',transformOrigin:'0 0',willChange:pz.s>=1.5?'auto':'transform'}},renderGrid(ops)));}
+  /* ── 미니맵 ──────────────────────────────────────────────
+     확대해서 한 구역만 보고 있을 때, 전체 배치도 어디쯤인지 알려 준다.
+     (극장 좌석 예매의 전체 좌석도처럼)
+     보기 전용이라 pointerEvents 를 꺼서 확대·이동·선택에 끼어들지 않는다.
+     칸 크기·간격은 renderGrid 와 같은 값을 써야 네모가 실제 위치와 맞는다. */
+  function miniMap(){
+    if(!wh||!wh.cols||!wh.rows||!vp.w||!vp.h) return null;
+    var GAP=2, LW=Math.round(BASE*0.8), PAD=8;
+    var gw=wh.cols*BASE+(wh.cols-1)*GAP, gh=wh.rows*BASE+(wh.rows-1)*GAP;
+    var cw=PAD*2+LW*2+GAP*2+gw, ch=PAD*2+LW*2+GAP*2+gh;   /* 라벨 줄까지 포함한 전체 크기 */
+    /* 전체가 화면에 다 들어오면 알려 줄 것이 없다 */
+    if(cw*pz.s<=vp.w+8 && ch*pz.s<=vp.h+8) return null;
+
+    var MAX=104, k=Math.min(MAX/cw, MAX/ch);
+    var mw=Math.round(cw*k), mh=Math.round(ch*k), off=(PAD+LW+GAP)*k;
+
+    var cells=[];
+    for(var r=0;r<wh.rows;r++){
+      for(var c=0;c<wh.cols;c++){
+        var cell=(wh.cells||{})[r+'-'+c], bg='transparent';
+        if(cell&&(cell.type==='rack'||cell.type==='shelf')){
+          var sl=cell.slots||{}, got=null;
+          for(var sk in sl){ if(sl[sk]){ got=sl[sk]; break; } }
+          /* 물건이 있으면 그 상품색으로 — 큰 배치도와 같은 색이라 눈으로 잇기 쉽다 */
+          bg=got?((wh.pColors||{})[got.name]||'#94A3B8'):'rgba(255,255,255,.12)';
+        }
+        cells.push(h('div',{key:r+'-'+c,style:{background:bg}}));
+      }
+    }
+
+    /* 지금 보이는 범위를 배치도 좌표로 환산해 네모로 그린다 */
+    var x1=(-pz.x)/pz.s*k, y1=(-pz.y)/pz.s*k;
+    var x2=x1+vp.w/pz.s*k, y2=y1+vp.h/pz.s*k;
+    x1=Math.max(0,Math.min(mw,x1)); x2=Math.max(0,Math.min(mw,x2));
+    y1=Math.max(0,Math.min(mh,y1)); y2=Math.max(0,Math.min(mh,y2));
+
+    return h('div',{style:{position:'absolute',top:8,right:8,width:mw,height:mh,
+        background:'rgba(15,23,42,.82)',border:'1px solid '+BDR,borderRadius:5,
+        overflow:'hidden',pointerEvents:'none',zIndex:5,boxShadow:'0 2px 10px rgba(0,0,0,.5)'}},
+      h('div',{style:{position:'absolute',left:off,top:off,width:gw*k,height:gh*k,
+        display:'grid',gridTemplateColumns:'repeat('+wh.cols+',1fr)',
+        gridTemplateRows:'repeat('+wh.rows+',1fr)',gap:Math.max(0,GAP*k)}},cells),
+      h('div',{style:{position:'absolute',left:x1,top:y1,
+        width:Math.max(3,x2-x1),height:Math.max(3,y2-y1),
+        border:'1.5px solid #FBBF24',background:'rgba(251,191,36,.14)',
+        borderRadius:2,boxSizing:'border-box'}}));
+  }
+
+  function GW(ops){return h('div',{ref:wrapRef,onMouseMove:onTipMove,onMouseLeave:onTipLeave,onPointerDown:function(e){onTipDown(e,ops);},onContextMenu:function(e){onGridCtx(e,ops);},onClick:function(e){onGridClick(e,ops);},onPointerMove:onTipPointerMove,onPointerUp:onTipUp,onPointerCancel:onTipUp,style:{flex:1,overflow:'hidden',position:'relative',cursor:'grab',background:BG,touchAction:'none'}},h('div',{style:{position:'absolute',top:0,left:0,transform:'translate('+pz.x+'px,'+pz.y+'px) scale('+pz.s+')',transformOrigin:'0 0',willChange:pz.s>=1.5?'auto':'transform'}},renderGrid(ops)),miniMap());}
   function tS(active,accent){var ac=accent?'#FBBF24':'#60A5FA',bd=accent?'#F59E0B':'#3B82F6';return Object.assign({},S('transparent',active?ac:SUB),{borderRadius:0,padding:'7px 12px',fontSize:11,fontWeight:600,borderBottom:active?('2px solid '+bd):'2px solid transparent',flexShrink:0});}
 
   function renderPendPanel(){if(!outSelMode&&pendOut.length===0)return null;var groupMap={},groupOrder=[];pendOut.forEach(function(item){var gk=(item.date||'')+'||'+(item.loc||'');if(!groupMap[gk]){groupMap[gk]=[];groupOrder.push(gk);}groupMap[gk].push(item);});return h('div',{style:{background:'rgba(10,18,30,.98)',borderTop:'2px solid #F59E0B',padding:10}},h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},h('span',{style:{fontSize:11,fontWeight:700,color:'#FBBF24'}},'출고대기 '+pendOut.length+'건 / '+groupOrder.length+'묶음'),outSelMode&&h('span',{style:{fontSize:10,color:'#F59E0B',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.25)',borderRadius:5,padding:'2px 8px'}},outMeta?outMeta.date+'일 - '+outMeta.loc+' 선택중':'')),pendOut.length===0?h('div',{style:{fontSize:11,color:SUB,textAlign:'center',padding:'6px 0'}},'출고할 유닛을 탭하여 추가하세요'):h(Fragment,null,groupOrder.map(function(gk){return h(PendGroup,{key:gk,gk:gk,items:groupMap[gk],wh:wh,onConfirm:confirmPend,onConfirmAll:confirmPendAll,onWithdraw:withdrawPend,onWithdrawAll:withdrawPendAll});})));}
