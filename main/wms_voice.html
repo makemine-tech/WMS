@@ -57,11 +57,20 @@ body{background:var(--bg);font-family:system-ui,-apple-system,'Segoe UI',sans-se
 .pbtn.addout{color:#FCA5A5;background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);}
 .pbtn.del{color:#FCA5A5;border-color:rgba(248,113,113,.3);}
 .pbtn.big{flex:1;padding:11px 6px;font-size:13px;}
+.glist{margin:6px 0 2px;}
+.grow{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;border:1px solid var(--bd);background:rgba(255,255,255,.03);margin-bottom:5px;cursor:pointer;}
+.grow.on{border-color:#34D399;background:rgba(52,211,153,.12);}
+.gn{flex:none;width:19px;height:19px;border-radius:50%;background:rgba(255,255,255,.1);color:var(--sub);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;}
+.grow.on .gn{background:#34D399;color:#06281D;}
+.gv{flex:1;min-width:0;font-size:13.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.gl{flex:none;font-size:11.5px;font-weight:800;color:#6EE7B7;}
 .pleft{font-size:11px;font-weight:800;color:#6EE7B7;flex:none;padding:0 4px;}
 .pr.done{padding:2px 2px 4px;}
 .pdesc{flex:1;min-width:0;font-size:13.5px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pfoot{display:flex;gap:5px;margin-top:6px;}
-.preg{flex:1;margin-top:0;border:none;border-radius:8px;padding:10px;background:#2563EB;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;}
+.preg{flex:1;margin-top:0;border:none;border-radius:8px;padding:10px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;}
+.preg.in{background:#059669;}
+.preg.out{background:#DC2626;}
 .padd{display:flex;gap:6px;margin-top:10px;}
 
 /* 문답 카드 */
@@ -319,7 +328,13 @@ function sendAudio(blob, mt, slot, cb, my){
   fr.onload=function(){
     var b64=String(fr.result||'').split(',')[1]||'';
     if(!b64) return sttFallback('오디오가 비었어요', slot, cb, my);
-    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:PRODUCTS.slice(0,400), cols:colNames(), priority:planVocab()})
+    var cs=(W&&curSlot())||'';
+    var prods;
+    if(cs==='group'){
+      var gs=pendGroups();
+      prods=gs.map(function(g){ return g.product; }).concat(gs.map(function(_,i){ return (i+1)+'번'; }));
+    } else prods=PRODUCTS.slice(0,400);
+    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:prods, cols:colNames(), priority:planVocab()})
       .then(function(res){
         var d=(res&&res.data)||{}, alts=d.alts||[];
         sttFails=0; setMic('idle');
@@ -375,12 +390,13 @@ function keepAwake(){ try{ if(navigator.wakeLock&&!wakeLock) navigator.wakeLock.
 var MODES={
   plan:   {label:'예정작업', steps:[]},
   inq:    {label:'입고대기', steps:['product','exp','qty','pallets']},
-  place:  {label:'입고적치', steps:['unit','lvl']},
+  place:  {label:'입고적치', steps:['group','unit','lvl']},
   outnow: {label:'즉시출고', steps:['unit','lvl']},
   outq:   {label:'출고대기', steps:['product','pallets']},
   check:  {label:'유닛확인', steps:['unit','lvl']}
 };
 var SLOTS={
+  group:  {k:'상품',      q:'어느 상품인가요?',   stt:'product'},
   product:{k:'상품명',    q:'상품명?',           stt:'product'},
   exp:    {k:'유통기한',  q:'유통기한?',         stt:'exp'},
   qty:    {k:'파렛트당',  q:'파렛트당 수량은요?', stt:'num'},
@@ -397,6 +413,7 @@ function curSlot(){ return W.edit || (W.i<steps().length ? steps()[W.i] : null);
 function pickMode(m){
   stopListen(); try{ speechSynthesis.cancel(); }catch(e){}
   W={mode:m, val:{}, i:0, edit:null, tries:0, done:false};
+  prefillGroup(false);   /* 상품군이 하나뿐이면 바로 채운다 */
   render();
 }
 window.pickMode=pickMode;
@@ -406,12 +423,33 @@ function micPress(){
   keepAwake();
   if(listening){ stopListen(); return; }
   if(!W||W.mode==='plan') return;
-  if(W.done){ W={mode:W.mode, val:{}, i:0, edit:null, tries:0, done:false}; }
+  if(W.done){
+    W={mode:W.mode, val:{}, i:0, edit:null, tries:0, done:false};
+    prefillGroup(true);   /* 이어서 적치 — 하던 상품군이 남아 있으면 다시 묻지 않는다 */
+  }
   W.tries=0; askCur();
 }
 window.micPress=micPress;
 
 /* 고른 유닛이 몇 층까지인지 — 랙(파란)은 3~4층, 보관(노란)은 2층이라 칸마다 다르다 */
+/* 아직 적치할 것이 남은 상품군 — 이 중에서 고른다 */
+function pendGroups(){ return inGroups().filter(function(g){ return g.left>0; }); }
+/* 지금 물어볼 항목 번호를 다시 맞춘다 */
+function syncIdx(){
+  var nx=steps().filter(function(k){ return !W.val[k]; })[0];
+  W.i = nx?steps().indexOf(nx):steps().length;
+  return nx||null;
+}
+/* 상품군이 하나뿐이면 묻지 않고, 이어서 적치할 때는 하던 것을 그대로 쓴다 */
+function prefillGroup(keepActive){
+  if(!W||W.mode!=='place') return;
+  var gs=pendGroups(); if(!gs.length) return;
+  if(gs.length===1){ W.val.group={v:gs[0].id, fuzzy:false, heard:''}; syncIdx(); return; }
+  if(keepActive&&U.ACTIVE.in){
+    var g=findGroup('in', U.ACTIVE.in);
+    if(g&&g.left>0){ W.val.group={v:g.id, fuzzy:false, heard:''}; syncIdx(); }
+  }
+}
 function unitLevels(){
   if(!W||!W.val.unit) return 0;
   var ci=cellAt(W.val.unit.v);
@@ -435,6 +473,7 @@ function askCur(){
 function retryMsg(s){
   if(s==='lvl'){ var mx=unitLevels(); if(mx) return '이 유닛은 '+mx+'층까지 있어요. 몇 층인가요?'; }
   if(s==='unit') return '랙이나 보관 유닛으로 다시 말씀해 주세요';
+  if(s==='group') return '대기 목록의 상품명이나 번호로 말씀해 주세요';
   if(s==='product') return '등록된 상품명으로 다시 말씀해 주세요';
   return '다시 말씀해 주세요';
 }
@@ -462,13 +501,12 @@ function accept(s, v, fuzzy, heard){
   /* 아직 안 채운 첫 항목으로 — 고치기였다면 원래 자리로 돌아간다 */
   /* 유닛을 고쳤는데 이미 말한 층이 그 칸에 없으면(랙 3층 → 보관 2층) 층을 다시 묻는다 */
   if(s==='unit' && W.val.lvl){ var mx0=unitLevels(); if(mx0 && W.val.lvl.v>mx0) delete W.val.lvl; }
-  var nx=steps().filter(function(k){ return !W.val[k]; })[0];
+  var nx=syncIdx();
   /* 층이 하나뿐인 칸이면 물어볼 것이 없다 */
   if(nx==='lvl' && unitLevels()===1){
     W.val.lvl={v:1, fuzzy:false, heard:''};
-    nx=steps().filter(function(k){ return !W.val[k]; })[0];
+    nx=syncIdx();
   }
-  W.i = nx?steps().indexOf(nx):steps().length;
   render();
   var echo=slotSay(s, v);
   if(W.i>=steps().length){ speak(echo, function(){ finishWiz(); }); return; }
@@ -483,6 +521,20 @@ function parseAlts(s, alts){
 }
 function parseSlot(s, text){
   if(!text) return null;
+  if(s==='group'){
+    var gs=pendGroups(); if(!gs.length) return null;
+    if(/번/.test(text)){ var n0=V.firstNum(text); if(n0!=null&&n0>=1&&n0<=gs.length) return {v:gs[n0-1].id}; }
+    var names=[]; gs.forEach(function(g){ if(names.indexOf(g.product)<0) names.push(g.product); });
+    var gm=V.matchProduct(text, names);
+    if(gm&&gm.rel<=0.34){
+      var hit=gs.filter(function(g){ return g.product===gm.name; });
+      if(hit.length===1) return {v:hit[0].id, fuzzy:!gm.exact};
+      return null;   /* 같은 상품인데 유통기한·수량이 다른 것이 여럿 — 번호로 골라야 확실하다 */
+    }
+    var n1=V.firstNum(text);
+    if(n1!=null&&n1>=1&&n1<=gs.length) return {v:gs[n1-1].id};
+    return null;
+  }
   if(s==='product'){
     var m=V.matchProduct(text, PRODUCTS);
     if(m && m.rel<=0.34) return {v:m.name, fuzzy:!m.exact};
@@ -517,6 +569,7 @@ function parseSlot(s, text){
   return null;
 }
 function slotSay(s, v){
+  if(s==='group'){ var g=findGroup('in',v); return g?(g.product+(g.exp?', '+V.sayExp(g.exp):'')):''; }
   if(s==='product') return v;
   if(s==='exp') return v?V.sayExp(v):'유통기한 없음';
   if(s==='qty') return v+'개';
@@ -526,6 +579,7 @@ function slotSay(s, v){
   return String(v);
 }
 function slotText(s, v){
+  if(s==='group'){ var g=findGroup('in',v); return g?(g.product+(g.exp?' · '+V.fmtExp(g.exp):'')+' · 남은 '+g.left+'팔'):'(없어짐)'; }
   if(s==='exp') return v?V.fmtExp(v):'없음';
   if(s==='qty') return v+'개';
   if(s==='pallets') return v+'팔';
@@ -595,8 +649,10 @@ function actRegister(){
 function actPlace(){
   var L={col:W.val.unit.v.col, row:W.val.unit.v.row, lvl:W.val.lvl.v};
   var lc=locCheck(L); if(lc.err) return wizNg(lc.err, lc.sayErr);
-  var g=activeGroup('in');
-  if(!g) return wizNg('입고대기가 없어요 — 먼저 등록하세요','입고대기가 없어요. 먼저 입고대기를 등록해 주세요');
+  var g=W.val.group?findGroup('in', W.val.group.v):activeGroup('in');
+  if(g&&g.left<=0) g=null;
+  if(!g) return wizNg('고른 상품이 이미 다 나갔어요 — 목록에서 다시 고르세요','고른 상품이 이미 다 나갔어요. 목록에서 다시 골라 주세요');
+  U.ACTIVE.in=g.id;
   var empty=lc.lv.slots.filter(function(x){return !x.slot;})[0];
   if(!empty){ var o=lc.lv.slots[0].slot;
     return wizNg(lc.label+'에 이미 '+o.name+' ('+V.fmtExp(o.exp)+') 있음', lc.say+'에는 이미 '+josa(o.name,'이/가')+' 있어요'); }
@@ -943,7 +999,7 @@ function renderPlans(){
     /* ＋품목은 줄마다 두면 폰에서 입력칸이 좁아진다 — 블록 아래에 하나만 */
     if(!reg) h+='<div class="pfoot">'
       +'<button class="pbtn add" onclick="planRowAdd(\''+pid+'\')">＋ 품목</button>'
-      +'<button class="preg" onclick="planRegister(\''+pid+'\')">'+(p.type==='in'?'입고대기':'출고대기')+'에 등록</button>'
+      +'<button class="preg '+p.type+'" onclick="planRegister(\''+pid+'\')">'+(p.type==='in'?'입고대기':'출고대기')+'에 등록</button>'
       +'</div>';
     h+='</div>';
   });
@@ -1018,12 +1074,29 @@ function renderCard(){
   }
 }
 /* 적치·즉시출고에서 "지금 무엇이 대상인지" 한 줄 — 이건 꼭 필요한 정보 */
+/* 대기 목록 — 눌러서 고르거나, 상품명·번호로 말해서 고른다 */
+function groupListHTML(){
+  var gs=pendGroups();
+  if(!gs.length) return '<div class="sub">입고대기가 없어요 — 예정작업이나 입고대기에서 먼저 등록하세요</div>';
+  var cur=W.val.group&&W.val.group.v;
+  return '<div class="glist">'+gs.map(function(g,i){
+    return '<div class="grow'+(g.id===cur?' on':'')+'" onclick="chooseGroupIdx('+i+')">'
+      +'<span class="gn">'+(i+1)+'</span>'
+      +'<span class="gv">'+esc(g.product)+(g.exp?' · '+V.fmtExp(g.exp):'')+(g.qty?' · '+g.qty+'개':'')+'</span>'
+      +'<span class="gl">'+g.left+'팔</span></div>';
+  }).join('')+'</div>';
+}
+function chooseGroupIdx(i){
+  var gs=pendGroups(), g=gs[i]; if(!g||!W) return;
+  stopListen(); try{ speechSynthesis.cancel(); }catch(e){}
+  if(W.done) W={mode:W.mode, val:{}, i:0, edit:null, tries:0, done:false};
+  W.edit=null; W.tries=0;
+  accept('group', g.id, false, '');
+}
+window.chooseGroupIdx=chooseGroupIdx;
 function ctxLine(){
   if(!W) return '';
-  if(W.mode==='place'){
-    var g=activeGroup('in');
-    return '<div class="sub">'+(g?'다음 적치: '+esc(groupLine(g))+' · 남은 '+g.left+'팔':'입고대기 없음')+'</div>';
-  }
+  if(W.mode==='place') return groupListHTML();
   if(W.mode==='outnow'){
     var o=activeGroup('out');
     return '<div class="sub">'+(o?'출고대기: '+esc(groupLine(o))+' · 남은 '+o.left+'팔':'출고대기 없음 — 칸에 있는 것을 그대로 출고합니다')+'</div>';
