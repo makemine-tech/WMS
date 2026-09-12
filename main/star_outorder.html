@@ -298,6 +298,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .bl-g.has{border-color:rgba(95,211,141,.55);color:#7ee0a6}
 .bl-g.has.on{background:rgba(95,211,141,.18);border-color:#5fd38d;color:#8fe8b3}
 .bl-g.nil{opacity:.5}
+/* 정렬 기준 — 박스번호순 / 출고센터별 */
+.bl-sort{display:flex;align-items:center;gap:.3rem;margin-bottom:.5rem;font-size:.72rem;color:var(--mu);font-weight:800;flex-wrap:wrap}
+.bl-sort .bl-sb{padding:.3rem .62rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:6px;font-size:.76rem;font-weight:800;cursor:pointer}
+.bl-sort .bl-sb:hover{color:var(--tx);border-color:var(--mu)}
+.bl-sort .bl-sb.on{border-color:var(--o);background:rgba(255,140,90,.18);color:var(--o)}
+.bl-sect.c-no .bl-sh{color:#ffb794}
 /* 센터별 묶음 */
 .bl-legend{display:flex;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 .1rem;font-size:.72rem;color:var(--mu);align-items:center}
 .bl-legend .lg{display:flex;align-items:center;gap:.25rem;font-weight:700}
@@ -3355,6 +3361,16 @@ function cpPalletShort(eta, center){
 var cpBoxListOn = false;
 var cpBoxListGroup = null;   /* 펼쳐 놓은 규칙 키 */
 var cpBoxSeenTs = {};        /* 박스ID → 마지막 입고 시각 (최근 입고가 위로) */
+/* 정렬 기준 — 'no' 박스번호 순차 / 'center' 출고센터별 묶음 */
+var cpBoxSort = 'center';
+try { var _bs = localStorage.getItem('cpBoxSort'); if (_bs === 'no' || _bs === 'center') cpBoxSort = _bs; } catch (e) {}
+function cpSetBoxSort(mode){
+  cpBoxSort = (mode === 'no') ? 'no' : 'center';
+  try { localStorage.setItem('cpBoxSort', cpBoxSort); } catch (e) {}
+  cpBoxListRender();
+}
+function cpSortByBoxNo(){ cpSetBoxSort('no'); }
+function cpSortByCenter(){ cpSetBoxSort('center'); }
 
 function cpSetBoxList(on){
   cpBoxListOn = !!on;
@@ -3396,6 +3412,10 @@ function cpBoxGroups(){
     multi.push(etc);
   }
   return multi;
+}
+/* 박스번호 오름차순 (번호가 같거나 없으면 ID 사전순) */
+function cpBoxNoCmp(a, b){
+  return (a.no || 0) - (b.no || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 function cpBoxGroupLabel(g){
   if (g.plain) return escH(g.pre);
@@ -3453,6 +3473,14 @@ function cpBoxListRender(){
   if (cpBoxListGroup != null && !groups[cpBoxListGroup]) cpBoxListGroup = null;
   var plan = cpBoxPlan();
 
+  /* ⓪ 정렬 기준 — 박스번호순 / 출고센터별 */
+  var sortBar = '<div class="bl-sort">정렬 기준'
+    + '<button type="button" class="bl-sb' + (cpBoxSort === 'no' ? ' on' : '') + '"'
+    + ' onclick="cpSortByBoxNo()" title="센터 구분 없이 박스번호 오름차순으로 죽 늘어놓습니다">🔢 박스번호별</button>'
+    + '<button type="button" class="bl-sb' + (cpBoxSort === 'center' ? ' on' : '') + '"'
+    + ' onclick="cpSortByCenter()" title="나갈 센터별로 묶고, 센터 교차·잔류는 따로 내립니다">🏢 출고센터별</button>'
+    + '</div>';
+
   /* ① 규칙 — 이번 발주로 나갈 박스가 있으면 초록, 없으면 회색 */
   var head = '<div class="bl-groups">' + groups.map(function(g, gi){
     var ship = 0, left = 0;
@@ -3469,10 +3497,12 @@ function cpBoxListRender(){
   var body = '';
   var cur = (cpBoxListGroup == null) ? null : groups[cpBoxListGroup];
   if (!cur) {
-    body = '<div class="bl-none">위에서 규칙을 누르면 그 박스들이 센터별로 펼쳐집니다</div>';
+    body = '<div class="bl-none">위에서 규칙을 누르면 그 박스들이 ' + (cpBoxSort === 'no' ? '박스번호순으로' : '센터별로') + ' 펼쳐집니다</div>';
   } else if (!plan) {
+    var flat = cur.ids.map(function(x, xi){ return [x, xi]; });
+    if (cpBoxSort === 'no') flat.sort(function(a, b){ return cpBoxNoCmp(a[0], b[0]); });
     body = '<div class="bl-legend">발주(PO)를 올리면 센터별로 묶고 색으로 구분합니다</div>'
-         + '<div class="bl-chips">' + cur.ids.map(function(x, xi){ return cpBoxChip(x, xi, null); }).join('') + '</div>';
+         + '<div class="bl-chips">' + flat.map(function(t){ return cpBoxChip(t[0], t[1], null); }).join('') + '</div>';
   } else {
     /* ② 센터별로 묶고, 교차·잔류는 따로 내린다 */
     var byCtr = {}, cross = [], none = [];
@@ -3496,14 +3526,23 @@ function cpBoxListRender(){
          + '<span class="lg whole">완박스</span><span class="lg part">일부출고</span>'
          + '<span class="lg cross">센터분리</span><span class="lg none">잔류</span>'
          + '</div>';
-    Object.keys(byCtr).sort().forEach(function(ctr){
-      body += sect('🏢 ' + ctr, 'c-ctr', byCtr[ctr], ctr + ' 로만 나가는 박스');
-    });
-    body += sect('⚯ 센터 교차', 'c-cross', cross, '두 센터 이상으로 나뉘는 박스 — 뜯어서 나눠 담아야 합니다');
-    body += sect('▫ 잔류 · 이번 발주 해당없음', 'c-none', none, '이번 발주로 나갈 것이 없는 박스');
+    if (cpBoxSort === 'no') {
+      /* 박스번호순 — 센터로 묶지 않고 번호 오름차순 한 줄로 */
+      var all = [];
+      Object.keys(byCtr).forEach(function(ctr){ all = all.concat(byCtr[ctr]); });
+      all = all.concat(cross, none);
+      all.sort(function(a, b){ return cpBoxNoCmp(a[0], b[0]); });
+      body += sect('🔢 박스번호순', 'c-no', all, '센터 구분 없이 박스번호 오름차순 — 색은 그대로 발주 기준입니다');
+    } else {
+      Object.keys(byCtr).sort().forEach(function(ctr){
+        body += sect('🏢 ' + ctr, 'c-ctr', byCtr[ctr], ctr + ' 로만 나가는 박스');
+      });
+      body += sect('⚯ 센터 교차', 'c-cross', cross, '두 센터 이상으로 나뉘는 박스 — 뜯어서 나눠 담아야 합니다');
+      body += sect('▫ 잔류 · 이번 발주 해당없음', 'c-none', none, '이번 발주로 나갈 것이 없는 박스');
+    }
     if (!Object.keys(byCtr).length && !cross.length) body += '<div class="bl-none">이 규칙에는 이번 발주로 나갈 박스가 없습니다</div>';
   }
-  host.innerHTML = head + body;
+  host.innerHTML = sortBar + head + body;
 }
 
 function cpBoxChip(x, xi, c){
