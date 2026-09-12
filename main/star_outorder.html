@@ -286,6 +286,22 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-scan-input-wrap.relabel{border-color:var(--o)!important;box-shadow:0 0 0 4px rgba(255,140,90,.16)!important;background:linear-gradient(135deg,#2a2017,#1d1812)}
 .cp-mode-toggle{display:flex;gap:.4rem;margin-bottom:.65rem;flex-wrap:wrap;align-items:stretch}
 /* 바코드 덧방 토글 (체크박스형 버튼) */
+/* 번호만 입력 — 박스ID 앞/뒤 고정 */
+.cp-num-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.5rem 0 .1rem;padding:.55rem .7rem;background:rgba(255,140,90,.06);border:1.5px solid rgba(255,140,90,.28);border-radius:8px}
+.cp-num-row .nl{font-size:.78rem;font-weight:800;color:var(--mu);flex:0 0 auto}
+.cp-num-row input.na{width:6.2rem;padding:.4rem .5rem;background:#0f1117;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;font-size:.88rem;font-weight:800;font-family:var(--mo);text-align:center}
+.cp-num-row input.na:focus{outline:none;border-color:var(--o)}
+.cp-num-row .nbox{font-size:.9rem;font-weight:900;color:var(--o);font-family:var(--mo)}
+.np-presets{display:flex;gap:.35rem;flex-wrap:wrap;flex:1 1 100%}
+.np-btn{padding:.35rem .6rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:6px;font-size:.8rem;font-weight:800;font-family:var(--mo);cursor:pointer;display:flex;align-items:center;gap:.35rem}
+.np-btn i{font-style:normal;color:var(--o);opacity:.75}
+.np-btn em{font-style:normal;font-size:.7rem;font-weight:700;color:var(--mu);opacity:.7;font-family:inherit}
+.np-btn:hover{color:var(--tx);border-color:var(--mu)}
+.np-btn.on{border-color:var(--o);background:rgba(255,140,90,.18);color:var(--o)}
+.np-none{font-size:.78rem;color:var(--mu)}
+.np-preview{margin-top:.35rem;font-size:.9rem;font-weight:800;font-family:var(--mo)}
+.np-preview.ok{color:#5fd38d}  .np-preview.no{color:#ff7b7b}
+.np-preview span{font-size:.74rem;font-weight:700;opacity:.8;font-family:inherit}
 .cp-relabel-toggle{flex:0 0 auto;display:flex;align-items:center;gap:.4rem;padding:.55rem .8rem;background:#0f1117;color:var(--mu);border:1.5px solid var(--br);border-radius:7px;font-size:.84rem;font-weight:800;cursor:pointer;transition:all .15s;user-select:none}
 .cp-relabel-toggle:hover{color:var(--tx);border-color:var(--mu)}
 .cp-relabel-toggle input{width:16px;height:16px;accent-color:var(--o);cursor:pointer;margin:0}
@@ -1318,6 +1334,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <input type="checkbox" id="cpRelabelChk" onchange="cpSetRelabelMode(this.checked)">
             <span>🏷️ 바코드 덧방</span>
           </label>
+          <label class="cp-relabel-toggle" id="cpNumToggle" title="번호만 입력 — 박스ID 의 공통 부분(앞/뒤)을 고정해 두고 번호만 칩니다. 박스바코드가 실제 바코드가 아니어서 손으로 쳐야 할 때 씁니다.">
+            <input type="checkbox" id="cpNumChk" onchange="cpSetNumMode(this.checked)">
+            <span>🔢 번호만 입력</span>
+          </label>
           <label class="cp-collect-toggle" id="cpCollectToggle" title="모아뽑기 — 덧방 상품모드에서 스캔할 때 바로 인쇄하지 않고 누적했다가, [모아 인쇄]를 누르면 스캔한 순서대로 일괄 인쇄합니다. (박스 일괄인쇄처럼)" style="display:none">
             <input type="checkbox" id="cpCollectChk" onchange="cpSetCollectMode(this.checked)">
             <span>📚 모아뽑기</span>
@@ -1341,7 +1361,15 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <div class="cc-empty">상품바코드를 스캔하면 여기에 쌓입니다 · 같은 상품은 수량이 올라갑니다</div>
           </div>
         </div>
-        <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)">
+        <div class="cp-num-row" id="cpNumRow" style="display:none">
+          <span class="nl">박스ID 규칙</span>
+          <input class="na" id="cpNumPre" placeholder="앞" oninput="cpNumOnAffixInput()" autocomplete="off">
+          <span class="nbox">＋ 번호 ＋</span>
+          <input class="na" id="cpNumSuf" placeholder="뒤" oninput="cpNumOnAffixInput()" autocomplete="off">
+          <div class="np-presets" id="cpNumPresets"></div>
+        </div>
+        <input type="text" id="cpScanInp" class="cp-scan-inp" placeholder="📦 박스바코드 스캔/입력" autocomplete="off" autofocus onkeydown="cpOnScanKey(event)" oninput="cpNumSyncInput()">
+        <div class="np-preview" id="cpNumPreview" style="display:none"></div>
         <div class="cp-scan-hint" id="cpScanHintText">박스 모드: 박스바코드 스캔 → 그 박스 안 모든 SKU 일괄 출고</div>
         <div id="cpScanFlash" style="display:none"></div>
         <div class="cp-center-summary-row" id="cpCenterSummaryRow" style="display:none">
@@ -1735,6 +1763,7 @@ function attachRefs(){
     stockQty = qty;
     stockBoxes = boxList;
     boxIndex = bIdx;
+    try { cpNumRenderPresets(); cpNumSyncInput(); } catch(e){}   /* 번호만 입력 — 박스ID 규칙 버튼 갱신 */
     stockByAlt = mergeAltIndex(byAlt, altMap);
     /* 숫자코어 인덱스 — 재고 보유 바코드 기준, 코어당 재고 많은 것 우선 */
     var byCore = {};
@@ -3220,6 +3249,7 @@ function cpSetScanMode(m){
   var item = document.getElementById('cpModeItem');
   if (box && item) { box.classList.toggle('on', cpScanMode==='box'); item.classList.toggle('on', cpScanMode==='item'); }
   cpApplyScanModeUI();
+  cpNumSyncInput();   /* 번호만 입력 — 상품 모드로 가면 안내를 끈다 */
 }
 
 /* 박스/상품 + 덧방 상태를 종합해 입력칸 색·placeholder·힌트를 갱신 */
@@ -3297,14 +3327,136 @@ function cpPalletShort(eta, center){
   return (e ? e + ' ' : '') + (center||'?');
 }
 
+
+/* ═══════════ 번호만 입력 (박스ID 앞/뒤 고정) ═══════════
+ * 박스ID 가 실제 바코드가 아니라 손으로 쳐야 할 때, 공통 부분을 고정해 두고
+ * 번호만 치게 한다.  예) 앞 "STA-" 를 고정 → "77" 만 치면 STA-77
+ *                      뒤 "SI"  를 고정 → "68" 만 치면 68SI
+ * 안전장치: 박스 모드에서, 4자리 이하 순수 숫자일 때만 펼친다.
+ *           상품바코드(11~14자리)나 상품 모드는 절대 건드리지 않는다. */
+var cpNumMode = false;
+var cpNumAffix = { pre:'', suf:'' };
+try {
+  var _na = JSON.parse(localStorage.getItem('cpNumAffix') || 'null');
+  if (_na && typeof _na === 'object') cpNumAffix = { pre: _na.pre || '', suf: _na.suf || '' };
+} catch(e){}
+
+function cpNumSave(){
+  try { localStorage.setItem('cpNumAffix', JSON.stringify(cpNumAffix)); } catch(e){}
+}
+function cpSetNumMode(on){
+  cpNumMode = !!on;
+  var chk = document.getElementById('cpNumChk');
+  if (chk) chk.checked = cpNumMode;
+  var lab = document.getElementById('cpNumToggle');
+  if (lab) lab.className = 'cp-relabel-toggle' + (cpNumMode ? ' on' : '');
+  var row = document.getElementById('cpNumRow');
+  if (row) row.style.display = cpNumMode ? '' : 'none';
+  if (cpNumMode) cpNumRenderPresets();
+  cpNumSyncInput();
+  var inp = document.getElementById('cpScanInp');
+  if (inp) inp.focus();
+}
+function cpNumSetAffix(pre, suf){
+  cpNumAffix.pre = normBoxId(pre || '');
+  cpNumAffix.suf = normBoxId(suf || '');
+  cpNumSave();
+  var p = document.getElementById('cpNumPre'), s = document.getElementById('cpNumSuf');
+  if (p) p.value = cpNumAffix.pre;
+  if (s) s.value = cpNumAffix.suf;
+  cpNumRenderPresets();
+  cpNumSyncInput();
+  var inp = document.getElementById('cpScanInp');
+  if (inp) inp.focus();
+}
+function cpNumOnAffixInput(){
+  var p = document.getElementById('cpNumPre'), s = document.getElementById('cpNumSuf');
+  cpNumAffix.pre = normBoxId(p ? p.value : '');
+  cpNumAffix.suf = normBoxId(s ? s.value : '');
+  cpNumSave();
+  cpNumRenderPresets();
+  cpNumSyncInput();
+}
+
+/* 입고된 박스ID 에서 "앞 + 번호 + 뒤" 규칙을 찾아 버튼으로 보여 준다 */
+function cpNumPresets(){
+  var ids = Object.keys(boxIndex || {});
+  var m = {};
+  ids.forEach(function(id){
+    var a = normBoxId(id).match(/^(\D*)(\d+)(\D*)$/);
+    if (!a) return;
+    var key = a[1] + '§' + a[3];
+    if (!m[key]) m[key] = { pre:a[1], suf:a[3], n:0, min:Infinity, max:-Infinity };
+    var g = m[key], v = +a[2];
+    g.n++; if (v < g.min) g.min = v; if (v > g.max) g.max = v;
+  });
+  return Object.keys(m).map(function(k){ return m[k]; })
+    .filter(function(g){ return g.n >= 2 && (g.pre || g.suf); })
+    .sort(function(a,b){ return b.n - a.n; })
+    .slice(0, 8);
+}
+function cpNumRenderPresets(){
+  var box = document.getElementById('cpNumPresets');
+  if (!box) return;
+  var list = cpNumPresets();
+  if (!list.length) { box.innerHTML = '<span class="np-none">입고 등록된 박스가 없어 규칙을 찾지 못했습니다</span>'; return; }
+  box.innerHTML = list.map(function(g){
+    var on = (g.pre === cpNumAffix.pre && g.suf === cpNumAffix.suf);
+    var shown = escH(g.pre) + '<i>번호</i>' + escH(g.suf);
+    return '<button class="np-btn' + (on ? ' on' : '') + '"'
+      + ' onclick="cpNumSetAffix(' + JSON.stringify(g.pre) + ',' + JSON.stringify(g.suf) + ')"'
+      + ' title="' + escAttrLocal(g.pre + '1' + g.suf + ' ~ ' + g.pre + g.max + g.suf) + '">'
+      + shown + '<em>' + g.min + '~' + g.max + ' · ' + g.n + '개</em></button>';
+  }).join('');
+}
+/* 지금 치면 무엇이 되는지 입력칸 옆에 그대로 보여 준다 */
+function cpNumSyncInput(){
+  var inp = document.getElementById('cpScanInp');
+  var pv  = document.getElementById('cpNumPreview');
+  if (inp) {
+    inp.placeholder = (cpNumMode && cpScanMode === 'box')
+      ? '🔢 번호만 입력 — ' + (cpNumAffix.pre || '') + '□' + (cpNumAffix.suf || '')
+      : (cpScanMode === 'box' ? '📦 박스바코드 스캔/입력' : '🏷️ 상품바코드 스캔/입력');
+  }
+  if (!pv) return;
+  if (!cpNumMode || cpScanMode !== 'box') { pv.style.display = 'none'; return; }
+  var raw = (inp && inp.value || '').trim();
+  if (!/^\d{1,4}$/.test(raw)) { pv.style.display = 'none'; return; }
+  var made = cpExpandBoxNo(raw);
+  var known = !!(boxIndex && boxIndex[made]);
+  pv.style.display = '';
+  pv.className = 'np-preview' + (known ? ' ok' : ' no');
+  pv.innerHTML = '→ <b>' + escH(made) + '</b>' + (known ? ' <span>등록됨</span>' : ' <span>입고에 없는 박스</span>');
+}
+
+/* 번호 → 박스ID. 펼칠 조건이 아니면 원문 그대로 돌려준다 */
+function cpExpandBoxNo(raw){
+  var s = String(raw == null ? '' : raw).trim();
+  if (!cpNumMode) return raw;
+  if (cpScanMode !== 'box') return raw;            /* 상품 모드는 손대지 않는다 */
+  if (!/^\d{1,4}$/.test(s)) return raw;            /* 상품바코드(11~14자리)는 건드리지 않는다 */
+  var pre = cpNumAffix.pre || '', suf = cpNumAffix.suf || '';
+  if (!pre && !suf) return raw;
+  var made = normBoxId(pre + s + suf);
+  if (boxIndex && boxIndex[made]) return made;
+  /* 자리수를 0 으로 채운 표기(STA-007)도 받아 준다 */
+  for (var w = s.length + 1; w <= 4; w++) {
+    var alt = normBoxId(pre + ('0000' + s).slice(-w) + suf);
+    if (boxIndex && boxIndex[alt]) return alt;
+  }
+  return made;   /* 못 찾아도 만든 값을 넘겨 "이 박스ID 없음" 안내가 뜨게 한다 */
+}
+
 function cpOnScanKey(ev){
   if (ev.key !== 'Enter') return;
   ev.preventDefault();
   var inp = document.getElementById('cpScanInp');
   var raw = (inp.value||'').trim();
   if (!raw) return;
+  raw = cpExpandBoxNo(raw);   /* 번호만 입력 모드 — 박스 모드의 짧은 숫자만 박스ID 로 펼친다 */
   cpHandleScan(raw);
   inp.value = '';
+  cpNumSyncInput();
   inp.focus();
 }
 
