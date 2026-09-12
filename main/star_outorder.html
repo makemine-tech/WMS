@@ -2550,6 +2550,56 @@ function cpPlanDoneBoxes(){
   (workSession.pending||[]).forEach(function(p){ if (p.srcBoxBarcode) done[p.srcBoxBarcode] = true; });
   return done;
 }
+/* 박스 한 건 집계 — 계획 라인이든 실제 기록이든 같은 모양으로 boxes 에 담는다.
+ * 나가는 게 하나도 없으면(전량 잔류) 담지 않고 false 를 준다. */
+function cpPlanPushBox(boxes, boxId, lines, doneBoxes, isActual){
+  var shipLines = lines.filter(function(l){ return l.kind === 'ship'; });
+  if (!shipLines.length) return false;
+  var ctrMap = {};
+  shipLines.forEach(function(l){ ctrMap[l.center] = (ctrMap[l.center]||0) + l.qty; });
+  var centers = Object.keys(ctrMap);
+  var hasResidual = lines.length > shipLines.length;
+  boxes.push({
+    boxId: boxId, lines: lines, centers: centers, ctrMap: ctrMap, hasResidual: hasResidual,
+    done: !!doneBoxes[boxId], actual: !!isActual,
+    split: centers.length > 1 || hasResidual,
+    shipQty: shipLines.reduce(function(s,l){ return s+l.qty; }, 0),
+    totalQty: lines.reduce(function(s,l){ return s+l.qty; }, 0)
+  });
+  return true;
+}
+/* 이미 처리한 박스(완료 scans / 입고대기 staging / 처리대기 pending)의 '실제' 배분.
+ * 계획은 박스ID 오름차순 가상 순회라 실제 스캔 순서와 다르다 — 그래서 이미 처리한 박스는
+ * 다시 시뮬레이션하지 말고 기록 그대로 쓰고, 그만큼 발주 잔여(remain)를 먼저 깎는다.
+ * '계획은 센터교차인데 실제로는 한 센터로만 나갔다' 같은 어긋남이 남은 박스로 번지지 않게.
+ * 반환: boxId → lines[] (cpBuildBoxPlan 의 line 과 같은 모양) */
+function cpPlanActualLines(rows, remain){
+  var by = {};
+  if (!workSession) return by;
+  var posBySrc = {};
+  rows.forEach(function(r, i){ posBySrc[r.srcIdx] = i; });   /* rows 는 need>0 만 걸러낸 배열 */
+  var recs = [];
+  (workSession.scans   || []).forEach(function(s){ if (!s.undone) recs.push(s); });
+  (workSession.staging || []).forEach(function(t){ recs.push(t); });
+  (workSession.pending || []).forEach(function(p){ recs.push(p); });
+  recs.forEach(function(rec){
+    var boxId = rec.srcBoxBarcode || rec.boxBarcode || '';
+    var qty = +rec.qty || 0;
+    if (!boxId || qty <= 0) return;
+    var pos = (!rec.unmatched && rec.srcIdx != null && rec.srcIdx >= 0) ? posBySrc[rec.srcIdx] : null;
+    var bc = rec.barcode || '';
+    var meta = stockMeta[bc] || {};
+    if (pos == null) {
+      (by[boxId] = by[boxId] || []).push({ bc:bc, name: meta.name || '', center:'잔류', qty:qty, kind:'none' });
+      return;
+    }
+    var r = rows[pos];
+    (by[boxId] = by[boxId] || []).push({ bc:bc, name: r.skuName || meta.name || '', center: r.center,
+                                         qty:qty, kind:'ship', eta: r.eta || '' });
+    remain[pos] = Math.max(0, remain[pos] - qty);
+  });
+  return by;
+}
 function cpBuildBoxPlan(){
   var rows = cpPlanPoRows();
   if (!rows.length) return null;
@@ -2557,12 +2607,22 @@ function cpBuildBoxPlan(){
   var centerTot = {};
   rows.forEach(function(r){ centerTot[r.center] = (centerTot[r.center]||0) + r.need; });
   var remain = rows.map(function(r){ return r.need; });
+  /* 이미 처리한 박스는 기록대로 — 남은 발주수량을 먼저 깎아 놓는다 */
+  var actualByBox = cpPlanActualLines(rows, remain);
 
   var boxIds = Object.keys(boxIndex).sort(function(a,b){ return String(a).localeCompare(String(b), 'ko', {numeric:true}); });
   var boxes = [], skipBoxes = 0, skipQty = 0;
 
   boxIds.forEach(function(boxId){
     var contents = boxIndex[boxId] || {};
+    var act = actualByBox[boxId];
+    if (act) {
+      /* 이미 처리한 박스 — 계획이 아니라 실제로 어디로 갔는지 그대로 */
+      if (!cpPlanPushBox(boxes, boxId, act, doneBoxes, true)) {
+        skipBoxes++; skipQty += act.reduce(function(s,l){ return s+l.qty; }, 0);
+      }
+      return;
+    }
     var lines = [];
     Object.keys(contents).sort().forEach(function(bc){
       var qty = +contents[bc] || 0;
@@ -2582,23 +2642,10 @@ function cpBuildBoxPlan(){
       if (left > 0) lines.push({ bc:bc, name: rows[idxs[0]].skuName || meta.name || '', center:'잔류', qty:left, kind:'over' });
     });
     if (!lines.length) return;
-    var shipLines = lines.filter(function(l){ return l.kind === 'ship'; });
-    if (!shipLines.length) {
+    if (!cpPlanPushBox(boxes, boxId, lines, doneBoxes, false)) {
       /* 이번 PO 와 무관하거나 이미 발주수량이 다 찬 박스 — 표에서 제외하고 건수만 집계 */
       skipBoxes++; skipQty += lines.reduce(function(s,l){ return s+l.qty; }, 0);
-      return;
     }
-    var ctrMap = {};
-    shipLines.forEach(function(l){ ctrMap[l.center] = (ctrMap[l.center]||0) + l.qty; });
-    var centers = Object.keys(ctrMap);
-    var hasResidual = lines.length > shipLines.length;
-    boxes.push({
-      boxId: boxId, lines: lines, centers: centers, ctrMap: ctrMap, hasResidual: hasResidual,
-      done: !!doneBoxes[boxId],
-      split: centers.length > 1 || hasResidual,
-      shipQty: shipLines.reduce(function(s,l){ return s+l.qty; }, 0),
-      totalQty: lines.reduce(function(s,l){ return s+l.qty; }, 0)
-    });
   });
 
   /* 센터별 요약 */
@@ -2728,7 +2775,7 @@ function cpShowPlan(){
 
   document.getElementById('cpPlanBody').innerHTML = h;
   var fi = document.getElementById('cpPlanFootInfo');
-  if (fi) fi.textContent = '※ 박스ID 오름차순 기준 계획값 — 실제 스캔 순서에 따라 센터 배분이 달라질 수 있습니다'
+  if (fi) fi.textContent = '※ 이미 처리한 박스는 실제 배분 기록, 남은 박스는 박스ID 오름차순 기준 계획값 — 스캔 순서에 따라 센터 배분이 달라질 수 있습니다'
                          + (plan.skipBoxes ? ' · PO 무관 박스 '+plan.skipBoxes+'개('+plan.skipQty+'개) 제외' : '');
   document.getElementById('cpPlanBack').classList.add('open');
   document.getElementById('cpPlanBox').classList.add('open');
@@ -3448,9 +3495,12 @@ var cpBoxGroupsCache = [];   /* 방금 그린 목록 — onclick 에는 번호�
  *   잔류/무관 이번 발주에 없음     (회색) */
 var cpBoxPlanCache = null, cpBoxPlanSig = '';
 function cpBoxPlan(){
+  var ws = workSession || {};
   var sig = Object.keys(boxIndex || {}).length
-    + '|' + ((workSession && workSession.rows || []).length)
-    + '|' + (((typeof cpState !== 'undefined' && cpState.rows) || []).length);
+    + '|' + ((ws.rows || []).length)
+    + '|' + (((typeof cpState !== 'undefined' && cpState.rows) || []).length)
+    /* 처리 상황이 바뀌면 배분 계획도 달라진다 — 캐시를 새로 잡는다 */
+    + '|' + ((ws.scans || []).length) + '|' + ((ws.staging || []).length) + '|' + ((ws.pending || []).length);
   if (cpBoxPlanCache && cpBoxPlanSig === sig) return cpBoxPlanCache;
   var p = null;
   try { p = cpBuildBoxPlan(); } catch (e) { p = null; }
