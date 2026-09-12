@@ -411,11 +411,32 @@ function micPress(){
 }
 window.micPress=micPress;
 
+/* 고른 유닛이 몇 층까지인지 — 랙(파란)은 3~4층, 보관(노란)은 2층이라 칸마다 다르다 */
+function unitLevels(){
+  if(!W||!W.val.unit) return 0;
+  var ci=cellAt(W.val.unit.v);
+  return ci.err?0:ci.dR;
+}
+function slotQ(s){
+  if(s==='lvl'){ var mx=unitLevels(); if(mx) return '몇 층인가요? (1~'+mx+'층)'; }
+  return SLOTS[s].q;
+}
+function slotQSay(s){
+  if(s==='lvl'){ var mx=unitLevels(); if(mx) return mx+'층까지 있어요. 몇 층인가요?'; }
+  return SLOTS[s].q;
+}
 function askCur(){
   var s=curSlot();
   if(!s){ finishWiz(); return; }
   render();
-  speak(SLOTS[s].q, function(){ hear(s); });
+  speak(slotQSay(s), function(){ hear(s); });
+}
+/* 못 알아들었을 때 무엇을 어떻게 말해야 하는지 알려 준다 */
+function retryMsg(s){
+  if(s==='lvl'){ var mx=unitLevels(); if(mx) return '이 유닛은 '+mx+'층까지 있어요. 몇 층인가요?'; }
+  if(s==='unit') return '랙이나 보관 유닛으로 다시 말씀해 주세요';
+  if(s==='product') return '등록된 상품명으로 다시 말씀해 주세요';
+  return '다시 말씀해 주세요';
 }
 function hear(s){
   var w=W;
@@ -423,7 +444,7 @@ function hear(s){
     if(W!==w||W.done) return;   /* 그 사이 작업을 바꿨거나 끝났으면 무시 */
     if(!alts){ retry(s, err==='no-speech'?'못 들었어요':'다시 말씀해 주세요'); return; }
     var r=parseAlts(s, alts);
-    if(!r){ setStatus('"'+alts[0]+'" — 못 알아들었어요','ng'); retry(s,'다시 말씀해 주세요'); return; }
+    if(!r){ setStatus('"'+alts[0]+'" — 못 알아들었어요','ng'); retry(s, retryMsg(s)); return; }
     accept(s, r.v, r.fuzzy, alts[0]);
   });
 }
@@ -439,13 +460,20 @@ function accept(s, v, fuzzy, heard){
   W.tries=0;
   W.edit=null;
   /* 아직 안 채운 첫 항목으로 — 고치기였다면 원래 자리로 돌아간다 */
+  /* 유닛을 고쳤는데 이미 말한 층이 그 칸에 없으면(랙 3층 → 보관 2층) 층을 다시 묻는다 */
+  if(s==='unit' && W.val.lvl){ var mx0=unitLevels(); if(mx0 && W.val.lvl.v>mx0) delete W.val.lvl; }
   var nx=steps().filter(function(k){ return !W.val[k]; })[0];
+  /* 층이 하나뿐인 칸이면 물어볼 것이 없다 */
+  if(nx==='lvl' && unitLevels()===1){
+    W.val.lvl={v:1, fuzzy:false, heard:''};
+    nx=steps().filter(function(k){ return !W.val[k]; })[0];
+  }
   W.i = nx?steps().indexOf(nx):steps().length;
   render();
   var echo=slotSay(s, v);
   if(W.i>=steps().length){ speak(echo, function(){ finishWiz(); }); return; }
   var nextS=steps()[W.i];
-  speak(echo+'. '+SLOTS[nextS].q, function(){ render(); hear(nextS); });
+  speak(echo+'. '+slotQSay(nextS), function(){ render(); hear(nextS); });
 }
 
 /* ── 답 해석 (질문마다 다르게) ── */
@@ -476,12 +504,15 @@ function parseSlot(s, text){
     var cn=colNames(), u=V.matchUnit(text, cn);
     /* 이 창고에 없는 유닛이면 그 자리에서 되묻는다 (끝까지 갔다가 실패하지 않게) */
     if(!u || cn.indexOf(u.col)<0 || u.row<1 || u.row>(WH&&WH.rows||0)) return null;
+    /* 랙(파란)·보관(노란)이 아닌 칸은 물건을 둘 수 없다 — 끝까지 갔다가 실패하지 않게 여기서 거른다 */
+    if(cellAt(u).err) return null;
     return {v:u};
   }
   if(s==='lvl'){
-    var l=V.firstNum(text);
-    if(l!=null && l>=1 && l<=30) return {v:l};
-    return null;
+    var l=V.firstNum(text), mx=unitLevels();
+    if(l==null||l<1) return null;
+    if(mx&&l>mx) return null;   /* 보관 칸에 3층이라고 해도 처음부터 다시 하지 않고 층만 되묻는다 */
+    return l<=30?{v:l}:null;
   }
   return null;
 }
@@ -967,7 +998,7 @@ function renderCard(){
   var s=curSlot(), h='';
   /* 마지막 답 직후 처리로 넘어가는 찰나에는 s 가 없다 */
   if(W.done||!s) h+='<div class="q small">'+esc(MODES[W.mode].label)+(W.done?' 완료':' 처리 중…')+'</div>';
-  else h+='<div class="q">'+esc(SLOTS[s].q)+'</div>';
+  else h+='<div class="q">'+esc(slotQ(s))+'</div>';
   h+=ctxLine();
   h+='<div class="rows">'+steps().map(function(k){
       var g=W.val[k], on=(!W.done&&k===s);
