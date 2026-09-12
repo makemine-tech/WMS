@@ -294,6 +294,31 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .bl-g em{font-style:normal;font-size:.72rem;font-weight:700;opacity:.75;font-family:inherit}
 .bl-g:hover{color:var(--tx);border-color:var(--mu)}
 .bl-g.on{border-color:var(--o);background:rgba(255,140,90,.2);color:var(--o)}
+/* 규칙 — 이번 발주로 나갈 게 있으면 초록, 없으면 무채색 */
+.bl-g.has{border-color:rgba(95,211,141,.55);color:#7ee0a6}
+.bl-g.has.on{background:rgba(95,211,141,.18);border-color:#5fd38d;color:#8fe8b3}
+.bl-g.nil{opacity:.5}
+/* 센터별 묶음 */
+.bl-legend{display:flex;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 .1rem;font-size:.72rem;color:var(--mu);align-items:center}
+.bl-legend .lg{display:flex;align-items:center;gap:.25rem;font-weight:700}
+.bl-legend .lg::before{content:"";width:9px;height:9px;border-radius:2px;border:1.5px solid}
+.bl-legend .lg.whole::before{border-color:#6aa9ff;background:rgba(106,169,255,.3)}
+.bl-legend .lg.part::before{border-color:#e8c14a;background:rgba(232,193,74,.3)}
+.bl-legend .lg.cross::before{border-color:#b98bff;background:rgba(185,139,255,.3)}
+.bl-legend .lg.none::before{border-color:#39405222;background:#232838}
+.bl-sect{margin-top:.55rem;padding-top:.45rem;border-top:1px dashed rgba(255,140,90,.22)}
+.bl-sh{font-size:.78rem;font-weight:800;color:var(--tx);margin-bottom:.35rem;display:flex;align-items:center;gap:.4rem}
+.bl-sh b{font-size:.72rem;font-weight:700;color:var(--mu)}
+.bl-sect.c-cross .bl-sh{color:#c9a6ff}
+.bl-sect.c-none .bl-sh{color:var(--mu)}
+.bl-sect.c-none .bl-chips{opacity:.62}
+/* 박스 색 — 완박스 파랑 / 일부출고 노랑 / 센터분리 보라 / 잔류 무채색 */
+.bl-b.k-whole{border-color:rgba(106,169,255,.6);color:#9cc7ff;background:rgba(106,169,255,.1)}
+.bl-b.k-part{border-color:rgba(232,193,74,.6);color:#ecd07c;background:rgba(232,193,74,.1)}
+.bl-b.k-cross{border-color:rgba(185,139,255,.65);color:#cdb0ff;background:rgba(185,139,255,.12)}
+.bl-b.k-none{border-color:#232838;color:#5a6173;background:#12151d}
+.bl-b s{text-decoration:none;margin-left:.3rem;font-size:.72rem;font-weight:700;opacity:.75}
+.bl-b.done{background:#0d0f15 !important;color:#4a5163 !important;border-color:#232838 !important}
 .bl-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.55rem;max-height:34vh;overflow-y:auto;padding-top:.5rem;border-top:1px dashed rgba(255,140,90,.25)}
 .bl-b{padding:.42rem .6rem;background:#141822;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;font-size:.9rem;font-weight:800;font-family:var(--mo);cursor:pointer;min-width:4.2rem}
 .bl-b:hover{border-color:var(--o);color:var(--o)}
@@ -3386,43 +3411,115 @@ function cpBoxDone(id){
   return '';
 }
 
-/* 방금 그린 목록 — onclick 에는 번호만 넘긴다.
-   박스ID 를 따옴표로 감싸 넣으면 onclick="..." 속성이 그 따옴표에서 끊겨 아무 일도 일어나지 않는다. */
-var cpBoxGroupsCache = [];
+var cpBoxGroupsCache = [];   /* 방금 그린 목록 — onclick 에는 번호만 넘긴다 */
+/* 발주 기준 박스 분류 — 개괄표(cpBuildBoxPlan)가 이미 계산한 것을 색으로 옮긴다.
+ * 박스 하나는 넷 중 하나다:
+ *   완박스   한 센터로 통째      (파랑)
+ *   일부출고 한 센터 + 잔류       (노랑)
+ *   센터분리 두 센터 이상 교차     (보라)
+ *   잔류/무관 이번 발주에 없음     (회색) */
+var cpBoxPlanCache = null, cpBoxPlanSig = '';
+function cpBoxPlan(){
+  var sig = Object.keys(boxIndex || {}).length
+    + '|' + ((workSession && workSession.rows || []).length)
+    + '|' + (((typeof cpState !== 'undefined' && cpState.rows) || []).length);
+  if (cpBoxPlanCache && cpBoxPlanSig === sig) return cpBoxPlanCache;
+  var p = null;
+  try { p = cpBuildBoxPlan(); } catch (e) { p = null; }
+  if (p) {
+    p.byId = {};
+    p.boxes.forEach(function (b) { p.byId[b.boxId] = b; });
+  }
+  cpBoxPlanCache = p; cpBoxPlanSig = sig;
+  return p;
+}
+function cpBoxClass(id){
+  var p = cpBoxPlan();
+  if (!p) return null;                                  /* 발주 없음 — 색칠하지 않는다 */
+  var b = p.byId[id];
+  if (!b) return { k:'none', label:'잔류', centers:[], qty:0 };
+  if (b.centers.length > 1) return { k:'cross', label:'센터분리', centers:b.centers, qty:b.shipQty };
+  if (b.hasResidual)        return { k:'part',  label:'일부출고', centers:b.centers, qty:b.shipQty };
+  return { k:'whole', label:'완박스', centers:b.centers, qty:b.shipQty };
+}
+var CP_BOX_KIND = { whole:'완박스', part:'일부출고', cross:'센터분리', none:'잔류' };
+
 function cpBoxListRender(){
   var host = document.getElementById('cpBoxListWrap');
   if (!host || !cpBoxListOn) return;
   var groups = cpBoxGroups();
   cpBoxGroupsCache = groups;
-  if (!groups.length) {
-    host.innerHTML = '<div class="bl-none">입고 등록된 박스가 없습니다</div>';
-    return;
-  }
+  if (!groups.length) { host.innerHTML = '<div class="bl-none">입고 등록된 박스가 없습니다</div>'; return; }
   if (cpBoxListGroup != null && !groups[cpBoxListGroup]) cpBoxListGroup = null;
+  var plan = cpBoxPlan();
 
+  /* ① 규칙 — 이번 발주로 나갈 박스가 있으면 초록, 없으면 회색 */
   var head = '<div class="bl-groups">' + groups.map(function(g, gi){
-    var left = g.ids.filter(function(x){ return !cpBoxDone(x.id); }).length;
-    return '<button type="button" class="bl-g' + (cpBoxListGroup === gi ? ' on' : '') + '"'
-      + ' onclick="cpBoxListOpen(' + gi + ')">'
+    var ship = 0, left = 0;
+    g.ids.forEach(function(x){
+      var c = plan ? cpBoxClass(x.id) : null;
+      if (c && c.k !== 'none') { ship++; if (!cpBoxDone(x.id)) left++; }
+    });
+    var cls = 'bl-g' + (cpBoxListGroup === gi ? ' on' : '') + (plan ? (ship ? ' has' : ' nil') : '');
+    return '<button type="button" class="' + cls + '" onclick="cpBoxListOpen(' + gi + ')">'
       + cpBoxGroupLabel(g)
-      + '<em>' + left + ' / ' + g.ids.length + '</em></button>';
+      + '<em>' + (plan ? (ship ? '출고 ' + ship + ' · 남은 ' + left : '해당없음') : g.ids.length + '개') + '</em></button>';
   }).join('') + '</div>';
 
   var body = '';
   var cur = (cpBoxListGroup == null) ? null : groups[cpBoxListGroup];
   if (!cur) {
-    body = '<div class="bl-none">위에서 규칙을 누르면 그 박스들이 모두 펼쳐집니다</div>';
+    body = '<div class="bl-none">위에서 규칙을 누르면 그 박스들이 센터별로 펼쳐집니다</div>';
+  } else if (!plan) {
+    body = '<div class="bl-legend">발주(PO)를 올리면 센터별로 묶고 색으로 구분합니다</div>'
+         + '<div class="bl-chips">' + cur.ids.map(function(x, xi){ return cpBoxChip(x, xi, null); }).join('') + '</div>';
   } else {
-    body = '<div class="bl-chips">' + cur.ids.map(function(x, xi){
-      var st = cpBoxDone(x.id);
-      return '<button type="button" class="bl-b' + (st ? ' done' : '') + '"'
-        + ' onclick="cpBoxListPick(' + xi + ')"'
-        + (st ? ' title="' + escAttrLocal(st) + '"' : '') + '>'
-        + escH(x.id) + (st ? '<u>✓</u>' : '') + '</button>';
-    }).join('') + '</div>';
+    /* ② 센터별로 묶고, 교차·잔류는 따로 내린다 */
+    var byCtr = {}, cross = [], none = [];
+    cur.ids.forEach(function(x, xi){
+      var c = cpBoxClass(x.id);
+      if (!c || c.k === 'none') { none.push([x, xi, c]); return; }
+      if (c.k === 'cross')      { cross.push([x, xi, c]); return; }
+      var ctr = c.centers[0] || '(센터없음)';
+      (byCtr[ctr] = byCtr[ctr] || []).push([x, xi, c]);
+    });
+    function sect(title, cls, arr, tip){
+      if (!arr.length) return '';
+      var doneN = arr.filter(function(t){ return cpBoxDone(t[0].id); }).length;
+      return '<div class="bl-sect ' + cls + '">'
+        + '<div class="bl-sh"' + (tip ? ' title="' + escAttrLocal(tip) + '"' : '') + '>' + escH(title)
+        + '<b>' + (arr.length - doneN) + ' / ' + arr.length + '</b></div>'
+        + '<div class="bl-chips">' + arr.map(function(t){ return cpBoxChip(t[0], t[1], t[2]); }).join('') + '</div>'
+        + '</div>';
+    }
+    body = '<div class="bl-legend">'
+         + '<span class="lg whole">완박스</span><span class="lg part">일부출고</span>'
+         + '<span class="lg cross">센터분리</span><span class="lg none">잔류</span>'
+         + '</div>';
+    Object.keys(byCtr).sort().forEach(function(ctr){
+      body += sect('🏢 ' + ctr, 'c-ctr', byCtr[ctr], ctr + ' 로만 나가는 박스');
+    });
+    body += sect('⚯ 센터 교차', 'c-cross', cross, '두 센터 이상으로 나뉘는 박스 — 뜯어서 나눠 담아야 합니다');
+    body += sect('▫ 잔류 · 이번 발주 해당없음', 'c-none', none, '이번 발주로 나갈 것이 없는 박스');
+    if (!Object.keys(byCtr).length && !cross.length) body += '<div class="bl-none">이 규칙에는 이번 발주로 나갈 박스가 없습니다</div>';
   }
   host.innerHTML = head + body;
 }
+
+function cpBoxChip(x, xi, c){
+  var st = cpBoxDone(x.id);
+  var kind = c ? c.k : '';
+  var tip = (c ? CP_BOX_KIND[c.k] + (c.centers && c.centers.length ? ' · ' + c.centers.join(', ') : '')
+                 + (c.qty ? ' · ' + c.qty + '개' : '') : '')
+          + (st ? (c ? ' · ' : '') + st : '');
+  return '<button type="button" class="bl-b' + (kind ? ' k-' + kind : '') + (st ? ' done' : '') + '"'
+    + ' onclick="cpBoxListPick(' + xi + ')"'
+    + (tip ? ' title="' + escAttrLocal(tip) + '"' : '') + '>'
+    + escH(x.id)
+    + (c && c.qty ? '<s>' + c.qty + '</s>' : '')
+    + (st ? '<u>✓</u>' : '') + '</button>';
+}
+
 function cpBoxListOpen(gi){
   cpBoxListGroup = (cpBoxListGroup === gi) ? null : gi;
   cpBoxListRender();
