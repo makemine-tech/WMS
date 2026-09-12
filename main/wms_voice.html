@@ -365,7 +365,7 @@ function sendAudio(blob, mt, slot, cb, my){
       var gs=pendGroups();
       prods=gs.map(function(g){ return g.product; }).concat(gs.map(function(_,i){ return (i+1)+'번'; }));
     } else prods=PRODUCTS.slice(0,400);
-    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:prods, cols:colNames(), priority:planVocab()})
+    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:prods, cols:colNames(), rows:(WH&&WH.rows)||0, levels:unitLevels(), priority:planVocab()})
       .then(function(res){
         var d=(res&&res.data)||{}, alts=d.alts||[];
         sttFails=0; setMic('idle');
@@ -616,6 +616,20 @@ window.micPress=micPress;
 
 /* 고른 유닛이 몇 층까지인지 — 랙(파란)은 3~4층, 보관(노란)은 2층이라 칸마다 다르다 */
 /* 아직 적치할 것이 남은 상품군 — 이 중에서 고른다 */
+/* 물건을 둘 수 있는 유닛 전부 — 인식이 빗나갔을 때 여기서 가장 가까운 것을 고른다 */
+var UCACHE=null;
+function storableUnits(){
+  if(UCACHE) return UCACHE;
+  var out=[], cs=(WH&&WH.cells)||{};
+  Object.keys(cs).forEach(function(k){
+    var c=cs[k]; if(!c||(c.type!=='rack'&&c.type!=='shelf')) return;
+    var p=k.split('-'), r=+p[0], cc=+p[1];
+    if(!(r>=0)||!(cc>=0)) return;
+    var col=V.colName(cc), row=r+1;
+    out.push({key:col+'|'+row, forms:V.unitForms(col,row)});
+  });
+  UCACHE=out; return out;
+}
 function pendGroups(){ return inGroups().filter(function(g){ return g.left>0; }); }
 /* 지금 물어볼 항목 번호를 다시 맞춘다 */
 function syncIdx(){
@@ -739,17 +753,36 @@ function parseSlot(s, text){
   }
   if(s==='unit'){
     var cn=colNames(), u=V.matchUnit(text, cn);
-    /* 이 창고에 없는 유닛이면 그 자리에서 되묻는다 (끝까지 갔다가 실패하지 않게) */
-    if(!u || cn.indexOf(u.col)<0 || u.row<1 || u.row>(WH&&WH.rows||0)) return null;
-    /* 랙(파란)·보관(노란)이 아닌 칸은 물건을 둘 수 없다 — 끝까지 갔다가 실패하지 않게 여기서 거른다 */
-    if(cellAt(u).err) return null;
-    return {v:u};
+    if(u){
+      /* 또렷하게 읽혔으면 그대로 믿고, 쓸 수 없는 칸이면 되묻는다.
+         여기서 발음으로 바꿔치기하면 "디"(D)가 "티"(T)로 조용히 바뀐다 —
+         자모 비교는 ㄷ과 ㅌ을 같은 소리로 보기 때문이다. */
+      if(cn.indexOf(u.col)<0 || u.row<1 || u.row>(WH&&WH.rows||0)) return null;
+      return cellAt(u).err?null:{v:u};
+    }
+    /* 아예 못 읽었을 때만 — 쓸 수 있는 유닛 중 발음이 거의 같은 것으로.
+       위치를 잘못 잡는 것이 가장 위험하므로 문턱을 상품명보다 좁게 둔다 */
+    var um=V.nearest(text, storableUnits());
+    if(um && um.rel<=0.2){
+      var pp=um.key.split('|');
+      return {v:{col:pp[0], row:+pp[1]}, fuzzy:true};
+    }
+    return null;
   }
   if(s==='lvl'){
     var l=V.firstNum(text), mx=unitLevels();
-    if(l==null||l<1) return null;
-    if(mx&&l>mx) return null;   /* 보관 칸에 3층이라고 해도 처음부터 다시 하지 않고 층만 되묻는다 */
-    return l<=30?{v:l}:null;
+    /* 숫자가 또렷하면 그대로 믿는다. 그 칸에 없는 층이면 되묻는다
+       (여기서 발음으로 끼워 맞추면 "사층"이 3층으로 잘못 들어간다) */
+    if(l!=null){
+      if(l<1||l>30) return null;
+      if(mx&&l>mx) return null;
+      return {v:l};
+    }
+    /* 숫자를 못 뽑았을 때만 — 층은 몇 개 안 되니 발음이 가장 가까운 것으로 */
+    var lc=[], mm=mx||4;
+    for(var i=1;i<=mm;i++) lc.push({key:i, forms:V.lvlForms(i)});
+    var lm=V.nearest(text, lc);
+    return (lm&&lm.rel<=0.34)?{v:lm.key, fuzzy:true}:null;
   }
   return null;
 }
@@ -1330,6 +1363,7 @@ function selectWh(id){
   whRef=db.ref('warehouses/'+id);
   whRef.on('value',function(s){
     WH=s.val(); if(WH){ WH.rows=+WH.rows||0; WH.cols=+WH.cols||0; if(!WH.cells) WH.cells={}; }
+    UCACHE=null;
     PRODUCTS=collectProducts(WHS.map(function(w){ return w.id===id?WH:w.raw; }));
     planCleanup();
     render();

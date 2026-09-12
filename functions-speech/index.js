@@ -26,7 +26,7 @@ const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJEC
 /* 어휘 부스트(model adaptation)는 global 엔드포인트의 short/long 모델에서 동작한다 */
 const STT_LOCATION = 'global';
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;   /* 약 20초 분량의 opus — 명령 한 마디로 충분 */
-const MAX_PHRASES = 400;                    /* inline PhraseSet 안전 한도 */
+const MAX_PHRASES = 700;                    /* inline PhraseSet 한도 — 24열x21행(504) 조합이 들어갈 만큼 */
 
 let _client = null;
 function client() {
@@ -60,7 +60,7 @@ function readSino(n) {
   return s || '영';
 }
 
-function buildPhrases(slot, products, cols, priority) {
+function buildPhrases(slot, products, cols, priority, rows, levels) {
   const seen = new Set();
   const out = [];
   const add = (value, boost) => {
@@ -83,18 +83,37 @@ function buildPhrases(slot, products, cols, priority) {
       /* 예정에 없는 상품은 낮게 — 후보를 오늘 것 쪽으로 기울인다 */
       prods.slice(0, MAX_PHRASES).forEach((p) => add(p, pProds.length ? 10 : 20));
       break;
-    case 'unit':
+    case 'unit': {
       /* 이 창고에 실제로 있는 열만 — 없는 열은 아예 후보에서 뺀다 */
+      const nRows = Math.min(Math.max(+rows || 0, 0), 99);
+      const says = colList.map((c) => LETTER_SAY[String(c).toUpperCase()] || String(c).toUpperCase());
+      /* 열 x 번호 조합이 감당할 만하면 "에이 십이" 처럼 통째로 올린다 — 가장 잘 듣는다 */
+      if (nRows && says.length * nRows <= MAX_PHRASES - says.length * 2) {
+        says.forEach((sy) => { for (let r = 1; r <= nRows; r++) add(sy + ' ' + readSino(r), 20); });
+      }
       colList.forEach((c) => {
         const u = String(c).toUpperCase();
         add(LETTER_SAY[u] || u, 18);
         add(u, 18);
       });
-      SINO.forEach((n) => add(n, 10));
+      for (let r = 1; r <= nRows; r++) add(readSino(r), 14);   /* "십이" 처럼 두 자리는 특히 도움이 된다 */
+      SINO.forEach((n) => add(n, 8));
       break;
-    case 'lvl':
+    }
+    case 'lvl': {
+      /* 낱글자 "삼" 을 올려도 "삼층" 인식에는 거의 도움이 안 된다.
+         실제로 말하는 모양 그대로 올린다. */
+      const top = Math.min(Math.max(+levels || 4, 1), 9);
+      for (let i = 1; i <= top; i++) {
+        add(readSino(i) + '층', 20);
+        add(i + '층', 20);
+        add(readSino(i), 12);
+      }
+      SINO.forEach((n) => add(n, 8));
+      break;
+    }
     case 'num':
-      if (slot === 'num') pNums.forEach((v) => { add(String(v), 18); add(readSino(v), 18); });
+      pNums.forEach((v) => { add(String(v), 18); add(readSino(v), 18); });
       SINO.forEach((n) => add(n, 15));
       NATIVE.forEach((n) => add(n, 15));
       break;
@@ -169,7 +188,7 @@ exports.sttVoice = onCall(
       throw new HttpsError('invalid-argument', '녹음이 너무 길어요 — 한 문장씩 말씀해 주세요');
     }
 
-    const phrases = buildPhrases(data.slot, data.products, data.cols, data.priority);
+    const phrases = buildPhrases(data.slot, data.products, data.cols, data.priority, data.rows, data.levels);
     const recognizer = `projects/${PROJECT_ID}/locations/${STT_LOCATION}/recognizers/_`;
 
     /* 1차: 어휘 부스트 켜고 시도.

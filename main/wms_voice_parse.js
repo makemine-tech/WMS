@@ -439,8 +439,43 @@
     return null;
   }
 
+
+  /* ── 닫힌 집합 고르기 ─────────────────────────────────────
+     층은 1~4개, 유닛도 그 창고에 있는 것뿐이다. 후보가 정해져 있으면
+     인식이 빗나가도 발음이 가장 가까운 것을 고를 수 있다.
+     상품명에 쓰던 자모 퍼지매칭을 층·유닛에도 쓴다. */
+
+  /* 층을 말하는 여러 모양 — "3층", "삼층", "삼".
+     층은 한자어로 센다(일층·이층·삼층). 순우리말(한층·세층)을 후보에 넣으면
+     "산층" 이 "한층"(1층)과 "삼층"(3층) 사이에서 갈린다. */
+  function lvlForms(n){
+    var s=toSino(n), out=[n+'층', s+'층', s, String(n)];
+    return out.filter(function(v,i){ return v&&out.indexOf(v)===i; });
+  }
+  /* 유닛을 말하는 여러 모양 — "에이 이", "에이이", "A2", "에이 2" */
+  function unitForms(col,row){
+    var l=LET_SAY[col]||col, s=toSino(row);
+    var out=[l+' '+s, l+s, l+' '+row, l+row, col+row, col+' '+row];
+    return out.filter(function(v,i){ return v&&out.indexOf(v)===i; });
+  }
+  /* 후보 중 발음이 가장 가까운 것. cands = [{key, forms:[...]}] */
+  function nearest(text, cands){
+    var t=phon(text); if(!t||!cands||!cands.length) return null;
+    var best=null;
+    for(var i=0;i<cands.length;i++){
+      var fs=cands[i].forms||[];
+      for(var j=0;j<fs.length;j++){
+        var p=phon(fs[j]); if(!p) continue;
+        var rel=lev(t,p)/Math.max(p.length,1);
+        if(!best||rel<best.rel){ best={key:cands[i].key, rel:rel, form:fs[j]}; if(rel===0) return best; }
+      }
+    }
+    return best;
+  }
+
   var API={parse:parse, parseBest:parseBest, sayLoc:sayLoc, sayExp:sayExp, locLabel:locLabel, fmtExp:fmtExp, yesNo:yesNo,
     colIndex:colIndex, colName:colName, validYMD:validYMD, variants:variants, _tokenize:tokenize,
-    matchProduct:matchProduct, firstNum:firstNum, digitsOf:digitsOf, matchUnit:matchUnit, phon:phon, nativeNum:nativeNum};
+    matchProduct:matchProduct, firstNum:firstNum, digitsOf:digitsOf, matchUnit:matchUnit, phon:phon, nativeNum:nativeNum,
+    lvlForms:lvlForms, unitForms:unitForms, nearest:nearest, toSino:toSino};
   if(typeof module!=='undefined'&&module.exports) module.exports=API; else root.WMSVoice=API;
 })(this);
