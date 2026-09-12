@@ -32,6 +32,34 @@ body{background:var(--bg);font-family:system-ui,-apple-system,'Segoe UI',sans-se
 .md.on.place{background:#059669;border-color:#059669;}
 .md.on.outnow{background:#EA580C;border-color:#EA580C;}
 .md.on.check{background:#475569;border-color:#475569;}
+.md.on.plan{background:#7C3AED;border-color:#7C3AED;}
+
+/* 예정작업 입력 */
+.pb{border:1px solid var(--bd);border-radius:11px;padding:8px;margin-top:8px;background:rgba(255,255,255,.02);}
+.pb.reg{border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.05);}
+.ph{display:flex;gap:5px;align-items:center;margin-bottom:6px;}
+.pn{font-size:11px;font-weight:800;color:var(--sub);width:14px;flex:none;}
+.pt{font-size:11px;font-weight:800;padding:4px 7px;border-radius:6px;flex:none;}
+.pt.in{color:#A7F3D0;background:rgba(52,211,153,.15);}
+.pt.out{color:#FCA5A5;background:rgba(248,113,113,.15);}
+.pr{display:flex;gap:5px;align-items:center;margin-bottom:5px;}
+.pi{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:8px 7px;font-size:14px;font-family:inherit;min-width:0;}
+.pi:disabled{color:var(--sub);background:transparent;border-color:transparent;padding-left:0;}
+.ptype{flex:none;width:62px;}
+.pveh{flex:1;}
+.pnm{flex:1.7;}
+.pex{flex:1.25;}
+.pqn{flex:.8;}
+.pbtn{flex:none;border:1px solid var(--bd);background:rgba(255,255,255,.05);color:var(--sub);border-radius:7px;padding:8px 6px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.pbtn.add{color:#93C5FD;border-color:rgba(59,130,246,.4);}
+.pbtn.del{color:#FCA5A5;border-color:rgba(248,113,113,.3);}
+.pbtn.big{flex:1;padding:11px 6px;font-size:13px;}
+.pleft{font-size:11px;font-weight:800;color:#6EE7B7;flex:none;padding:0 4px;}
+.pr.done{padding:2px 2px 4px;}
+.pdesc{flex:1;min-width:0;font-size:13.5px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pfoot{display:flex;gap:5px;margin-top:6px;}
+.preg{flex:1;margin-top:0;border:none;border-radius:8px;padding:10px;background:#2563EB;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;}
+.padd{display:flex;gap:6px;margin-top:10px;}
 
 /* 문답 카드 */
 .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;}
@@ -288,7 +316,7 @@ function sendAudio(blob, mt, slot, cb, my){
   fr.onload=function(){
     var b64=String(fr.result||'').split(',')[1]||'';
     if(!b64) return sttFallback('오디오가 비었어요', slot, cb, my);
-    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:PRODUCTS.slice(0,400), cols:colNames()})
+    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:PRODUCTS.slice(0,400), cols:colNames(), priority:planVocab()})
       .then(function(res){
         var d=(res&&res.data)||{}, alts=d.alts||[];
         sttFails=0; setMic('idle');
@@ -342,11 +370,12 @@ function keepAwake(){ try{ if(navigator.wakeLock&&!wakeLock) navigator.wakeLock.
    한 번에 한 가지만 묻고 한 마디만 듣는다.
    답이 짧을수록 인식이 정확하고, 틀리면 그 항목만 다시 고치면 된다. */
 var MODES={
+  plan:   {label:'예정작업', steps:[]},
   inq:    {label:'입고대기', steps:['product','exp','qty','pallets']},
-  outq:   {label:'출고대기', steps:['product','pallets']},
-  place:  {label:'적치',     steps:['unit','lvl']},
+  place:  {label:'입고적치', steps:['unit','lvl']},
   outnow: {label:'즉시출고', steps:['unit','lvl']},
-  check:  {label:'확인',     steps:['unit','lvl']}
+  outq:   {label:'출고대기', steps:['product','pallets']},
+  check:  {label:'유닛확인', steps:['unit','lvl']}
 };
 var SLOTS={
   product:{k:'상품명',    q:'상품명?',           stt:'product'},
@@ -373,7 +402,7 @@ window.pickMode=pickMode;
 function micPress(){
   keepAwake();
   if(listening){ stopListen(); return; }
-  if(!W) return;
+  if(!W||W.mode==='plan') return;
   if(W.done){ W={mode:W.mode, val:{}, i:0, edit:null, tries:0, done:false}; }
   W.tries=0; askCur();
 }
@@ -616,6 +645,32 @@ function doUndo(){
       Promise.all(ps2).catch(fail); }
   } else if(u.t==='oreg'){
     db.ref(whPath()+'/voiceOut/'+u.voId).remove().catch(fail); if(WH.voiceOut) delete WH.voiceOut[u.voId];
+  } else if(u.t==='plan'){
+    /* 예정 등록 되돌리기 — 아직 적치·출고되지 않은 것만 거둬들이고 예정 건을 미등록으로 되돌린다 */
+    if(u.type==='in'){
+      var kill={}; (u.ids||[]).forEach(function(i){ kill[i]=1; });
+      var was=inQArr(), rest=was.filter(function(x){ return !kill[x.id]; }), gone=was.length-rest.length;
+      if(!gone){ ok=false; msg='이미 모두 적치돼서 되돌릴 수 없어요'; }
+      else {
+        if(gone<(u.ids||[]).length) msg='적치된 '+((u.ids||[]).length-gone)+'팔은 그대로 두고 남은 '+gone+'팔만 거뒀어요';
+        WH.inQ=rest;
+        var pl=[db.ref(whPath()+'/inQ').set(rest.length?rest:null)];
+        if(!msg) (u.txKeys||[]).forEach(function(k){ pl.push(db.ref('txLogs/'+WHID+'/'+k).remove()); });
+        Promise.all(pl).catch(fail);
+      }
+    } else {
+      (u.voIds||[]).forEach(function(v){ db.ref(whPath()+'/voiceOut/'+v).remove().catch(fail); if(WH.voiceOut) delete WH.voiceOut[v]; });
+    }
+    if(ok){
+      var pp=plansObj()[u.pid];
+      if(pp){ pp.registered=false;
+        rowIds(pp).forEach(function(rid){ delete pp.rows[rid].ids; delete pp.rows[rid].voId;
+          db.ref(plansPath()+'/'+u.pid+'/rows/'+rid+'/ids').remove().catch(function(){});
+          db.ref(plansPath()+'/'+u.pid+'/rows/'+rid+'/voId').remove().catch(function(){}); });
+        db.ref(plansPath()+'/'+u.pid+'/registered').set(false).catch(function(){});
+      }
+      PLANSIG='';
+    }
   }
   if(!ok){ setStatus(msg,'ng'); speak(msg); return; }
   U.UNDO.pop(); addLog('[되돌림] '+u.label+(msg?' ('+msg+')':''));
@@ -623,6 +678,247 @@ function doUndo(){
 }
 window.doUndo=doUndo;
 
+
+
+/* ── 예정작업 ───────────────────────────────────────────────
+   당일 들어오고 나갈 차를 미리 적어 두는 곳. 여기만 말이 아니라 타이핑이다.
+   건(차량) 하나에 상품 줄이 여러 개 붙는다.
+   [등록] 하면 입고 건은 입고대기(inQ), 출고 건은 출고대기(voiceOut)로 들어가고,
+   적치·출고로 다 빠지면 이 목록에서 저절로 사라진다.
+   또 여기 적힌 상품·유통기한·수량은 음성 인식의 우선 어휘로 쓰인다. ── */
+function plansPath(){ return whPath()+'/plans'; }
+function plansObj(){ return (WH&&WH.plans)||{}; }
+function planIds(){
+  var o=plansObj();
+  return Object.keys(o).filter(function(k){ return o[k]; })
+    .sort(function(a,b){ return (o[a].createdAt||0)-(o[b].createdAt||0); });
+}
+function rowIds(p){
+  var r=p.rows||{};
+  return Object.keys(r).filter(function(k){ return r[k]; })
+    .sort(function(a,b){ return (r[a].seq||0)-(r[b].seq||0); });
+}
+/* 등록된 줄이 얼마나 남았는지 — 0 이면 그 줄은 끝난 것 */
+function rowLeft(p, r){
+  if(!p.registered) return null;
+  if(p.type==='in'){
+    var have={}; inQArr().forEach(function(x){ have[x.id]=1; });
+    return (r.ids||[]).filter(function(id){ return have[id]; }).length;
+  }
+  var vo=(WH&&WH.voiceOut)||{};
+  return r.voId&&vo[r.voId] ? Math.max(0,+vo[r.voId].left||0) : 0;
+}
+function planDone(p){
+  if(!p.registered) return false;
+  var rs=rowIds(p); if(!rs.length) return true;
+  return rs.every(function(rid){ return rowLeft(p, p.rows[rid])===0; });
+}
+/* 다 끝난 건은 목록에서 지운다 */
+function planCleanup(){
+  if(!WH||!WH.plans) return;
+  planIds().forEach(function(pid){
+    if(planDone(plansObj()[pid])){
+      delete WH.plans[pid];
+      db.ref(plansPath()+'/'+pid).remove().catch(function(){});
+    }
+  });
+}
+
+/* 음성 인식 우선 어휘 — 오늘 들어올/나갈 것부터 알아듣게 */
+function planVocab(){
+  var prods=[], exps=[], nums=[];
+  planIds().forEach(function(pid){
+    var p=plansObj()[pid];
+    rowIds(p).forEach(function(rid){
+      var r=p.rows[rid];
+      if(r.product && prods.indexOf(r.product)<0) prods.push(r.product);
+      if(r.exp && exps.indexOf(r.exp)<0) exps.push(r.exp);
+      [r.qty, r.pallets].forEach(function(n){ if(n>0 && nums.indexOf(+n)<0) nums.push(+n); });
+    });
+  });
+  return {products:prods, exps:exps, nums:nums};
+}
+
+/* ── 편집 ── */
+function planAdd(type){
+  var pid=db.ref(plansPath()).push().key;
+  var rid=uid();
+  var p={type:type||'in', vehicle:'', createdAt:Date.now(), by:(USER&&USER.email)||'', registered:false,
+         rows:{}};
+  p.rows[rid]={product:'', exp:'', pallets:'', qty:'', seq:Date.now()};
+  if(!WH.plans) WH.plans={};
+  WH.plans[pid]=p;
+  db.ref(plansPath()+'/'+pid).set(p).catch(fail);
+  PLANSIG=''; render();
+}
+window.planAdd=planAdd;
+function planRowAdd(pid){
+  var p=plansObj()[pid]; if(!p||p.registered) return;
+  var rid=uid();
+  if(!p.rows) p.rows={};
+  p.rows[rid]={product:'', exp:'', pallets:'', qty:'', seq:Date.now()};
+  db.ref(plansPath()+'/'+pid+'/rows/'+rid).set(p.rows[rid]).catch(fail);
+  PLANSIG=''; render();
+}
+window.planRowAdd=planRowAdd;
+function planDel(pid){
+  var p=plansObj()[pid]; if(!p) return;
+  if(p.registered && !confirm('이미 등록된 건이에요. 예정 목록에서만 지울까요? (입고대기·출고대기는 그대로 남습니다)')) return;
+  delete WH.plans[pid];
+  db.ref(plansPath()+'/'+pid).remove().catch(fail);
+  PLANSIG=''; render();
+}
+window.planDel=planDel;
+function planRowDel(pid, rid){
+  var p=plansObj()[pid]; if(!p||p.registered) return;
+  if(rowIds(p).length<=1){ planDel(pid); return; }
+  delete p.rows[rid];
+  db.ref(plansPath()+'/'+pid+'/rows/'+rid).remove().catch(fail);
+  PLANSIG=''; render();
+}
+window.planRowDel=planRowDel;
+/* 입력칸에서 빠져나올 때 저장 — 타이핑 중에는 화면을 다시 그리지 않는다 */
+function planSet(pid, rid, field, el){
+  var p=plansObj()[pid]; if(!p||p.registered) return;
+  var v=el.value;
+  if(field==='pallets'||field==='qty') v=v.replace(/[^\d]/g,'');
+  if(field==='exp') v=v.replace(/[^\d]/g,'').slice(0,6);
+  el.value=v;
+  if(rid){ if(!p.rows[rid]) return; p.rows[rid][field]=v; db.ref(plansPath()+'/'+pid+'/rows/'+rid+'/'+field).set(v).catch(fail); }
+  else { p[field]=v; db.ref(plansPath()+'/'+pid+'/'+field).set(v).catch(fail); }
+}
+window.planSet=planSet;
+
+/* ── 등록 → 입고대기 / 출고대기 ── */
+function planRegister(pid){
+  var p=plansObj()[pid]; if(!p||p.registered) return;
+  var rs=rowIds(p), bad=[];
+  rs.forEach(function(rid,i){
+    var r=p.rows[rid];
+    if(!r.product) bad.push((i+1)+'번째 줄 상품명');
+    if(!(+r.pallets>0)) bad.push((i+1)+'번째 줄 파렛트 수');
+    if(p.type==='in'){
+      if(!(+r.qty>0)) bad.push((i+1)+'번째 줄 파렛트당 수량');
+      if(r.exp && !V.validYMD(r.exp)) bad.push((i+1)+'번째 줄 유통기한');
+    }
+  });
+  if(bad.length){ setStatus('빠지거나 잘못된 값: '+bad.join(', '),'ng'); return; }
+
+  var upd={}, done=[];
+  if(p.type==='in'){
+    var nq=inQArr();
+    rs.forEach(function(rid){
+      var r=p.rows[rid], items=[];
+      for(var i=0;i<+r.pallets;i++) items.push({id:uid(), name:r.product, qty:+r.qty, exp:String(r.exp||'')});
+      nq=nq.concat(items);
+      if(safeKey(r.product)&&!(WH.pColors&&WH.pColors[r.product])) upd['pColors/'+r.product]=pickClr(r.product);
+      var txRef=db.ref('txLogs/'+WHID).push();
+      txRef.set({id:uid(), type:'in', date:todayStr(), name:r.product, exp:String(r.exp||''),
+                 pallets:+r.pallets, qty:(+r.qty)*(+r.pallets)}).catch(fail);
+      p.rows[rid].ids=items.map(function(x){return x.id;});
+      done.push({rid:rid, ids:p.rows[rid].ids, txKey:txRef.key});
+    });
+    upd.inQ=nq.length?nq:null;
+    WH.inQ=nq;
+    db.ref(whPath()).update(upd).catch(fail);
+  } else {
+    rs.forEach(function(rid){
+      var r=p.rows[rid];
+      var vref=db.ref(whPath()+'/voiceOut').push();
+      var o={product:r.product, exp:String(r.exp||''), qty:+r.qty||0, total:+r.pallets, left:+r.pallets,
+             createdAt:Date.now(), by:(USER&&USER.email)||''};
+      if(!WH.voiceOut) WH.voiceOut={}; WH.voiceOut[vref.key]=o;
+      vref.set(o).catch(fail);
+      p.rows[rid].voId=vref.key;
+      done.push({rid:rid, voId:vref.key});
+    });
+  }
+  p.registered=true;
+  var save={registered:true};
+  done.forEach(function(d){
+    if(d.ids) save['rows/'+d.rid+'/ids']=d.ids;
+    if(d.voId) save['rows/'+d.rid+'/voId']=d.voId;
+  });
+  db.ref(plansPath()+'/'+pid).update(save).catch(fail);
+  U.UNDO.push({t:'plan', pid:pid, type:p.type,
+    ids:done.reduce(function(a,d){ return a.concat(d.ids||[]); },[]),
+    txKeys:done.map(function(d){return d.txKey;}).filter(Boolean),
+    voIds:done.map(function(d){return d.voId;}).filter(Boolean),
+    label:'예정 등록 · '+(p.vehicle||(p.type==='in'?'입고':'출고'))+' '+rs.length+'품목'});
+  saveU();
+  var tot=rs.reduce(function(a,rid){ return a+(+p.rows[rid].pallets||0); },0);
+  addLog('[예정등록] '+(p.type==='in'?'입고대기':'출고대기')+' · '+(p.vehicle||'차량미기입')+' · '+rs.length+'품목 '+tot+'팔');
+  PLANSIG=''; render();
+  setStatus((p.type==='in'?'입고대기':'출고대기')+'에 '+rs.length+'품목 '+tot+'팔 등록했어요','ok');
+}
+window.planRegister=planRegister;
+
+/* ── 화면 ── */
+var PLANSIG='';
+function planSig(){
+  return planIds().map(function(pid){
+    var p=plansObj()[pid];
+    return pid+':'+(p.registered?'R':'e')+':'+rowIds(p).join(',')+':'+rowIds(p).map(function(rid){ return rowLeft(p,p.rows[rid]); }).join('/');
+  }).join('|');
+}
+function renderPlans(){
+  var c=document.getElementById('card'); if(!c) return;
+  /* 타이핑 중이면 건드리지 않는다 (다른 사람의 창고 변경으로도 다시 그려지므로) */
+  if(c.contains(document.activeElement) && document.activeElement.tagName==='INPUT') return;
+  var sig=planSig();
+  PLANSIG=sig;
+  var ids=planIds();
+  var h='<div class="q small">예정작업 — 오늘 들어오고 나갈 것을 미리 적어 두세요</div>';
+  if(!ids.length) h+='<div class="sub">아직 없어요. 아래 [＋ 건 추가]를 누르세요.</div>';
+  ids.forEach(function(pid, bi){
+    var p=plansObj()[pid], reg=!!p.registered, rs=rowIds(p);
+    h+='<div class="pb'+(reg?' reg':'')+'">'
+      +'<div class="ph">'
+        +'<span class="pn">'+(bi+1)+'</span>'
+        +(reg?'<span class="pt '+p.type+'">'+(p.type==='in'?'입고':'출고')+'</span>'
+             :'<select class="pi ptype" onchange="planSet(\''+pid+'\',null,\'type\',this)">'
+               +'<option value="in"'+(p.type==='in'?' selected':'')+'>입고</option>'
+               +'<option value="out"'+(p.type==='out'?' selected':'')+'>출고</option></select>')
+        +'<input class="pi pveh" value="'+esc(p.vehicle||'')+'" placeholder="차량"'+(reg?' disabled':'')
+          +' onchange="planSet(\''+pid+'\',null,\'vehicle\',this)">'
+        +'<button class="pbtn add" onclick="planAdd(\''+p.type+'\')" title="건 추가">＋건</button>'
+        +'<button class="pbtn del" onclick="planDel(\''+pid+'\')" title="이 건 삭제">✕</button>'
+      +'</div>';
+    rs.forEach(function(rid){
+      var r=p.rows[rid], left=rowLeft(p,r);
+      /* 등록된 줄은 고칠 수 없으니 입력칸 대신 한 줄로 읽기 쉽게 */
+      if(reg){
+        h+='<div class="pr done"><span class="pdesc">'+esc(r.product)
+          +(r.exp?' · '+V.fmtExp(r.exp):'')+' · '+(+r.pallets||0)+'팔'+(r.qty?' × '+r.qty+'개':'')
+          +'</span><span class="pleft">남은 '+left+'팔</span></div>';
+        return;
+      }
+      h+='<div class="pr">'
+        +'<input class="pi pnm" list="prodList" value="'+esc(r.product||'')+'" placeholder="상품명"'+(reg?' disabled':'')
+          +' onchange="planSet(\''+pid+'\',\''+rid+'\',\'product\',this)">'
+        +'<input class="pi pex" inputmode="numeric" value="'+esc(r.exp||'')+'" placeholder="유통기한"'+(reg?' disabled':'')
+          +' onchange="planSet(\''+pid+'\',\''+rid+'\',\'exp\',this)">'
+        +'<input class="pi pqn" inputmode="numeric" value="'+esc(r.pallets||'')+'" placeholder="팔수"'+(reg?' disabled':'')
+          +' onchange="planSet(\''+pid+'\',\''+rid+'\',\'pallets\',this)">'
+        +'<input class="pi pqn" inputmode="numeric" value="'+esc(r.qty||'')+'" placeholder="개/팔"'+(reg?' disabled':'')
+          +' onchange="planSet(\''+pid+'\',\''+rid+'\',\'qty\',this)">'
+        +(reg?'<span class="pleft">남은 '+left+'팔</span>'
+             :'<button class="pbtn del" onclick="planRowDel(\''+pid+'\',\''+rid+'\')" title="이 줄 삭제">✕</button>')
+      +'</div>';
+    });
+    /* ＋품목은 줄마다 두면 폰에서 입력칸이 좁아진다 — 블록 아래에 하나만 */
+    if(!reg) h+='<div class="pfoot">'
+      +'<button class="pbtn add" onclick="planRowAdd(\''+pid+'\')">＋ 품목</button>'
+      +'<button class="preg" onclick="planRegister(\''+pid+'\')">'+(p.type==='in'?'입고대기':'출고대기')+'에 등록</button>'
+      +'</div>';
+    h+='</div>';
+  });
+  h+='<div class="padd"><button class="pbtn add big" onclick="planAdd(\'in\')">＋ 입고 건 추가</button>'
+    +'<button class="pbtn add big" onclick="planAdd(\'out\')">＋ 출고 건 추가</button></div>';
+  h+='<datalist id="prodList">'+PRODUCTS.slice().sort().map(function(x){ return '<option value="'+esc(x)+'">'; }).join('')+'</datalist>';
+  h+='<div class="st" id="st">여기 적어 두면 음성 인식이 이 상품·유통기한·수량을 먼저 알아들어요</div>';
+  c.innerHTML=h;
+}
 
 /* ── 화면 ── */
 function renderShell(){
@@ -656,6 +952,7 @@ function render(){
 }
 function renderCard(){
   var c=document.getElementById('card'); if(!c) return;
+  if(W&&W.mode==='plan') return renderPlans();
   /* 입력 중이던 값·커서는 살려둔다 (다른 사람의 창고 변경으로 다시 그려질 수 있음) */
   var old=document.getElementById('edIn'), keep=old?old.value:'', focused=old&&document.activeElement===old;
   var st=document.getElementById('st'), stHTML=st?st.outerHTML:'';
@@ -708,8 +1005,9 @@ function setMic(state){
   var b=document.getElementById('micBtn'); if(!b) return;
   if(state==='on'){ b.className='mic on'; b.textContent='● 듣는 중 — 탭하면 중지'; b.disabled=false; return; }
   if(state==='think'){ b.className='mic think'; b.textContent='인식 중…'; b.disabled=true; return; }
-  b.className='mic'; b.disabled=!W;
+  b.className='mic'; b.disabled=!W||W.mode==='plan';
   if(!W){ b.textContent='작업을 고르세요'; return; }
+  if(W.mode==='plan'){ b.textContent='예정작업은 직접 입력해요'; return; }
   if(W.done){ b.textContent='🎙 '+MODES[W.mode].label+' 다시 시작'; return; }
   var filled=steps().filter(function(k){ return W.val[k]; }).length;
   b.textContent=filled?'🎙 이어서 말하기':'🎙 시작';
@@ -738,6 +1036,7 @@ function selectWh(id){
   whRef.on('value',function(s){
     WH=s.val(); if(WH){ WH.rows=+WH.rows||0; WH.cols=+WH.cols||0; if(!WH.cells) WH.cells={}; }
     PRODUCTS=collectProducts(WHS.map(function(w){ return w.id===id?WH:w.raw; }));
+    planCleanup();
     render();
   });
 }

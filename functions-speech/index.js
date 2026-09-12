@@ -43,8 +43,24 @@ const LETTER_SAY = {A:'에이',B:'비',C:'씨',D:'디',E:'이',F:'에프',G:'지
 const SINO = ['영','공','일','이','삼','사','오','육','칠','팔','구','십','백'];
 const NATIVE = ['하나','둘','셋','넷','다섯','여섯','일곱','여덟','아홉','열','스물','서른','마흔','쉰'];
 const YESNO = ['네','예','맞아요','아니오','아니요','아뇨','취소'];
+const DIG = ['영','일','이','삼','사','오','육','칠','팔','구'];
 
-function buildPhrases(slot, products, cols) {
+/* 유통기한은 한 자리씩 읽는다 — 270703 -> 이칠공칠공삼 */
+function readDigits(v) {
+  return String(v || '').split('').map((c) => (c === '0' ? '공' : (DIG[+c] || c))).join('');
+}
+/* 수량은 자릿수로 읽는다 — 125 -> 백이십오 */
+function readSino(n) {
+  let x = Math.floor(Math.abs(+n)) || 0, s = '';
+  [[1000, '천'], [100, '백'], [10, '십']].forEach((u) => {
+    const d = Math.floor(x / u[0]);
+    if (d) { s += (d > 1 ? DIG[d] : '') + u[1]; x -= d * u[0]; }
+  });
+  if (x) s += DIG[x];
+  return s || '영';
+}
+
+function buildPhrases(slot, products, cols, priority) {
   const seen = new Set();
   const out = [];
   const add = (value, boost) => {
@@ -55,10 +71,17 @@ function buildPhrases(slot, products, cols) {
   };
   const prods = Array.isArray(products) ? products : [];
   const colList = (Array.isArray(cols) && cols.length) ? cols : Object.keys(LETTER_SAY);
+  /* 예정작업에 적어 둔 것 — 오늘 실제로 들어오고 나갈 것부터 알아듣게 최우선으로 올린다 */
+  const pr = priority || {};
+  const pProds = Array.isArray(pr.products) ? pr.products : [];
+  const pExps = Array.isArray(pr.exps) ? pr.exps : [];
+  const pNums = Array.isArray(pr.nums) ? pr.nums : [];
 
   switch (slot) {
     case 'product':
-      prods.slice(0, MAX_PHRASES).forEach((p) => add(p, 20));
+      pProds.forEach((p) => add(p, 20));
+      /* 예정에 없는 상품은 낮게 — 후보를 오늘 것 쪽으로 기울인다 */
+      prods.slice(0, MAX_PHRASES).forEach((p) => add(p, pProds.length ? 10 : 20));
       break;
     case 'unit':
       /* 이 창고에 실제로 있는 열만 — 없는 열은 아예 후보에서 뺀다 */
@@ -71,10 +94,12 @@ function buildPhrases(slot, products, cols) {
       break;
     case 'lvl':
     case 'num':
+      if (slot === 'num') pNums.forEach((v) => { add(String(v), 18); add(readSino(v), 18); });
       SINO.forEach((n) => add(n, 15));
       NATIVE.forEach((n) => add(n, 15));
       break;
     case 'exp':
+      pExps.forEach((e) => { add(String(e), 18); add(readDigits(e), 18); });
       SINO.forEach((n) => add(n, 15));
       ['년', '월', '일'].forEach((n) => add(n, 10));
       break;
@@ -82,7 +107,8 @@ function buildPhrases(slot, products, cols) {
       YESNO.forEach((n) => add(n, 18));
       break;
     default:
-      prods.slice(0, 300).forEach((p) => add(p, 20));
+      pProds.forEach((p) => add(p, 20));
+      prods.slice(0, 300).forEach((p) => add(p, pProds.length ? 10 : 20));
       colList.forEach((c) => add(LETTER_SAY[String(c).toUpperCase()] || String(c), 12));
       SINO.forEach((n) => add(n, 8));
   }
@@ -143,7 +169,7 @@ exports.sttVoice = onCall(
       throw new HttpsError('invalid-argument', '녹음이 너무 길어요 — 한 문장씩 말씀해 주세요');
     }
 
-    const phrases = buildPhrases(data.slot, data.products, data.cols);
+    const phrases = buildPhrases(data.slot, data.products, data.cols, data.priority);
     const recognizer = `projects/${PROJECT_ID}/locations/${STT_LOCATION}/recognizers/_`;
 
     /* 1차: 어휘 부스트 켜고 시도.
