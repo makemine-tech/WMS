@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
 <script src="/wms_voice_parse.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -61,6 +62,9 @@ select{margin-bottom:10px;}
 .mic{width:100%;height:80px;border-radius:18px;border:none;background:#2563EB;color:#fff;font-size:19px;font-weight:800;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 24px rgba(37,99,235,.35);}
 .mic.on{background:#DC2626;animation:pulse 1.1s infinite;}
 .mic.ask{background:#059669;}
+.mic.think{background:#7C3AED;}
+.sttTg{font-size:10.5px;font-weight:800;border-radius:6px;padding:2px 6px;cursor:pointer;font-family:inherit;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:var(--sub);}
+.sttTg.on{color:#C4B5FD;background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.5);}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}70%{box-shadow:0 0 0 14px rgba(220,38,38,0);}100%{box-shadow:0 0 0 0 rgba(220,38,38,0);}}
 .hint{font-size:11.5px;color:var(--sub);text-align:center;}
 .typ{display:flex;gap:6px;margin-bottom:10px;}
@@ -171,7 +175,7 @@ function renderShell(){
       +'<datalist id="prodList"></datalist></div></details>'
     +'<div id="draftBox"></div>'
     +'<div class="sec">② 위치 말하기 — "에이 원 3층 입고" · "에이 원 3층 출고" · "에이 원 3층 뭐야"</div>'
-    +'<div class="box"><div class="lb"><span>알아들은 말</span><span id="micSt">대기</span></div><div class="heard interim" id="heard">아래 버튼을 누르고 말하세요</div></div>'
+    +'<div class="box"><div class="lb"><span>알아들은 말</span><span><button class="sttTg" id="sttTg" onclick="toggleSSTT()"></button> <span id="micSt">대기</span></span></div><div class="heard interim" id="heard">아래 버튼을 누르고 말하세요</div></div>'
     +'<div class="box" id="resBox" style="display:none"><div class="lb"><span>해석 · 처리</span></div><div class="grid" id="resGrid"></div><div id="chks"></div></div>'
     +'<div id="sayBox"></div>'
     +'<div class="typ"><input id="typIn" placeholder="문장 직접 입력 (예: 에이 원 3층 입고)" autocomplete="off"><button class="btn2" onclick="typedTest()">처리</button></div>'
@@ -186,7 +190,7 @@ function renderShell(){
   document.getElementById('typIn').addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); typedTest(); } });
   renderAll();
 }
-function renderAll(){ renderLists(); renderDraft(); renderLog(); renderCur(); renderDatalist(); }
+function renderAll(){ renderLists(); renderDraft(); renderLog(); renderCur(); renderDatalist(); paintSSTT(); }
 function renderDatalist(){ var d=document.getElementById('prodList'); if(d) d.innerHTML=PRODUCTS.slice().sort().map(function(p){return '<option value="'+esc(p)+'">';}).join(''); }
 function renderLists(){
   var box=document.getElementById('lists'); if(!box) return;
@@ -249,7 +253,7 @@ function setMicUI(state){
   var b=document.getElementById('micBtn'), st=document.getElementById('micSt'), hn=document.getElementById('hint'); if(!b) return;
   var M={cmd:['mic on','● 듣는 중… (말이 끝나면 자동 종료)','듣는 중'], fill:['mic on','● 이어서 말씀하세요','이어서 듣는 중'],
     confirm:['mic on','● "네" 또는 "아니오"','대답 듣는 중'], ask:['mic ask','🎙 눌러서 "네 / 아니오" 대답','대답 대기'],
-    wait:['mic ask','🎙 눌러서 이어서 말하기','빠진 항목 대기'], idle:['mic','🎙 눌러서 말하기','대기']}[state]||['mic','🎙 눌러서 말하기','대기'];
+    think:['mic think','⏳ 인식 중…','인식 중'], wait:['mic ask','🎙 눌러서 이어서 말하기','빠진 항목 대기'], idle:['mic','🎙 눌러서 말하기','대기']}[state]||['mic','🎙 눌러서 말하기','대기'];
   b.className=M[0]; b.textContent=M[1]; st.textContent=M[2];
   if(hn) hn.textContent=state==='ask'?'버튼을 누르고 대답하거나, 위의 네/아니오를 누르세요':state==='wait'?'말이 끊겨도 괜찮아요 — 적어둔 건 그대로 두고 빠진 것만 이어서 말하면 돼요':'탭하고 말하면 말이 끝날 때 자동으로 멈춰요 · 블루투스 버튼(Enter·Space·→)도 가능';
   renderCur();
@@ -271,12 +275,162 @@ function speak(text, cb){
   }catch(e){ done(); }
 }
 
+/* ── 정밀 인식(서버) ─────────────────────────────────────────
+   브라우저 Web Speech API 는 페이지가 어휘를 알려줄 방법이 없어서
+   "서리태15" / "에이 십" 같은 현장 말을 엉뚱하게 받아적는다.
+   여기서는 직접 녹음해서 Cloud Function 으로 보내고,
+   그 창고의 상품 목록을 부스트한 Google STT v2 결과를 받는다.
+   실패하면 기존 Web Speech 로 자동 폴백. ────────────────── */
+var SSTT_OK = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+var SSTT = SSTT_OK && lsGet('wms_voice_sstt') !== '0';
+var sttFails = 0, sttFn = null;
+function sttCall(){
+  if(!sttFn) sttFn = firebase.app().functions('asia-southeast1').httpsCallable('sttVoice', {timeout:60000});
+  return sttFn;
+}
+function paintSSTT(){
+  var el=document.getElementById('sttTg'); if(!el) return;
+  el.style.display = SSTT_OK?'':'none';
+  el.className='sttTg'+(SSTT?' on':'');
+  el.textContent = SSTT?'🎯 정밀인식 켬':'🎯 정밀인식 끔';
+}
+function setSSTT(on){
+  SSTT = !!on && SSTT_OK; sttFails = 0; lsSet('wms_voice_sstt', SSTT?'1':'0');
+  paintSSTT();
+  showHeard(SSTT?'정밀인식을 켰어요 — 창고 상품명을 우선해서 알아들어요':'정밀인식을 껐어요 — 브라우저 기본 인식을 써요', true);
+}
+window.toggleSSTT=function(){ setSSTT(!SSTT); };
+
+var micStream=null, mediaRec=null, audioCtx=null, vadTimer=null, sttAbort=false;
+function pickMime(){
+  var c=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
+  for(var i=0;i<c.length;i++){ if(MediaRecorder.isTypeSupported(c[i])) return c[i]; }
+  return '';
+}
+function getMic(){
+  if(micStream && micStream.active) return Promise.resolve(micStream);
+  return navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true}})
+    .then(function(s){ micStream=s; return s; });
+}
+function releaseMic(){
+  try{ if(micStream) micStream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+  micStream=null;
+}
+document.addEventListener('visibilitychange',function(){ if(document.hidden && !listening) releaseMic(); });
+
+function levelBar(v){ var n=Math.max(0,Math.min(10,Math.round(v*90))); return '█'.repeat(n)+'·'.repeat(10-n); }
+
+/* 말이 끝나는 지점 찾기 — 창고 소음을 감안해 첫 0.3초의 바닥소음 기준으로 문턱을 잡는다 */
+function startVAD(stream, onStop){
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+  }catch(e){ setTimeout(onStop, 4000); return; }
+  var src=audioCtx.createMediaStreamSource(stream);
+  var an=audioCtx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.2; src.connect(an);
+  var buf=new Uint8Array(an.fftSize);
+  var t0=Date.now(), floor=0, floorN=0, thr=0.012, spoke=false, lastLoud=0;
+  vadTimer=setInterval(function(){
+    an.getByteTimeDomainData(buf);
+    var s=0; for(var i=0;i<buf.length;i++){ var d=(buf[i]-128)/128; s+=d*d; }
+    var rms=Math.sqrt(s/buf.length), el=Date.now()-t0;
+    if(el<300){ floor+=rms; floorN++; if(floorN) thr=Math.max(0.012, (floor/floorN)*2.6); }
+    else {
+      if(rms>thr){ spoke=true; lastLoud=Date.now(); }
+      if(!spoke && el>6000) return finish('no-speech');
+      if(spoke && Date.now()-lastLoud>900) return finish('done');
+      if(el>15000) return finish('done');
+    }
+    showHeard((spoke?'● ':'○ ')+levelBar(rms), true);
+  }, 50);
+  function finish(why){
+    clearInterval(vadTimer); vadTimer=null;
+    try{ src.disconnect(); }catch(e){}
+    onStop(why);
+  }
+}
+function stopVAD(){ if(vadTimer){ clearInterval(vadTimer); vadTimer=null; } }
+
+function listenServer(mode){
+  var mt=pickMime();
+  sttAbort=false; listening=true; setMicUI(mode);
+  showHeard('○ '+levelBar(0), true);
+  getMic().then(function(stream){
+    if(sttAbort){ listening=false; setMicUI(idleState()); return; }
+    var chunks=[];
+    var r; try{ r=new MediaRecorder(stream, mt?{mimeType:mt, audioBitsPerSecond:32000}:undefined); }
+    catch(e){ return fallback('녹음을 시작할 수 없어요'); }
+    mediaRec=r;
+    r.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
+    r.onstop=function(){
+      stopVAD(); mediaRec=null; listening=false;
+      if(sttAbort){ setMicUI(idleState()); return; }
+      var blob=new Blob(chunks, {type:mt||'audio/webm'});
+      if(blob.size<1200){ showHeard('말소리가 들리지 않았어요', true); setMicUI(idleState()); return; }
+      sendAudio(blob, mt, mode);
+    };
+    r.start();
+    startVAD(stream, function(why){
+      if(why==='no-speech'){ sttAbort=true; try{ r.stop(); }catch(e){}
+        showHeard('말소리가 들리지 않았어요', true); listening=false; setMicUI(idleState()); return; }
+      try{ r.stop(); }catch(e){}
+    });
+  }).catch(function(err){
+    var m=(err&&err.name==='NotAllowedError')?'마이크 권한이 꺼져 있어요 — 주소창 왼쪽 자물쇠에서 마이크를 허용해 주세요':'마이크를 열 수 없어요';
+    fallback(m);
+  });
+  function fallback(msg){
+    stopVAD(); listening=false; mediaRec=null;
+    showHeard(msg, true);
+    setMicUI(idleState());
+  }
+}
+
+function sendAudio(blob, mt, mode){
+  setMicUI('think');
+  showHeard('인식 중…', true);
+  var fr=new FileReader();
+  fr.onerror=function(){ sttFail('오디오를 읽지 못했어요', mode); };
+  fr.onload=function(){
+    var b64=String(fr.result||'').split(',')[1]||'';
+    if(!b64) return sttFail('오디오가 비었어요', mode);
+    sttCall()({audio:b64, mime:mt||'audio/webm', phrases:PRODUCTS.slice(0,400)})
+      .then(function(res){
+        var d=res&&res.data||{}, alts=d.alts||[];
+        if(!alts.length){ showHeard('알아듣지 못했어요 — 다시 말씀해 주세요', true); setMicUI(idleState()); return; }
+        sttFails=0;
+        if(d.adapted===false) addLog('⚠ 어휘 부스트 없이 인식됨 — 정확도가 낮을 수 있어요');
+        if(mode==='confirm') handleConfirm(alts); else { showHeard(alts[0], false); handleCommand(alts); }
+      })
+      .catch(function(err){ sttFail((err&&err.message)||'인식 서버에 연결하지 못했어요', mode); });
+  };
+  fr.readAsDataURL(blob);
+}
+function sttFail(msg, mode){
+  sttFails++;
+  addLog('⚠ 정밀인식 실패 — '+msg);
+  if(sttFails>=3){
+    setSSTT(false);
+    showHeard('정밀인식이 계속 실패해서 기본 인식으로 바꿨어요 ('+msg+')', true);
+    setMicUI(idleState());
+    return;
+  }
+  showHeard('정밀인식 실패 — 기본 인식으로 다시 들어볼게요 ('+msg+')', true);
+  listenWeb(mode);
+}
+
 /* ── 음성 인식 ── */
 function micPress(){ keepAwake(); if(listening){ stopListen(); return; } listen(pending?'confirm':(DRAFT?'fill':'cmd')); }
 window.micPress=micPress;
 function idleState(){ return pending?'ask':(DRAFT?'wait':'idle'); }
-function stopListen(){ if(rec){ try{ rec.abort(); }catch(e){} } rec=null; listening=false; setMicUI(idleState()); }
-function listen(mode){
+function stopListen(){
+  sttAbort=true; stopVAD();
+  if(mediaRec){ try{ mediaRec.stop(); }catch(e){} mediaRec=null; }
+  if(rec){ try{ rec.abort(); }catch(e){} } rec=null; listening=false; setMicUI(idleState());
+}
+/* 정밀인식(서버)을 우선 쓰고, 안 되면 브라우저 기본 인식으로 */
+function listen(mode){ if(SSTT) return listenServer(mode); return listenWeb(mode); }
+function listenWeb(mode){
   if(!SR){ showHeard('이 브라우저는 음성 인식을 지원하지 않아요 (안드로이드 크롬 권장)', true); return; }
   try{ speechSynthesis.cancel(); }catch(e){}
   if(rec){ try{ rec.abort(); }catch(e){} }
