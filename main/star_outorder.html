@@ -3372,7 +3372,6 @@ function cpBoxGroups(){
   }
   return multi;
 }
-function cpBoxGroupKey(g){ return g.etc ? '§etc' : (g.pre + '§' + g.suf + (g.plain ? '§p' : '')); }
 function cpBoxGroupLabel(g){
   if (g.plain) return escH(g.pre);
   return escH(g.pre) + '<i>번호</i>' + escH(g.suf);
@@ -3387,44 +3386,53 @@ function cpBoxDone(id){
   return '';
 }
 
+/* 방금 그린 목록 — onclick 에는 번호만 넘긴다.
+   박스ID 를 따옴표로 감싸 넣으면 onclick="..." 속성이 그 따옴표에서 끊겨 아무 일도 일어나지 않는다. */
+var cpBoxGroupsCache = [];
 function cpBoxListRender(){
   var host = document.getElementById('cpBoxListWrap');
   if (!host || !cpBoxListOn) return;
   var groups = cpBoxGroups();
+  cpBoxGroupsCache = groups;
   if (!groups.length) {
     host.innerHTML = '<div class="bl-none">입고 등록된 박스가 없습니다</div>';
     return;
   }
-  var head = '<div class="bl-groups">' + groups.map(function(g){
-    var k = cpBoxGroupKey(g);
+  if (cpBoxListGroup != null && !groups[cpBoxListGroup]) cpBoxListGroup = null;
+
+  var head = '<div class="bl-groups">' + groups.map(function(g, gi){
     var left = g.ids.filter(function(x){ return !cpBoxDone(x.id); }).length;
-    return '<button class="bl-g' + (cpBoxListGroup === k ? ' on' : '') + '"'
-      + ' onclick="cpBoxListOpen(' + JSON.stringify(k) + ')">'
+    return '<button type="button" class="bl-g' + (cpBoxListGroup === gi ? ' on' : '') + '"'
+      + ' onclick="cpBoxListOpen(' + gi + ')">'
       + cpBoxGroupLabel(g)
       + '<em>' + left + ' / ' + g.ids.length + '</em></button>';
   }).join('') + '</div>';
 
   var body = '';
-  var cur = groups.filter(function(g){ return cpBoxGroupKey(g) === cpBoxListGroup; })[0];
+  var cur = (cpBoxListGroup == null) ? null : groups[cpBoxListGroup];
   if (!cur) {
     body = '<div class="bl-none">위에서 규칙을 누르면 그 박스들이 모두 펼쳐집니다</div>';
   } else {
-    body = '<div class="bl-chips">' + cur.ids.map(function(x){
+    body = '<div class="bl-chips">' + cur.ids.map(function(x, xi){
       var st = cpBoxDone(x.id);
-      return '<button class="bl-b' + (st ? ' done' : '') + '"'
-        + ' onclick="cpBoxListPick(' + JSON.stringify(x.id) + ')"'
+      return '<button type="button" class="bl-b' + (st ? ' done' : '') + '"'
+        + ' onclick="cpBoxListPick(' + xi + ')"'
         + (st ? ' title="' + escAttrLocal(st) + '"' : '') + '>'
         + escH(x.id) + (st ? '<u>✓</u>' : '') + '</button>';
     }).join('') + '</div>';
   }
   host.innerHTML = head + body;
 }
-function cpBoxListOpen(key){
-  cpBoxListGroup = (cpBoxListGroup === key) ? null : key;
+function cpBoxListOpen(gi){
+  cpBoxListGroup = (cpBoxListGroup === gi) ? null : gi;
   cpBoxListRender();
 }
 /* 박스를 누르면 그 박스를 스캔한 것과 똑같이 처리한다 */
-function cpBoxListPick(id){
+function cpBoxListPick(xi){
+  var g = (cpBoxListGroup == null) ? null : cpBoxGroupsCache[cpBoxListGroup];
+  var row = g && g.ids[xi];
+  if (!row) return;
+  var id = row.id;
   var st = cpBoxDone(id);
   if (st && !confirm('이 박스는 이미 ' + st + ' 상태입니다.\n\n' + id + '\n\n그래도 다시 처리할까요?')) return;
   cpHandleScan(id);
