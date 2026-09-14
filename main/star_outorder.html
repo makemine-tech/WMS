@@ -311,6 +311,34 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .bl-b i{font-style:normal;margin-left:.32rem;padding:.04rem .28rem;border-radius:3px;font-size:.68rem;font-weight:900;background:rgba(255,255,255,.1);letter-spacing:.02em}
 .bl-b em{font-style:normal;margin-left:.22rem;font-size:.66rem;font-weight:800;opacity:.6}
 .bl-b.done i{background:rgba(255,255,255,.05)}
+/* 규칙 동시체크 — 칩 왼쪽 네모. 둘 이상 체크하면 합산 개괄표만 */
+.bl-g .ck{font-size:1rem;line-height:1;margin-left:-.12rem;opacity:.75;font-family:inherit;font-style:normal}
+.bl-g .ck:hover{opacity:1;color:var(--o)}
+.bl-g.bl-tool{color:var(--mu);border-style:dashed;font-family:inherit;font-size:.76rem}
+/* 센터 묶음 머리 — 수량 · 총예상 파렛트/박스 · 작업/남은 · 파렛트당 박스 입력 */
+.bl-sh.bl-ch{flex-wrap:wrap;gap:.3rem .6rem;padding:.38rem .5rem;background:rgba(255,255,255,.035);border-radius:6px;font-size:.76rem}
+.bl-ch .ct{color:var(--y);font-weight:900;font-size:.88rem}
+.bl-ch .q{color:var(--tx);font-family:var(--mo);font-weight:800}
+.bl-ch .q small{color:var(--mu);font-weight:700;font-size:.68rem}
+.bl-ch .q .rm{color:var(--y)}
+.bl-ch .tot{color:#8fe8b3;font-weight:800}
+.bl-ch .tot b{font-family:var(--mo);font-size:.92rem;font-weight:900;color:#8fe8b3}
+.bl-ch .wk{color:var(--mu);font-weight:700}
+.bl-ch .wk b{font-family:var(--mo);font-size:.76rem;font-weight:900;color:var(--b)}
+.bl-ch .wk b.lf{color:var(--o)}
+.bl-bpp{margin-left:auto;display:flex;align-items:center;gap:.25rem;color:var(--mu);font-weight:800;font-size:.72rem;white-space:nowrap;cursor:default}
+.bl-bpp input{width:3.6rem;padding:.2rem .3rem;background:#0f1117;border:1.5px solid var(--o);border-radius:5px;color:var(--o);font-family:var(--mo);font-weight:900;font-size:.88rem;text-align:right}
+.bl-bpp input:placeholder-shown{border-style:dashed}
+/* 여러 규칙 합산 개괄표 */
+.bl-ov{margin-top:.55rem}
+.bl-ov .ov-t{font-size:.82rem;font-weight:900;color:var(--tx);margin-bottom:.35rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:baseline}
+.bl-ov .ov-t em{font-style:normal;font-size:.72rem;color:var(--mu);font-weight:700;font-family:var(--mo)}
+.bl-ov .tbl td.n,.bl-ov .tbl th.n{text-align:right;font-family:var(--mo);white-space:nowrap}
+.bl-ov .tbl td.ctr{font-weight:900;color:var(--y);white-space:nowrap}
+.bl-ov .tbl td.hi{font-weight:900;color:#8fe8b3;font-size:.86rem}
+.bl-ov .tbl td.lf{color:var(--o);font-weight:800}
+.bl-ov .tbl tr.sum td{border-top:1.5px solid var(--br);font-weight:900;background:rgba(255,255,255,.03)}
+.bl-ov .bl-bpp{margin:0;justify-content:flex-end}
 /* 센터별 묶음 */
 .bl-legend{display:flex;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 .1rem;font-size:.72rem;color:var(--mu);align-items:center}
 .bl-legend .lg{display:flex;align-items:center;gap:.25rem;font-weight:700}
@@ -3413,7 +3441,8 @@ function cpPalletShort(eta, center){
  * 박스를 누르면 그 박스를 스캔한 것과 똑같이 처리된다(입고대기로).
  * 이미 처리한 박스는 흐리게 표시해 두 번 누르지 않게 한다. */
 var cpBoxListOn = false;
-var cpBoxListGroup = null;   /* 펼쳐 놓은 규칙 키 */
+/* 선택한 규칙 키들 — 1개면 그 박스들을 칩으로 펼치고, 2개 이상 동시체크하면 센터별 합산 개괄표만 보여 준다 */
+var cpBoxListSel = [];
 var cpBoxSeenTs = {};        /* 박스ID → 마지막 입고 시각 (최근 입고가 위로) */
 /* 정렬 기준 — 'no' 박스번호 순차 / 'center' 출고센터별 묶음 / 'sku' 같은 상품끼리 */
 var cpBoxSort = 'center';
@@ -3444,7 +3473,7 @@ function cpBoxGroups(){
   Object.keys(boxIndex || {}).forEach(function(id){
     var a = String(id).match(/^(\D*)(\d+)(\D*)$/);
     var key = a ? (a[1] + '§' + a[3]) : ('§§' + id);
-    if (!m[key]) m[key] = { pre: a ? a[1] : id, suf: a ? a[3] : '', plain: !a, ids: [], ts: 0 };
+    if (!m[key]) m[key] = { key: key, pre: a ? a[1] : id, suf: a ? a[3] : '', plain: !a, ids: [], ts: 0 };
     var g = m[key];
     g.ids.push({ id: id, no: a ? +a[2] : 0 });
     var t = cpBoxSeenTs[id] || 0;
@@ -3458,7 +3487,7 @@ function cpBoxGroups(){
   /* 최근에 입고된 규칙이 위로 — 지난달 박스가 먼저 나오지 않게 */
   multi.sort(function(a,b){ return b.ts - a.ts || b.ids.length - a.ids.length; });
   if (lone.length) {
-    var etc = { pre:'기타', suf:'', plain:true, etc:true, ids:[], ts:0 };
+    var etc = { key:'§etc§', pre:'기타', suf:'', plain:true, etc:true, ids:[], ts:0 };
     lone.forEach(function(g){
       etc.ids = etc.ids.concat(g.ids);
       if (g.ts > etc.ts) etc.ts = g.ts;
@@ -3525,10 +3554,14 @@ var CP_BOX_KIND = { whole:'완박스', part:'일부출고', cross:'센터분리'
 function cpBoxListRender(){
   var host = document.getElementById('cpBoxListWrap');
   if (!host || !cpBoxListOn) return;
+  /* 파렛트당 박스를 치는 중이면 지금 다시 그리지 않는다 — 칸을 떠날 때(cpBppDone) 그린다 */
+  var ae = document.activeElement;
+  if (ae && ae.closest && host.contains(ae) && ae.closest('.bl-bpp')) { cpBoxListRender._defer = true; return; }
   var groups = cpBoxGroups();
   cpBoxGroupsCache = groups;
   if (!groups.length) { host.innerHTML = '<div class="bl-none">입고 등록된 박스가 없습니다</div>'; return; }
-  if (cpBoxListGroup != null && !groups[cpBoxListGroup]) cpBoxListGroup = null;
+  cpBoxListSel = cpBoxListSel.filter(function(k){ return groups.some(function(g){ return g.key === k; }); });
+  var selGroups = groups.filter(function(g){ return cpBoxListSel.indexOf(g.key) >= 0; });
   var plan = cpBoxPlan();
 
   /* ⓪ 정렬 기준 — 박스번호순 / 출고센터별 */
@@ -3548,18 +3581,27 @@ function cpBoxListRender(){
       var c = plan ? cpBoxClass(x.id) : null;
       if (c && c.k !== 'none') { ship++; if (!cpBoxDone(x.id)) left++; }
     });
-    var cls = 'bl-g' + (cpBoxListGroup === gi ? ' on' : '') + (plan ? (ship ? ' has' : ' nil') : '');
+    var picked = cpBoxListSel.indexOf(g.key) >= 0;
+    var cls = 'bl-g' + (picked ? ' on' : '') + (plan ? (ship ? ' has' : ' nil') : '');
     return '<button type="button" class="' + cls + '" onclick="cpBoxListOpen(' + gi + ')">'
+      + '<i class="ck" onclick="event.stopPropagation();cpBoxListCheck(' + gi + ')"'
+      + ' title="동시체크 — 규칙을 둘 이상 체크하면 합쳐서 센터별 파렛트·박스 개괄표만 보여 줍니다">' + (picked ? '☑' : '☐') + '</i>'
       + cpBoxGroupLabel(g)
       + '<em>' + (plan ? (ship ? '출고 ' + ship + ' · 남은 ' + left : '해당없음') : g.ids.length + '개') + '</em></button>';
-  }).join('') + '</div>';
+  }).join('')
+    + (plan ? '<button type="button" class="bl-g bl-tool" onclick="cpBoxListCheckAll()" title="이번 발주로 나갈 박스가 있는 규칙을 모두 체크">☑ 출고 규칙 모두</button>' : '')
+    + (cpBoxListSel.length ? '<button type="button" class="bl-g bl-tool" onclick="cpBoxListClear()">✕ 선택 해제</button>' : '')
+    + '</div>';
 
   var body = '';
-  var cur = (cpBoxListGroup == null) ? null : groups[cpBoxListGroup];
-  if (!cur) {
+  var cur = (selGroups.length === 1) ? selGroups[0] : null;
+  if (selGroups.length > 1) {
+    body = plan ? cpBoxCtrOverview(selGroups, plan)
+                : '<div class="bl-legend">발주(PO)를 올리면 센터별 파렛트·박스 개괄표가 계산됩니다</div>';
+  } else if (!cur) {
     body = '<div class="bl-none">위에서 규칙을 누르면 그 박스들이 '
          + (cpBoxSort === 'no' ? '박스번호순으로' : cpBoxSort === 'sku' ? '상품별로' : '센터별로')
-         + ' 펼쳐집니다</div>';
+         + ' 펼쳐집니다 · 칩 왼쪽 ☐ 로 여러 규칙을 동시체크하면 합산 개괄표가 나옵니다</div>';
   } else if (!plan) {
     body = '<div class="bl-legend">발주(PO)를 올리면 센터와 색이 함께 표시됩니다</div>';
     if (cpBoxSort === 'sku') {
@@ -3595,8 +3637,13 @@ function cpBoxListRender(){
                         '센터 구분 없이 박스번호 오름차순 — 칩 오른쪽 약자가 나갈 센터입니다 (예: 인4 = 인천4)',
                         { ctr:true });
     } else {
-      Object.keys(byCtr).sort().forEach(function(ctr){
-        body += cpBoxSect('🏢 ' + ctr, 'c-ctr', byCtr[ctr], ctr + ' 로만 나가는 박스');
+      /* 센터마다 머리줄에 수량·파렛트·박스 예측 — 센터 교차 박스로만 나가는 센터도 머리줄은 낸다 */
+      var cst = cpBoxCtrStats(cur.ids.map(function(x){ return x.id; }), plan);
+      var ctrNames = Object.keys(byCtr);
+      cst.list.forEach(function(e){ if (ctrNames.indexOf(e.center) < 0) ctrNames.push(e.center); });
+      ctrNames.sort().forEach(function(ctr){
+        body += cpBoxSect('🏢 ' + ctr, 'c-ctr', byCtr[ctr] || [], ctr + ' 로만 나가는 박스', null,
+                          cst.by[ctr] ? cpBoxCtrHead(cst.by[ctr]) : '');
       });
       body += cpBoxSect('⚯ 센터 교차', 'c-cross', cross, '두 센터 이상으로 나뉘는 박스 — 뜯어서 나눠 담아야 합니다', { ctr:true });
       body += cpBoxSect('▫ 잔류 · 이번 발주 해당없음', 'c-none', none, '이번 발주로 나갈 것이 없는 박스');
@@ -3608,14 +3655,170 @@ function cpBoxListRender(){
 
 /* 묶음 한 덩어리 — 제목줄(남은/전체) + 박스 칩들.
  * arr 는 [박스, 원래인덱스, 분류, 칩옵션?] 배열. defOpt 는 칩옵션이 없는 항목의 기본값. */
-function cpBoxSect(title, cls, arr, tip, defOpt){
-  if (!arr.length) return '';
+function cpBoxSect(title, cls, arr, tip, defOpt, headHtml){
+  if (!arr.length && !headHtml) return '';
   var doneN = arr.filter(function(t){ return cpBoxDone(t[0].id); }).length;
-  return '<div class="bl-sect ' + cls + '">'
-    + '<div class="bl-sh"' + (tip ? ' title="' + escAttrLocal(tip) + '"' : '') + '>' + escH(title)
-    + '<b>' + (arr.length - doneN) + ' / ' + arr.length + '</b></div>'
-    + '<div class="bl-chips">' + arr.map(function(t){ return cpBoxChip(t[0], t[1], t[2], t[3] || defOpt); }).join('') + '</div>'
+  var head = headHtml
+    || ('<div class="bl-sh"' + (tip ? ' title="' + escAttrLocal(tip) + '"' : '') + '>' + escH(title)
+        + '<b>' + (arr.length - doneN) + ' / ' + arr.length + '</b></div>');
+  return '<div class="bl-sect ' + cls + '">' + head
+    + (arr.length
+        ? '<div class="bl-chips">' + arr.map(function(t){ return cpBoxChip(t[0], t[1], t[2], t[3] || defOpt); }).join('') + '</div>'
+        : '<div class="bl-none">이 센터로만 나가는 박스는 없습니다 — 아래 센터 교차 박스에서 나눠 담습니다</div>')
     + '</div>';
+}
+
+/* ═══ 센터별 파렛트·박스 예측 ═══
+ * ids(박스ID 목록) 범위 안에서만 센다.
+ *   총수량 · 출고 · 잔여 : 배분 계획(cpBoxPlan)의 출고 라인 — 이미 처리한 박스는 실제 배분
+ *   작업 박스            : 처리 기록(완료·입고대기·처리대기)의 서로 다른 출고박스 (출고박스번호, 없으면 원박스)
+ *   작업 파렛트          : 처리 기록의 서로 다른 파렛트번호 (입고일+번호)
+ *   남은 박스            : 아직 처리 안 한 박스 중 이 센터로 나갈 게 있는 것 —
+ *                          혼적(센터 교차)은 센터별로 나눠 담는다고 보고 센터마다 1박스씩
+ *   남은 파렛트          = ⌈남은 박스 ÷ 파렛트당 박스⌉,  총예상 = 작업 + 남은 */
+function cpBoxCtrStats(ids, plan){
+  var by = {}, idSet = {};
+  ids.forEach(function(id){ idSet[id] = 1; });
+  function ent(c){ return by[c] || (by[c] = { center:c, skus:{}, qty:0, shipped:0, left:0, boxSet:{}, palSet:{} }); }
+  ids.forEach(function(id){
+    var b = plan && plan.byId[id];
+    if (!b) return;
+    b.lines.forEach(function(l){
+      if (l.kind !== 'ship') return;
+      var e = ent(l.center);
+      e.skus[l.bc] = 1;
+      e.qty += l.qty;
+      if (b.done) e.shipped += l.qty;
+    });
+    if (!b.done) b.centers.forEach(function(c){ ent(c).left++; });
+  });
+  var ws = workSession || {}, rows = ws.rows || [];
+  function rec(r, withPallet){
+    var src = r.srcBoxBarcode || r.boxBarcode || '';
+    if (!src || !idSet[src]) return;
+    if (r.unmatched || r.srcIdx == null || r.srcIdx < 0) return;
+    var row = rows[r.srcIdx] || {};
+    var e = ent(String(row.center || r.palletCenter || r.center || '').trim() || '(센터없음)');
+    e.boxSet[r.shipBoxNo || src] = 1;
+    if (withPallet && +r.palletNo > 0) e.palSet[(r.palletEta || row.eta || '') + '|' + (+r.palletNo)] = 1;
+  }
+  (ws.scans   || []).forEach(function(s){ if (!s.undone) rec(s, true); });
+  (ws.staging || []).forEach(function(t){ rec(t, true); });
+  (ws.pending || []).forEach(function(p){ rec(p, false); });
+
+  var list = Object.keys(by).map(function(c){
+    var e = by[c], n = cpBoxPerPallet(c);
+    e.skuCnt  = Object.keys(e.skus).length;
+    e.rem     = Math.max(0, e.qty - e.shipped);
+    e.doneBox = Object.keys(e.boxSet).length;
+    e.donePal = Object.keys(e.palSet).length;
+    e.bpp     = n;
+    e.leftPal = n ? Math.ceil(e.left / n) : null;
+    e.totBox  = e.doneBox + e.left;
+    e.totPal  = n ? e.donePal + e.leftPal : null;
+    return e;
+  }).filter(function(e){ return e.qty > 0 || e.doneBox > 0; })
+    .sort(function(a, b){ return a.center < b.center ? -1 : a.center > b.center ? 1 : 0; });
+  var out = {};
+  list.forEach(function(e){ out[e.center] = e; });
+  return { list: list, by: out };
+}
+
+/* 센터 머리줄 — 경기광주5  680개(12SKU) / 출고 190 (잔여 490) · 총예상 9P / 70박스 (작업 3P 22박스 · 남은 6P / 48박스)  파렛트당 [8] 박스 */
+function cpBoxCtrHead(e){
+  var P = function(v){ return v == null ? '?' : v; };
+  return '<div class="bl-sh bl-ch">'
+    + '<span class="ct">🏢 ' + escH(e.center) + '</span>'
+    + '<span class="q" title="이 센터로 나갈 총수량 / 지금까지 출고(처리)한 수량 (남은 수량)">'
+    +   e.qty + '<small>개·' + e.skuCnt + 'SKU</small> / 출고 ' + e.shipped + ' <span class="rm">(잔여 ' + e.rem + ')</span></span>'
+    + '<span class="tot" title="총예상 = 지금까지 작업 + 남은 예상">총예상 <b>' + P(e.totPal) + '</b>파렛트 / <b>' + e.totBox + '</b>박스</span>'
+    + '<span class="wk" title="작업 = 지금까지 쌓은 파렛트·출고박스 · 남은 = 아직 처리 안 한 박스(혼적은 센터마다 1박스) ÷ 파렛트당 박스">'
+    +   '(작업 <b>' + e.donePal + '</b>파렛트 <b>' + e.doneBox + '</b>박스 · 남은 <b class="lf">' + P(e.leftPal) + '</b>파렛트 / <b class="lf">' + e.left + '</b>박스)</span>'
+    + cpBppInput(e.center, e.bpp)
+    + '</div>';
+}
+
+/* 파렛트당 적재 박스수 — 센터별. 세션이 있으면 세션에(다른 기기와 공유), 없으면 이 기기에만 */
+var CP_BPP_LS = 'cpBoxPerPallet';
+function cpBppKey(c){ return String(c || '').replace(/[.#$\/\[\]]/g, '_'); }
+function cpBppLocal(){ try { return JSON.parse(localStorage.getItem(CP_BPP_LS) || '{}') || {}; } catch (e) { return {}; } }
+function cpBoxPerPallet(c){
+  var k = cpBppKey(c);
+  var v = workSession && workSession.boxPerPallet && workSession.boxPerPallet[k];
+  if (!(+v > 0)) v = cpBppLocal()[k];
+  return +v > 0 ? Math.floor(+v) : 0;
+}
+function cpSetBoxPerPallet(c, val){
+  var k = cpBppKey(c), n = Math.floor(+val);
+  if (!(n > 0)) n = 0;
+  var m = cpBppLocal();
+  if (n) m[k] = n; else delete m[k];
+  try { localStorage.setItem(CP_BPP_LS, JSON.stringify(m)); } catch (e) {}
+  if (workSession) {
+    workSession.boxPerPallet = Object.assign({}, workSession.boxPerPallet || {});
+    if (n) workSession.boxPerPallet[k] = n; else delete workSession.boxPerPallet[k];
+    if (workSessionRef) { try { workSessionRef.child('boxPerPallet/' + k).set(n || null); } catch (e) {} }
+  }
+  cpBoxListRender._defer = true;
+  cpBppDone();
+}
+/* 입력 중에는 다시 그리지 않는다 (스캔·동기화로 목록이 새로 그려지면 치던 숫자가 날아간다) — 칸을 떠나면 그린다 */
+function cpBppDone(){
+  setTimeout(function(){
+    if (cpBoxListRender._defer) { cpBoxListRender._defer = false; cpBoxListRender(); }
+  }, 0);
+}
+function cpBppInput(c, n){
+  return '<label class="bl-bpp" title="이 센터 파렛트 1개에 박스를 몇 개 쌓는지 — 넣으면 남은·총예상 파렛트수가 계산됩니다">'
+    + '파렛트당 <input type="number" min="1" step="1" inputmode="numeric" value="' + (n || '') + '" placeholder="?"'
+    + ' data-ctr="' + escAttrLocal(c) + '"'
+    + ' onchange="cpSetBoxPerPallet(this.getAttribute(\'data-ctr\'), this.value)"'
+    + ' onblur="cpBppDone()" onclick="this.select()"'
+    + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}"> 박스</label>';
+}
+
+/* 📊 여러 규칙 동시체크 — 박스 칩 없이 센터별 계산값만 */
+function cpBoxCtrOverview(gs, plan){
+  var ids = [];
+  gs.forEach(function(g){ g.ids.forEach(function(x){ ids.push(x.id); }); });
+  var st = cpBoxCtrStats(ids, plan);
+  var h = '<div class="bl-ov"><div class="ov-t">📊 센터별 개괄 — ' + gs.map(cpBoxGroupLabel).join(' + ')
+        + '<em>규칙 ' + gs.length + '개 · 박스 ' + ids.length + '개</em></div>';
+  if (!st.list.length) return h + '<div class="bl-none">체크한 규칙에는 이번 발주로 나갈 박스가 없습니다</div></div>';
+  var T = { skus:{}, qty:0, shipped:0, rem:0, donePal:0, doneBox:0, left:0, leftPal:0, totPal:0, totBox:0, miss:0 };
+  var rowsH = st.list.map(function(e){
+    Object.keys(e.skus).forEach(function(bc){ T.skus[bc] = 1; });
+    T.qty += e.qty; T.shipped += e.shipped; T.rem += e.rem;
+    T.donePal += e.donePal; T.doneBox += e.doneBox; T.left += e.left; T.totBox += e.totBox;
+    if (e.bpp) { T.leftPal += e.leftPal; T.totPal += e.totPal; } else T.miss++;
+    return '<tr><td class="ctr">' + escH(e.center) + '</td>'
+      + '<td class="n">' + e.skuCnt + '</td><td class="n">' + e.qty + '</td><td class="n">' + e.shipped + '</td>'
+      + '<td class="n lf">' + e.rem + '</td>'
+      + '<td class="n">' + e.donePal + '</td><td class="n">' + e.doneBox + '</td>'
+      + '<td class="n lf">' + e.left + '</td>'
+      + '<td class="n">' + cpBppInput(e.center, e.bpp) + '</td>'
+      + '<td class="n lf">' + (e.bpp ? e.leftPal : '?') + '</td>'
+      + '<td class="n hi">' + (e.bpp ? e.totPal : '?') + '</td><td class="n hi">' + e.totBox + '</td></tr>';
+  }).join('');
+  var missTxt = T.miss ? ' <span style="color:var(--mu);font-size:.66rem">+' + T.miss + '곳 미입력</span>' : '';
+  h += '<div class="tbl-wrap" style="max-height:52vh"><table class="tbl"><thead><tr>'
+     + '<th>센터</th><th class="n">SKU</th><th class="n">총수량</th><th class="n">출고</th><th class="n">잔여</th>'
+     + '<th class="n" title="지금까지 쌓은 파렛트">작업 파렛트</th><th class="n" title="지금까지 출고한 박스">작업 박스</th>'
+     + '<th class="n" title="아직 처리 안 한 박스 — 혼적은 센터마다 1박스">남은 박스</th>'
+     + '<th class="n">파렛트당 박스</th><th class="n">남은 파렛트</th>'
+     + '<th class="n">총예상 파렛트</th><th class="n">총예상 박스</th>'
+     + '</tr></thead><tbody>' + rowsH
+     + '<tr class="sum"><td>합계 (' + st.list.length + '센터)</td>'
+     + '<td class="n">' + Object.keys(T.skus).length + '</td><td class="n">' + T.qty + '</td><td class="n">' + T.shipped + '</td>'
+     + '<td class="n lf">' + T.rem + '</td><td class="n">' + T.donePal + '</td><td class="n">' + T.doneBox + '</td>'
+     + '<td class="n lf">' + T.left + '</td><td class="n"></td>'
+     + '<td class="n lf">' + T.leftPal + missTxt + '</td>'
+     + '<td class="n hi">' + T.totPal + missTxt + '</td><td class="n hi">' + T.totBox + '</td></tr>'
+     + '</tbody></table></div>'
+     + '<div class="bl-note"><b>남은 박스</b> = 아직 처리 안 한 박스 (혼적·센터 교차 박스는 센터마다 따로 1박스) · '
+     + '<b>남은 파렛트</b> = 남은 박스 ÷ 파렛트당 박스 (올림) · <b>총예상</b> = 지금까지 작업 + 남은 예상. '
+     + '한 규칙만 누르면 다시 박스 칩이 펼쳐집니다.</div></div>';
+  return h;
 }
 
 /* 🧩 상품별 — 박스가 달라도 같은 상품바코드끼리 한 묶음으로 모은다.
@@ -3696,13 +3899,36 @@ function cpBoxChip(x, xi, c, o){
     + (st ? '<u>✓</u>' : '') + '</button>';
 }
 
+/* 규칙 칩 누름 — 그 규칙 하나만 펼친다 (이미 그것만 열려 있으면 닫는다) */
 function cpBoxListOpen(gi){
-  cpBoxListGroup = (cpBoxListGroup === gi) ? null : gi;
+  var g = cpBoxGroupsCache[gi];
+  if (!g) return;
+  cpBoxListSel = (cpBoxListSel.length === 1 && cpBoxListSel[0] === g.key) ? [] : [g.key];
   cpBoxListRender();
 }
+/* ☐ 동시체크 — 넣었다 뺐다 */
+function cpBoxListCheck(gi){
+  var g = cpBoxGroupsCache[gi];
+  if (!g) return;
+  var i = cpBoxListSel.indexOf(g.key);
+  if (i >= 0) cpBoxListSel.splice(i, 1); else cpBoxListSel.push(g.key);
+  cpBoxListRender();
+}
+function cpBoxListCheckAll(){
+  var plan = cpBoxPlan();
+  if (!plan) return;
+  cpBoxListSel = cpBoxGroupsCache.filter(function(g){
+    return g.ids.some(function(x){ var c = cpBoxClass(x.id); return c && c.k !== 'none'; });
+  }).map(function(g){ return g.key; });
+  cpBoxListRender();
+}
+function cpBoxListClear(){ cpBoxListSel = []; cpBoxListRender(); }
 /* 박스를 누르면 그 박스를 스캔한 것과 똑같이 처리한다 */
 function cpBoxListPick(xi){
-  var g = (cpBoxListGroup == null) ? null : cpBoxGroupsCache[cpBoxListGroup];
+  var g = null;
+  if (cpBoxListSel.length === 1) {
+    cpBoxGroupsCache.forEach(function(x){ if (x.key === cpBoxListSel[0]) g = x; });
+  }
   var row = g && g.ids[xi];
   if (!row) return;
   var id = row.id;
