@@ -339,6 +339,15 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .bl-ov .tbl td.lf{color:var(--o);font-weight:800}
 .bl-ov .tbl tr.sum td{border-top:1.5px solid var(--br);font-weight:900;background:rgba(255,255,255,.03)}
 .bl-ov .bl-bpp{margin:0;justify-content:flex-end}
+/* 파렛트당 박스 — 박스번호 군별. 흐린 칸 = 같은 군을 다른 센터에서 넣은 값을 이어 씀 */
+.bl-bpp i{font-style:normal;color:var(--o);opacity:.75}
+.bl-bpp.inh input{border-style:dashed;color:#b98a6e;opacity:.8}
+.bl-ch .fr,.bl-ov .fr{color:var(--mu);font-size:.68rem;font-weight:700;margin-left:.15rem;font-family:var(--mo)}
+.bl-ov .tbl tr.crow td{border-top:1.5px solid rgba(255,255,255,.09)}
+.bl-ov .tbl td.mu{color:var(--mu);font-size:.68rem;font-family:inherit}
+.bl-ov .tbl tr.sub td{font-size:.74rem;color:var(--mu);background:rgba(255,255,255,.015);padding-top:.28rem;padding-bottom:.28rem}
+.bl-ov .tbl tr.sub td.gl{padding-left:1.1rem;font-family:var(--mo);font-weight:800;color:var(--tx);white-space:nowrap}
+.bl-ov .tbl tr.sub td.gl i{font-style:normal;color:var(--o);opacity:.75}
 /* 센터별 묶음 */
 .bl-legend{display:flex;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 .1rem;font-size:.72rem;color:var(--mu);align-items:center}
 .bl-legend .lg{display:flex;align-items:center;gap:.25rem;font-weight:700}
@@ -3638,7 +3647,7 @@ function cpBoxListRender(){
                         { ctr:true });
     } else {
       /* 센터마다 머리줄에 수량·파렛트·박스 예측 — 센터 교차 박스로만 나가는 센터도 머리줄은 낸다 */
-      var cst = cpBoxCtrStats(cur.ids.map(function(x){ return x.id; }), plan);
+      var cst = cpBoxCtrStats([cur], plan);
       var ctrNames = Object.keys(byCtr);
       cst.list.forEach(function(e){ if (ctrNames.indexOf(e.center) < 0) ctrNames.push(e.center); });
       ctrNames.sort().forEach(function(ctr){
@@ -3668,54 +3677,84 @@ function cpBoxSect(title, cls, arr, tip, defOpt, headHtml){
     + '</div>';
 }
 
-/* ═══ 센터별 파렛트·박스 예측 ═══
- * ids(박스ID 목록) 범위 안에서만 센다.
+/* ═══ 센터별 파렛트·박스 예측 (용적률) ═══
+ * gs(선택한 규칙 = 박스번호 군들) 범위 안에서만 센다.
+ * 파렛트당 박스는 박스번호 군마다 다르다 — 군마다 박스 크기가 달라 STA 는 8개, SI 는 12개, SIA 는 20개처럼
+ * 한 파렛트에 쌓이는 양이 다르다. 그래서 값은 (군 × 센터) 마다 따로 두고,
+ * 박스 1개가 차지하는 파렛트 비율(1 ÷ 파렛트당 박스)을 군별로 더해 센터 파렛트수를 낸다.
+ *   예) STA 12박스÷8 = 1.5  +  SI 18박스÷12 = 1.5  +  SIA 20박스÷20 = 1.0  →  4.0  →  4파렛트
+ *       (STA 넘친 4개 + SI 넘친 6개는 반 파렛트씩이라 둘이 합쳐 1파렛트)
  *   총수량 · 출고 · 잔여 : 배분 계획(cpBoxPlan)의 출고 라인 — 이미 처리한 박스는 실제 배분
- *   작업 박스            : 처리 기록(완료·입고대기·처리대기)의 서로 다른 출고박스 (출고박스번호, 없으면 원박스)
- *   작업 파렛트          : 처리 기록의 서로 다른 파렛트번호 (입고일+번호)
- *   남은 박스            : 아직 처리 안 한 박스 중 이 센터로 나갈 게 있는 것 —
- *                          혼적(센터 교차)은 센터별로 나눠 담는다고 보고 센터마다 1박스씩
- *   남은 파렛트          = ⌈남은 박스 ÷ 파렛트당 박스⌉,  총예상 = 작업 + 남은 */
-function cpBoxCtrStats(ids, plan){
-  var by = {}, idSet = {};
-  ids.forEach(function(id){ idSet[id] = 1; });
-  function ent(c){ return by[c] || (by[c] = { center:c, skus:{}, qty:0, shipped:0, left:0, boxSet:{}, palSet:{} }); }
-  ids.forEach(function(id){
-    var b = plan && plan.byId[id];
+ *   작업 박스 / 파렛트   : 처리 기록(완료·입고대기·처리대기)의 서로 다른 출고박스 / 파렛트번호(입고일+번호)
+ *   남은 박스            : 아직 처리 안 한 박스 — 혼적(센터 교차)은 센터별로 나눠 담는다고 보고 센터마다 1박스씩
+ *   남은 파렛트          = ⌈ Σ 군별 (남은 박스 ÷ 파렛트당 박스) ⌉ ,  총예상 = 작업 + 남은 */
+function cpBoxCtrStats(gs, plan){
+  var by = {}, gOf = {}, gIdx = {};
+  gs.forEach(function(g, i){ gIdx[g.key] = i; g.ids.forEach(function(x){ gOf[x.id] = g; }); });
+  function blank(){ return { skus:{}, qty:0, shipped:0, left:0, boxSet:{}, palSet:{} }; }
+  function ent(c){
+    var e = by[c];
+    if (!e) { e = by[c] = blank(); e.center = c; e.grp = {}; }
+    return e;
+  }
+  function sub(e, g){
+    return e.grp[g.key] || (e.grp[g.key] = Object.assign(blank(), { g:g, key:g.key }));
+  }
+  Object.keys(gOf).forEach(function(id){
+    var b = plan && plan.byId[id], g = gOf[id];
     if (!b) return;
     b.lines.forEach(function(l){
       if (l.kind !== 'ship') return;
       var e = ent(l.center);
-      e.skus[l.bc] = 1;
-      e.qty += l.qty;
-      if (b.done) e.shipped += l.qty;
+      [e, sub(e, g)].forEach(function(o){
+        o.skus[l.bc] = 1;
+        o.qty += l.qty;
+        if (b.done) o.shipped += l.qty;
+      });
     });
-    if (!b.done) b.centers.forEach(function(c){ ent(c).left++; });
+    if (!b.done) b.centers.forEach(function(c){ var e = ent(c); e.left++; sub(e, g).left++; });
   });
   var ws = workSession || {}, rows = ws.rows || [];
   function rec(r, withPallet){
-    var src = r.srcBoxBarcode || r.boxBarcode || '';
-    if (!src || !idSet[src]) return;
+    var src = r.srcBoxBarcode || r.boxBarcode || '', g = src ? gOf[src] : null;
+    if (!g) return;
     if (r.unmatched || r.srcIdx == null || r.srcIdx < 0) return;
     var row = rows[r.srcIdx] || {};
     var e = ent(String(row.center || r.palletCenter || r.center || '').trim() || '(센터없음)');
-    e.boxSet[r.shipBoxNo || src] = 1;
-    if (withPallet && +r.palletNo > 0) e.palSet[(r.palletEta || row.eta || '') + '|' + (+r.palletNo)] = 1;
+    var pk = (withPallet && +r.palletNo > 0) ? (r.palletEta || row.eta || '') + '|' + (+r.palletNo) : '';
+    [e, sub(e, g)].forEach(function(o){
+      o.boxSet[r.shipBoxNo || src] = 1;
+      if (pk) o.palSet[pk] = 1;
+    });
   }
   (ws.scans   || []).forEach(function(s){ if (!s.undone) rec(s, true); });
   (ws.staging || []).forEach(function(t){ rec(t, true); });
   (ws.pending || []).forEach(function(p){ rec(p, false); });
 
+  function fin(o){
+    o.skuCnt  = Object.keys(o.skus).length;
+    o.rem     = Math.max(0, o.qty - o.shipped);
+    o.doneBox = Object.keys(o.boxSet).length;
+    o.donePal = Object.keys(o.palSet).length;
+    o.totBox  = o.doneBox + o.left;
+    return o;
+  }
   var list = Object.keys(by).map(function(c){
-    var e = by[c], n = cpBoxPerPallet(c);
-    e.skuCnt  = Object.keys(e.skus).length;
-    e.rem     = Math.max(0, e.qty - e.shipped);
-    e.doneBox = Object.keys(e.boxSet).length;
-    e.donePal = Object.keys(e.palSet).length;
-    e.bpp     = n;
-    e.leftPal = n ? Math.ceil(e.left / n) : null;
-    e.totBox  = e.doneBox + e.left;
-    e.totPal  = n ? e.donePal + e.leftPal : null;
+    var e = fin(by[c]), frac = 0, miss = 0;
+    e.subs = Object.keys(e.grp).map(function(k){ return fin(e.grp[k]); })
+      .filter(function(s){ return s.qty > 0 || s.doneBox > 0; })
+      .sort(function(a, b){ return gIdx[a.key] - gIdx[b.key]; });
+    e.subs.forEach(function(s){
+      var v = cpBoxPerPallet(s.key, c);
+      s.bpp  = v.n;
+      s.inh  = v.inh;
+      s.frac = v.n ? s.left / v.n : null;
+      if (s.left > 0) { if (v.n) frac += s.frac; else miss++; }
+    });
+    e.frac    = frac;
+    e.miss    = miss;
+    e.leftPal = miss ? null : Math.ceil(frac - 1e-9);   /* 1/3×3 = 1.0000000000000002 같은 부동소수 오차로 한 파렛트 더 붙지 않게 */
+    e.totPal  = e.leftPal == null ? null : e.donePal + e.leftPal;
     return e;
   }).filter(function(e){ return e.qty > 0 || e.doneBox > 0; })
     .sort(function(a, b){ return a.center < b.center ? -1 : a.center > b.center ? 1 : 0; });
@@ -3723,8 +3762,11 @@ function cpBoxCtrStats(ids, plan){
   list.forEach(function(e){ out[e.center] = e; });
   return { list: list, by: out };
 }
+/* 용적 파렛트 표기 — 1.5, 0.25 (소수 둘째 자리까지) */
+function cpBppFrac(x){ return x == null ? '?' : String(Math.round(x * 100) / 100); }
 
-/* 센터 머리줄 — 경기광주5  680개(12SKU) / 출고 190 (잔여 490) · 총예상 9P / 70박스 (작업 3P 22박스 · 남은 6P / 48박스)  파렛트당 [8] 박스 */
+/* 센터 머리줄 — 경기광주5  680개·12SKU / 출고 190 (잔여 490)  총예상 9파렛트 / 70박스
+ *              (작업 3파렛트 22박스 · 남은 6파렛트(5.5) / 48박스)  STA-번호 파렛트당 [8] 박스 */
 function cpBoxCtrHead(e){
   var P = function(v){ return v == null ? '?' : v; };
   return '<div class="bl-sh bl-ch">'
@@ -3732,32 +3774,44 @@ function cpBoxCtrHead(e){
     + '<span class="q" title="이 센터로 나갈 총수량 / 지금까지 출고(처리)한 수량 (남은 수량)">'
     +   e.qty + '<small>개·' + e.skuCnt + 'SKU</small> / 출고 ' + e.shipped + ' <span class="rm">(잔여 ' + e.rem + ')</span></span>'
     + '<span class="tot" title="총예상 = 지금까지 작업 + 남은 예상">총예상 <b>' + P(e.totPal) + '</b>파렛트 / <b>' + e.totBox + '</b>박스</span>'
-    + '<span class="wk" title="작업 = 지금까지 쌓은 파렛트·출고박스 · 남은 = 아직 처리 안 한 박스(혼적은 센터마다 1박스) ÷ 파렛트당 박스">'
-    +   '(작업 <b>' + e.donePal + '</b>파렛트 <b>' + e.doneBox + '</b>박스 · 남은 <b class="lf">' + P(e.leftPal) + '</b>파렛트 / <b class="lf">' + e.left + '</b>박스)</span>'
-    + cpBppInput(e.center, e.bpp)
+    + '<span class="wk" title="남은 파렛트 = 남은 박스 ÷ 파렛트당 박스 (괄호는 올림 전 용적) · 혼적 박스는 센터마다 1박스">'
+    +   '(작업 <b>' + e.donePal + '</b>파렛트 <b>' + e.doneBox + '</b>박스 · 남은 <b class="lf">' + P(e.leftPal) + '</b>파렛트'
+    +   (e.leftPal != null && e.frac !== e.leftPal ? '<small class="fr">(' + cpBppFrac(e.frac) + ')</small>' : '')
+    +   ' / <b class="lf">' + e.left + '</b>박스)</span>'
+    + e.subs.map(function(s){ return cpBppInput(s, e.center, cpBoxGroupLabel(s.g) + ' 파렛트당'); }).join('')
     + '</div>';
 }
 
-/* 파렛트당 적재 박스수 — 센터별. 세션이 있으면 세션에(다른 기기와 공유), 없으면 이 기기에만 */
-var CP_BPP_LS = 'cpBoxPerPallet';
-function cpBppKey(c){ return String(c || '').replace(/[.#$\/\[\]]/g, '_'); }
+/* 파렛트당 적재 박스수 — (박스번호 군 × 센터) 마다.
+ * 세션이 있으면 세션(bppByGroup)에 저장해 다른 기기와 공유, 없으면 이 기기에만.
+ * 한 센터에 넣은 값은 같은 군의 '기본값'(군|*)도 되어, 아직 안 넣은 다른 센터는 그 값을 흐리게 이어 쓴다. */
+var CP_BPP_LS = 'cpBppByGroup';
+function cpBppKey(gkey, c){ return (String(gkey || '') + '|' + String(c || '')).replace(/[.#$\/\[\]]/g, '_'); }
 function cpBppLocal(){ try { return JSON.parse(localStorage.getItem(CP_BPP_LS) || '{}') || {}; } catch (e) { return {}; } }
-function cpBoxPerPallet(c){
-  var k = cpBppKey(c);
-  var v = workSession && workSession.boxPerPallet && workSession.boxPerPallet[k];
+function cpBppRead(k){
+  var v = workSession && workSession.bppByGroup && workSession.bppByGroup[k];
   if (!(+v > 0)) v = cpBppLocal()[k];
   return +v > 0 ? Math.floor(+v) : 0;
 }
-function cpSetBoxPerPallet(c, val){
-  var k = cpBppKey(c), n = Math.floor(+val);
+function cpBoxPerPallet(gkey, c){
+  var n = cpBppRead(cpBppKey(gkey, c));
+  if (n) return { n:n, inh:false };
+  n = cpBppRead(cpBppKey(gkey, '*'));
+  return { n:n, inh:!!n };
+}
+function cpSetBoxPerPallet(gkey, c, val){
+  var n = Math.floor(+val);
   if (!(n > 0)) n = 0;
+  var sets = {};
+  sets[cpBppKey(gkey, c)] = n || null;
+  if (n) sets[cpBppKey(gkey, '*')] = n;
   var m = cpBppLocal();
-  if (n) m[k] = n; else delete m[k];
+  Object.keys(sets).forEach(function(k){ if (sets[k]) m[k] = sets[k]; else delete m[k]; });
   try { localStorage.setItem(CP_BPP_LS, JSON.stringify(m)); } catch (e) {}
   if (workSession) {
-    workSession.boxPerPallet = Object.assign({}, workSession.boxPerPallet || {});
-    if (n) workSession.boxPerPallet[k] = n; else delete workSession.boxPerPallet[k];
-    if (workSessionRef) { try { workSessionRef.child('boxPerPallet/' + k).set(n || null); } catch (e) {} }
+    var sm = workSession.bppByGroup = Object.assign({}, workSession.bppByGroup || {});
+    Object.keys(sets).forEach(function(k){ if (sets[k]) sm[k] = sets[k]; else delete sm[k]; });
+    if (workSessionRef) { try { workSessionRef.child('bppByGroup').update(sets); } catch (e) {} }
   }
   cpBoxListRender._defer = true;
   cpBppDone();
@@ -3768,44 +3822,61 @@ function cpBppDone(){
     if (cpBoxListRender._defer) { cpBoxListRender._defer = false; cpBoxListRender(); }
   }, 0);
 }
-function cpBppInput(c, n){
-  return '<label class="bl-bpp" title="이 센터 파렛트 1개에 박스를 몇 개 쌓는지 — 넣으면 남은·총예상 파렛트수가 계산됩니다">'
-    + '파렛트당 <input type="number" min="1" step="1" inputmode="numeric" value="' + (n || '') + '" placeholder="?"'
-    + ' data-ctr="' + escAttrLocal(c) + '"'
-    + ' onchange="cpSetBoxPerPallet(this.getAttribute(\'data-ctr\'), this.value)"'
+/* s = 군별 집계(key·bpp·inh). lblHtml 은 이미 이스케이프된 HTML */
+function cpBppInput(s, c, lblHtml){
+  var tip = s.inh
+    ? '같은 박스번호 군을 다른 센터에서 넣은 값을 이어 쓰는 중 — 이 센터만 다르면 고쳐 넣으세요'
+    : '이 박스번호 군의 박스를 파렛트 1개에 몇 개 쌓는지 — 군마다 박스 크기가 달라 따로 넣습니다';
+  return '<label class="bl-bpp' + (s.inh ? ' inh' : '') + '" title="' + escAttrLocal(tip) + '">'
+    + (lblHtml || '') + ' <input type="number" min="1" step="1" inputmode="numeric" value="' + (s.bpp || '') + '" placeholder="?"'
+    + ' data-g="' + escAttrLocal(s.key) + '" data-ctr="' + escAttrLocal(c) + '"'
+    + ' onchange="cpSetBoxPerPallet(this.getAttribute(\'data-g\'), this.getAttribute(\'data-ctr\'), this.value)"'
     + ' onblur="cpBppDone()" onclick="this.select()"'
     + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}"> 박스</label>';
 }
 
-/* 📊 여러 규칙 동시체크 — 박스 칩 없이 센터별 계산값만 */
+/* 📊 여러 규칙 동시체크 — 박스 칩 없이 센터별 계산값만. 센터 줄 아래에 군별 줄(파렛트당 박스 입력·용적) */
 function cpBoxCtrOverview(gs, plan){
-  var ids = [];
-  gs.forEach(function(g){ g.ids.forEach(function(x){ ids.push(x.id); }); });
-  var st = cpBoxCtrStats(ids, plan);
+  var nBox = 0;
+  gs.forEach(function(g){ nBox += g.ids.length; });
+  var st = cpBoxCtrStats(gs, plan);
   var h = '<div class="bl-ov"><div class="ov-t">📊 센터별 개괄 — ' + gs.map(cpBoxGroupLabel).join(' + ')
-        + '<em>규칙 ' + gs.length + '개 · 박스 ' + ids.length + '개</em></div>';
+        + '<em>규칙 ' + gs.length + '개 · 박스 ' + nBox + '개</em></div>';
   if (!st.list.length) return h + '<div class="bl-none">체크한 규칙에는 이번 발주로 나갈 박스가 없습니다</div></div>';
   var T = { skus:{}, qty:0, shipped:0, rem:0, donePal:0, doneBox:0, left:0, leftPal:0, totPal:0, totBox:0, miss:0 };
   var rowsH = st.list.map(function(e){
     Object.keys(e.skus).forEach(function(bc){ T.skus[bc] = 1; });
     T.qty += e.qty; T.shipped += e.shipped; T.rem += e.rem;
     T.donePal += e.donePal; T.doneBox += e.doneBox; T.left += e.left; T.totBox += e.totBox;
-    if (e.bpp) { T.leftPal += e.leftPal; T.totPal += e.totPal; } else T.miss++;
-    return '<tr><td class="ctr">' + escH(e.center) + '</td>'
+    if (e.leftPal != null) { T.leftPal += e.leftPal; T.totPal += e.totPal; } else T.miss++;
+    var r = '<tr class="crow"><td class="ctr">' + escH(e.center) + '</td>'
       + '<td class="n">' + e.skuCnt + '</td><td class="n">' + e.qty + '</td><td class="n">' + e.shipped + '</td>'
       + '<td class="n lf">' + e.rem + '</td>'
       + '<td class="n">' + e.donePal + '</td><td class="n">' + e.doneBox + '</td>'
       + '<td class="n lf">' + e.left + '</td>'
-      + '<td class="n">' + cpBppInput(e.center, e.bpp) + '</td>'
-      + '<td class="n lf">' + (e.bpp ? e.leftPal : '?') + '</td>'
-      + '<td class="n hi">' + (e.bpp ? e.totPal : '?') + '</td><td class="n hi">' + e.totBox + '</td></tr>';
+      + '<td class="n mu">' + (e.subs.length > 1 ? '군별 합산 ↓' : '↓') + '</td>'
+      + '<td class="n lf">' + (e.leftPal == null ? '?' : e.leftPal)
+      +   '<small class="fr">(' + cpBppFrac(e.frac) + (e.miss ? ' +' + e.miss + '군 미입력' : '') + ')</small></td>'
+      + '<td class="n hi">' + (e.totPal == null ? '?' : e.totPal) + '</td><td class="n hi">' + e.totBox + '</td></tr>';
+    e.subs.forEach(function(s){
+      r += '<tr class="sub"><td class="gl">└ ' + cpBoxGroupLabel(s.g) + '</td>'
+        + '<td class="n">' + s.skuCnt + '</td><td class="n">' + s.qty + '</td><td class="n">' + s.shipped + '</td>'
+        + '<td class="n">' + s.rem + '</td>'
+        + '<td class="n">' + s.donePal + '</td><td class="n">' + s.doneBox + '</td>'
+        + '<td class="n">' + s.left + '</td>'
+        + '<td class="n">' + cpBppInput(s, e.center, '') + '</td>'
+        + '<td class="n" title="용적 = 남은 박스 ÷ 파렛트당 박스">' + (s.left ? cpBppFrac(s.frac) : '0') + '</td>'
+        + '<td class="n"></td><td class="n">' + s.totBox + '</td></tr>';
+    });
+    return r;
   }).join('');
-  var missTxt = T.miss ? ' <span style="color:var(--mu);font-size:.66rem">+' + T.miss + '곳 미입력</span>' : '';
-  h += '<div class="tbl-wrap" style="max-height:52vh"><table class="tbl"><thead><tr>'
-     + '<th>센터</th><th class="n">SKU</th><th class="n">총수량</th><th class="n">출고</th><th class="n">잔여</th>'
+  var missTxt = T.miss ? ' <span style="color:var(--mu);font-size:.66rem">+' + T.miss + '센터 미입력</span>' : '';
+  h += '<div class="tbl-wrap" style="max-height:60vh"><table class="tbl"><thead><tr>'
+     + '<th>센터 / 박스번호 군</th><th class="n">SKU</th><th class="n">총수량</th><th class="n">출고</th><th class="n">잔여</th>'
      + '<th class="n" title="지금까지 쌓은 파렛트">작업 파렛트</th><th class="n" title="지금까지 출고한 박스">작업 박스</th>'
      + '<th class="n" title="아직 처리 안 한 박스 — 혼적은 센터마다 1박스">남은 박스</th>'
-     + '<th class="n">파렛트당 박스</th><th class="n">남은 파렛트</th>'
+     + '<th class="n" title="박스번호 군마다 따로 — 박스 크기가 달라 쌓이는 개수가 다릅니다">파렛트당 박스</th>'
+     + '<th class="n" title="센터 줄 = 군별 용적 합을 올림 (괄호가 합) · 군 줄 = 그 군의 용적">남은 파렛트 (용적)</th>'
      + '<th class="n">총예상 파렛트</th><th class="n">총예상 박스</th>'
      + '</tr></thead><tbody>' + rowsH
      + '<tr class="sum"><td>합계 (' + st.list.length + '센터)</td>'
@@ -3815,9 +3886,10 @@ function cpBoxCtrOverview(gs, plan){
      + '<td class="n lf">' + T.leftPal + missTxt + '</td>'
      + '<td class="n hi">' + T.totPal + missTxt + '</td><td class="n hi">' + T.totBox + '</td></tr>'
      + '</tbody></table></div>'
-     + '<div class="bl-note"><b>남은 박스</b> = 아직 처리 안 한 박스 (혼적·센터 교차 박스는 센터마다 따로 1박스) · '
-     + '<b>남은 파렛트</b> = 남은 박스 ÷ 파렛트당 박스 (올림) · <b>총예상</b> = 지금까지 작업 + 남은 예상. '
-     + '한 규칙만 누르면 다시 박스 칩이 펼쳐집니다.</div></div>';
+     + '<div class="bl-note"><b>파렛트당 박스</b>는 박스번호 군마다 따로 넣습니다 (박스 크기가 달라서) · '
+     + '<b>용적</b> = 남은 박스 ÷ 파렛트당 박스 — 예) STA 12÷8=1.5 + SI 18÷12=1.5 + SIA 20÷20=1.0 = 4.0 → 4파렛트 · '
+     + '<b>남은 파렛트</b> = 센터의 군별 용적 합을 올림 · <b>총예상</b> = 작업 + 남은 · '
+     + '흐린 칸은 같은 군을 다른 센터에서 넣은 값을 이어 쓰는 중입니다.</div></div>';
   return h;
 }
 
