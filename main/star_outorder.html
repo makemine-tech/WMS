@@ -561,6 +561,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-del:hover{background:rgba(240,88,88,.18)}
 .cp-done-del:active{transform:scale(.94)}
 .cp-done-tbl tbody tr.undone .cp-done-del{display:none}
+/* 상품 바코드 라벨 인쇄 — 출고수량만큼 (✕ 옆) */
+.cp-done-acts{display:inline-flex;gap:.3rem;align-items:center}
+.cp-done-prt{background:transparent;border:1px solid rgba(240,196,74,.55);color:var(--y);font-size:.8rem;width:24px;height:24px;border-radius:4px;cursor:pointer;padding:0;line-height:1;font-family:inherit}
+.cp-done-prt:hover{background:rgba(240,196,74,.18)}
+.cp-done-prt:active{transform:scale(.94)}
 .cp-done-tbl .c-box{color:var(--b);font-weight:800}
 .cp-done-tbl .c-bc{color:var(--y);font-weight:800}
 .cp-done-tbl .c-code{color:var(--g);font-weight:700}
@@ -5626,7 +5631,10 @@ function cpRefreshDonePool(){
       /* 개별 삭제 버튼 — ts+barcode+srcBoxBarcode 조합으로 식별 */
       var keyArgs = (+s.ts||0)+',\''+escAttrLocal(s.barcode||'')+'\',\''+escAttrLocal(s.srcBoxBarcode||'')+'\'';
       var delBtn = s.undone ? '' :
-        '<button type="button" class="cp-done-del" title="이 출고 항목 삭제 (취소)" onclick="cpDeleteScanByKey('+keyArgs+')">✕</button>';
+        '<span class="cp-done-acts">'+
+          '<button type="button" class="cp-done-del" title="이 출고 항목 삭제 (취소)" onclick="cpDeleteScanByKey('+keyArgs+')">✕</button>'+
+          '<button type="button" class="cp-done-prt" title="이 상품 바코드 라벨을 출고수량('+(+s.qty||0)+')만큼 인쇄" onclick="cpPrintDoneScanLabels('+keyArgs+')">🖨</button>'+
+        '</span>';
       /* 출고수량 inline 수정 */
       var qtyCell = s.undone
         ? '+' + s.qty
@@ -5666,6 +5674,25 @@ function cpRefreshDonePool(){
     });
   });
   body.innerHTML = html;
+}
+
+/* 완료풀 한 줄 → 그 상품의 바코드 라벨을 출고수량만큼 인쇄 (80x40mm, 덧방과 같은 즉시 인쇄).
+ * 줄 식별은 삭제 버튼과 같은 (ts, 바코드, 원박스) 조합. 수량은 표에서 고친 값이 반영된 현재 기록을 읽는다. */
+function cpPrintDoneScanLabels(ts, barcode, srcBoxBarcode){
+  if (!workSession) return;
+  var s = (workSession.scans || []).filter(function(x){
+    return !x.undone && (+x.ts || 0) === (+ts || 0)
+        && String(x.barcode || '') === String(barcode || '')
+        && String(x.srcBoxBarcode || '') === String(srcBoxBarcode || '');
+  })[0];
+  if (!s) { cpFlash('warn','⚠️ 이 출고 항목을 찾지 못했습니다 — 목록이 바뀌었을 수 있습니다'); return; }
+  var qty = Math.floor(+s.qty || 0);
+  if (qty <= 0) { cpFlash('warn','⚠️ 출고수량이 0 이라 인쇄할 라벨이 없습니다'); return; }
+  if (qty > 50 && !confirm('상품 바코드 ' + (s.barcode || '') + ' 라벨을 ' + qty + '장 인쇄합니다.\n\n계속할까요?')) return;
+  var item = { barcode: s.barcode, qty: qty, srcIdx: s.srcIdx, box: s.srcBoxBarcode || s.boxBarcode || s.shipBoxNo || '' };
+  if (typeof cpPrintLabelsDirect === 'function') cpPrintLabelsDirect([item]);
+  else cpPrintLabelsFromItems([item]);
+  cpFlash('ok','🖨 ' + escH(s.barcode || '') + ' 라벨 ' + qty + '장 인쇄');
 }
 
 /* ═══════════ 혼적 라벨 인쇄 (80x40mm, 2 SKU/페이지 자동 분할) ═══════════
