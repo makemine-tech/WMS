@@ -965,6 +965,15 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-item .bc{font-family:var(--mo);font-size:.7rem;color:var(--mu);letter-spacing:.04em}
 .cp-staging-item .qt{font-weight:900;color:var(--g);font-family:var(--mo);min-width:36px;text-align:right}
 .cp-staging-item .acts{display:flex;gap:.3rem;flex-shrink:0}
+/* 입고대기 줄 — 완료 + 대기 = 합계 / 출고 · 남음·마감·초과 (대기/삭제 버튼 옆) */
+.cp-staging-item .rq{font-family:var(--mo);font-size:.7rem;color:var(--mu);font-weight:700;white-space:nowrap;padding:.12rem .4rem;border-radius:4px;border:1px solid var(--br);background:#0a0d13}
+.cp-staging-item .rq b{color:var(--tx);font-weight:900}
+.cp-staging-item .rq small{font-size:.66rem}
+.cp-staging-item .rq em{font-style:normal;font-weight:900;margin-left:.3rem;padding:.02rem .34rem;border-radius:3px}
+.cp-staging-item .rq.left em{color:var(--g);background:rgba(74,240,168,.12)}
+.cp-staging-item .rq.full em{color:var(--b);background:rgba(91,156,246,.16)}
+.cp-staging-item .rq.over{border-color:rgba(240,88,88,.55)}
+.cp-staging-item .rq.over em{color:#fff;background:var(--r)}
 .cp-staging-item .acts button{font-size:.66rem;font-weight:800;padding:.2rem .45rem;border-radius:4px;cursor:pointer;border:1px solid;background:transparent;font-family:inherit}
 .cp-staging-item .acts .del{color:var(--r);border-color:rgba(240,88,88,.5)}
 .cp-staging-item .acts .del:hover{background:rgba(240,88,88,.16)}
@@ -2551,19 +2560,42 @@ function cpPlanPoRows(){
   }).filter(function(r){ return r.need > 0; });
 }
 /* 박스 안 바코드 → PO 라인 인덱스들 (직접 → alt → 숫자코어, 소량 센터 우선 정렬) */
-function cpPlanMatchIdxs(bc, rows, centerTot){
+/* 발주줄 바코드 찾아보기 표 — 정규화 바코드 / 원바코드 / 숫자코어 → 줄 번호(오름차순).
+ * 계획은 박스 × SKU × 발주줄마다 바코드를 정규화해 비교했다 (수천 박스면 수백만 번). 한 번만 만들어 둔다. */
+function cpPlanMatchIndex(rows){
+  var mx = { direct:{}, src:{}, core:{} };
+  function add(m, k, i){
+    if (!k) return;
+    var a = m[k] || (m[k] = []);
+    if (a[a.length - 1] !== i) a.push(i);
+  }
+  rows.forEach(function(r, i){
+    var s = normBarcode(r.srcBarcode), p = normBarcode(r.poBarcode);
+    add(mx.direct, s, i); add(mx.direct, p, i);
+    add(mx.src, s, i);
+    add(mx.core, barcodeCore(r.srcBarcode), i); add(mx.core, barcodeCore(r.poBarcode), i);
+  });
+  return mx;
+}
+function cpPlanMatchIdxs(bc, rows, centerTot, mx){
   var idxs = [], i;
-  for (i=0; i<rows.length; i++){
-    if (normBarcode(rows[i].srcBarcode) === bc || normBarcode(rows[i].poBarcode) === bc) idxs.push(i);
-  }
-  if (!idxs.length && stockByAlt[bc]) {
-    var src = stockByAlt[bc];
-    for (i=0; i<rows.length; i++){ if (normBarcode(rows[i].srcBarcode) === src) idxs.push(i); }
-  }
-  if (!idxs.length) {
-    var core = barcodeCore(bc);
-    if (core) for (i=0; i<rows.length; i++){
-      if (barcodeCore(rows[i].srcBarcode) === core || barcodeCore(rows[i].poBarcode) === core) idxs.push(i);
+  if (mx) {
+    idxs = (mx.direct[bc] || []).slice();
+    if (!idxs.length && stockByAlt[bc]) idxs = (mx.src[stockByAlt[bc]] || []).slice();
+    if (!idxs.length) { var c0 = barcodeCore(bc); if (c0) idxs = (mx.core[c0] || []).slice(); }
+  } else {
+    for (i=0; i<rows.length; i++){
+      if (normBarcode(rows[i].srcBarcode) === bc || normBarcode(rows[i].poBarcode) === bc) idxs.push(i);
+    }
+    if (!idxs.length && stockByAlt[bc]) {
+      var src = stockByAlt[bc];
+      for (i=0; i<rows.length; i++){ if (normBarcode(rows[i].srcBarcode) === src) idxs.push(i); }
+    }
+    if (!idxs.length) {
+      var core = barcodeCore(bc);
+      if (core) for (i=0; i<rows.length; i++){
+        if (barcodeCore(rows[i].srcBarcode) === core || barcodeCore(rows[i].poBarcode) === core) idxs.push(i);
+      }
     }
   }
   if (idxs.length > 1) {
@@ -2646,7 +2678,11 @@ function cpBuildBoxPlan(){
   /* 이미 처리한 박스는 기록대로 — 남은 발주수량을 먼저 깎아 놓는다 */
   var actualByBox = cpPlanActualLines(rows, remain);
 
-  var boxIds = Object.keys(boxIndex).sort(function(a,b){ return String(a).localeCompare(String(b), 'ko', {numeric:true}); });
+  var mx = cpPlanMatchIndex(rows);
+  /* localeCompare(…, 'ko', {numeric}) 는 부를 때마다 비교기를 새로 만든다 — 같은 규칙의 비교기 하나로 */
+  var koNum = (typeof Intl !== 'undefined' && Intl.Collator) ? new Intl.Collator('ko', { numeric:true }).compare
+            : function(a, b){ return String(a).localeCompare(String(b), 'ko', {numeric:true}); };
+  var boxIds = Object.keys(boxIndex).sort(function(a,b){ return koNum(String(a), String(b)); });
   var boxes = [], skipBoxes = 0, skipQty = 0;
 
   boxIds.forEach(function(boxId){
@@ -2664,7 +2700,7 @@ function cpBuildBoxPlan(){
       var qty = +contents[bc] || 0;
       if (qty <= 0) return;
       var meta = stockMeta[bc] || {};
-      var idxs = cpPlanMatchIdxs(bc, rows, centerTot);
+      var idxs = cpPlanMatchIdxs(bc, rows, centerTot, mx);
       if (!idxs.length) { lines.push({ bc:bc, name: meta.name||'', center:'잔류', qty:qty, kind:'none' }); return; }
       var left = qty;
       idxs.forEach(function(ix){
@@ -3030,6 +3066,43 @@ function cpScheduleScanUI(){
   _cpUiRaf = requestAnimationFrame(function(){ _cpUiRaf = null; cpRefreshScanUI(); });
 }
 
+/* ═══ 화면 갱신 한 번 동안 쓰는 집계 캐시 ═══
+ * 목록을 한 번 그릴 때 줄마다·칩마다 scans / staging / pending 전체를 다시 훑었다
+ * (발주줄 수 × 기록 수, 박스칩 수 × 기록 수, 완료풀 줄 수 × 스캔 수 …).
+ * 박스 하나 누를 때마다 이게 두세 번씩 돌아 반응이 느렸다.
+ * 기록을 한 번만 훑어 표를 만들어 두고, 그리는 동안만 쓰고 버린다 (바뀐 데이터에 옛 값을 쓰지 않게). */
+var _cpIdx = null;
+function cpBuildIdx(){
+  var ws = workSession || {}, rows = ws.rows || [];
+  var ix = { shipped:{}, staged:{}, pending:{}, boxSt:{}, palBox:{} };
+  (ws.scans || []).forEach(function(s){
+    if (s.undone) return;
+    ix.shipped[s.srcIdx] = (ix.shipped[s.srcIdx] || 0) + (+s.qty || 0);
+    if (s.srcBoxBarcode) ix.boxSt[s.srcBoxBarcode] = '처리됨';
+    if (s.boxBarcode)    ix.boxSt[s.boxBarcode]    = '처리됨';
+    var r = rows[s.srcIdx] || {};
+    var pk = (s.palletEta || r.eta || '') + '|' + (s.palletCenter || r.center || '') + '|' + (+s.palletNo || 1);
+    var bk = s.shipBoxNo || s.srcBoxBarcode;
+    if (bk) (ix.palBox[pk] || (ix.palBox[pk] = {}))[bk] = 1;
+  });
+  (ws.staging || []).forEach(function(t){
+    if (!t.unmatched) ix.staged[t.srcIdx] = (ix.staged[t.srcIdx] || 0) + (+t.qty || 0);
+    if (t.srcBoxBarcode && !ix.boxSt[t.srcBoxBarcode]) ix.boxSt[t.srcBoxBarcode] = '입고대기';
+  });
+  (ws.pending || []).forEach(function(p){
+    if (p.srcIdx != null && p.srcIdx >= 0) ix.pending[p.srcIdx] = (ix.pending[p.srcIdx] || 0) + (+p.qty || 0);
+    /* 처리대기는 박스만 합치면 끝나는 단계 — 완료로 본다 */
+    if (p.srcBoxBarcode && !ix.boxSt[p.srcBoxBarcode]) ix.boxSt[p.srcBoxBarcode] = '처리됨';
+  });
+  return ix;
+}
+function cpWithIdx(fn){
+  if (_cpIdx) return fn();
+  _cpIdx = cpBuildIdx();
+  try { return fn(); } finally { _cpIdx = null; }
+}
+/* ═══ 집계 캐시 끝 ═══ */
+
 /* ── 세션 헤더 갱신 ── */
 function cpRefreshSessionHdr(){
   if (!workSession) return;
@@ -3283,7 +3356,7 @@ function cpShowResumeBanner(sessions, mineId){
     return '<div class="rb-row'+(isMine?' mine':'')+'">'+
       '<div class="rb-info">'+
         statusBadge + ' · <b>' + escH(s.vendor||'(업체 미입력)') + '</b>' + (isMine ? ' <span style="color:var(--g);font-size:.7rem">(이 PC 에서 시작)</span>' : '') +
-        '<span class="rb-meta">시작 '+escH(fmtDt(s.createdAt))+' · 스캔 '+scanCnt+'건 · 출고박스 '+sBoxes+'개 · 대기 '+penCnt+'건 · ID '+escH(s.sessionId)+'</span>'+
+        '<span class="rb-meta">시작 '+escH(fmtDt(s.createdAt))+' · 스캔 '+scanCnt+'건 · 출고박스 '+sBoxes+'개 · 처리대기 '+penCnt+'건 · ID '+escH(s.sessionId)+'</span>'+
       '</div>'+
       '<button class="btn btn-g" onclick="cpResumeSession(\''+sid+'\')">이어서 작업</button>'+
       '<button class="btn btn-r" onclick="cpDiscardSession(\''+sid+'\')">버리기</button>'+
@@ -3516,10 +3589,12 @@ function cpBoxGroupLabel(g){
 
 /* 이미 처리했거나 대기에 올라간 박스 */
 function cpBoxDone(id){
+  if (_cpIdx) return _cpIdx.boxSt[id] || '';
   var ws = workSession || {};
   if ((ws.scans || []).some(function(s){ return !s.undone && (s.srcBoxBarcode === id || s.boxBarcode === id); })) return '처리됨';
   if ((ws.staging || []).some(function(t){ return t.srcBoxBarcode === id; })) return '입고대기';
-  if ((ws.pending || []).some(function(p){ return p.srcBoxBarcode === id; })) return '처리대기';
+  /* 처리대기는 박스만 합치면 끝나는 단계 — 완료로 본다 */
+  if ((ws.pending || []).some(function(p){ return p.srcBoxBarcode === id; })) return '처리됨';
   return '';
 }
 
@@ -3533,6 +3608,13 @@ var cpBoxChipIds = [];       /* 방금 그린 박스 칩의 박스ID — 박스 
  *   잔류/무관 이번 발주에 없음     (회색) */
 var cpBoxPlanCache = null, cpBoxPlanSig = '';
 function cpBoxPlan(){
+  /* 한 번 그리는 동안은 한 번만 확인 — 칩마다 박스 전체 키를 다시 세던 것 */
+  if (_cpIdx && _cpIdx.plan !== undefined) return _cpIdx.plan;
+  var p = cpBoxPlanFresh();
+  if (_cpIdx) _cpIdx.plan = p;
+  return p;
+}
+function cpBoxPlanFresh(){
   var ws = workSession || {};
   var sig = Object.keys(boxIndex || {}).length
     + '|' + ((ws.rows || []).length)
@@ -3563,6 +3645,7 @@ var CP_BOX_KIND = { whole:'완박스', part:'일부출고', cross:'센터분리'
 function cpBoxListRender(){
   var host = document.getElementById('cpBoxListWrap');
   if (!host || !cpBoxListOn) return;
+  if (!_cpIdx) return cpWithIdx(cpBoxListRender);   /* 칩마다 기록 전체를 훑지 않게 집계를 한 번 만들어 쓴다 */
   /* 파렛트당 박스를 치는 중이면 지금 다시 그리지 않는다 — 칸을 떠날 때(cpBppDone) 그린다 */
   var ae = document.activeElement;
   if (ae && ae.closest && host.contains(ae) && ae.closest('.bl-bpp')) { cpBoxListRender._defer = true; return; }
@@ -3974,12 +4057,14 @@ function cpBoxListCheck(gi){
   cpBoxListRender();
 }
 function cpBoxListCheckAll(){
-  var plan = cpBoxPlan();
-  if (!plan) return;
-  cpBoxListSel = cpBoxGroupsCache.filter(function(g){
-    return g.ids.some(function(x){ var c = cpBoxClass(x.id); return c && c.k !== 'none'; });
-  }).map(function(g){ return g.key; });
-  cpBoxListRender();
+  var ok = cpWithIdx(function(){
+    if (!cpBoxPlan()) return false;
+    cpBoxListSel = cpBoxGroupsCache.filter(function(g){
+      return g.ids.some(function(x){ var c = cpBoxClass(x.id); return c && c.k !== 'none'; });
+    }).map(function(g){ return g.key; });
+    return true;
+  });
+  if (ok) cpBoxListRender();
 }
 function cpBoxListClear(){ cpBoxListSel = []; cpBoxListRender(); }
 /* 박스를 누르면 그 박스를 스캔한 것과 똑같이 처리한다 */
@@ -3988,8 +4073,7 @@ function cpBoxListPick(ci){
   if (!id) return;
   var st = cpBoxDone(id);
   if (st && !confirm('이 박스는 이미 ' + st + ' 상태입니다.\n\n' + id + '\n\n그래도 다시 처리할까요?')) return;
-  cpHandleScan(id);
-  cpBoxListRender();
+  cpHandleScan(id);   /* 화면 갱신은 스캔 처리가 다음 프레임에 한 번 — 여기서 또 그리면 두 번 그린다 */
   var inp = document.getElementById('cpScanInp');
   if (inp) inp.focus();
 }
@@ -4000,9 +4084,8 @@ function cpOnScanKey(ev){
   var inp = document.getElementById('cpScanInp');
   var raw = (inp.value||'').trim();
   if (!raw) return;
-  cpHandleScan(raw);
+  cpHandleScan(raw);   /* 박스 목록 갱신은 스캔 처리가 다음 프레임에 한 번 */
   inp.value = '';
-  if (cpBoxListOn) cpBoxListRender();
   inp.focus();
 }
 
@@ -4517,13 +4600,15 @@ function cpMatchingRowIdxs(bc){
 }
 /* row(idx)에 묶여 있는 입고대기(staging, 매칭만) 누적 수량 */
 function cpRowStaged(idx){
+  if (_cpIdx) return _cpIdx.staged[idx] || 0;
   return ((workSession && workSession.staging) || []).reduce(function(s,x){
     return s + ((!x.unmatched && x.srcIdx === idx) ? (+x.qty||0) : 0);
   }, 0);
 }
-/* row(idx)에 묶여 있는 처리대기(pending) 누적 수량 */
+/* row(idx)에 묶여 있는 처리대기(pending) 누적 수량 — 표기상으로는 완료로 센다 (박스만 합치면 끝나는 단계) */
 function cpRowPending(idx){
   if (idx == null || idx < 0) return 0;
+  if (_cpIdx) return _cpIdx.pending[idx] || 0;
   return ((workSession && workSession.pending) || []).reduce(function(s,x){
     return s + ((x.srcIdx === idx) ? (+x.qty||0) : 0);
   }, 0);
@@ -4809,10 +4894,11 @@ function cpProcessItemScan(raw){
   var name = row.skuName || '';
   var altBadge = matchedVia==='alt' ? ' <span style="color:var(--p);font-weight:800">[ALT]</span>' : '';
   var totalForSrc = stageAddForSrc + 1;
+  var doneForSrc = prog.shipped + cpRowPending(idx);   /* 처리대기는 완료로 센다 */
   /* 입고 시스템과 동일하게 '대기 수량'을 일·이·삼… 으로 센다 */
   cpSpeakCount(cpItemStagedQty(sg));
-  cpFlash('ok','📥 <b>'+escH(name||row.poBarcode)+'</b>'+altBadge+' → 입고 대기 (+1, 누적 '+totalForSrc+' · 필요 '+prog.need+')');
-  cpShowStatus('ship', (name||row.poBarcode||'')+(row.center?' · '+row.center:'')+' · 누적 '+totalForSrc+'/'+prog.need);
+  cpFlash('ok','📥 <b>'+escH(name||row.poBarcode)+'</b>'+altBadge+' → 입고 대기 (+1 · 완료 '+doneForSrc+' + 대기 '+totalForSrc+' = '+(doneForSrc+totalForSrc)+' / 출고 '+prog.need+')');
+  cpShowStatus('ship', (name||row.poBarcode||'')+(row.center?' · '+row.center:'')+' · '+(doneForSrc+totalForSrc)+'/'+prog.need);
   cpUpdateDisplay({ type:'item', input:raw, scans:[], staging:[stagedItem], unmatched:[] });
   cpScheduleScanUI();
 }
@@ -5146,39 +5232,10 @@ function cpBuildProdLabels(items){
 /* 라벨 인쇄 (전체 페이지 인쇄 — 일괄 버튼용) — items: [{barcode, qty, srcIdx}, ...] */
 function cpPrintLabelsFromItems(items){
   if (!items || !items.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
-  var labels = cpBuildProdLabels(items);
-  if (!labels.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
-  var area = document.getElementById('prodLabelArea');
-  if (!area){ cpFlash('er','라벨 영역 없음'); return; }
-  area.innerHTML = labels.join('');
   if (typeof JsBarcode === 'undefined') cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄');
-
-  /* 측정 가능하도록 잠시 오프스크린에 렌더 → 대표 라벨만 바코드+폰트축소, 동일 라벨은 복제 */
-  var savedCss = area.style.cssText;
-  area.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;width:80mm;z-index:-1;visibility:hidden';
-  /* 다음 페인트 후 측정 — DOM reflow 보장 */
-  requestAnimationFrame(function(){
-    cpRenderFitDedup(area);
-    area.style.cssText = savedCss;  /* 원복 — CSS 의 display:none 으로 돌아감 */
-
-    /* @page 80x40mm + 인쇄 */
-    var oldStyle = document.getElementById('prod-label-pagestyle');
-    if (oldStyle) oldStyle.remove();
-    var st = document.createElement('style');
-    st.id = 'prod-label-pagestyle';
-    st.textContent = '@media print { @page { size: 80mm 40mm; margin: 0; } }';
-    document.head.appendChild(st);
-    document.body.classList.add('printing-product-label');
-    setTimeout(function(){
-      window.print();
-      setTimeout(function(){
-        document.body.classList.remove('printing-product-label');
-        var s = document.getElementById('prod-label-pagestyle');
-        if (s) s.remove();
-      }, 1500);
-    }, 80);
-  });
-  cpFlash('ok','✓ 상품 라벨 '+labels.length+'장 인쇄 시작');
+  /* 본문 전체를 인쇄하던 방식(인쇄 준비에 수 초)을 라벨만 담은 iframe 즉시 인쇄로 */
+  var n = cpPrintLabelsDirect(items);
+  if (n) cpFlash('ok','✓ 상품 라벨 '+n+'장 인쇄 시작');
 }
 
 /* ═══════════ 덧방 즉시 인쇄 (iframe — 라벨만 인쇄, 빠름) ═══════════
@@ -5195,34 +5252,27 @@ function cpPrintLabelsDirect(items){
   tmp.style.cssText = 'position:fixed;left:-99999px;top:0;width:80mm';
   tmp.innerHTML = labels.join('');
   document.body.appendChild(tmp);
-  if (typeof JsBarcode !== 'undefined') {
-    tmp.querySelectorAll('svg[data-bc]').forEach(function(svg){
-      try {
-        JsBarcode(svg, svg.getAttribute('data-bc')||'', {format:'CODE128',displayValue:false,width:2.2,height:64,margin:0,background:'#ffffff',lineColor:'#000000'});
-        svg.removeAttribute('width'); svg.removeAttribute('height'); svg.setAttribute('preserveAspectRatio','none');
-      } catch(e){}
-    });
-  }
+  /* 같은 라벨(data-sig)은 대표 한 장만 바코드 + 글씨맞춤 하고 나머지는 복제 — 600장이어도 고유 라벨 수만큼만 일한다.
+     글씨맞춤도 여기서 끝내, iframe 안에서 장마다 다시 재지 않는다 */
+  cpRenderFitDedup(tmp);
   var bodyHtml = tmp.innerHTML;
   tmp.remove();
+  cpPrintInIframe(bodyHtml);
+  return labels.length;
+}
 
-  /* 2) 페이지의 모든 <style> 을 모아 iframe 에 그대로 (prod-label CSS 포함) */
+/* 라벨 HTML 만 담은 작은 iframe 을 인쇄 — 무거운 본문 전체를 인쇄용으로 다시 배치하지 않아 빠르다.
+ * 페이지 <style> 을 그대로 가져가고 80x40mm 로 고정. --kiosk-printing 이면 대화상자 없이 즉시 출력. */
+function cpPrintInIframe(bodyHtml){
   var css = '';
   document.querySelectorAll('style').forEach(function(s){ css += s.textContent + '\n'; });
   css += '@page{size:80mm 40mm;margin:0}html,body{margin:0;padding:0;background:#fff}';
-
-  /* 3) 폰트 자동축소 함수 소스 (부모와 단일 출처) */
-  var fitSrc = cpShrinkToFit.toString() + '\n' + cpFitLeftColumn.toString() + '\n' + cpFitLabelText.toString();
-
   var doc =
     '<!doctype html><html><head><meta charset="utf-8"><style>'+css+'</style></head><body>'+
     bodyHtml +
-    '<scr'+'ipt>'+ fitSrc +
-    'document.querySelectorAll(".prod-label").forEach(function(l){try{cpFitLabelText(l);}catch(e){}});'+
-    'setTimeout(function(){try{window.focus();window.print();}catch(e){}},30);'+
-    '<\/scr'+'ipt></body></html>';
+    '<scr'+'ipt>setTimeout(function(){try{window.focus();window.print();}catch(e){}},30);<\/scr'+'ipt></body></html>';
 
-  /* 4) 숨김 iframe → srcdoc 로 즉시 로드 → (iframe 내부 스크립트가) 인쇄 → 정리 */
+  /* 숨김 iframe → srcdoc 로 즉시 로드 → (iframe 내부 스크립트가) 인쇄 → 정리 */
   if (_cpDirectIfr) { try{ _cpDirectIfr.remove(); }catch(e){} _cpDirectIfr = null; }
   var ifr = document.createElement('iframe');
   ifr.setAttribute('aria-hidden','true');
@@ -5520,7 +5570,13 @@ function cpToggleLineConfirm(btn){
 function cpRefreshDonePool(){
   var body = document.getElementById('cpDoneBody');
   if (!body) return;
-  if (!workSession) { body.innerHTML = '<tr><td colspan="11" class="cp-done-empty">세션 없음</td></tr>'; return; }
+  if (!workSession) { cpRefreshDonePool._sig = null; body.innerHTML = '<tr><td colspan="11" class="cp-done-empty">세션 없음</td></tr>'; return; }
+  /* 완료 기록이 그대로면 다시 그리지 않는다 — 박스를 입고대기로 넣을 때마다 수백 줄 표를 새로 짓던 것.
+     (고치던 수량·파렛트 칸이 스캔 때문에 날아가지도 않는다) */
+  var doneSig = JSON.stringify([workSession.scans || [], workSession.shipBoxes || [], workSession.palletBoxOverride || {}, workSession.rows || []])
+              + '|' + Object.keys(stockMeta || {}).length;
+  if (doneSig === cpRefreshDonePool._sig && body.childElementCount) return;
+  cpRefreshDonePool._sig = doneSig;
   var scans = (workSession.scans || []);
   var activeScans = scans.filter(function(s){ return !s.undone; });
   var rows = workSession.rows || [];
@@ -5726,24 +5782,9 @@ function cpBuildMixLabelHtmlForBox(boxLabel, items, vendor, center){
   }).join('');
 }
 function cpDoPrintMixLabels(html){
-  var area = document.getElementById('mixLabelArea');
-  if (!area) { cpFlash('er','라벨 영역 없음'); return; }
-  area.innerHTML = html;
-  var oldStyle = document.getElementById('mix-label-pagestyle');
-  if (oldStyle) oldStyle.remove();
-  var st = document.createElement('style');
-  st.id = 'mix-label-pagestyle';
-  st.textContent = '@media print { @page { size: 80mm 40mm; margin: 0; } }';
-  document.head.appendChild(st);
-  document.body.classList.add('printing-label');
-  setTimeout(function(){
-    window.print();
-    setTimeout(function(){
-      document.body.classList.remove('printing-label');
-      var s = document.getElementById('mix-label-pagestyle');
-      if (s) s.remove();
-    }, 1500);
-  }, 80);
+  if (!html) { cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  /* 본문 전체 인쇄 대신 라벨만 담은 iframe 즉시 인쇄 (상품 라벨과 같은 방식) */
+  cpPrintInIframe(html);
 }
 
 function cpPrintMixLabel(shipBoxNo){
@@ -6900,6 +6941,7 @@ function cpAppendScans(newScans, onDone){
 /* 박스수 자동 계산 — 같은 (eta, center, palletNo) 그룹의 distinct shipBoxNo 개수 */
 function cpAutoBoxCountForPallet(eta, center, palletNo){
   if (!workSession) return 0;
+  if (_cpIdx) { var ps = _cpIdx.palBox[eta + '|' + center + '|' + (+palletNo)]; return ps ? Object.keys(ps).length : 0; }
   var seen = {};
   (workSession.scans||[]).forEach(function(s){
     if (s.undone) return;
@@ -7061,7 +7103,8 @@ function cpComputeRowProgress(idx){
   var row = (workSession && workSession.rows) ? workSession.rows[idx] : null;
   if (!row) return { shipped:0, need:0, status:'pending' };
   var shipped = 0;
-  (workSession.scans||[]).forEach(function(s){
+  if (_cpIdx) shipped = _cpIdx.shipped[idx] || 0;
+  else (workSession.scans||[]).forEach(function(s){
     if (s.undone) return;
     if (s.srcIdx === idx) shipped += (+s.qty||0);
   });
@@ -7079,15 +7122,16 @@ function cpRefreshProgress(){
   if (!rows.length) { el.innerHTML = '<div class="cp-prog-empty">세션 라인 없음</div>'; return; }
   var html = rows.map(function(r, i){
     var p = cpComputeRowProgress(i);
-    /* 대기(입고대기+처리대기)도 출고 처리된 것으로 간주해 진행률에 반영 */
-    var waiting = cpRowReserved(i);
-    var have = p.shipped + waiting;
+    /* 완료 = 스캔 완료 + 처리대기(박스만 합치면 끝) · 대기 = 입고대기만. 둘 다 진행률에 반영 */
+    var doneQ = p.shipped + cpRowPending(i);
+    var waiting = cpRowStaged(i);
+    var have = doneQ + waiting;
     var status = have===0 ? 'pending' : (have < p.need) ? 'partial' : (have === p.need) ? 'done' : 'over';
     var statusIcon = status==='done' ? '✓' : status==='partial' ? '◐' : status==='over' ? '⚠' : '○';
     var name = r.skuName || '';
     var qtyHtml = waiting>0
-      ? p.shipped+'<span class="wt">+'+waiting+'</span>/'+p.need
-      : p.shipped+'/'+p.need;
+      ? doneQ+'<span class="wt">+'+waiting+'</span>/'+p.need
+      : doneQ+'/'+p.need;
     return '<div class="cp-prog-row '+status+'">'+
       '<span class="bc" title="PO '+escH(r.poBarcode)+'">'+escH(r.poBarcode)+'</span>'+
       '<span class="nm">'+escH(name)+'<small>'+escH(r.center||'')+'</small></span>'+
@@ -7115,14 +7159,17 @@ function cpRefreshRecent(){
 
 /* ── 스캔 UI 통합 갱신 ── */
 function cpRefreshScanUI(){
-  if (typeof cpBoxListOn !== 'undefined' && cpBoxListOn) { try { cpBoxListRender(); } catch(e){} }   /* 박스 목록 — 처리 표시 갱신 */
-  cpRefreshRecent();
-  cpRefreshProgress();
-  cpRefreshPallet();
-  cpRefreshStaging();
-  cpRefreshDonePool();
-  cpRefreshPending();
-  cpRefreshCenterSummary();
+  /* 집계는 한 번만 — 아래 목록들이 같은 표를 나눠 쓴다 */
+  cpWithIdx(function(){
+    if (typeof cpBoxListOn !== 'undefined' && cpBoxListOn) { try { cpBoxListRender(); } catch(e){} }   /* 박스 목록 — 처리 표시 갱신 */
+    cpRefreshRecent();
+    cpRefreshProgress();
+    cpRefreshPallet();
+    cpRefreshStaging();
+    cpRefreshDonePool();
+    cpRefreshPending();
+    cpRefreshCenterSummary();
+  });
 }
 
 /* ═══════════ 센터별 한 줄 요약 (박스바코드 스캔칸 아래) ═══════════
@@ -7162,8 +7209,8 @@ function cpRefreshCenterSummary(){
     var pn = +s.palletNo;
     if (pn > 0) byCenter[c].pallets[pn] = true;
   });
-  /* 입고대기(staging) + 처리대기(pending) 도 '대기'로 카운터에 합산 — 넘긴 순간부터 출고된 것으로 간주.
-   * 완료(shipped)와 별도 표기하되 잔여 계산엔 함께 차감. */
+  /* 입고대기(staging)는 '대기'로 따로 표기하고 잔여 계산엔 함께 차감.
+   * 처리대기(pending)는 박스만 합치면 끝나는 단계 — 대기가 아니라 완료(shipped)로 센다. */
   (workSession.staging||[]).forEach(function(t){
     if (t.unmatched || t.srcIdx == null || t.srcIdx < 0) return;
     var r = rows[t.srcIdx] || {};
@@ -7176,7 +7223,7 @@ function cpRefreshCenterSummary(){
     var r = rows[p.srcIdx] || {};
     var c = p.center || r.center || '(미지정)';
     if (!byCenter[c]){ byCenter[c] = { need:0, shipped:0, waiting:0, pallets:{} }; order.push(c); }
-    byCenter[c].waiting += (+p.qty || 0);
+    byCenter[c].shipped += (+p.qty || 0);
   });
   if (!order.length){ wrap.style.display='none'; el.innerHTML=''; return; }
   wrap.style.display = '';
@@ -7194,6 +7241,20 @@ function cpRefreshCenterSummary(){
       '<span class="cs-prog">(<span class="pr">'+sum.shipped+'</span>'+waitHtml+'/<span class="rm">'+rem+'</span>)</span>'+
     '</span>';
   }).join('<span class="cs-sep">|</span>');
+}
+
+/* 입고대기 줄 — 이 상품이 앞으로 몇 개 더 나가는지 / 몇 개 초과인지.
+ *   완료 590 + 대기 12 = 602 / 출고 600  2개 초과
+ *   완료 590 + 대기 10 = 600 / 출고 600  마감
+ * 대기 = 입고대기(모든 박스 합)만. 처리대기는 박스만 합치면 끝나는 단계라 완료로 센다.
+ * q = { need, done, staged, total, diff } (cpRefreshStaging 의 rowQ) */
+function cpStagingRqHtml(q){
+  var st = q.diff > 0 ? 'over' : (q.diff === 0 ? 'full' : 'left');
+  var tail = q.diff > 0 ? q.diff + '개 초과' : (q.diff === 0 ? '마감' : (-q.diff) + '개 남음');
+  return '<span class="rq ' + st + '" title="출고총수량 ' + q.need + ' 기준 — 완료(처리대기 포함) ' + q.done
+    + ' + 입고대기 ' + q.staged + ' = ' + q.total + '">'
+    + '완료 <b>' + q.done + '</b> + 대기 <b>' + q.staged + '</b> = <b>' + q.total + '</b>'
+    + '<small> / 출고 ' + q.need + '</small> <em>' + tail + '</em></span>';
 }
 
 /* ═══════════ 입고 대기 (staging) ═══════════
@@ -7236,13 +7297,22 @@ function cpRefreshStaging(){
   order.sort(function(a,b){ return batchTs[b] - batchTs[a]; });          /* 박스끼리: 최신 박스가 위 */
   var latestKey = order[0];
   var rows = workSession.rows || [];
+  /* 상품(발주줄)별 출고 현황 — 완료(처리대기 포함) + 입고대기(모든 박스 합) vs 출고총수량 */
+  var rqMemo = {};
+  function rowQ(idx){
+    if (rqMemo[idx]) return rqMemo[idx];
+    var p = cpComputeRowProgress(idx);
+    var done = p.shipped + cpRowPending(idx), staged = cpRowStaged(idx);
+    return (rqMemo[idx] = { need:p.need, done:done, staged:staged, total:done + staged, diff:done + staged - p.need });
+  }
   list.innerHTML = order.map(function(k){
     var items = byBatch[k];
     var first = items[0];
     var boxId = first.srcBoxBarcode || '?';
     var totalQty = items.reduce(function(s,x){return s+(+x.qty||0);},0);
     var isMix = items.some(function(x){return x.isMix;});
-    var hasOverflow = items.some(function(x){return x.hasOverflow;});
+    /* 초과는 스캔 당시 값이 아니라 지금 기준 (다른 박스의 대기·처리대기까지 합쳐) */
+    var hasOverflow = items.some(function(x){ return !x.unmatched && rowQ(x.srcIdx).diff > 0; });
     var unmatchedCnt = items.filter(function(x){return x.unmatched;}).length;
     var hasUnmatched = unmatchedCnt > 0;
     /* 시각 강조 우선순위: 잔류 > 초과 > 혼적 */
@@ -7279,10 +7349,7 @@ function cpRefreshStaging(){
       var kindLabel = '정상';
       if (it.unmatched) { kind = 'un'; kindLabel = '잔류'; }
       else {
-        var prog = cpComputeRowProgress(it.srcIdx);
-        var stageAddForSrc = items.filter(function(x){return !x.unmatched && x.srcIdx === it.srcIdx;})
-          .reduce(function(s,x){return s+(+x.qty||0);},0);
-        if (prog.shipped + cpRowPending(it.srcIdx) + stageAddForSrc > prog.need) {
+        if (rowQ(it.srcIdx).diff > 0) {
           kind = 'over'; kindLabel = '발주초과';
         } else if (primaryCenter && r.center && r.center !== primaryCenter) {
           kind = 'mix'; kindLabel = '다른센터';
@@ -7299,6 +7366,7 @@ function cpRefreshStaging(){
         '<span class="nm">'+escH(name)+(nameSmall?'<small>'+escH(nameSmall)+'</small>':'')+'</span>'+
         '<span class="bc">'+escH(it.barcode||'')+'</span>'+
         qtyInput+'<span style="font-size:.7rem;color:var(--mu);margin-left:.18rem">개</span>'+
+        (it.unmatched ? '' : cpStagingRqHtml(rowQ(it.srcIdx)))+
         '<span class="acts">'+
           '<button type="button" class="hold" onclick="cpStagingMoveToPending(\''+escAttrLocal(it.id)+'\')" title="이 항목을 처리 대기로 이동 (나중에 검토)">⏸ 대기</button>'+
           '<button type="button" class="del"  onclick="cpStagingDeleteItem(\''+escAttrLocal(it.id)+'\')" title="이 항목을 대기 목록에서 제거 (입고 안 함)">✕ 삭제</button>'+
