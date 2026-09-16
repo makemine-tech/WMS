@@ -4653,6 +4653,7 @@ function cpProcessBoxScan(raw){
   var sessRows = workSession.rows || [];
   var matchedItems = [];
   var unmatchedSku = [];
+  var overSku = [];       /* 발주수량을 다 채우고 남은 수량 — 나가지 않는다 */
   var reserve = {};   /* 이번 박스 내 idx별 누적 배분량 — 같은 row 중복 배분 방지 */
   Object.keys(contents).forEach(function(bc){
     var inQty = contents[bc] || 0;
@@ -4672,14 +4673,15 @@ function cpProcessBoxScan(raw){
       left -= take;
     });
     if (left > 0) {
-      /* 전 센터 발주수량 합을 초과하는 잔량 — 첫 센터에 초과분으로 적재(발주초과 배지로 경고). */
-      matchedItems.push({ bc:bc, qty:left, srcIdx:match.idxs[0], matchedVia:match.via });
-      reserve[match.idxs[0]] = (reserve[match.idxs[0]]||0) + left;
+      /* 전 센터 발주수량을 다 채우고 남은 수량 = 발주초과. 나가는 물량이 아니다.
+         예전엔 첫 센터 출고 항목으로 섞어 넣어서 라벨이 초과분까지 찍히고,
+         이미 다 채운 상품이어도 '출고'로 안내됐다. 잔류처럼 따로 담는다 (어느 발주줄인지는 overIdx). */
+      overSku.push({ bc:bc, qty:left, overIdx:match.idxs[0] });
     }
   });
 
   /* 박스 안에 SKU 가 하나도 없는 비정상 케이스 */
-  if (!matchedItems.length && !unmatchedSku.length) {
+  if (!matchedItems.length && !unmatchedSku.length && !overSku.length) {
     cpFlash('er','❌ <b>박스 '+escH(boxId)+'</b>: 내용 SKU 없음');
     cpSpeak('오류');
     cpShowStatus('error', '박스 '+boxId+' — 내용 SKU 없음');
@@ -4699,9 +4701,9 @@ function cpProcessBoxScan(raw){
   });
   var isMix       = Object.keys(centerSet).length > 1;   /* 혼적 = 다중 센터 */
   var hasResidual = unmatchedSku.length > 0;             /* 잔류 SKU 섞임 */
-  var allResidual = !matchedItems.length;                /* 전량 잔류 */
-  var ovCheck = matchedItems.length ? cpCheckOverflow(matchedItems) : { ok:true };
-  var hasOverflow = !ovCheck.ok;
+  var hasOverflow = overSku.length > 0;                  /* 발주초과 수량 섞임 */
+  var allResidual = !matchedItems.length;                /* 나가는 게 하나도 없음 (잔류·초과뿐) */
+  var allOver     = allResidual && hasOverflow;          /* 나갈 게 없는데 같은 상품이 또 왔다 → '초과' */
 
   /* 모든 박스 → 입고 대기(staging) 로. 매칭/잔류 모두 함께 표시. */
   var batchId = 'B' + Date.now() + '-' + Math.random().toString(36).slice(2,7);
@@ -4743,6 +4745,28 @@ function cpProcessBoxScan(raw){
       unmatched: true        /* 잔류 — 일괄 입고 차단 대상 */
     });
   });
+  /* 발주초과 — 출고하지 않는 수량. 잔류와 같이 라벨·출고 수량·일괄 입고에서 빠지고
+     입고대기에는 '발주초과'로 보인다. srcIdx 를 -1 로 둬야 대기/출고 집계에 끼지 않는다. */
+  overSku.forEach(function(it){
+    var r = sessRows[it.overIdx] || {};
+    newStaging.push({
+      id: 'S' + Date.now() + '-' + Math.random().toString(36).slice(2,9),
+      batchId: batchId,
+      type: 'box',
+      ts: Date.now(), by: getUserId(),
+      srcBoxBarcode: boxId,
+      barcode: it.bc, poBarcode: r.poBarcode || '',
+      qty: it.qty,
+      palletEta: '', palletCenter: '',
+      palletNo: 0,
+      srcIdx: -1,
+      overIdx: it.overIdx,
+      isMix: isMix,
+      hasOverflow: true,
+      unmatched: true,
+      overflow: true
+    });
+  });
   var sg = (workSession.staging || []).slice().concat(newStaging);
   /* 상품 스캔과 같은 이유로 로컬 먼저 확정 — 저장 응답을 기다리지 않는다 */
   cpApplyStagingLocal(sg);
@@ -4752,30 +4776,38 @@ function cpProcessBoxScan(raw){
   var shipQty  = shipRows.reduce(function(s,x){ return s + (+x.qty||0); }, 0);
   var stayQty  = unmatchedSku.reduce(function(s,x){ return s + (+x.qty||0); }, 0);
   var resTxt   = '잔류 ' + unmatchedSku.length + '종 ' + stayQty + '개';
+  var overQty  = overSku.reduce(function(s,x){ return s + (+x.qty||0); }, 0);
+  var overTxt  = '발주초과 ' + overQty + '개';
+  var stayAll  = [hasOverflow ? overTxt : '', hasResidual ? resTxt : ''].filter(Boolean).join(' · ');
   var extra = '';
+  if (hasOverflow)  extra += '<span class="sub">⚠ '+overTxt+' — 출고하지 않습니다. 박스에서 빼 두고 [✕ 삭제]</span>';
   if (hasResidual)  extra += '<span class="sub">⚠ '+resTxt+' — 출고 대상 아님. [✕ 삭제] 또는 [⏸ 대기]로 걸러내세요</span>';
   if (isMix)        extra += '<span class="sub">⚠ 혼적 — 여러 센터 SKU 포함</span>';
-  if (hasOverflow)  extra += '<span class="sub">⚠ 발주수량 초과 SKU 포함 — 입고 전 점검</span>';
-  var kind = (hasResidual || isMix || hasOverflow) ? 'warn' : 'ok';
+  var kind = allOver ? 'er' : ((hasResidual || isMix || hasOverflow) ? 'warn' : 'ok');
   cpFlash(kind,
     (allResidual
-      ? '📦 <b>박스 '+escH(boxId)+'</b> → <b>출고 대상 없음</b> — 전량 '+resTxt
+      ? '📦 <b>박스 '+escH(boxId)+'</b> → <b>'+(allOver ? '발주초과' : '출고 대상 없음')+'</b> — 전량 '+stayAll
       : '📥 <b>박스 '+escH(boxId)+'</b> → 출고 '+shipRows.length+'SKU '+shipQty+'개 입고 대기 추가. 검토 후 <b>[✓ 일괄 입고]</b>.')
     + extra);
-  /* TTS — 나가는 것 기준. 일부만 나가도 '출고', 잔류는 뒤에 덧붙여 안내 */
-  cpSpeak(allResidual ? '잔류'
-    : ((isMix ? '혼적' : '출고') + (hasResidual ? ', 잔류 '+unmatchedSku.length+'종' : '')));
+  /* TTS — 나가는 것 기준. 1개라도 나가면 '출고'(초과·잔류는 뒤에 덧붙임),
+     나갈 게 0 인데 발주초과가 있으면 '초과', 잔류뿐이면 '잔류' */
+  cpSpeak(allResidual ? (allOver ? '초과' : '잔류')
+    : ((isMix ? '혼적' : '출고')
+       + (hasOverflow ? ', 초과 '+overQty+'개' : '')
+       + (hasResidual ? ', 잔류 '+unmatchedSku.length+'종' : '')));
   /* 중앙 상태 — 멀리서도 즉시 인지 */
   var _ctrs = Object.keys(centerSet);
-  var _stKind = allResidual ? 'stay' : (isMix ? 'mix' : 'ship');
+  var _stKind = allResidual ? (allOver ? 'over' : 'stay') : (isMix ? 'mix' : 'ship');
   var _stSub  = allResidual
-    ? ('박스 '+boxId+' — 출고 대상 없음 · '+resTxt)
+    ? ('박스 '+boxId+' — 출고 대상 없음 · '+stayAll)
     : ('박스 '+boxId+' · '+(isMix ? _ctrs.join(' / ') : (_ctrs[0]||''))
         + ' · 출고 '+shipRows.length+'SKU '+shipQty+'개'
-        + (hasResidual ? ' · ⚠'+resTxt+' 제외' : '')
-        + (hasOverflow ? ' · ⚠발주초과' : ''));
+        + (hasOverflow ? ' · ⚠'+overTxt+' 제외' : '')
+        + (hasResidual ? ' · ⚠'+resTxt+' 제외' : ''));
   cpShowStatus(_stKind, _stSub);
-  cpUpdateDisplay({ type:'box', input:boxId, scans:[], staging:newStaging, unmatched:unmatchedSku, isMix:isMix, allUnmatched:allResidual });
+  cpUpdateDisplay({ type:'box', input:boxId, scans:[], staging:newStaging,
+    unmatched: unmatchedSku.concat(overSku.map(function(o){ return { bc:o.bc, qty:o.qty, over:true }; })),
+    isMix:isMix, allUnmatched:allResidual });
 }
 
 /* 원본 박스바코드를 출고박스로 등록 (단일·매칭 박스 — 이미 같은 번호가 있으면 no-op) */
@@ -4918,6 +4950,11 @@ function cpUpdateDisplay(ev){
   /* 박스 안 모두 잔류 = scans 없음. 그래도 디스플레이는 띄워서 사장님이 판단하도록 */
   var hasScans = ev && ev.scans && ev.scans.length > 0;
   var hasUnmatched = ev && ev.unmatched && ev.unmatched.length > 0;
+  /* 박스에 남는 것 = 잔류(PO 없음) + 발주초과(u.over) — 둘을 구분해 안내 */
+  var unOverN = hasUnmatched ? ev.unmatched.filter(function(u){ return u.over; }).length : 0;
+  var unStayN = hasUnmatched ? ev.unmatched.length - unOverN : 0;
+  var allOverEv = !!(ev && ev.allUnmatched && hasUnmatched && !unStayN);
+  var unTxt = [unStayN ? '잔류 ' + unStayN + '종' : '', unOverN ? '초과 ' + unOverN + '종' : ''].filter(Boolean).join(' · ');
   if (!ev || (!hasScans && !hasUnmatched)){
     d.classList.add('idle');
     return;
@@ -4948,7 +4985,7 @@ function cpUpdateDisplay(ev){
   var d2 = new Date(nowMs), pad=function(n){n=String(n);return n.length<2?'0'+n:n;};
   var ts = pad(d2.getHours())+':'+pad(d2.getMinutes())+':'+pad(d2.getSeconds());
   var typeLabel = ev.type==='box' ? ('📦 박스 — ' + escH(ev.input)) : ('🏷️ 상품 — ' + escH(ev.input));
-  if (ev.allUnmatched) typeLabel += ' <span style="color:var(--y);font-weight:800">· 잔류 박스</span>';
+  if (ev.allUnmatched) typeLabel += ' <span style="color:var(--y);font-weight:800">· '+(allOverEv ? '발주초과 박스' : '잔류 박스')+'</span>';
   setT('dpType', typeLabel);
   setT('dpScannedAt', '⏱ ' + ts);
 
@@ -4961,12 +4998,12 @@ function cpUpdateDisplay(ev){
     var centerHtml;
     if (ev.allUnmatched) {
       /* 박스 안 모두 잔류 — 큰 글씨에 명확히 표시 */
-      centerHtml = '⚠ 잔류';
+      centerHtml = allOverEv ? '⚠ 초과' : '⚠ 잔류';
       cEl.classList.add('warn','size-md');
     } else if (isMixed) {
       /* 혼적 — 모든 매칭된 센터를 표시하고 잔류가 있으면 ' + 잔류' 추가 */
       var parts = centerKeys.slice();
-      if (hasUnmatched) parts.push('잔류 ' + ev.unmatched.length + '종');
+      if (hasUnmatched) parts.push(unTxt);
       centerHtml = '⚠ 혼적 — ' + parts.map(escH).join('<span class="sep">·</span>');
       cEl.classList.add('warn');
       var totalLen = ('혼적 — ' + parts.join(' · ')).length;
@@ -5030,7 +5067,9 @@ function cpUpdateDisplay(ev){
       (size ? '<span class="sep">·</span><span class="size">'+escH(size)+'</span>' : '') +
       '<span class="qty" style="color:var(--mu)">'+u.qty+'개</span>'+
       '<span class="colon">:</span>'+
-      '<span class="ctr diff" title="PO 출고 대상 아님 — 박스에 잔류로 남아있음">잔류</span>'+
+      (u.over
+        ? '<span class="ctr diff" title="발주수량을 다 채우고 남은 수량 — 출고하지 않고 박스에 남김">초과</span>'
+        : '<span class="ctr diff" title="PO 출고 대상 아님 — 박스에 잔류로 남아있음">잔류</span>')+
       actBtns('stay', key)+
     '</div>';
   }
@@ -5064,11 +5103,11 @@ function cpUpdateDisplay(ev){
   var mw = document.getElementById('dpMixWarn');
   if (mw) {
     var warnTexts = [];
-    if (ev.allUnmatched) warnTexts.push('박스 내 모든 SKU 가 PO 출고 대상 아님 — 잔류 박스');
+    if (ev.allUnmatched) warnTexts.push(allOverEv ? '박스 내 상품이 모두 발주수량 초과 — 출고할 것 없음' : '박스 내 모든 SKU 가 PO 출고 대상 아님 — 잔류 박스');
     else {
       if (isMixCenter) warnTexts.push('센터 ' + centerKeys.length + '개 ('+centerKeys.join(', ')+')');
       if (isMixEta) warnTexts.push('입고일 ' + etaKeys.length + '개');
-      if (hasUnmatched) warnTexts.push('잔류 SKU ' + ev.unmatched.length + '종 (잔류)');
+      if (hasUnmatched) warnTexts.push(unTxt + ' — 출고 제외');
     }
     if (warnTexts.length) {
       mw.style.display = '';
@@ -5079,7 +5118,7 @@ function cpUpdateDisplay(ev){
   }
 
   /* TTS — 혼적/잔류/단일 센터 별로 다른 안내 */
-  if (ev.allUnmatched) cpSpeak('잔류 박스');
+  if (ev.allUnmatched) cpSpeak(allOverEv ? '초과' : '잔류 박스');
   else if (isMixed) cpSpeak('혼적 박스 — ' + centerKeys.join(' '));
   else cpSpeak(centerKeys[0] || '');
 
@@ -7315,8 +7354,8 @@ function cpRefreshStaging(){
     var totalQty = items.reduce(function(s,x){return s+(+x.qty||0);},0);
     var isMix = items.some(function(x){return x.isMix;});
     /* 초과는 스캔 당시 값이 아니라 지금 기준 (다른 박스의 대기·처리대기까지 합쳐) */
-    var hasOverflow = items.some(function(x){ return !x.unmatched && rowQ(x.srcIdx).diff > 0; });
-    var unmatchedCnt = items.filter(function(x){return x.unmatched;}).length;
+    var hasOverflow = items.some(function(x){ return x.overflow || (!x.unmatched && rowQ(x.srcIdx).diff > 0); });
+    var unmatchedCnt = items.filter(function(x){return x.unmatched && !x.overflow;}).length;   /* 진짜 잔류만 — 발주초과는 따로 */
     var hasUnmatched = unmatchedCnt > 0;
     /* 시각 강조 우선순위: 잔류 > 초과 > 혼적 */
     var isCurrent = (k === latestKey);
@@ -7336,9 +7375,9 @@ function cpRefreshStaging(){
     });
     var primaryCenter = Object.keys(ctrCnt).sort(function(a,b){return ctrCnt[b]-ctrCnt[a];})[0] || '';
     var itemsHtml = items.map(function(it){
-      var r = (it.srcIdx >= 0) ? (rows[it.srcIdx] || {}) : {};
+      var r = (it.srcIdx >= 0) ? (rows[it.srcIdx] || {}) : (it.overflow ? (rows[it.overIdx] || {}) : {});
       var meta = stockMeta[normBarcode(it.barcode)] || {};
-      var name = meta.name || r.skuName || (it.unmatched ? '(우리 PO에 없음 — 잔류)' : '');
+      var name = meta.name || r.skuName || (it.unmatched && !it.overflow ? '(우리 PO에 없음 — 잔류)' : '');
       var code = meta.code || '';
       var ctr  = r.center || (it.unmatched ? '미매칭' : '');
       var eta  = r.eta || '';
@@ -7350,7 +7389,8 @@ function cpRefreshStaging(){
        *   normal   — 그 외 (단일 센터 또는 다수 센터 동일) */
       var kind = 'normal';
       var kindLabel = '정상';
-      if (it.unmatched) { kind = 'un'; kindLabel = '잔류'; }
+      if (it.overflow) { kind = 'over'; kindLabel = '발주초과 · 출고 안 함'; }
+      else if (it.unmatched) { kind = 'un'; kindLabel = '잔류'; }
       else {
         if (rowQ(it.srcIdx).diff > 0) {
           kind = 'over'; kindLabel = '발주초과';
@@ -7423,7 +7463,10 @@ function cpStagingCommitItems(items, onDone){
   if (unmatchedItems.length) {
     var boxList = {};
     unmatchedItems.forEach(function(it){ boxList[it.srcBoxBarcode||'?'] = true; });
-    cpFlash('er','❌ 잔류(미매칭) SKU '+unmatchedItems.length+'종이 포함되어 있습니다.<span class="sub">박스: '+Object.keys(boxList).join(', ')+' — 각 항목에 [✕ 삭제] 또는 [⏸ 대기]를 누른 후 다시 입고하세요.</span>');
+    var overN = unmatchedItems.filter(function(it){ return it.overflow; }).length;
+    var stayN = unmatchedItems.length - overN;
+    cpFlash('er','❌ 출고하지 않는 항목이 남아 있습니다 — '+[stayN ? '잔류 '+stayN+'종' : '', overN ? '발주초과 '+overN+'종' : ''].filter(Boolean).join(' · ')+
+      '<span class="sub">박스: '+Object.keys(boxList).join(', ')+' — '+(overN ? '초과분은 박스에서 빼 두고 [✕ 삭제]' : '')+(overN && stayN ? ', ' : '')+(stayN ? '잔류는 [✕ 삭제] 또는 [⏸ 대기]' : '')+' 후 다시 입고하세요.</span>');
     return;
   }
   var sessRows = workSession.rows || [];
@@ -7651,6 +7694,7 @@ function cpStagingMoveToPending(itemId){
   var idx = stg.findIndex(function(x){ return x.id === itemId; });
   if (idx < 0) return;
   var it = stg[idx];
+  if (it.overflow) { cpFlash('warn','⚠️ 발주초과 수량은 출고하지 않으므로 대기로 보낼 수 없습니다 — 박스에서 빼 두고 [✕ 삭제]'); return; }
   var sessRows = workSession.rows || [];
   var r = sessRows[it.srcIdx] || {};
   /* pending 구조에 맞춰 변환 */
