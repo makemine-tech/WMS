@@ -347,6 +347,16 @@
     font-size: 8pt; color: #64748b;
   }
   .foot .issued { text-align: right; line-height: 1.4; }
+  /* 우측 하단 출고지 — 같은 센터·같은 날이라도 출고지가 다르면 파렛트가 갈린다.
+     작업자가 이 이름으로 밀크런 라벨 짝을 눈으로 확인한다. */
+  .foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2mm; }
+  .origin-tag {
+    font-size: 12pt; font-weight: 800; color: #0f172a;
+    border: 1.2pt solid #0f172a; border-radius: 2mm; padding: 1mm 3mm;
+    display: inline-flex; align-items: baseline; gap: 2.5mm; white-space: nowrap;
+  }
+  .origin-tag .ot-label { font-size: 8pt; font-weight: 700; color: #64748b; letter-spacing: .08em; }
+  .origin-tag .ot-none  { color: #dc2626; }
 
   /* ======================================================
      웹페이지 하단 푸터 (main/index.html과 통일)
@@ -1232,7 +1242,9 @@ function groupRows(rows) {
   for (const r of rows) {
     const etaKey = formatEta(r.eta, yearNow) || '__noeta__';
     const bk = r.__booking || 0;   // 같은 센터·파렛트수 안에서 출고건 구분 (1로 리셋 감지)
-    const key = `${r.center}::${etaKey}::${r.palletT}::${bk}::${r.palletN}`;
+    /* 같은 센터·같은 도착일·같은 파렛트번호라도 출고지가 다르면 다른 파렛트다 (섞이면 안 된다) */
+    const og = normOrigin(r.origin);
+    const key = `${r.center}::${etaKey}::${r.palletT}::${bk}::${r.palletN}::${og}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(r);
   }
@@ -1241,6 +1253,8 @@ function groupRows(rows) {
     return {
       key,
       center: first.center,
+      origin: (items.find(i => String(i.origin || '').trim()) || {}).origin || '',
+      originNorm: normOrigin(first.origin),
       palletTotal: first.palletT,
       palletNo: first.palletN,
       booking: first.__booking || 0,
@@ -1265,6 +1279,8 @@ function groupRows(rows) {
     if (ea !== eb) return ea < eb ? -1 : 1;
     const c = a.center.localeCompare(b.center, "ko");
     if (c !== 0) return c;
+    const o = String(a.origin||'').localeCompare(String(b.origin||''), "ko");
+    if (o !== 0) return o;   // 출고지별로 묶어 인쇄 — 라벨 짝을 순서대로 맞추기 위해
     if (a.palletTotal !== b.palletTotal) return a.palletTotal - b.palletTotal;
     if ((a.booking || 0) !== (b.booking || 0)) return (a.booking || 0) - (b.booking || 0); // 출고건1 전체 → 출고건2 전체
     return a.palletNo - b.palletNo;
@@ -1465,9 +1481,12 @@ function renderPreview(groups) {
         </table>
 
         <div class="foot">
-          <div class="issued">
-            발행: ${escapeHtml(issued)}<br/>
-            페이지: ${i+1} / ${groups.length}
+          <div class="foot-right">
+            <div class="origin-tag"><span class="ot-label">출고지</span>${g.origin ? escapeHtml(g.origin) : '<span class="ot-none">미지정</span>'}</div>
+            <div class="issued">
+              발행: ${escapeHtml(issued)}<br/>
+              페이지: ${i+1} / ${groups.length}
+            </div>
           </div>
         </div>
       </section>`;
@@ -1480,6 +1499,7 @@ function renderPreview(groups) {
   document.getElementById("summary").innerHTML =
     `업체 <b>${escapeHtml(vendor.name)}</b> · 총 <b>${groups.length}</b>개 팔레트 · ` +
     `물류센터 <b>${[...new Set(groups.map(g=>g.center))].length}</b>곳 · ` +
+    `출고지 <b>${[...new Set(groups.map(g=>g.origin||'(미지정)'))].length}</b>곳 · ` +
     `SKU행 <b>${groups.reduce((s,g)=>s+g.items.length,0)}</b>건`;
 
   // 레이아웃 완료 후 각 페이지를 297mm 안에 들어가도록 자동 축소
@@ -1624,6 +1644,20 @@ function normCenter(s) {
     .replace(/\(.*?\)/g, '')   // 괄호 내용 제거
     .replace(/\s+/g, '')
     .toLowerCase();
+}
+
+/* 출고지 정규화 — 공백·괄호 제거 후 비교 (센터와 같은 방식) */
+function normOrigin(s) {
+  return String(s||'')
+    .replace(/(.*?)/g, '')
+    .replace(/s+/g, '')
+    .toLowerCase();
+}
+/* 라벨 페이지 글자에 이 출고지 이름이 들어 있는가 — 같은 센터로 가는 라벨을 출고지별로 가른다 */
+function pageMatchesOrigin(page, on) {
+  if (!on) return false;
+  const cleanText = String(page.text || '').replace(/s+/g, '').toLowerCase();
+  return cleanText.includes(on);
 }
 
 /* PDF 1개 분석 → { file, doc, category, pages: [{idx, center, text, useFor}], allText } */
@@ -2135,8 +2169,9 @@ function matchPagesInPdf(item, cn) {
 
 /* 한 센터에 대한 라벨 페이지([{url, kind}] 배열) 생성, 인덱스는 팔레트 번호 1..N
    kind: 'truck' (정사각 라벨, 페이지 가득) | 'milkrun' (가로 PDF, 90도 회전 가득) */
-async function getLabelPagesForCenter(center) {
+async function getLabelPagesForCenter(center, origin) {
   const cn = normCenter(center);
+  const on = normOrigin(origin);   // 같은 센터라도 출고지가 다르면 라벨도 갈라야 한다
 
   // truck: 모든 파일의 매칭 페이지를 누적 → PALLET 번호 오름차순 정렬
   // (분할된 truck_shipment 파일이 같은 센터에 여러 개 있어도 통합 인쇄)
@@ -2147,6 +2182,10 @@ async function getLabelPagesForCenter(center) {
       const pg = it.pages[i - 1];
       if (pageMatchesCenter(pg, cn)) truckMatches.push({ item: it, pageIdx: i, page: pg });
     }
+  }
+  if (on && truckMatches.length) {
+    const byOg = truckMatches.filter(m => pageMatchesOrigin(m.page, on));
+    if (byOg.length) truckMatches.splice(0, truckMatches.length, ...byOg);
   }
   if (truckMatches.length) {
     truckMatches.sort((a, b) => {
@@ -2177,8 +2216,15 @@ async function getLabelPagesForCenter(center) {
     const allowed = pickPagesForCategory(it);
     for (const i of allowed) {
       const pg = it.pages[i - 1];
-      if (pageMatchesCenter(pg, cn)) dlMatches.push({ item: it, pageIdx: i });
+      if (pageMatchesCenter(pg, cn)) dlMatches.push({ item: it, pageIdx: i, page: pg });
     }
+  }
+  /* 출고지 이름이 찍힌 라벨이 있으면 그 라벨만 이 출고지 몫으로 (센터가 같아도 서로 교차되지 않게) */
+  let dlByOrigin = false;
+  if (on && dlMatches.length) {
+    const byOg = dlMatches.filter(m => pageMatchesOrigin(m.page, on));
+    if (byOg.length) { dlMatches.splice(0, dlMatches.length, ...byOg); dlByOrigin = true; }
+    else console.warn('[label match] center=%s origin=%s → 라벨에 출고지 글자가 없어 센터 기준 순서대로 배정', center, origin);
   }
   if (dlMatches.length) {
     console.log('[label match] center=%s → download files=%d pages=%d',
@@ -2189,6 +2235,7 @@ async function getLabelPagesForCenter(center) {
     for (const m of dlMatches) {
       items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'milkrun' });
     }
+    items.byOrigin = dlByOrigin;   // 출고지로 갈랐는지 — 못 갈랐으면 센터 하나로 순서 공유
     return items;
   }
 
@@ -2209,7 +2256,7 @@ let TRUCK_CANCELLED = false;   // 확인창에서 취소를 누르면 true
 /* 출고건 키 — (센터 + 도착예정일 + 총 파렛트수 + 출고건번호). 같은 출고건의 모든 파렛트가 같은 키.
  * booking 포함: 같은 센터·파렛트수가 2건 겹쳐도 트럭 매칭 단계에서 따로 잡히도록. (일반 건은 booking=0 → 동작 동일) */
 function shipmentKey(g) {
-  return normCenter(g.center) + '::' + formatEta(g.eta, new Date().getFullYear()) + '::' + g.palletTotal + '::' + (g.booking || 0);
+  return normCenter(g.center) + '::' + formatEta(g.eta, new Date().getFullYear()) + '::' + g.palletTotal + '::' + (g.booking || 0) + '::' + (g.originNorm || '');
 }
 
 /* 트럭 파일 1개 요약 — 센터/파렛트수/트럭번호/부킹번호 + 파렛트번호 오름차순 라벨페이지 */
@@ -2408,9 +2455,18 @@ async function buildIntegratedStage() {
       }
     } else {
       // ── download(밀크런) 센터: 기존 방식(센터별 순서대로) 유지
-      if (!(cn in dlCache)) dlCache[cn] = await getLabelPagesForCenter(g.center);
-      dlCounter[cn] = (dlCounter[cn] || 0) + 1;
-      const it = dlCache[cn][dlCounter[cn] - 1];
+      /* 출고지별로 라벨을 따로 집는다. 라벨에 출고지 글자가 없으면(못 가르면)
+         예전처럼 센터 하나로 순서를 공유해 같은 라벨이 두 번 나오지 않게 한다. */
+      const ok = normOrigin(g.origin);
+      const ckey = cn + '||' + ok;
+      if (!(ckey in dlCache)) {
+        const arr = await getLabelPagesForCenter(g.center, g.origin);
+        dlCache[ckey] = arr;
+        if (!arr.byOrigin) dlCache[cn + '||*'] = arr;
+      }
+      const useKey = dlCache[ckey].byOrigin ? ckey : (cn + '||*');
+      dlCounter[useKey] = (dlCounter[useKey] || 0) + 1;
+      const it = dlCache[useKey][dlCounter[useKey] - 1];
       if (it) { labelUrl = it.url; kind = it.kind; }
     }
     if (labelUrl) {
