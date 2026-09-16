@@ -1649,14 +1649,14 @@ function normCenter(s) {
 /* 출고지 정규화 — 공백·괄호 제거 후 비교 (센터와 같은 방식) */
 function normOrigin(s) {
   return String(s||'')
-    .replace(/(.*?)/g, '')
-    .replace(/s+/g, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\s+/g, '')
     .toLowerCase();
 }
 /* 라벨 페이지 글자에 이 출고지 이름이 들어 있는가 — 같은 센터로 가는 라벨을 출고지별로 가른다 */
 function pageMatchesOrigin(page, on) {
   if (!on) return false;
-  const cleanText = String(page.text || '').replace(/s+/g, '').toLowerCase();
+  const cleanText = String(page.text || '').replace(/\s+/g, '').toLowerCase();
   return cleanText.includes(on);
 }
 
@@ -1691,7 +1691,21 @@ async function analyzePdf(file, category) {
       m = text.match(/[A-Z]{2,4}\d*\s+(\S+?\(?\S*?\)?)_TRUCK/);
       if (m) center = m[1];
     }
-    pages.push({ idx: i, text, center, centerNorm: normCenter(center) });
+    const pg = { idx: i, text, center, centerNorm: normCenter(center) };
+    /* 밀크런 라벨의 파렛트 번호 — 적재리스트 '총수-번호'(예 6-1)와 맞춘다.
+       '파렛트 1/6', '파렛트 6-1', 'PALLET 1/6' 같은 표기를 모두 잡고,
+       숫자 한 개만 있으면 번호로만 본다. 못 읽으면 예전처럼 순서대로 배정된다. */
+    if (category === 'download') {
+      const t = text.replace(/\s+/g, '');
+      let mm = t.match(/(?:파렛트|팔레트|파레트|pallet|plt)[^0-9]{0,4}(\d{1,3})\s*[\/\-]\s*(\d{1,3})/i)
+             || t.match(/(\d{1,3})\s*[\/\-]\s*(\d{1,3})(?:파렛트|팔레트|파레트|pallet|plt)/i);
+      if (mm) pg.mrPair = [parseInt(mm[1], 10), parseInt(mm[2], 10)];
+      else {
+        const one = t.match(/(?:파렛트|팔레트|파레트|pallet|plt)[^0-9]{0,4}(\d{1,3})/i);
+        if (one) pg.palletNo = parseInt(one[1], 10);
+      }
+    }
+    pages.push(pg);
   }
 
   // 분할 truck_shipment 통합 인쇄용 정렬키 — 라벨(홀수)엔 PALLET 번호가 없고 다음 짝수페이지에만 있음
@@ -2167,6 +2181,19 @@ function matchPagesInPdf(item, cn) {
   return allowed.filter(i => pageMatchesCenter(item.pages[i-1], cn));
 }
 
+/* 라벨 한 장이 이 파렛트('총수-번호')의 것인가 —
+   라벨에 '1/6' 처럼 두 숫자가 있으면 (총수,번호) 순서가 어느 쪽이든 맞으면 일치,
+   숫자가 하나면 번호만 본다. */
+function labelMatchesPallet(page, tot, no) {
+  if (!page || no == null) return false;
+  if (page.mrPair) {
+    const [a, b] = page.mrPair;
+    return (a === tot && b === no) || (a === no && b === tot);
+  }
+  if (page.palletNo != null) return page.palletNo === no;
+  return false;
+}
+
 /* 한 센터에 대한 라벨 페이지([{url, kind}] 배열) 생성, 인덱스는 팔레트 번호 1..N
    kind: 'truck' (정사각 라벨, 페이지 가득) | 'milkrun' (가로 PDF, 90도 회전 가득) */
 async function getLabelPagesForCenter(center, origin) {
@@ -2205,7 +2232,7 @@ async function getLabelPagesForCenter(center, origin) {
       truckMatches.map(m => `${m.item.name}#${m.pageIdx}(P${m.page.palletNo ?? '?'})`));
     const items = [];
     for (const m of truckMatches) {
-      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'truck' });
+      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'truck', page: m.page });
     }
     return items;
   }
@@ -2233,7 +2260,7 @@ async function getLabelPagesForCenter(center, origin) {
       dlMatches.length);
     const items = [];
     for (const m of dlMatches) {
-      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'milkrun' });
+      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'milkrun', page: m.page });
     }
     items.byOrigin = dlByOrigin;   // 출고지로 갈랐는지 — 못 갈랐으면 센터 하나로 순서 공유
     return items;
@@ -2422,6 +2449,7 @@ async function buildIntegratedStage() {
   const dlCache = {};
   const dlCounter = {};
   const shipCounter = {};   // 트럭: 출고건별 파렛트 진행 카운터 (fallback)
+  let dlByNo = 0, dlBySeq = 0;   // 밀크런 라벨을 번호로 맞췄는지 / 순서로 맞췄는지
 
   let totalAdded = 0;
   for (let i = 0; i < GROUPS.length; i++) {
@@ -2458,21 +2486,33 @@ async function buildIntegratedStage() {
       /* 출고지별로 라벨을 따로 집는다. 라벨에 출고지 글자가 없으면(못 가르면)
          예전처럼 센터 하나로 순서를 공유해 같은 라벨이 두 번 나오지 않게 한다. */
       const ok = normOrigin(g.origin);
-      const ckey = cn + '||' + ok;
+      const ckey = cn + '||' + ok, shared = cn + '||*';
       if (!(ckey in dlCache)) {
-        const arr = await getLabelPagesForCenter(g.center, g.origin);
-        dlCache[ckey] = arr;
-        if (!arr.byOrigin) dlCache[cn + '||*'] = arr;
+        const found = await getLabelPagesForCenter(g.center, g.origin);
+        if (found.byOrigin) dlCache[ckey] = found;
+        else {
+          /* 출고지로 못 가른 센터는 목록 하나를 계속 나눠 쓴다 (다시 만들면 같은 라벨이 두 번 붙는다) */
+          if (!dlCache[shared]) dlCache[shared] = found;
+          dlCache[ckey] = dlCache[shared];
+        }
       }
-      const useKey = dlCache[ckey].byOrigin ? ckey : (cn + '||*');
-      dlCounter[useKey] = (dlCounter[useKey] || 0) + 1;
-      const it = dlCache[useKey][dlCounter[useKey] - 1];
-      if (it) { labelUrl = it.url; kind = it.kind; }
+      const arr = dlCache[ckey];
+      /* 파렛트 번호가 같은 라벨을 먼저 — 적재리스트 6-1 이면 라벨도 6-1 */
+      let it = arr.find(x => !x.__used && labelMatchesPallet(x.page, g.palletTotal, g.palletNo));
+      if (it) dlByNo++;
+      else { it = arr.find(x => !x.__used); if (it) dlBySeq++; }   // 번호를 못 읽은 라벨은 순서대로
+      if (it) { it.__used = true; labelUrl = it.url; kind = it.kind; }
     }
     if (labelUrl) {
       stage.appendChild(pdfImgPage(labelUrl, kind));
       totalAdded++;
     }
+  }
+  if (dlBySeq) {
+    console.warn('[milkrun] 번호로 맞춘 라벨 %d장, 번호를 못 읽어 순서대로 붙인 라벨 %d장', dlByNo, dlBySeq);
+    setPdfStatus('밀크런 라벨 ' + dlBySeq + '장은 라벨에서 파렛트 번호를 못 읽어 순서대로 배치했습니다 — 번호를 확인하세요.', 'warn');
+  } else if (dlByNo) {
+    console.log('[milkrun] 파렛트 번호로 맞춘 라벨 %d장', dlByNo);
   }
   return totalAdded;
 }
