@@ -1093,7 +1093,12 @@ function dlStockCurrent(){
   var snap = aggregateStock(null);
   var fset = getFilteredBcSet();
   if (fset) snap = snap.filter(function(g){ return fset[normBarcode(g.barcode)]; });
-  if (!snap.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다'+(fset?' (검색 결과 일치 0)':'')); return; }
+  /* 현재고가 0인(그리고 불량도 0인) 바코드는 받아도 쓸 데가 없다 — 재고나 불량이 1개라도 남은 것만.
+     재고가 음수(출고가 입고보다 많은 어긋난 기록)인 것도 여기서 함께 빠진다. */
+  var zeroN = snap.length;
+  snap = snap.filter(function(g){ return (+g.stock||0) >= 1 || (+g.defQty||0) >= 1; });
+  zeroN -= snap.length;
+  if (!snap.length) { setMsg('m0','warn','⚠️ 다운로드할 데이터가 없습니다 — 재고·불량이 남은 바코드가 없습니다'+(fset?' (검색 결과 일치 0)':'')); return; }
   var rows = [['박스바코드','바코드','품명','브랜드','품번','컬러','사이즈','원산지','현재고','불량','비고']];
   snap.forEach(function(g){
     var m = g.meta || {};
@@ -1103,7 +1108,7 @@ function dlStockCurrent(){
   var cols = [{wch:16},{wch:16},{wch:24},{wch:10},{wch:12},{wch:10},{wch:8},{wch:10},{wch:10},{wch:8},{wch:24}];
   var fname = '현재고수량_'+ymd(Date.now())+(fset?'_검색결과':'');
   saveXlsx(rows, fname, '현재고', cols);
-  setMsg('m0','ok','✅ 현재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 기준), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개');
+  setMsg('m0','ok','✅ 현재고 다운로드 완료 '+(fset?'(검색결과만) ':'')+'— '+snap.length+'행 (바코드 1개당 1행), 총 재고 '+snap.reduce(function(s,g){return s+g.stock;},0)+'개'+(zeroN?' · 재고 0 제외 '+zeroN+'종':''));
 }
 
 /* ①-B 박스별 현재고 다운로드 — (박스, 바코드) 쌍 단위 1행. 검색 중이면 그 결과만.
