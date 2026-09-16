@@ -540,7 +540,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-tbl tbody td{padding:.42rem .55rem;border-bottom:1px solid rgba(37,43,59,.5);font-family:var(--mo);font-size:.8rem;white-space:nowrap;vertical-align:middle}
 .cp-done-tbl tbody tr:first-child td{background:rgba(74,240,168,.06)}  /* 가장 최근 행 강조 */
 .cp-done-tbl tbody tr.undone td{opacity:.35;text-decoration:line-through}
-/* 완료풀 inline edit input (출고수량/파렛/박스수) */
+/* 완료풀 inline edit input (출고수량/파렛/번째) */
+.c-pal-cell .of{font-size:.68rem;color:var(--mu);font-weight:700;margin-left:.1rem;font-family:var(--mo)}
 .cp-done-tbl .c-edit-inp{width:44px;background:#0a0d13;color:var(--g);border:1px solid var(--br);border-radius:3px;padding:.12rem .2rem;font-family:var(--mo);font-weight:900;font-size:.78rem;text-align:right;outline:none;-moz-appearance:textfield}
 .cp-done-tbl .c-edit-inp::-webkit-outer-spin-button,
 .cp-done-tbl .c-edit-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
@@ -1530,7 +1531,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
               <th style="text-align:right">잔여</th>
               <th>입고일</th>
               <th>센터</th>
-              <th style="text-align:center" title="파렛트 번호 + 박스수 (수정 가능 — 변경 즉시 저장)">파렛/박스 ✎</th>
+              <th style="text-align:center" title="박스마다: 파렛트 번호 + 그 파렛트의 몇 번째 박스 (수정 가능 — 변경 즉시 저장, 위 파렛트 개괄이 함께 바뀜)">파렛/번째 ✎</th>
               <th style="text-align:center" title="이 출고 항목 개별 삭제">✕</th>
             </tr></thead>
             <tbody id="cpDoneBody">
@@ -3101,6 +3102,44 @@ function cpWithIdx(fn){
   _cpIdx = cpBuildIdx();
   try { return fn(); } finally { _cpIdx = null; }
 }
+/* ═══ 파렛트 안 박스 순서 — 'N번째 박스' ═══
+ * 박스 1개 = 출고박스번호(없으면 원박스) 1개. 박스수는 따로 적지 않는다 —
+ * 파렛트(입고일+센터+번호)에 든 서로 다른 박스의 개수가 곧 박스수다.
+ * 파렛트 안에서 몇 번째인지는 ① 작업자가 정한 순번(boxSeq)이 있으면 그 순서,
+ * ② 없으면 처음 적재된 시각 순서. (예전엔 줄마다 '파렛트 전체 박스수'를 똑같이 보여 줘서
+ *    어느 게 몇 번째 박스인지 알 수 없었고, 고쳐도 그 줄 표시만 바뀌었다) */
+function cpScanBoxKey(s){ return s.shipBoxNo || s.srcBoxBarcode || s.boxBarcode || ''; }
+function cpScanPalletKey(s, rows){
+  var r = (rows || [])[s.srcIdx] || {};
+  return (s.palletEta || r.eta || '') + '|' + (s.palletCenter || r.center || '') + '|' + (+s.palletNo || 1);
+}
+/* → { order: { 파렛트키: [박스키 …] }, rank: { 파렛트키#박스키: n } } — 화면 갱신 중엔 한 번만 만든다 */
+function cpPalletBoxOrder(){
+  if (_cpIdx && _cpIdx.boxOrder) return _cpIdx.boxOrder;
+  var ws = workSession || {}, rows = ws.rows || [], info = {};
+  (ws.scans || []).forEach(function(sc){
+    if (sc.undone) return;
+    var bk = cpScanBoxKey(sc);
+    if (!bk) return;
+    var pk = cpScanPalletKey(sc, rows), k = pk + '#' + bk;
+    var e = info[k] || (info[k] = { pk:pk, bk:bk, ts:Infinity, seq:null });
+    if ((+sc.ts || 0) < e.ts) e.ts = +sc.ts || 0;
+    if (sc.boxSeq != null && sc.boxSeq !== '' && !isNaN(+sc.boxSeq)) e.seq = (e.seq == null) ? +sc.boxSeq : Math.min(e.seq, +sc.boxSeq);
+  });
+  var order = {}, rank = {};
+  Object.keys(info).forEach(function(k){ var e = info[k]; (order[e.pk] || (order[e.pk] = [])).push(e); });
+  Object.keys(order).forEach(function(pk){
+    order[pk].sort(function(a, b){
+      var as = a.seq == null ? 1e15 : a.seq, bs = b.seq == null ? 1e15 : b.seq;
+      return (as - bs) || (a.ts - b.ts) || (a.bk < b.bk ? -1 : a.bk > b.bk ? 1 : 0);
+    });
+    order[pk] = order[pk].map(function(e, i){ rank[pk + '#' + e.bk] = i + 1; return e.bk; });
+  });
+  var out = { order:order, rank:rank };
+  if (_cpIdx) _cpIdx.boxOrder = out;
+  return out;
+}
+
 /* ═══ 집계 캐시 끝 ═══ */
 
 /* ── 세션 헤더 갱신 ── */
@@ -5714,23 +5753,28 @@ function cpRefreshDonePool(){
       var qtyCell = s.undone
         ? '+' + s.qty
         : '+<input type="number" min="0" class="c-edit-inp" value="'+(+s.qty||0)+'" onchange="cpDoneUpdateScan('+keyArgs+',\'qty\',this.value,this)" onclick="this.select()" title="출고수량 수정">';
-      /* 파렛/박스수 inline 수정 — 그룹(eta·center·palletNo) 기준 박스수 자동계산 또는 override */
-      var sEta = s.palletEta || r.eta || '';
-      var sCtr = s.palletCenter || r.center || '';
-      var sPn  = +s.palletNo || 1;
-      var palCell;
-      if (s.undone) {
-        palCell = (s.palletNo||'-');
-      } else {
-        /* 박스수는 상품줄(scan) 단위 — s.boxCount 가 있으면 그 값, 없으면 파렛트 자동계산을 기본값으로 표시.
-           수정 시 해당 줄만 바뀜(같은 파렛트의 다른 줄에 영향 없음). */
-        var boxCount = (s.boxCount !== undefined && s.boxCount !== null) ? (+s.boxCount) : cpResolveBoxCountForPallet(sEta, sCtr, sPn);
-        palCell = '<div class="c-pal-cell">'+
-          '<input type="number" min="1" class="c-edit-inp narrow" value="'+sPn+'" onchange="cpDoneUpdateScan('+keyArgs+',\'palletNo\',this.value,this)" onclick="this.select()" title="파렛트 번호 수정">'+
-          '<span>파렛</span>'+
-          '<input type="number" min="0" class="c-edit-inp narrow" value="'+boxCount+'" onchange="cpDoneUpdateScan('+keyArgs+',\'boxCount\',this.value,this)" onclick="this.select()" title="박스수 수정 (이 상품줄의 박스 개수 — 같은 파렛트라도 줄마다 따로 적용)">'+
-          '<span>박스</span>'+
-        '</div>';
+      /* 파렛 · 몇 번째 박스 — 박스 단위라 박스의 첫 줄에만 (rowspan). 박스수는 칸이 아니라
+         파렛트에 든 박스 개수로 저절로 정해진다 (고치면 위 초록 개괄·적재리스트가 함께 바뀜) */
+      var palTd = '';
+      if (i === 0) {
+        var sPn = +s.palletNo || 1;
+        var palHtml;
+        var boxArg = '\''+escAttrLocal(g.boxNo)+'\'';
+        if (s.undone || g.boxNo === '?') {
+          palHtml = (s.palletNo||'-');
+        } else {
+          var bo = cpPalletBoxOrder(), pk = cpScanPalletKey(s, rows);
+          var seq = bo.rank[pk + '#' + g.boxNo] || 1;
+          var inPal = (bo.order[pk] || []).length || 1;
+          palHtml = '<div class="c-pal-cell">'+
+            '<input type="number" min="1" class="c-edit-inp narrow" value="'+sPn+'" onchange="cpDoneMoveBox('+boxArg+',this.value,this)" onclick="this.select()" title="이 박스의 파렛트 번호 — 바꾸면 박스 통째로 그 파렛트의 맨 뒤로 옮깁니다">'+
+            '<span>파렛</span>'+
+            '<input type="number" min="1" class="c-edit-inp narrow" value="'+seq+'" onchange="cpDoneSetBoxSeq('+boxArg+',this.value,this)" onclick="this.select()" title="이 파렛트 안에서 몇 번째 박스인지 — 바꾸면 순서만 바뀌고 박스수는 그대로">'+
+            '<span>번째</span>'+
+            '<span class="of" title="이 파렛트에 든 박스 수">/'+inPal+'</span>'+
+          '</div>';
+        }
+        palTd = '<td class="c-pal grp-cell" rowspan="'+rowSpan+'">' + palHtml + '</td>';
       }
       html += '<tr class="'+rowCls+'">'+
         groupCells +
@@ -5743,7 +5787,7 @@ function cpRefreshDonePool(){
         '<td class="'+remCls+'">'+ rem + '</td>'+
         '<td class="c-eta">' + escH(r.eta||'-') + '</td>'+
         '<td class="c-ctr">' + escH(r.center||'-') + '</td>'+
-        '<td class="c-pal">' + palCell + '</td>'+
+        palTd +
         '<td style="text-align:center">' + delBtn + '</td>'+
       '</tr>';
     });
@@ -5887,6 +5931,12 @@ function cpBuildShipListGroups(){
     }
     pg.totalQty += (+s.qty||0);
   });
+  /* 박스를 옮겨 새 파렛트 번호가 생겨도 총 파렛트수에 들어가게 — 실제 쓰인 가장 큰 번호 */
+  var maxPnByGrp = {};
+  Object.keys(byPage).forEach(function(k){
+    var pg = byPage[k], gk2 = (pg.eta||'') + '|' + (pg.center||'');
+    maxPnByGrp[gk2] = Math.max(maxPnByGrp[gk2] || 0, +pg.palletNo || 1);
+  });
   /* 객체 → 배열 + 정렬 */
   var groups = Object.keys(byPage).map(function(k){
     var g = byPage[k];
@@ -5925,7 +5975,12 @@ function cpBuildShipListGroups(){
       var s = String(id); var m = s.match(/(\d+)\s*$/);
       return m ? s.slice(0, m.index) + m[1].padStart(12,'0') : s;
     }
+    /* 완료풀의 'N번째' 순서 그대로 (없으면 박스번호순) */
+    var boRank = cpPalletBoxOrder().rank, pageKey = (g.eta||'') + '|' + (g.center||'') + '|' + (+g.palletNo||1);
+    var rk = function(id){ return boRank[pageKey + '#' + id] || 1e9; };
     var boxes = Object.keys(g.boxSku||{}).sort(function(a,b){
+      var ra = rk(a), rb = rk(b);
+      if (ra !== rb) return ra - rb;
       var ka=boxSortKey(a), kb=boxSortKey(b); return ka<kb?-1:(ka>kb?1:0);
     }).map(function(boxId){
       var skuQ = g.boxSku[boxId];
@@ -5946,9 +6001,9 @@ function cpBuildShipListGroups(){
     var fixedTotal = (workSession.palletTotals||{})[gk];   /* 사용자가 고정 입력한 센터별 총 파렛트수 */
     return {
       key: g.key, eta: g.eta, center: g.center, palletNo: g.palletNo,
-      palletTotal: fixedTotal || palCountByGrp[gk] || g.palletNo,
+      palletTotal: fixedTotal || Math.max(palCountByGrp[gk] || 0, maxPnByGrp[gk] || 0) || g.palletNo,
       pos: Object.keys(g.pos),
-      boxSum: cpResolveBoxCountForPallet(g.eta, g.center, g.palletNo),  /* 파렛트당 distinct 박스수 (override 반영) */
+      boxSum: boxes.filter(function(b){ return b.boxNo !== '-'; }).length,   /* 이 파렛트에 실제로 든 박스 개수 (옛 수동 박스수는 쓰지 않음) */
       totalQty: g.totalQty,
       skuCount: items.length,
       items: items,
@@ -6747,7 +6802,7 @@ function cpRefreshPalletHistory(){
     return '<div class="pl-history-row">'+
       '<span class="pn">'+escH(cpPalletShort(p.eta, p.center))+'-'+p.no+'</span>'+
       '<span class="ct">'+escH(p.center||'')+'</span>'+
-      '<span class="bx">'+(p.boxCount||0)+'박스</span>'+
+      '<span class="bx">'+cpAutoBoxCountForPallet(p.eta||'', p.center||'', p.no||1)+'박스</span>'+   /* 마감 뒤 옮긴 박스도 반영 */
     '</div>';
   }).join('');
   hist.innerHTML = '<div class="pl-history-title">📋 마감 이력 (최근 8건)</div>'+rows;
@@ -7039,6 +7094,74 @@ function cpDoneUpdateScan(ts, barcode, srcBox, field, value, inputEl){
     if (inputEl) inputEl.value = orig;
   });
 }
+/* 박스 통째로 다른 파렛트로 — 그 박스의 모든 상품줄을 옮기고, 새 파렛트의 맨 뒤 박스가 된다.
+ * 옮긴 뒤 두 파렛트의 순번(boxSeq)을 1,2,3… 으로 다시 매겨 빈 번호가 생기지 않게 한다. */
+function cpDoneMoveBox(boxKey, value, inputEl){
+  if (!workSessionRef || !workSession) return;
+  var rows = workSession.rows || [];
+  var scans = (workSession.scans || []).slice();
+  var mine = scans.filter(function(sc){ return !sc.undone && cpScanBoxKey(sc) === boxKey; });
+  if (!mine.length) { cpFlash('warn','⚠️ 박스를 찾을 수 없습니다 — 목록이 바뀌었을 수 있습니다'); return; }
+  var first = mine[0];
+  var fromPn = +first.palletNo || 1;
+  var n = parseInt(value, 10);
+  if (isNaN(n) || n < 1) { if (inputEl) inputEl.value = fromPn; cpFlash('warn','⚠️ 파렛트 번호는 1 이상 — 원래 값 복구'); return; }
+  if (mine.every(function(sc){ return (+sc.palletNo || 1) === n; })) return;   /* 변경 없음 */
+  var base = cpScanPalletKey(first, rows).replace(/\|[^|]*$/, '');   /* 입고일|센터 */
+  var fromPk = base + '|' + fromPn, toPk = base + '|' + n;
+  var bo = cpPalletBoxOrder();
+  var seqAt = {};
+  (bo.order[fromPk] || []).filter(function(bk){ return bk !== boxKey; })
+    .forEach(function(bk, i){ seqAt[fromPk + '#' + bk] = i + 1; });
+  var toList = (bo.order[toPk] || []).filter(function(bk){ return bk !== boxKey; });
+  toList.push(boxKey);
+  toList.forEach(function(bk, i){ seqAt[toPk + '#' + bk] = i + 1; });
+  var next = scans.map(function(sc){
+    if (sc.undone) return sc;
+    var bk = cpScanBoxKey(sc);
+    if (bk === boxKey) return Object.assign({}, sc, { palletNo: n, boxSeq: seqAt[toPk + '#' + bk] });
+    var q = seqAt[cpScanPalletKey(sc, rows) + '#' + bk];
+    return (q != null && +sc.boxSeq !== q) ? Object.assign({}, sc, { boxSeq: q }) : sc;
+  });
+  cpDoneSaveScans(next, '✓ 박스 '+escH(boxKey)+' → '+n+'번 파렛트 '+toList.length+'번째 (파렛트 '+fromPn+' · '+n+' 박스수 다시 계산)', inputEl, fromPn);
+}
+/* 같은 파렛트 안에서 순서만 바꾸기 — k번째로 끼워 넣고 나머지를 한 칸씩 민다 */
+function cpDoneSetBoxSeq(boxKey, value, inputEl){
+  if (!workSessionRef || !workSession) return;
+  var rows = workSession.rows || [];
+  var scans = (workSession.scans || []).slice();
+  var first = scans.filter(function(sc){ return !sc.undone && cpScanBoxKey(sc) === boxKey; })[0];
+  if (!first) { cpFlash('warn','⚠️ 박스를 찾을 수 없습니다 — 목록이 바뀌었을 수 있습니다'); return; }
+  var pk = cpScanPalletKey(first, rows);
+  var list = (cpPalletBoxOrder().order[pk] || []).slice();
+  var from = list.indexOf(boxKey);
+  var n = parseInt(value, 10);
+  if (isNaN(n) || n < 1) { if (inputEl) inputEl.value = from + 1; cpFlash('warn','⚠️ 순번은 1 이상 — 원래 값 복구'); return; }
+  var k = Math.min(n, list.length);
+  if (k === from + 1) { if (inputEl) inputEl.value = k; return; }   /* 변경 없음 (범위 밖이면 끝으로 맞춤) */
+  list.splice(from, 1);
+  list.splice(k - 1, 0, boxKey);
+  var seqAt = {};
+  list.forEach(function(bk, i){ seqAt[bk] = i + 1; });
+  var next = scans.map(function(sc){
+    if (sc.undone || cpScanPalletKey(sc, rows) !== pk) return sc;
+    var q = seqAt[cpScanBoxKey(sc)];
+    return (q != null && +sc.boxSeq !== q) ? Object.assign({}, sc, { boxSeq: q }) : sc;
+  });
+  cpDoneSaveScans(next, '✓ 박스 '+escH(boxKey)+' → '+(+first.palletNo||1)+'번 파렛트 '+k+'번째', inputEl, from + 1);
+}
+function cpDoneSaveScans(next, okMsg, inputEl, origVal){
+  cpFlushSessionSave();   /* 대기 중인 스캔 저장을 먼저 내보낸다 — 이 write 에 덮이지 않게 */
+  workSessionRef.update({ scans: next, updatedAt: Date.now() }).then(function(){
+    workSession.scans = next;
+    cpRefreshScanUI();   /* 위 초록 파렛트 개괄·완료풀·박스 목록을 새 박스 배치로 다시 계산 */
+    cpFlash('ok', okMsg);
+  }).catch(function(err){
+    cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
+    if (inputEl) inputEl.value = origVal;
+  });
+}
+
 /* 파렛트 박스수 override 저장 */
 function cpDoneUpdateBoxCount(eta, center, palletNo, value, inputEl){
   if (!workSessionRef || !workSession) return;
