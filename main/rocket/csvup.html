@@ -137,10 +137,10 @@
     <div class="card-title"><div class="icon" style="background:#eef2ff;color:#4338ca;">&#128196;</div> PO CSV 파일 업로드</div>
     <div class="upload-zone" id="uploadZone">
       <div class="icon-big">&#128193;</div>
-      <p>CSV 파일을 드래그하거나 클릭하여 업로드</p>
+      <p>CSV · 엑셀(xlsx/xls) 파일을 드래그하거나 클릭하여 업로드</p>
       <div class="filename" id="fileLabel"></div>
     </div>
-    <input type="file" id="fileInput" accept=".csv" style="display:none">
+    <input type="file" id="fileInput" accept=".csv,.xlsx,.xlsm,.xls" style="display:none">
   </div>
 
   <!-- Status -->
@@ -409,11 +409,53 @@ function handleFile(file) {
   if (!file) return;
   document.getElementById('fileLabel').textContent = file.name;
 
+  // 엑셀(.xlsx/.xls)은 '물류센터' 열이 있는 시트를 CSV 로 바꿔 같은 매칭을 탄다
+  if (/\.(xlsx|xlsm|xls)$/i.test(file.name)) {
+    var xr = new FileReader();
+    xr.onload = function(ev) {
+      var csv;
+      try { csv = excelToCsv(new Uint8Array(ev.target.result)); }
+      catch (err) { showToast('엑셀 파일을 읽지 못했습니다: ' + err.message); return; }
+      if (!csv) { showToast('엑셀에서 "물류센터" 열을 찾지 못했습니다'); return; }
+      parseAndMatch(csv);
+    };
+    xr.readAsArrayBuffer(file);
+    return;
+  }
+
   var reader = new FileReader();
   reader.onload = function(ev) {
     parseAndMatch(ev.target.result);
   };
   reader.readAsText(file, 'UTF-8');
+}
+
+// 엑셀 → CSV 텍스트. '물류센터' 머리글이 있는 시트·행부터 (위쪽 제목줄은 건너뜀). 못 찾으면 ''
+// 화면 표시값이 아니라 원래 값으로 — 긴 바코드가 8.8E+12 로, 날짜가 9/20/26 으로 바뀌지 않게
+function excelToCsv(bytes) {
+  var wb = XLSX.read(bytes, {type:'array', cellDates:true});
+  var p2 = function(n) { return (n < 10 ? '0' : '') + n; };
+  var cellText = function(v) {
+    if (v == null) return '';
+    if (v instanceof Date) {
+      var d = v.getFullYear() + '-' + p2(v.getMonth() + 1) + '-' + p2(v.getDate());
+      return (v.getHours() || v.getMinutes()) ? d + ' ' + p2(v.getHours()) + ':' + p2(v.getMinutes()) : d;
+    }
+    return String(v);
+  };
+  var csvCell = function(v) {
+    var t = cellText(v).replace(/\r?\n/g, ' ');
+    return /[",]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  for (var s = 0; s < wb.SheetNames.length; s++) {
+    var aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[s]], {header:1, raw:true, defval:'', blankrows:false});
+    for (var r = 0; r < aoa.length; r++) {
+      if (aoa[r].some(function(h) { return String(h).trim() === '물류센터'; })) {
+        return aoa.slice(r).map(function(row) { return row.map(csvCell).join(','); }).join('\n');
+      }
+    }
+  }
+  return '';
 }
 
 function parseAndMatch(csvText) {
