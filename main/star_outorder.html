@@ -528,6 +528,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-done-title{font-size:.9rem;color:var(--g);font-family:var(--mo);letter-spacing:.04em;font-weight:800;margin-bottom:.6rem;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .cp-done-title .count{background:var(--g);color:#0f1117;padding:.12rem .55rem;border-radius:10px;font-size:.74rem;font-weight:900}
 .cp-done-title .meta{margin-left:auto;font-size:.7rem;color:var(--mu);font-weight:700}
+/* 완료풀 센터별 파렛트수·박스수 */
+.cp-ctr-chips{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}
+.cp-ctr-chip{background:rgba(255,184,74,.1);border:1px solid rgba(255,184,74,.45);color:var(--tx);border-radius:6px;padding:.22rem .6rem;font-size:.82rem;font-weight:700;white-space:nowrap}
+.cp-ctr-chip b{color:#ffb84a;font-weight:900;margin-right:.15rem}
+.cp-ctr-chip .n{color:var(--g);font-weight:900;font-size:.95rem}
 .cp-done-title .bak-actions{display:flex;gap:.4rem;align-items:center}
 .cp-done-title .bak-btn{background:var(--s2);color:var(--tx);border:1px solid var(--br);font-size:.72rem;font-weight:800;padding:.32rem .65rem;border-radius:5px;cursor:pointer;position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:.3rem}
 .cp-done-title .bak-btn:hover{border-color:var(--g);color:var(--g)}
@@ -1516,6 +1521,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <div class="cp-done-pool">
         <div class="cp-done-title">
           ✓ 완료풀 — 출고 누적 <span class="count" id="cpDoneCount">0</span>
+          <span class="cp-ctr-chips" id="cpDoneCenters"></span>
           <span class="meta" id="cpDoneMeta"></span>
           <span class="bak-actions">
             <button class="bak-btn" onclick="cpDownloadDoneExcel()" title="현재 세션 전체를 엑셀로 백업">⬇ 엑셀 백업</button>
@@ -5659,7 +5665,7 @@ function cpToggleLineConfirm(btn){
 function cpRefreshDonePool(){
   var body = document.getElementById('cpDoneBody');
   if (!body) return;
-  if (!workSession) { cpRefreshDonePool._sig = null; body.innerHTML = '<tr><td colspan="11" class="cp-done-empty">세션 없음</td></tr>'; return; }
+  if (!workSession) { var ce0 = document.getElementById('cpDoneCenters'); if (ce0) ce0.innerHTML = ''; cpRefreshDonePool._sig = null; body.innerHTML = '<tr><td colspan="11" class="cp-done-empty">세션 없음</td></tr>'; return; }
   /* 완료 기록이 그대로면 다시 그리지 않는다 — 박스를 입고대기로 넣을 때마다 수백 줄 표를 새로 짓던 것.
      (고치던 수량·파렛트 칸이 스캔 때문에 날아가지도 않는다) */
   var doneSig = JSON.stringify([workSession.scans || [], workSession.shipBoxes || [], workSession.palletBoxOverride || {}, workSession.rows || []])
@@ -5682,6 +5688,20 @@ function cpRefreshDonePool(){
   if (cnt) cnt.textContent = activeScans.length;
   var meta = document.getElementById('cpDoneMeta');
   if (meta) meta.textContent = '박스 ' + Object.keys(distinctBox).length + ' · 총 출고 ' + totalShip + '개';
+  /* 센터별 파렛트수·박스수 — 파렛트 번호·박스 순서를 고치면 함께 바뀐다 (적재리스트와 같은 집계) */
+  var ctrEl = document.getElementById('cpDoneCenters');
+  if (ctrEl) {
+    var ctrAgg = {}, pbo = cpPalletBoxOrder().order;
+    Object.keys(pbo).forEach(function(pk){
+      var ctr = pk.split('|')[1] || '센터없음';
+      var a = ctrAgg[ctr] || (ctrAgg[ctr] = { pal:0, box:0 });
+      a.pal++; a.box += pbo[pk].length;
+    });
+    ctrEl.innerHTML = Object.keys(ctrAgg).sort(function(a,b){ return a.localeCompare(b, 'ko', {numeric:true}); }).map(function(c){
+      var a = ctrAgg[c];
+      return '<span class="cp-ctr-chip"><b>'+escH(c)+'</b> <span class="n">'+a.pal+'</span>파렛트 · <span class="n">'+a.box+'</span>박스</span>';
+    }).join('');
+  }
 
   if (!activeScans.length) {
     body.innerHTML = '<tr><td colspan="13" class="cp-done-empty">스캔 시작 후 출고 적재 내역이 여기에 누적됩니다</td></tr>';
