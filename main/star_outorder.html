@@ -845,18 +845,21 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .ship-foot{margin-top:auto;padding-top:5mm;border-top:1.5px dashed #000;font-size:8.5pt;color:#000;font-weight:700;display:flex;justify-content:space-between}
 
 /* duplex (2부 가로 좌우 동일) */
+/* 2장인쇄(좌우): A4 가로 한 장 = 반쪽 2칸, 각 칸에 A4 세로 한 쪽을 0.703배로 줄여 넣는다.
+ * 높이를 209mm 로 살짝 줄여 반올림 때문에 빈 장이 끼는 것을 막는다. */
 .ship-list-area .ship-duplex-sheet{
-  width:297mm;height:210mm;max-height:210mm;
+  width:297mm;height:209mm;max-height:209mm;
   display:flex;background:#fff;
   page-break-after:always;page-break-inside:avoid;break-inside:avoid;
   overflow:hidden;
 }
 .ship-list-area .ship-duplex-sheet:last-child{page-break-after:auto}
-.ship-list-area .ship-duplex-half{width:148.5mm;height:210mm;max-height:210mm;overflow:hidden;position:relative}
+.ship-list-area .ship-duplex-half{width:148.5mm;height:209mm;max-height:209mm;overflow:hidden;position:relative}
 .ship-list-area .ship-duplex-half + .ship-duplex-half{border-left:1px dashed rgba(0,0,0,.35)}
 .ship-list-area .ship-duplex-half > .ship-page{
   width:210mm;height:297mm;min-height:297mm;max-height:297mm;
-  overflow:hidden;zoom:0.707;
+  padding:12mm 10mm 10mm;   /* 용지 여백 0 이라 칸 안에서 여백 확보 (줄면 약 8×7mm) */
+  overflow:hidden;zoom:0.703;
   page-break-after:auto!important;page-break-inside:avoid;break-inside:avoid;
 }
 
@@ -1407,7 +1410,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         </div>
         <div class="ss-actions">
           <button class="cp-tts-toggle on" id="cpTtsBtn" onclick="cpToggleTts()" title="센터명 음성 안내 (TTS) 켜기/끄기">🔊 음성 ON</button>
-          <button class="btn btn-y" onclick="cpPrintShipList()" title="출고적재리스트 인쇄 (A4 세로 1부, 또는 가로 2부 좌우동일)">📃 적재리스트</button>
+          <button class="btn btn-y" onclick="cpPrintShipList('1up')" title="출고적재리스트 — A4 세로, 한 면에 파렛트 1장 (2부)">📃 적재 1장인쇄</button>
+          <button class="btn btn-y" onclick="cpPrintShipList('2up')" title="출고적재리스트 — A4 가로 좌우 2칸, 파렛트별로 끊어서. 한 쪽짜리는 좌우 같은 내용(2부), 여러 쪽이면 좌1·우2 / 좌3·공란 순서">📑 적재 2장인쇄(좌우)</button>
           <button class="btn btn-s" onclick="cpPauseScan()" title="세션은 그대로 두고 PO뷰로 돌아갑니다">⏸ 일시정지</button>
           <button class="btn btn-r" onclick="cpEndScan()" title="세션 완료 처리">📤 작업 종료</button>
         </div>
@@ -6048,7 +6052,10 @@ function cpBuildShipListGroups(){
   return groups;
 }
 
-function cpBuildShipPageHtml(g, totalPages, pageIdx){
+/* opt (2장인쇄 쪽 나눔용): cont = 이어지는 쪽 (업체·예약 정보 생략), empty = 상품 행 없이 틀만.
+ * .ship-part 자리에는 나중에 ' · 2/3쪽' 이 채워진다. */
+function cpBuildShipPageHtml(g, totalPages, pageIdx, opt){
+  opt = opt || {};
   var vendor = (workSession && workSession.vendor) || '';
   var vendorCode = (workSession && workSession.vendorCode) || '';
   var posStr = (g.pos||[]).filter(Boolean).join(', ') || '-';
@@ -6058,7 +6065,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
   /* 박스번호 기준으로 묶어 렌더 — 같은 박스의 SKU 들은 박스수 셀 1개(rowspan)로 병합, 가운데 '1'.
      박스 1개당 한 <tbody> → page-break-inside:avoid 로 박스가 페이지 경계에서 안 쪼개짐.
      박스별 '1'의 합계 = 총박스수. */
-  var skuTbodies = (g.boxes||[]).map(function(box){
+  var skuTbodies = (opt.empty ? [] : (g.boxes||[])).map(function(box){
     var its = box.items || [];
     var n = its.length || 1;
     return '<tbody>' + its.map(function(it, i){
@@ -6092,6 +6099,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
       '</div>'+
     '</div>'+
 
+    (opt.cont ? '' :
     '<div class="ship-section-title">1) 업체 정보</div>'+
     '<table class="ship-info-table"><tbody>'+
       '<tr><th>업체명</th><td>'+escH(vendor||'-')+'</td></tr>'+
@@ -6105,9 +6113,9 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
       '<tr><th>물류센터 도착예정일</th><td class="val-accent">'+escH(g.eta||'-')+'</td></tr>'+
       '<tr><th>파렛트번호</th><td class="val-accent">'+(g.palletTotal||g.palletNo||1)+'-'+(g.palletNo||1)+'</td></tr>'+
       '<tr><th>총 박스수</th><td class="val-accent">'+(g.boxSum||0)+'</td></tr>'+
-    '</tbody></table>'+
+    '</tbody></table>') +
 
-    '<div class="ship-section-title">3) 상품 정보 ('+(g.skuCount||0)+' SKU · 박스 '+(g.boxSum||0)+' · 총 '+g.totalQty+'개)</div>'+
+    '<div class="ship-section-title">3) 상품 정보 ('+(g.skuCount||0)+' SKU · 박스 '+(g.boxSum||0)+' · 총 '+g.totalQty+'개)'+(opt.cont?' — 이어서':'')+'<span class="ship-part"></span></div>'+
     '<table class="ship-sku-table">'+
       '<colgroup>'+
         '<col style="width:4%">'+
@@ -6130,7 +6138,7 @@ function cpBuildShipPageHtml(g, totalPages, pageIdx){
 
     '<div class="ship-foot">'+
       '<span>'+escH(vendor||'')+(vendorCode?'  ('+escH(vendorCode)+')':'')+'</span>'+
-      '<span>'+(pageIdx+1)+' / '+totalPages+'</span>'+
+      '<span>'+(pageIdx+1)+' / '+totalPages+'<span class="ship-part"></span></span>'+
     '</div>'+
   '</section>';
 }
@@ -6174,8 +6182,49 @@ function cpFitShipPageToA4(pageEl){
   }
 }
 
-/* 인쇄 트리거 — 항상 1부 A4 세로 (사장님이 프린터에서 부수 설정) */
-function cpPrintShipList(){
+/* 2장인쇄(좌우)용 — 한 파렛트를 반쪽 칸(A4 세로 한 쪽 크기)에 맞춰 여러 쪽으로 나눈다.
+ * 7.5pt 까지 줄여 한 쪽에 들어가면 1쪽, 아니면 박스(tbody) 단위로 끊어 다음 쪽으로 넘긴다.
+ * host: 측정용 오프스크린 .ship-duplex-half. 반환: 쪽별 HTML 배열 */
+var SHIP_HALF_MAX_STEP = 2;
+function cpSetShipStep(pg, step){
+  var vars = SHIP_FIT_STEPS[step];
+  Object.keys(vars).forEach(function(k){ pg.style.setProperty(k, vars[k]); });
+}
+function cpShipOverflows(pg){ void pg.offsetHeight; return pg.scrollHeight > pg.clientHeight + 1; }
+function cpSplitShipGroupHalf(g, totalPages, pageIdx, host){
+  host.innerHTML = cpBuildShipPageHtml(g, totalPages, pageIdx);
+  var full = host.firstElementChild;
+  for (var st=0; st<=SHIP_HALF_MAX_STEP; st++) {
+    if (st > 0) cpSetShipStep(full, st);
+    if (!cpShipOverflows(full)) return [full.outerHTML];
+  }
+  /* 한 쪽에 안 들어감 — 번호가 매겨진 박스 묶음(tbody)을 쪽마다 넘치기 직전까지 담는다 */
+  var tbs = Array.prototype.slice.call(full.querySelectorAll('.ship-sku-table tbody'));
+  var pages = [], i = 0;
+  while (i < tbs.length) {
+    host.innerHTML = cpBuildShipPageHtml(g, totalPages, pageIdx, { cont: pages.length > 0, empty: true });
+    var pg = host.firstElementChild;
+    cpSetShipStep(pg, SHIP_HALF_MAX_STEP);
+    var tbl = pg.querySelector('.ship-sku-table'), added = 0;
+    while (i < tbs.length) {
+      tbl.appendChild(tbs[i]);
+      if (added > 0 && cpShipOverflows(pg)) { tbl.removeChild(tbs[i]); break; }
+      added++; i++;   /* 박스 하나가 한 쪽보다 커도 최소 1박스는 담는다 (무한루프 방지) */
+    }
+    pages.push(pg);
+  }
+  pages.forEach(function(p, k){
+    p.querySelectorAll('.ship-part').forEach(function(s){ s.textContent = ' · ' + (k+1) + '/' + pages.length + '쪽'; });
+  });
+  return pages.map(function(p){ return p.outerHTML; });
+}
+
+/* 인쇄 트리거 — mode '1up': A4 세로 한 면에 파렛트 1장 (2부)
+ *               mode '2up': A4 가로 좌우 2칸, 파렛트별로 끊어서.
+ *                 한 쪽짜리 파렛트 → 좌우 같은 내용 (한 장에 2부)
+ *                 여러 쪽 파렛트   → 좌1 우2 / 좌3 공란 … 을 2부 */
+function cpPrintShipList(mode){
+  mode = mode === '2up' ? '2up' : '1up';
   if (!workSession) { cpFlash('warn','⚠️ 세션 없음'); return; }
 
   /* ── 센터별 총 파렛트수 입력 (고정) — 파렛트번호를 '총수-순번'(예: 42-1) 으로 표기 ── */
@@ -6218,6 +6267,7 @@ function cpPrintShipList(){
 
   var area = document.getElementById('shipListArea');
   if (!area) { cpFlash('er','적재리스트 영역 없음'); return; }
+  if (mode === '2up') { cpPrintShipList2up(groups, area); return; }
   /* 적재리스트는 2부씩 출력 — 각 페이지를 같은 페이지번호로 연속 2장 렌더 */
   area.innerHTML = groups.map(function(g, i){
     var pageHtml = cpBuildShipPageHtml(g, groups.length, i);
@@ -6253,6 +6303,49 @@ function cpPrintShipList(){
     }, 80);
   });
   cpFlash('ok','✓ 쿠팡출고 적재리스트 — '+groups.length+'페이지 × 2부 = '+(groups.length*2)+'장 인쇄');
+}
+
+/* 2장인쇄(좌우) — A4 가로, 칸마다 A4 세로 한 쪽을 줄여 넣는다. 파렛트마다 새 장에서 시작 */
+function cpPrintShipList2up(groups, area){
+  /* 측정용 오프스크린 칸 — 실제 인쇄 칸과 같은 크기·배율 */
+  var probe = document.createElement('div');
+  probe.className = 'ship-list-area';
+  probe.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;visibility:hidden';
+  probe.innerHTML = '<div class="ship-duplex-sheet"><div class="ship-duplex-half"></div></div>';
+  document.body.appendChild(probe);
+  var host = probe.querySelector('.ship-duplex-half');
+  var half = function(html){ return '<div class="ship-duplex-half">' + (html || '') + '</div>'; };
+  var sheet = function(l, r){ return '<div class="ship-duplex-sheet">' + half(l) + half(r) + '</div>'; };
+  var sheets = [], multi = 0;
+  try {
+    groups.forEach(function(g, i){
+      var pages = cpSplitShipGroupHalf(g, groups.length, i, host);
+      if (pages.length === 1) { sheets.push(sheet(pages[0], pages[0])); return; }
+      multi++;
+      var set = [];
+      for (var k = 0; k < pages.length; k += 2) set.push(sheet(pages[k], pages[k+1] || ''));
+      sheets = sheets.concat(set, set);   /* 여러 쪽 파렛트도 2부 */
+    });
+  } finally { probe.remove(); }
+
+  area.innerHTML = sheets.join('');
+  var oldStyle = document.getElementById('ship-list-pagestyle');
+  if (oldStyle) oldStyle.remove();
+  var st = document.createElement('style');
+  st.id = 'ship-list-pagestyle';
+  st.textContent = '@media print { @page { size: A4 landscape; margin: 0; } }';
+  document.head.appendChild(st);
+  document.body.classList.add('printing-shiplist');
+  setTimeout(function(){
+    window.print();
+    setTimeout(function(){
+      document.body.classList.remove('printing-shiplist');
+      var s = document.getElementById('ship-list-pagestyle');
+      if (s) s.remove();
+    }, 1500);
+  }, 80);
+  cpFlash('ok','✓ 적재리스트 2장인쇄(좌우) — 파렛트 '+groups.length+'개 · A4 가로 '+sheets.length+'장'
+    + (multi ? ' (여러 쪽 파렛트 '+multi+'개는 좌1·우2 / 좌3·공란 순서로 2부)' : ''));
 }
 
 /* ═══════════ 엑셀 백업 / 복원 ═══════════
