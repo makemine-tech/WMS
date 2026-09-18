@@ -579,6 +579,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-mix-print-btn{display:inline-block;background:linear-gradient(135deg,var(--y),#f7d068);color:#0f1117;border:none;font-size:.7rem;font-weight:900;padding:.32rem .65rem;border-radius:5px;cursor:pointer;margin-right:.4rem;letter-spacing:.02em}
 .cp-mix-print-btn:hover{background:linear-gradient(135deg,#f7d068,#f8da7c);transform:translateY(-1px)}
 .cp-mix-print-btn:active{transform:translateY(0)}
+/* 박스 전체 상품라벨 인쇄 버튼 */
+.cp-box-all-btn{display:inline-block;background:rgba(240,196,74,.12);color:var(--y);border:1px solid rgba(240,196,74,.6);font-size:.7rem;font-weight:900;padding:.28rem .6rem;border-radius:5px;cursor:pointer;margin-right:.4rem;white-space:nowrap;font-family:inherit}
+.cp-box-all-btn:hover{background:rgba(240,196,74,.25)}
+.cp-box-all-btn:active{transform:scale(.96)}
 
 /* ─── 혼적 라벨 (150x100mm 가로 인쇄 전용) ─── */
 .mix-label-area{display:none}
@@ -5732,8 +5736,12 @@ function cpRefreshDonePool(){
         var printBtn = needsLabel
           ? '<button class="cp-mix-print-btn" onclick="cpPrintMixLabel(\''+escH(g.boxNo)+'\')" title="박스 내용 라벨 인쇄 (150x100mm)">📃 라벨</button>'
           : '';
+        /* 박스 전체 상품라벨 — 이 박스의 모든 상품 바코드 라벨을 각 출고수량만큼 한 번에 */
+        var boxQty = grpScans.reduce(function(a,x){ return a + Math.max(0, Math.floor(+x.qty||0)); }, 0);
+        var allBtn = g.boxNo === '?' ? '' :
+          '<button class="cp-box-all-btn" onclick="cpPrintDoneBoxLabels(\''+escAttrLocal(g.boxNo)+'\')" title="이 박스의 모든 상품 바코드 라벨을 각 출고수량만큼 한 번에 인쇄 (총 '+boxQty+'장)">🖨 전체 '+boxQty+'</button>';
         groupCells =
-          '<td class="c-box grp-cell" rowspan="'+rowSpan+'">' + printBtn + escH(g.boxNo) + '</td>'+
+          '<td class="c-box grp-cell" rowspan="'+rowSpan+'">' + printBtn + allBtn + escH(g.boxNo) + '</td>'+
           '<td class="c-box grp-cell" rowspan="'+rowSpan+'" style="color:var(--mu)">' + escH(srcBcLabel) + '</td>';
       }
       /* 대체바코드 셀 — alt 있으면 보라색 강조, 없으면 회색 '-' */
@@ -5812,6 +5820,27 @@ function cpPrintDoneScanLabels(ts, barcode, srcBoxBarcode){
   if (typeof cpPrintLabelsDirect === 'function') cpPrintLabelsDirect([item]);
   else cpPrintLabelsFromItems([item]);
   cpFlash('ok','🖨 ' + escH(s.barcode || '') + ' 라벨 ' + qty + '장 인쇄');
+}
+
+/* 완료풀 박스 → 그 박스에 담긴 모든 상품의 바코드 라벨을 각 출고수량만큼 한 번에 인쇄 (80x40mm).
+ * 박스 식별은 완료풀 묶음과 같은 키 (출고박스번호 → 원박스 → 박스바코드). */
+function cpPrintDoneBoxLabels(boxNo){
+  if (!workSession) return;
+  var items = [];
+  (workSession.scans || []).forEach(function(x){
+    if (x.undone) return;
+    var key = x.shipBoxNo || x.srcBoxBarcode || x.boxBarcode || '?';
+    if (key !== boxNo) return;
+    var q = Math.floor(+x.qty || 0);
+    if (q <= 0) return;
+    items.push({ barcode: x.barcode, qty: q, srcIdx: x.srcIdx, box: x.srcBoxBarcode || x.boxBarcode || x.shipBoxNo || '' });
+  });
+  if (!items.length) { cpFlash('warn','⚠️ 이 박스에 인쇄할 라벨이 없습니다 (출고수량 0)'); return; }
+  var total = items.reduce(function(a,it){ return a + it.qty; }, 0);
+  if (total > 50 && !confirm('박스 ' + boxNo + ' — 상품 ' + items.length + '종 라벨 ' + total + '장을 인쇄합니다.\n\n계속할까요?')) return;
+  if (typeof cpPrintLabelsDirect === 'function') cpPrintLabelsDirect(items);
+  else cpPrintLabelsFromItems(items);
+  cpFlash('ok','🖨 박스 ' + escH(boxNo) + ' 전체 라벨 ' + items.length + '종 · ' + total + '장 인쇄');
 }
 
 /* ═══════════ 혼적 라벨 인쇄 (80x40mm, 2 SKU/페이지 자동 분할) ═══════════
