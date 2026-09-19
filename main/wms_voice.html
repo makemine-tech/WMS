@@ -23,6 +23,25 @@ body{background:var(--bg);font-family:system-ui,-apple-system,'Segoe UI',sans-se
 .sttTg{font-size:10px;font-weight:800;border-radius:6px;padding:4px 6px;cursor:pointer;font-family:inherit;border:1px solid var(--bd);background:rgba(255,255,255,.05);color:var(--sub);}
 .sttTg.on{color:#C4B5FD;background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.5);}
 
+/* AI 에게 창고 묻기 — 화면 맨 위 */
+.ask{background:linear-gradient(135deg,rgba(139,92,246,.14),rgba(59,130,246,.10));border:1px solid rgba(139,92,246,.45);border-radius:12px;padding:8px;margin-bottom:10px;}
+.askRow{display:flex;gap:6px;}
+.askRow input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:9px;padding:11px 10px;font-size:15px;font-family:inherit;}
+.askRow input:focus{outline:none;border-color:#8B5CF6;}
+.askMic,.askGo{border:none;border-radius:9px;font-weight:800;font-size:15px;cursor:pointer;font-family:inherit;flex-shrink:0;}
+.askMic{background:rgba(255,255,255,.08);color:var(--tx);padding:0 12px;border:1px solid var(--bd);min-width:48px;}
+.askMic.on{background:#DC2626;border-color:#DC2626;color:#fff;font-size:12px;}
+.askMic:disabled{opacity:.4;}
+.askGo{background:#7C3AED;color:#fff;padding:0 14px;}
+.aqa{margin-top:8px;padding:8px 10px;border-radius:9px;background:rgba(11,18,32,.6);border:1px solid var(--bd);}
+.aqa .aq{font-size:12px;color:var(--sub);margin-bottom:3px;}
+.aqa .aa{font-size:16px;line-height:1.45;color:var(--tx);font-weight:600;white-space:pre-wrap;}
+.aqa.busy .aa{color:#C4B5FD;}
+.aqa.err .aa{color:var(--red);font-size:13px;}
+.aqa.old{opacity:.6;}
+.aqa.old .aa{font-size:13px;}
+.asay{background:none;border:none;cursor:pointer;font-size:14px;vertical-align:middle;}
+
 /* 모드 5버튼 */
 .modes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;}
 .md{padding:14px 0;border-radius:11px;border:1px solid var(--bd);background:var(--card);color:var(--sub);font-weight:800;font-size:15px;cursor:pointer;font-family:inherit;}
@@ -1280,6 +1299,14 @@ function renderShell(){
       +'</select>'
       +'<button class="sttTg" id="sttTg" onclick="toggleSSTT()"></button>'
     +'</div>'
+    +'<div class="ask">'
+      +'<div class="askRow">'
+        +'<input id="askIn" placeholder="창고에 물어보기 — 예) 서리태15 유통기한 제일 짧은 거 어디 있어?" autocomplete="off" enterkeyhint="send" onkeydown="if(event.key===\'Enter\')askSend()">'
+        +'<button class="askMic" id="askMicBtn" onclick="askMic()" title="말로 묻기">🎤</button>'
+        +'<button class="askGo" onclick="askSend()">묻기</button>'
+      +'</div>'
+      +'<div id="askOut"></div>'
+    +'</div>'
     +'<div class="modes" id="modes">'
       +Object.keys(MODES).map(function(m){ return '<button class="md '+m+'" id="md_'+m+'" onclick="pickMode(\''+m+'\')">'+MODES[m].label+'</button>'; }).join('')
     +'</div>'
@@ -1290,7 +1317,65 @@ function renderShell(){
       +'<button class="mic" id="micBtn" onclick="micPress()">작업을 고르세요</button>'
     +'</div></div>';
   render();
+  renderAsk();
 }
+
+/* ── AI 에게 창고 묻기 ─────────────────────────────────────
+   글로 치거나 🎤 로 말하면 서버 askWarehouse 가 창고 데이터를 조회해 답한다 (읽기 전용).
+   답은 화면에 띄우고 소리로도 읽어 준다. 앞선 문답 몇 개를 같이 보내 이어 묻기가 된다. */
+var ASK={hist:[], busy:false, err:'', pending:'', wid:null};
+function askFn(){ return firebase.app().functions('asia-southeast1').httpsCallable('askWarehouse', {timeout:120000}); }
+function renderAsk(){
+  var box=document.getElementById('askOut'); if(!box) return;
+  if(ASK.wid!==WHID){ ASK.hist=[]; ASK.err=''; ASK.wid=WHID; }
+  var h='';
+  if(ASK.busy) h+='<div class="aqa busy"><div class="aq">'+esc(ASK.pending)+'</div><div class="aa">창고를 찾아보는 중…</div></div>';
+  if(ASK.err) h+='<div class="aqa err"><div class="aa">'+esc(ASK.err)+'</div></div>';
+  ASK.hist.slice(-3).reverse().forEach(function(x,i){
+    h+='<div class="aqa'+(i?' old':'')+'"><div class="aq">'+esc(x.q)+'</div><div class="aa">'+esc(x.a)
+      +(i===0&&!ASK.busy?' <button class="asay" onclick="speak(ASK.hist[ASK.hist.length-1].a)" title="다시 듣기">🔊</button>':'')+'</div></div>';
+  });
+  box.innerHTML=h;
+  var mb=document.getElementById('askMicBtn'); if(mb) mb.disabled=ASK.busy;
+}
+function askSend(text){
+  var el=document.getElementById('askIn');
+  var q=String(text!=null?text:(el&&el.value)||'').trim();
+  if(!q||ASK.busy) return;
+  if(!WHID){ ASK.err='창고를 먼저 골라 주세요'; renderAsk(); return; }
+  stopListen(); try{ speechSynthesis.cancel(); }catch(e){}
+  if(el) el.value='';
+  ASK.busy=true; ASK.err=''; ASK.pending=q; renderAsk();
+  askFn()({wid:WHID, question:q, history:ASK.hist.slice(-4)})
+    .then(function(res){
+      var a=((res&&res.data&&res.data.answer)||'').trim()||'답을 받지 못했어요';
+      ASK.hist.push({q:q, a:a}); ASK.hist=ASK.hist.slice(-10);
+      ASK.busy=false; renderAsk(); speak(a);
+    })
+    .catch(function(err){
+      var code=err&&err.code||'';
+      ASK.busy=false;
+      ASK.err=(code==='functions/not-found'||code==='not-found')?'AI 묻기 기능을 준비 중이에요 — 조금만 기다려 주세요'
+        :'묻기 실패 — '+((err&&err.message)||err);
+      renderAsk();
+    });
+}
+window.askSend=askSend;
+function askMic(){
+  if(ASK.busy) return;
+  stopListen(); try{ speechSynthesis.cancel(); }catch(e){}
+  var d=diagNew('ask'); curDiag=d;
+  var mb=document.getElementById('askMicBtn'); if(mb){ mb.classList.add('on'); mb.textContent='듣는 중'; }
+  var el=document.getElementById('askIn'); if(el) el.placeholder='말씀하세요…';
+  listen('ask', function(alts, err){
+    if(mb){ mb.classList.remove('on'); mb.textContent='🎤'; }
+    if(el) el.placeholder='창고에 물어보기 — 예) 서리태15 유통기한 제일 짧은 거 어디 있어?';
+    diagPut(d, {alts:(alts||[]).slice(0,5), err:err||'', result:alts?'ask':'none'}); diagSave(d);
+    if(!alts){ ASK.err=err==='no-speech'?'못 들었어요 — 🎤 을 누르고 다시 말씀해 주세요':'알아듣지 못했어요 — 다시 말하거나 글로 적어 주세요'; renderAsk(); return; }
+    askSend(alts[0]);
+  });
+}
+window.askMic=askMic;
 function render(){
   paintSSTT();
   Object.keys(MODES).forEach(function(m){

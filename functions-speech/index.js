@@ -242,3 +242,7 @@ exports.sttVoice = onCall(
     return { ok: true, alts, adapted, model: 'short', ms };
   }
 );
+
+
+/* 창고 AI 질문 (ask.js) */
+exports.askWarehouse = require('./ask').askWarehouse;
