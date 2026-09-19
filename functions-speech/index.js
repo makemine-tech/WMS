@@ -188,6 +188,20 @@ exports.sttVoice = onCall(
       throw new HttpsError('invalid-argument', '녹음이 너무 길어요 — 한 문장씩 말씀해 주세요');
     }
 
+    /* 인식률 진단 — 폰이 진단번호(diag)를 주면 이 녹음을 Storage 에 남긴다.
+       나중에 같은 녹음을 다른 인식 모델에 다시 넣어 비교하려는 것. 인식과 동시에 저장. */
+    const safeId = (s) => String(s || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
+    const dWid = data.diag && safeId(data.diag.wid), dId = data.diag && safeId(data.diag.id);
+    let diagSave = null;
+    if (dWid && dId) {
+      const mime = String(data.mime || 'audio/webm');
+      const ext = /mp4/.test(mime) ? 'm4a' : /ogg/.test(mime) ? 'ogg' : 'webm';
+      diagSave = admin.storage().bucket()
+        .file(`voiceDiag/${dWid}/${dId}.${ext}`)
+        .save(audio, { contentType: mime, resumable: false, metadata: { metadata: { uid, slot: String(data.slot || '') } } })
+        .catch((e) => logger.warn('진단 녹음 저장 실패', { message: e && e.message }));
+    }
+
     const phrases = buildPhrases(data.slot, data.products, data.cols, data.priority, data.rows, data.levels);
     const recognizer = `projects/${PROJECT_ID}/locations/${STT_LOCATION}/recognizers/_`;
 
@@ -222,8 +236,9 @@ exports.sttVoice = onCall(
     }
 
     const alts = altsFrom(response);
+    if (diagSave) await diagSave;
     const ms = Date.now() - t0;
-    logger.info('STT 완료', { uid, slot: data.slot || '-', adapted, phrases: phrases.length, bytes: audio.length, alts: alts.length, ms });
+    logger.info('STT 완료', { uid, slot: data.slot || '-', adapted, phrases: phrases.length, bytes: audio.length, alts: alts.length, heard: alts.slice(0, 3), diag: dId || '', ms });
     return { ok: true, alts, adapted, model: 'short', ms };
   }
 );

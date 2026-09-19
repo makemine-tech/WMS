@@ -294,11 +294,12 @@ function startVAD(stream, my, onStop){
   var src=audioCtx.createMediaStreamSource(stream);
   var an=audioCtx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.2; src.connect(an);
   var buf=new Uint8Array(an.fftSize);
-  var t0=Date.now(), floor=0, floorN=0, thr=0.012, spoke=false, lastLoud=0;
+  var t0=Date.now(), floor=0, floorN=0, thr=0.012, spoke=false, lastLoud=0, peak=0;
   vadTimer=setInterval(function(){
     an.getByteTimeDomainData(buf);
     var s=0; for(var i=0;i<buf.length;i++){ var d=(buf[i]-128)/128; s+=d*d; }
     var rms=Math.sqrt(s/buf.length), el=Date.now()-t0;
+    if(rms>peak) peak=rms;
     if(el<300){ floor+=rms; floorN++; thr=Math.max(0.012,(floor/floorN)*2.6); }
     else {
       if(rms>thr){ spoke=true; lastLoud=Date.now(); }
@@ -308,8 +309,29 @@ function startVAD(stream, my, onStop){
     }
     if(!stale(my)) setStatus((spoke?'* ':'. ')+levelBar(rms),'hear');
   }, 50);
-  function fin(why){ stopVAD(); try{ src.disconnect(); }catch(e){} onStop(why); }
+  function fin(why){ stopVAD(); try{ src.disconnect(); }catch(e){}
+    var r4=function(x){ return Math.round(x*10000)/10000; };
+    onStop(why, {floor:r4(floorN?floor/floorN:0), thr:r4(thr), peak:r4(peak), spoke:spoke, ms:Date.now()-t0}); }
 }
+
+/* ── 인식률 진단 기록 ─────────────────────────────────────
+   듣기 한 번마다 voiceDiag/<창고>/<번호> 에 남긴다: 무엇을 물었는지, 인식 후보, 해석 성공 여부,
+   말 끝 판정(소음 바닥·문턱·최대 음량), 그리고 나중에 손으로 고친 값(정답).
+   녹음은 서버가 같은 번호로 Storage 에 둔다 → 다른 인식 모델로 다시 돌려 비교할 수 있다.
+   기록 실패는 작업을 막지 않는다. */
+var curDiag=null, diagLast={};
+function diagNew(slot){
+  if(!WHID||!window.db) return null;
+  try{
+    var ref=db.ref('voiceDiag/'+WHID).push();
+    var d={id:ref.key, ref:ref, f:{t:Date.now(), uid:(USER&&USER.uid)||'', who:(USER&&USER.email)||'',
+      mode:(W&&W.mode)||'', slot:slot, engine:SSTT?'server':'web', ua:navigator.userAgent.slice(0,120)}};
+    return d;
+  }catch(e){ return null; }
+}
+function diagPut(d, f){ if(!d) return; for(var k in f) d.f[k]=f[k]; }
+function diagSave(d){ if(!d||!d.ref) return; try{ d.ref.set(d.f).catch(function(){}); }catch(e){} }
+function diagMark(d, f){ if(!d||!d.ref) return; diagPut(d, f); try{ d.ref.update(f).catch(function(){}); }catch(e){} }
 
 /* listen(slot, cb) — cb(alts, err) 로 인식 후보 문장들을 넘긴다.
    지난 인식의 늦은 콜백이 최신 결과·안내를 덮어쓰지 않도록 번호로 걸러낸다. */
@@ -323,7 +345,7 @@ function listen(slot, cb){
 }
 
 function listenServer(slot, cb, my){
-  var mt=pickMime();
+  var mt=pickMime(), d=curDiag, tRec=Date.now();
   sttAbort=false; listening=true; setMic('on');
   setStatus('. '+levelBar(0),'hear');
   getMic().then(function(stream){
@@ -337,11 +359,14 @@ function listenServer(slot, cb, my){
       stopVAD(); mediaRec=null; listening=false;
       if(sttAbort){ setMic('idle'); return; }
       var blob=new Blob(chunks,{type:mt||'audio/webm'});
+      diagPut(d, {bytes:blob.size, recMs:Date.now()-tRec, mime:mt||''});
       if(blob.size<1200){ setMic('idle'); cb(null,'no-speech'); return; }
-      sendAudio(blob, mt, slot, cb, my);
+      sendAudio(blob, mt, slot, cb, my, d);
     };
     r.start();
-    startVAD(stream, my, function(why){
+    startVAD(stream, my, function(why, st){
+      st=st||{};   /* 오디오 분석을 못 쓰는 폰은 4초 뒤 그냥 끝낸다 — 수치 없음 */
+      diagPut(d, {vad:why, vadFloor:st.floor, vadThr:st.thr, vadPeak:st.peak, vadSpoke:st.spoke, vadMs:st.ms});
       if(why==='no-speech'){ sttAbort=true; try{ r.stop(); }catch(e){}
         listening=false; setMic('idle'); cb(null,'no-speech'); return; }
       try{ r.stop(); }catch(e){}
@@ -352,7 +377,7 @@ function listenServer(slot, cb, my){
     setStatus((err&&err.name==='NotAllowedError')?'마이크 권한이 꺼져 있어요 — 주소창 왼쪽 자물쇠에서 허용해 주세요':'마이크를 열 수 없어요','ng');
   });
 }
-function sendAudio(blob, mt, slot, cb, my){
+function sendAudio(blob, mt, slot, cb, my, d){
   setMic('think'); if(!stale(my)) setStatus('인식 중…','hear');
   var fr=new FileReader();
   fr.onerror=function(){ sttFallback('오디오를 읽지 못했어요', slot, cb, my); };
@@ -365,14 +390,18 @@ function sendAudio(blob, mt, slot, cb, my){
       var gs=pendGroups();
       prods=gs.map(function(g){ return g.product; }).concat(gs.map(function(_,i){ return (i+1)+'번'; }));
     } else prods=PRODUCTS.slice(0,400);
-    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:prods, cols:colNames(), rows:(WH&&WH.rows)||0, levels:unitLevels(), priority:planVocab()})
+    var tSend=Date.now();
+    sttCall()({audio:b64, mime:mt||'audio/webm', slot:slot, products:prods, cols:colNames(), rows:(WH&&WH.rows)||0, levels:unitLevels(), priority:planVocab(),
+               diag:d?{wid:WHID, id:d.id}:null})
       .then(function(res){
-        var d=(res&&res.data)||{}, alts=d.alts||[];
+        var rd=(res&&res.data)||{}, alts=rd.alts||[];
+        diagPut(d, {srvMs:rd.ms||0, rtMs:Date.now()-tSend, adapted:rd.adapted!==false, audio:true});
         sttFails=0; setMic('idle');
-        if(d.adapted===false) addLog('어휘 부스트 없이 인식됨 — 정확도가 낮을 수 있어요');
+        if(rd.adapted===false) addLog('어휘 부스트 없이 인식됨 — 정확도가 낮을 수 있어요');
         cb(alts.length?alts:null, alts.length?null:'empty');
       })
-      .catch(function(err){ sttFallback((err&&err.message)||'인식 서버에 연결하지 못했어요', slot, cb, my); });
+      .catch(function(err){ diagPut(d, {srvErr:String((err&&err.message)||err).slice(0,200), engine:'server→web'});
+        sttFallback((err&&err.message)||'인식 서버에 연결하지 못했어요', slot, cb, my); });
   };
   fr.readAsDataURL(blob);
 }
@@ -675,12 +704,17 @@ function retryMsg(s){
   return '다시 말씀해 주세요';
 }
 function hear(s){
-  var w=W;
+  var w=W, d=diagNew(s);
+  curDiag=d;
   listen(SLOTS[s].stt, function(alts, err){
-    if(W!==w||W.done) return;   /* 그 사이 작업을 바꿨거나 끝났으면 무시 */
-    if(!alts){ retry(s, err==='no-speech'?'못 들었어요':'다시 말씀해 주세요'); return; }
+    if(d){ diagPut(d, {alts:(alts||[]).slice(0,5), err:err||''}); }
+    if(W!==w||W.done){ diagPut(d, {result:'stale'}); diagSave(d); return; }   /* 그 사이 작업을 바꿨거나 끝났으면 무시 */
+    if(!alts){ diagPut(d, {result:'none', tries:W.tries+1}); diagSave(d); diagLast[s]=d;
+      retry(s, err==='no-speech'?'못 들었어요':'다시 말씀해 주세요'); return; }
     var r=parseAlts(s, alts);
-    if(!r){ setStatus('"'+alts[0]+'" — 못 알아들었어요','ng'); retry(s, retryMsg(s)); return; }
+    if(!r){ diagPut(d, {result:'parseFail', tries:W.tries+1}); diagSave(d); diagLast[s]=d;
+      setStatus('"'+alts[0]+'" — 못 알아들었어요','ng'); retry(s, retryMsg(s)); return; }
+    diagPut(d, {result:'ok', value:slotSay(s, r.v), fuzzy:!!r.fuzzy}); diagSave(d); diagLast[s]=d;
     accept(s, r.v, r.fuzzy, alts[0]);
   });
 }
@@ -807,7 +841,10 @@ function slotText(s, v){
 }
 
 /* ── 타이핑으로 고치기 ── */
-function editSlot(s){ stopListen(); try{ speechSynthesis.cancel(); }catch(e){} W.edit=s; W.tries=0; render(); }
+function editSlot(s){ stopListen(); try{ speechSynthesis.cancel(); }catch(e){}
+  /* 음성으로 받은 값을 손으로 고치러 들어옴 = 잘못 알아들었던 것 */
+  var ld=diagLast[s]; if(ld&&ld.f.result==='ok') diagMark(ld, {corrected:true});
+  W.edit=s; W.tries=0; render(); }
 window.editSlot=editSlot;
 function submitTyped(){
   var el=document.getElementById('edIn'); if(!el) return;
@@ -815,6 +852,8 @@ function submitTyped(){
   var s=curSlot(); if(!s) return;
   var r=parseSlot(s, t);
   if(!r){ setStatus('"'+t+'" — '+SLOTS[s].k+'(으)로 해석할 수 없어요','ng'); return; }
+  /* 손으로 넣은 값 = 그 녹음의 정답. 모델 비교할 때 채점 기준이 된다 */
+  var ld=diagLast[s]; if(ld){ diagMark(ld, {typed:t, truth:slotSay(s, r.v)}); delete diagLast[s]; }
   el.value='';
   accept(s, r.v, r.fuzzy, t);
 }
