@@ -60,15 +60,11 @@
   .stat-v.sm.bad { color: var(--red); }
   .stat-v.sm.warn { color: #fbbf24; }
 
-  .dl { display: grid; grid-template-columns: 1fr auto 1fr; gap: .8rem; margin-top: .9rem; align-items: start; }
-  .dl.sc-open { grid-template-columns: 1fr 1.1fr 1fr; }
-  .sc-body { display: none; }
-  .dl.sc-open .sc-body { display: block; }
-  .sc-toggle { width: 100%; text-align: left; white-space: nowrap; background: none; border: none; color: #93a3bb;
-               font-family: inherit; font-size: .8rem; font-weight: 800; cursor: pointer; padding: 0 0 .2rem; }
-  .sc-toggle:hover { color: #e6e9f0; }
-  .dl.sc-open .sc-toggle { color: #e6e9f0; margin-bottom: .4rem; }
-  .dl.sc-open .sc-arrow { transform: rotate(90deg); display: inline-block; }
+  .dl { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin-top: .9rem; align-items: start; }
+  /* 스캔 칸 — 가로로 긴 접이식 (자세히 보기와 같은 모양) */
+  .sc-det { border-color: rgba(59,130,246,.45); }
+  .sc-det .sc-apply, .sc-det .sc-only { max-width: 420px; }
+  .sc-det .scan-input { max-width: 420px; }
   .sc-why { font-size: .64rem; color: #8b94a8; line-height: 1.5; margin-bottom: .45rem; }
   .sc-col:not(.on) { opacity: .85; }
   @media(max-width: 1000px){ .dl { grid-template-columns: 1fr; } }
@@ -540,12 +536,20 @@
         <div class="dl-title">⬇ 정렬된 송장 PDF</div>
         <div id="pdfDlBox" class="dl-box"></div>
       </div>
-      <div class="dl-col sc-col" id="scCol">
-        <button class="sc-toggle" id="scToggle" onclick="toggleScanCol()">
-          <span class="sc-arrow">▸</span> 📡 남은 송장 스캔
-          <span class="sc-state" id="scanApplyState"></span>
-        </button>
-        <div class="sc-body" id="scBody">
+      <div class="dl-col">
+        <div class="dl-title">🧾 픽킹리스트 <span id="plScope">(오늘치)</span></div>
+        <div class="pl-btns">
+          <button class="btn pl-b pl-hapo" onclick="openPickList('hapo')">합포</button>
+          <button class="btn pl-b pl-danpo" onclick="openPickList('danpo')">단포</button>
+          <button class="btn pl-b pl-all" onclick="openPickList('all')">전체 (로케이션순)</button>
+        </div>
+        <div class="pl-note" id="plNote"></div>
+      </div>
+    </div>
+
+    <details class="det sc-det" id="scCol">
+        <summary>📡 남은 송장 스캔 — 일부만 출고하고 남은 건 빼기 <span class="sc-state" id="scanApplyState"></span></summary>
+      <div class="det-body sc-body" id="scBody">
         <div class="sc-why">일부만 출고하고 남은 송장이 있을 때만 씁니다. 남은 송장을 스캔해 <b>이미 나간 건</b>을 픽킹에서 빼세요.</div>
         <div class="sc-sets" id="scanSets"></div>
         <input type="text" id="scanInput" class="scan-input" placeholder="여기를 클릭하고 남은 송장을 연속 스캔" autocomplete="off" spellcheck="false">
@@ -558,19 +562,9 @@
         <div class="sc-desc">스캔한 것만 남기고, <b>스캔 안 한 송장은 이미 나간 것</b>으로 보고 픽킹에서 뺍니다.</div>
         <button class="btn sc-only" onclick="applyScanOnly()">스캔 송장만 픽킹적용</button>
         <div class="sc-desc">다른 세트까지 무시하고 <b>스캔한 송장만</b> 픽킹리스트로 만듭니다.</div>
-        </div>
       </div>
+    </details>
 
-      <div class="dl-col">
-        <div class="dl-title">🧾 픽킹리스트 <span id="plScope">(오늘치)</span></div>
-        <div class="pl-btns">
-          <button class="btn pl-b pl-hapo" onclick="openPickList('hapo')">합포</button>
-          <button class="btn pl-b pl-danpo" onclick="openPickList('danpo')">단포</button>
-          <button class="btn pl-b pl-all" onclick="openPickList('all')">전체 (로케이션순)</button>
-        </div>
-        <div class="pl-note" id="plNote"></div>
-      </div>
-    </div>
 
     <details class="det">
       <summary>자세히 보기 — 무결성 대조 · 동시픽 · 확인요망</summary>
@@ -606,6 +600,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="wms_sync.js"></script>
 <script src="/wms_access.js" data-page="star_picking" data-floor="2"></script>
 
@@ -1964,11 +1959,9 @@ window.toggleScanPick = function(no, on){ scanPick[no] = !!on; renderScanPanel()
 
 /* 스캔 칸 펼치기/접기 — 가끔 쓰는 기능이라 평소엔 접어 둔다 */
 function toggleScanCol(open){
-  var dl = document.querySelector('.dl'); if (!dl) return;
-  var now = dl.classList.contains('sc-open');
-  var next = (open == null) ? !now : !!open;
-  dl.classList.toggle('sc-open', next);
-  var col = document.getElementById('scCol'); if (col) col.classList.toggle('on', next);
+  var d = document.getElementById('scCol'); if (!d) return;
+  var next = (open == null) ? !d.open : !!open;
+  d.open = next;
   if (next) setTimeout(focusScan, 60);
 }
 window.toggleScanCol = toggleScanCol;
@@ -1986,7 +1979,7 @@ function applyScanRemaining(){
     if (no === 0) curApplied = agg; else if (batches[no-1]) batches[no-1].applied = agg;
   });
   scanOnlyMode = false;
-  renderScanPanel(); renderBatches(); renderCopickSummary(); saveLocal();
+  renderScanPanel(); renderBatches(); renderCopickSummary(); saveLocal(); pushSetState();
   setStatus('success', '✅ 남은 작업만 반영 — [' + names + '] 스캔 ' + cnt + '건 기준으로 픽킹리스트를 다시 만들었습니다. (스캔 안 한 송장은 출고 완료로 간주)');
   statusEl.style.display = 'block';
 }
@@ -2103,10 +2096,28 @@ function restoreScans(arr){
 function loadSession(force){
   if (!syncReady) return;
   if (force) return doLoadSession();
+  /* 그룹에 공유된 세트가 있으면 어느 PC에서든 그것부터 (없으면 이 PC 저장분) */
+  return loadRemoteSets().then(function(got){
+    if (got){
+      localRestored = true;
+      renderBatches(); renderScanState(); renderCopickSummary();
+      resultEl.style.display = 'block';
+      setStatus('info', '☁ 공유된 작업을 불러왔습니다 — 세트 ' + batches.length + '개'
+        + (scanOrder.length ? (' · 스캔 ' + scanOrder.length + '건') : '') + ' (PDF는 받기 누를 때 내려받습니다)');
+      statusEl.style.display = 'block';
+      syncSetBadge('공유 작업 사용 중 · ' + (syncGroupId||''), 'var(--accent)');
+      return;
+    }
+    return loadSessionLocalFirst();
+  });
+}
+function loadSessionLocalFirst(){
   var wait = localRestorePromise || Promise.resolve(localRestored);
   return wait.then(function(ok){
     if (ok || localRestored){
       syncSetBadge('이 PC 작업 사용 중 · '+(syncGroupId||''), 'var(--accent)');
+      /* 이 PC 세트를 아직 공유하지 않았다면 지금 올린다 */
+      batches.filter(function(b){ return !b.sid; }).forEach(function(b){ uploadSet(b).then(function(){ saveLocal(); }); });
       return;
     }
     return doLoadSession();
@@ -2256,6 +2267,131 @@ function restoreLocal(){
   }).catch(function(e){ console.warn('[local] 복구 실패', e); return false; });
 }
 
+/* ═══ 세트 공유 — 어느 PC에서나 같은 세트를 불러온다 ═══
+   PDF 원본·정렬본은 Storage(star_picking/<그룹>/…), 집계·스캔은 Realtime DB.
+   PDF 는 무거우니 목록만 먼저 받고, 받기 버튼을 누를 때 내려받는다. */
+function stOk(){ return !!(syncReady && syncGroupId && window.firebase && firebase.storage); }
+function setsRef(){ return firebase.database().ref('wms_sync/groups/' + syncGroupId + '/star_picking/sets'); }
+function stFile(name){ return firebase.storage().ref('star_picking/' + syncGroupId + '/' + name); }
+function newSetId(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+/* 세트 하나를 올린다 (PDF 2개 + 작은 값들) */
+function uploadSet(b){
+  if (!stOk()) return Promise.resolve(false);
+  b.sid = b.sid || newSetId();
+  var ups = [];
+  if (b.raw)    ups.push(stFile(b.sid + '_raw.pdf').put(new Blob([b.raw], { type:'application/pdf' })));
+  if (b.sorted) ups.push(stFile(b.sid + '_sorted.pdf').put(new Blob([b.sorted], { type:'application/pdf' })));
+  syncSetBadge('세트 올리는 중... · ' + (syncGroupId||''), 'var(--accent2)');
+  return Promise.all(ups).then(function(){
+    return setsRef().child(b.sid).set({
+      sid: b.sid, no: b.no, at: b.at || Date.now(),
+      pdfName: b.pdfName || '', xlName: b.xlName || '',
+      inv: +b.inv || 0, multi: +b.multi || 0, pages: +b.pages || 0, exact: !!b.exact,
+      hasRaw: !!b.raw, hasSorted: !!b.sorted,
+      json: JSON.stringify({
+        agg: b.agg, applied: b.applied || null, regMap: b.regMap || {},
+        orderByReg: b.orderByReg || null, xlByBar: b.xlByBar || {}, xlInfo: b.xlInfo || {},
+        uncertain: b.uncertain || [], invoices: b.invoices || []
+      })
+    });
+  }).then(function(){
+    syncSetBadge('세트 ' + b.no + ' 공유됨 · ' + (syncGroupId||''), 'var(--accent)');
+    return true;
+  }).catch(function(e){
+    console.warn('[sets] 올리기 실패', e);
+    syncSetBadge('세트 공유 실패(이 PC에만 저장) · ' + (syncGroupId||''), 'var(--red)');
+    return false;
+  });
+}
+
+/* 스캔 목록·반영 상태만 갱신 (파일은 그대로) */
+function pushSetState(){
+  if (!stOk()) return;
+  var ups = batches.filter(function(b){ return b.sid; }).map(function(b){
+    return setsRef().child(b.sid).child('appliedJson').set(JSON.stringify(b.applied || null));
+  });
+  ups.push(setsRef().parent.child('scanState').set({ scans: scanOrder.slice(), scanOnly: !!scanOnlyMode, at: Date.now() }));
+  Promise.all(ups).catch(function(e){ console.warn('[sets] 상태 저장 실패', e); });
+}
+
+/* 공유된 세트 목록 불러오기 — PDF 는 아직 받지 않는다 */
+function loadRemoteSets(){
+  if (!stOk()) return Promise.resolve(false);
+  return setsRef().once('value').then(function(snap){
+    var v = snap.val() || {};
+    var list = Object.keys(v).map(function(k){ return v[k]; })
+      .filter(function(x){ return x && x.sid; })
+      .sort(function(a,b){ return (a.at||0) - (b.at||0); });
+    if (!list.length) return false;
+    batches = list.map(function(x, i){
+      var j = {};
+      try { j = JSON.parse(x.json || '{}'); } catch(e){}
+      var applied = j.applied || null;
+      if (x.appliedJson){ try { applied = JSON.parse(x.appliedJson); } catch(e){} }
+      return {
+        sid: x.sid, no: i + 1, pdfName: x.pdfName || ('세트' + (i+1) + '.pdf'), xlName: x.xlName || '',
+        inv: +x.inv || 0, multi: +x.multi || 0, pages: +x.pages || 0, exact: !!x.exact, at: x.at || 0,
+        agg: j.agg, applied: applied, regMap: j.regMap || {}, orderByReg: j.orderByReg || null,
+        xlByBar: j.xlByBar || {}, xlInfo: j.xlInfo || {}, uncertain: j.uncertain || [], invoices: j.invoices || [],
+        raw: null, sorted: null, remote: { raw: !!x.hasRaw, sorted: !!x.hasSorted }
+      };
+    });
+    return firebase.database().ref('wms_sync/groups/' + syncGroupId + '/star_picking/scanState').once('value')
+      .then(function(sn){
+        var st = sn.val() || {};
+        scanOrder = (st.scans || []).slice(); scanSet = {};
+        scanOrder.forEach(function(d){ scanSet[d] = true; });
+        scanOnlyMode = !!st.scanOnly;
+      }).catch(function(){}).then(function(){ return true; });
+  }).catch(function(e){ console.warn('[sets] 목록 불러오기 실패', e); return false; });
+}
+
+/* 받기 버튼을 누른 순간 PDF 를 내려받는다 (목록은 가볍게 유지) */
+function fetchSetPdf(b, which){
+  var have = which === 'raw' ? b.raw : b.sorted;
+  if (have) return Promise.resolve(have);
+  if (!stOk() || !b.sid || !(b.remote && b.remote[which])) return Promise.reject(new Error('저장된 PDF 가 없습니다'));
+  syncSetBadge('PDF 내려받는 중... · ' + (syncGroupId||''), 'var(--accent2)');
+  return stFile(b.sid + '_' + which + '.pdf').getDownloadURL()
+    .then(function(url){ return fetch(url); })
+    .then(function(r){ return r.arrayBuffer(); })
+    .then(function(ab){
+      if (which === 'raw') b.raw = ab; else b.sorted = new Uint8Array(ab);
+      syncSetBadge('동기화 켜짐 · ' + (syncGroupId||''), 'var(--accent)');
+      return which === 'raw' ? b.raw : b.sorted;
+    });
+}
+
+/* 공유 세트 전부 삭제 (전체 초기화 전용) */
+function deleteRemoteSets(){
+  if (!stOk()) return Promise.resolve();
+  return setsRef().once('value').then(function(snap){
+    var v = snap.val() || {}, dels = [];
+    Object.keys(v).forEach(function(k){
+      var x = v[k]; if (!x || !x.sid) return;
+      if (x.hasRaw)    dels.push(stFile(x.sid + '_raw.pdf').delete().catch(function(){}));
+      if (x.hasSorted) dels.push(stFile(x.sid + '_sorted.pdf').delete().catch(function(){}));
+    });
+    return Promise.all(dels);
+  }).then(function(){
+    return Promise.all([
+      setsRef().remove(),
+      firebase.database().ref('wms_sync/groups/' + syncGroupId + '/star_picking/scanState').remove()
+    ]);
+  }).catch(function(e){ console.warn('[sets] 삭제 실패', e); });
+}
+
+/* 세트 하나만 빼기 */
+function deleteRemoteSet(b){
+  if (!stOk() || !b || !b.sid) return Promise.resolve();
+  var dels = [];
+  if (b.remote ? b.remote.raw : b.raw)       dels.push(stFile(b.sid + '_raw.pdf').delete().catch(function(){}));
+  if (b.remote ? b.remote.sorted : b.sorted) dels.push(stFile(b.sid + '_sorted.pdf').delete().catch(function(){}));
+  dels.push(setsRef().child(b.sid).remove());
+  return Promise.all(dels).catch(function(){});
+}
+
 /* ═══ 세트(하루치) — 며칠치를 함께 피킹 ═══
    PDF 를 새로 올리면 직전 세트가 자동으로 등록되고 화면은 다음 날 파일을 받는다.
    피킹리스트는 전 세트 합계, 정렬된 송장 PDF 는 세트별(날짜순)로 따로 + 원하면 날짜 무관 합본. */
@@ -2289,8 +2425,10 @@ function stashCurrentSet(){
   var b = snapshotCurrent(batches.length + 1);
   if (!b) return false;
   batches.push(b);
+  b.at = Date.now();
   clearCurrentSet();
   saveLocal();
+  uploadSet(b).then(function(){ saveLocal(); });   /* sid 가 생기면 다시 저장 */
   return true;
 }
 
@@ -2316,6 +2454,7 @@ function clearCurrentSet(){
 function removeBatch(i){
   var b = batches[i]; if (!b) return;
   if (!confirm('세트 ' + b.no + ' (' + b.pdfName + ') 을 뺄까요?\n합계 픽킹리스트에서도 빠집니다.')) return;
+  deleteRemoteSet(b);
   batches.splice(i, 1);
   batches.forEach(function(x, idx){ x.no = idx + 1; });
   renderBatches(); saveLocal();
@@ -2380,8 +2519,12 @@ function renderBatches(){
 }
 
 function downloadBatch(i){
-  var b = batches[i]; if (!b || !b.sorted) return;
-  saveBlob(b.sorted, 'Sorted_' + b.no + '_' + b.pdfName);
+  var b = batches[i]; if (!b) return;
+  if (b.sorted){ saveBlob(b.sorted, 'Sorted_' + b.no + '_' + b.pdfName); return; }
+  fetchSetPdf(b, 'sorted').then(function(){
+    saveBlob(b.sorted, 'Sorted_' + b.no + '_' + b.pdfName);
+    saveLocal();
+  }).catch(function(e){ alert('PDF 를 가져오지 못했습니다: ' + e.message); });
 }
 window.downloadBatch = downloadBatch;
 
@@ -2399,7 +2542,15 @@ function downloadMergedPdf(){
   var sets = batches.map(function(b){ return { raw: b.raw, invoices: b.invoices, pages: b.pages, name: b.pdfName }; });
   if (currentSetDone()) sets.push({ raw: rawBuffer, invoices: lastInvoices||[], pages: lastPageCount, name: lastName });
   if (sets.length < 2){ alert('합본은 세트가 2개 이상일 때 만듭니다.'); return; }
-  if (sets.some(function(s){ return !s.raw; })){ alert('원본 PDF 가 남아 있지 않은 세트가 있어 합본을 만들 수 없습니다.'); return; }
+  var missing = batches.filter(function(b){ return !b.raw && b.remote && b.remote.raw; });
+  if (missing.length){
+    setStatus('loading', '<span class="spinner"></span> 다른 PC에서 올린 원본 PDF 내려받는 중...'); statusEl.style.display='block';
+    Promise.all(missing.map(function(b){ return fetchSetPdf(b, 'raw'); }))
+      .then(function(){ saveLocal(); downloadMergedPdf(); })
+      .catch(function(e){ setStatus('error', '❌ 원본 PDF 를 가져오지 못했습니다: ' + e.message); });
+    return;
+  }
+  if (sets.some(function(s){ return !s.raw; })){ alert('원본 PDF 가 없는 세트가 있어 합본을 만들 수 없습니다.'); return; }
   setStatus('info', '🧷 전체 합본 PDF 만드는 중...'); statusEl.style.display='block';
   var all = [];
   sets.forEach(function(s, si){ (s.invoices||[]).forEach(function(v){ all.push({ set: si, inv: v }); }); });
@@ -2467,7 +2618,7 @@ function resetAll(){
   batches = [];
   clearCurrentSet();
   scanSet = {}; scanOrder = []; scanPick = {}; scanOnlyMode = false;
-  localRestored = false; clearLocal();
+  localRestored = false; clearLocal(); deleteRemoteSets();
   renderBatches();
   var si = document.getElementById('scanInput'); if (si) si.value = '';
   var sf = document.getElementById('scanFb'); if (sf){ sf.className='scan-fb'; sf.innerHTML=''; }
