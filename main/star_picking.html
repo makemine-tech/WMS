@@ -320,6 +320,34 @@
     margin-top: 2rem; text-align: center;
     font-family: 'Space Mono', monospace; font-size: 0.62rem; color: #3a3f4d; line-height: 1.9;
   }
+
+  /* ── 세트(여러 날치) 등록 ── */
+  .batch{ margin-top:1.1rem; border:1px solid #2a3040; border-radius:14px; background:#141822; overflow:hidden; }
+  .batch-head{ display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+    padding:.85rem 1.1rem; border-bottom:1px solid #2a3040; font-weight:800; font-size:.95rem; }
+  .batch-state{ font-size:.78rem; color:#8b94a8; font-weight:700; }
+  .batch-desc{ padding:.8rem 1.1rem 0; font-size:.78rem; color:#8b94a8; line-height:1.7; }
+  .batch-item{ display:flex; align-items:center; gap:.7rem; margin:.7rem 1.1rem 0;
+    padding:.7rem .85rem; border:1px solid #2a3040; border-radius:11px; background:#10141d; }
+  .batch-no{ flex-shrink:0; width:26px; height:26px; border-radius:8px; background:#2563eb; color:#fff;
+    font-size:.78rem; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .batch-main{ flex:1; min-width:0; }
+  .batch-name{ font-size:.86rem; font-weight:700; color:#e6e9f0; word-break:break-all; }
+  .batch-meta{ font-size:.72rem; color:#8b94a8; margin-top:.2rem; }
+  .batch-warn{ color:#fbbf24; }
+  .batch-acts{ display:flex; gap:.4rem; flex-shrink:0; }
+  .bbtn{ background:#1c2331; border:1px solid #2a3040; color:#cbd5e1; border-radius:8px;
+    padding:.45rem .7rem; font-size:.76rem; font-weight:700; cursor:pointer; font-family:inherit; white-space:nowrap; }
+  .bbtn:hover{ background:#26304a; color:#fff; }
+  .bbtn.del{ color:#fca5a5; border-color:#4a2530; }
+  .batch-add{ margin:.9rem 1.1rem 1.1rem; width:calc(100% - 2.2rem); }
+  .batch-empty{ padding:.9rem 1.1rem 0; font-size:.78rem; color:#5b6373; }
+
+  /* 픽킹리스트 상단 '확인요망' */
+  .ps-veri{ border:2px solid #f59e0b; border-radius:10px; padding:.6rem .8rem; margin:.5rem 0 .8rem; background:#fffbeb; }
+  .ps-veri-t{ font-size:.92rem; font-weight:800; color:#92400e; margin-bottom:.35rem; }
+  .ps-veri-l{ font-size:.82rem; color:#1f2937; line-height:1.65; }
+  .ps-veri-l b{ color:#92400e; }
 </style>
 </head>
 <body>
@@ -372,6 +400,19 @@
     </div>
 
     <button class="btn" id="dlBtn" onclick="downloadSorted()">⬇ 정렬된 PDF 다운로드</button>
+
+    <!-- ── 여러 날치 한꺼번에 : 세트(송장PDF+할당리스트) 추가 등록 ── -->
+    <div class="batch">
+      <div class="batch-head">
+        <span>🗂 여러 날치 함께 피킹</span>
+        <span class="batch-state" id="batchState"></span>
+      </div>
+      <div class="batch-desc">밀린 날짜가 있으면 <b>지금 세트를 등록</b>하고 다음 날 파일(송장PDF+할당리스트)을 이어서 올리세요.
+        피킹리스트는 <b>등록한 세트를 모두 합쳐</b> 나오고, 정렬된 송장 PDF는 <b>세트별로 따로</b> 내려받습니다.
+        <br><span style="color:#6b7280;">수량은 항상 <b>할당리스트 엑셀</b>이 기준이고, 송장 판독이 흐린 항목만 피킹리스트 맨 위 <b>확인요망</b>으로 알려 줍니다. 등록한 세트는 이 브라우저에서만 유지되니 새로고침 전에 PDF를 받아 두세요.</span></div>
+      <div id="batchList"></div>
+      <button class="btn batch-add" id="batchAddBtn" onclick="addBatch()">＋ 이 세트 등록하고 다음 파일 올리기</button>
+    </div>
 
     <!-- ── 무결성 검증 (할당리스트 대조) ── -->
     <div class="intg">
@@ -538,6 +579,7 @@ var autoLoading  = false;  // 원격 세션 자동 불러오기 중 (이때는 �
 var _pdfDoneCb   = null;   // PDF 처리 완료 후 콜백 (체이닝용)
 var syncReady    = false;  // 로그인·그룹 확인되어 동기화 가능
 var syncGroupId  = null;
+var batches      = [];     // 추가 등록된 세트들 [{no,pdfName,xlName,sorted,agg,uncertain,inv,at}] — 밀린 날짜를 함께 피킹
 var sessionBinRev= 0;      // PDF/엑셀이 마지막으로 저장된 시각 (변경 감지용)
 var loadedBinRev = 0;      // 이 PC가 마지막으로 불러온 binRev
 
@@ -804,6 +846,7 @@ function renderResult(sorted){
   setStatus('success', '✅ 완료! 총 ' + sorted.length + '개 송장 · 합포 ' + multi.length + '건 우선 출력 — 아래 [정렬된 PDF 다운로드] 버튼을 눌러 받으세요.');
   resultEl.style.display = 'block';
   renderCopickSummary();
+  renderBatches();
 }
 
 /* 동시픽(단포+합포 겹침) 로케이션 요약 + 픽킹 버튼 안내 */
@@ -934,7 +977,7 @@ function buildPickAgg(pageTexts, invoices){
     // 송장 식별번호(등기번호) — 스캔 매칭용
     var mR = txt.match(/등기번호\s*:\s*([0-9\-]+)/);
     var reg = mR ? mR[1].replace(/[^0-9]/g,'') : null;
-    var rec = { reg: reg, raw: mR ? mR[1] : '', tag: tag, qty: inv.qty||0, items: its };
+    var rec = { no: inv.invNum, reg: reg, raw: mR ? mR[1] : '', tag: tag, qty: inv.qty||0, items: its };
     invIndex.push(rec);
     if (reg) regMap[reg] = rec;
   });
@@ -1298,10 +1341,39 @@ function dispName(e){
 /* 픽킹리스트 소스 결정
    · 엑셀이 있으면 = 엑셀(로케이션·바코드·상품명·수량 정확) + PDF의 단포/합포 구분
    · 없으면 = PDF 단독(송장 스크랩, 회전PDF 글자깨짐 가능) */
-function getDisplayAgg(){
+/* 지금 화면에 올라와 있는 한 세트(PDF+엑셀)의 집계 */
+function currentSetAgg(){
   if (orderRows && orderRows.length && xlRows && xlRows.length) return buildOrderAgg();  // 100% (OCR 무관)
   if (xlRows && xlRows.length && pickAgg) return buildExcelAgg();                          // 엑셀+송장 단포/합포
   return pickAgg;                                                                          // 송장 단독
+}
+
+/* 여러 세트의 집계를 (로케이션|바코드) 기준으로 합산 — 밀린 날짜를 한 번에 피킹하기 위함.
+   한 줄 합계만 내고 날짜 구분은 하지 않는다(현장 요청). */
+function mergeAggs(list){
+  var keys = {}, locTot = {};
+  (list||[]).forEach(function(a){
+    if (!a || !a.keys) return;
+    Object.keys(a.keys).forEach(function(k){
+      var e = a.keys[k];
+      var t = keys[k];
+      if (t){ t.d += (e.d||0); t.h += (e.h||0); if (!t.name && e.name) { t.name=e.name; t.sang=e.sang; t.opt=e.opt; } }
+      else keys[k] = { loc:e.loc, bar:e.bar, d:e.d||0, h:e.h||0, name:e.name||'', sang:e.sang||'', opt:e.opt||'', prod:e.prod||'' };
+      var lt = locTot[e.loc] || (locTot[e.loc] = { d:0, h:0 });
+      lt.d += (e.d||0); lt.h += (e.h||0);
+    });
+  });
+  var copick = Object.keys(locTot).filter(function(l){ return locTot[l].d>0 && locTot[l].h>0; });
+  return { keys:keys, locTot:locTot, copick:copick };
+}
+
+/* 등록된 세트 + 지금 올라와 있는 세트를 모두 합친 집계 (세트가 없으면 지금 것 그대로) */
+function getDisplayAgg(){
+  var cur = currentSetAgg();
+  if (!batches.length) return cur;
+  var list = batches.map(function(b){ return b.agg; });
+  if (cur) list.push(cur);
+  return mergeAggs(list);
 }
 
 /* ═══ 100% 조인 : 할당리스트(File1) ⋈ 주문내역(File3) — 송장 OCR과 완전 분리 ═══
@@ -1373,7 +1445,16 @@ function buildExcelAgg(){
   Object.keys(pdfKeys).forEach(function(k){ var e=pdfKeys[k]; (byBar[e.bar]=byBar[e.bar]||[]).push(k); });
   var consumed = {}, keys = {}, locTot = {}, pending = [];
 
+  /* 수량은 엑셀이 절대값 — 송장(PDF)에서는 단포/합포 비율만 빌려 온다.
+     송장 합계가 엑셀과 달라도 총량은 엑셀대로 맞추고, 그 항목은 확인요망 목록으로 따로 알린다.
+     송장에서 아예 못 찾은 항목은 단포로 두어 빠지지 않게 한다(확인요망에 뜸). */
   function add(r, d, h){
+    var want = (r.qty != null) ? (+r.qty || 0) : (d + h);
+    var pt = d + h;
+    if (pt !== want){
+      if (pt <= 0){ d = want; h = 0; }
+      else { d = Math.round(want * d / pt); h = want - d; }
+    }
     var k = r.loc + '|' + r.bar;
     var nm = (r.sang||'') + (r.opt ? ' / ' + r.opt : '');
     keys[k] = { loc: r.loc, bar: r.bar, d: d, h: h, name: nm, sang: r.sang||'', opt: r.opt||'' };
@@ -1408,6 +1489,57 @@ function buildExcelAgg(){
   var copick = Object.keys(locTot).filter(function(l){ return locTot[l].d>0 && locTot[l].h>0; });
   return { keys: keys, locTot: locTot, copick: copick };
 }
+/* ═══ 확인요망 : 엑셀(절대값)과 송장 PDF가 어긋난 항목 ═══
+   피킹 수량·품목은 엑셀을 그대로 따르고, PDF 판독이 흐린 것은 고치려 들지 않는다.
+   대신 "몇 번 송장을 눈으로 확인" 목록으로 뽑아 현장에서 확인하게 한다.
+   주문내역(File3)까지 올라온 세트는 송장 판독과 무관하게 100% 이므로 확인할 것이 없다. */
+function computeUncertain(){
+  if (orderRows && orderRows.length) return [];
+  if (!xlRows || !xlRows.length || !pickAgg || !pickAgg.keys) return [];
+  var pdfByBar = {}, out = [];
+  Object.keys(pickAgg.keys).forEach(function(k){
+    var e = pickAgg.keys[k];
+    pdfByBar[e.bar] = (pdfByBar[e.bar]||0) + (e.d||0) + (e.h||0);
+  });
+  var xlByBarQty = {}, xlMeta = {};
+  xlRows.forEach(function(r){
+    xlByBarQty[r.bar] = (xlByBarQty[r.bar]||0) + (r.qty||0);
+    if (!xlMeta[r.bar]) xlMeta[r.bar] = { loc:r.loc, sang:r.sang||'', opt:r.opt||'' };
+  });
+  /* 그 바코드가 들어 있는 송장 번호들 (육안 확인용) */
+  function invsOf(bar){
+    var ns = [];
+    (pickAgg.invIndex||[]).forEach(function(rec){
+      if (rec.no == null) return;
+      for (var i=0;i<rec.items.length;i++){ if (rec.items[i].bar === bar){ ns.push(rec.no); break; } }
+    });
+    return ns.sort(function(a,b){ return a-b; });
+  }
+  Object.keys(xlByBarQty).forEach(function(bar){
+    var xq = xlByBarQty[bar], pq = pdfByBar[bar] || 0;
+    if (xq === pq) return;
+    var m = xlMeta[bar] || {};
+    out.push({ bar:bar, loc:m.loc||'', name:(m.sang||'') + (m.opt?' / '+m.opt:''),
+      xl:xq, pdf:pq, invs:invsOf(bar),
+      why: pq===0 ? '송장에서 못 찾음' : (pq < xq ? '송장이 엑셀보다 적음' : '송장이 엑셀보다 많음') });
+  });
+  Object.keys(pdfByBar).forEach(function(bar){
+    if (xlByBarQty[bar] != null) return;
+    out.push({ bar:bar, loc:'', name:'', xl:0, pdf:pdfByBar[bar], invs:invsOf(bar), why:'엑셀에 없는 송장 항목' });
+  });
+  out.sort(function(a,b){ return Math.abs(b.xl-b.pdf) - Math.abs(a.xl-a.pdf); });
+  return out;
+}
+
+/* 등록 세트 + 현재 세트의 확인요망을 모두 모은다 (세트 번호를 붙여) */
+function allUncertain(){
+  var out = [];
+  batches.forEach(function(b){ (b.uncertain||[]).forEach(function(u){ out.push(Object.assign({ set:b.no }, u)); }); });
+  var cur = computeUncertain();
+  cur.forEach(function(u){ out.push(Object.assign({ set: batches.length ? batches.length+1 : 0 }, u)); });
+  return out;
+}
+
 /* 바코드(관리명) — 뒤 4자리를 크게 볼드 강조 */
 function fmtBarcode(bar){
   bar = String(bar||'');
@@ -1480,6 +1612,26 @@ function downloadPickExcel(){
   });
 }
 
+/* 피킹리스트 맨 위 '확인요망' — 수량은 엑셀대로 집고, 흐린 것만 송장 번호로 눈으로 확인 */
+function chkBlockHtml(){
+  var list = allUncertain();
+  if (!list.length) return '';
+  var many = list.length > 20, show = many ? list.slice(0, 20) : list;
+  var lines = show.map(function(u){
+    var who = (u.name || u.bar) + (u.loc ? ' <b>[' + escapeHtml(u.loc) + ']</b>' : '');
+    var invs = u.invs && u.invs.length
+      ? ('송장 <b>' + u.invs.slice(0, 8).join(', ') + '번</b>' + (u.invs.length > 8 ? ' 외 ' + (u.invs.length-8) + '건' : '') + ' 확인')
+      : '송장에서 해당 항목을 찾지 못함';
+    return '<div class="ps-veri-l">· ' + (batches.length ? '[세트' + u.set + '] ' : '') + escapeHtml(u.name || '')
+      + (u.name ? ' ' : '') + '<b>' + escapeHtml(u.bar) + '</b>'
+      + (u.loc ? ' [' + escapeHtml(u.loc) + ']' : '')
+      + ' — 엑셀 ' + u.xl + '개 / 송장 ' + u.pdf + '개 (' + u.why + ') → ' + invs + '</div>';
+  }).join('');
+  return '<div class="ps-veri"><div class="ps-veri-t">⚠ 육안 확인요망 ' + list.length + '건 '
+    + '<span style="font-weight:600;font-size:.8rem;">(피킹 수량은 엑셀 기준으로 이미 반영됨 — 아래 항목만 송장을 눈으로 확인)</span></div>'
+    + lines + (many ? '<div class="ps-veri-l">… 외 ' + (list.length - 20) + '건</div>' : '') + '</div>';
+}
+
 function buildSheetHtml(mode, rows, agg, title){
   var lt = agg.locTot;
   var ref = agg.refLocTot;   // 스캔분이면 전체 출고분 locTot (동시픽 판정 기준)
@@ -1493,9 +1645,12 @@ function buildSheetHtml(mode, rows, agg, title){
 
   var cpN = agg.copick.length;
   var html = '<div class="ps-title">' + label + '</div>';
+  html += chkBlockHtml();
   html += '<div class="ps-sub">' + ds + ' · ' + rows.length + '행 · 총 ' + totalQty + '개'
         + (cpN ? (' · 동시픽 ' + cpN + '곳') : '')
-        + (lastName ? (' · ' + escapeHtml(lastName)) : '') + '</div>';
+        + (batches.length
+            ? (' · 세트 ' + (batches.length + (pickAgg ? 1 : 0)) + '개 합계 (' + escapeHtml(batches.map(function(b){ return b.pdfName; }).concat(pickAgg ? [lastName] : []).join(', ')) + ')')
+            : (lastName ? (' · ' + escapeHtml(lastName)) : '')) + '</div>';
 
   // 순서: 로케이션 / 바코드(관리명) / 단포 / 합포 / 구분 / 상품(옵션)
   var th = '<th>✓</th><th>#</th><th>로케이션</th><th>바코드 (관리명)</th><th>단포</th><th>합포</th><th>구분</th><th>상품 (옵션)</th>';
@@ -1783,6 +1938,101 @@ function syncClearRemote(){
   WMSync.onRemoteChange(function(p){ onRemotePayload(p); });
 })();
 
+/* ═══ 세트(하루치) 등록 — 밀린 날짜를 함께 피킹 ═══
+   등록하면 그 세트의 집계·정렬PDF·확인요망을 보관하고 화면은 다음 파일을 받도록 비운다.
+   피킹리스트는 등록 세트 + 지금 세트를 합쳐서, 정렬 PDF 는 세트별로 따로 내려받는다. */
+function addBatch(){
+  if (!lastSorted || !pickAgg){ alert('먼저 송장 PDF 를 올려 정렬을 끝내 주세요.'); return; }
+  var agg = currentSetAgg();
+  if (!agg || !agg.keys){ alert('집계가 없습니다. 파일을 다시 확인해 주세요.'); return; }
+  if (!xlRows || !xlRows.length){
+    if (!confirm('이 세트에 할당리스트 엑셀이 없습니다.\n엑셀 없이 등록하면 수량이 송장 판독값이라 정확하지 않을 수 있어요.\n\n그래도 등록할까요?')) return;
+  }
+  var n = batches.length + 1;
+  batches.push({
+    no: n,
+    pdfName: lastName || ('세트' + n + '.pdf'),
+    xlName: lastXlsName || '',
+    sorted: lastSorted,
+    agg: agg,
+    uncertain: computeUncertain(),
+    inv: (pickAgg.invIndex || []).length,
+    exact: !!(orderRows && orderRows.length),
+    at: Date.now()
+  });
+  softResetForNext();
+  renderBatches();
+  setStatus('ok', '✅ 세트 ' + n + ' 등록 완료 — 다음 날짜의 <b>송장 PDF</b> 를 올려 주세요. 피킹리스트는 등록한 세트를 모두 합쳐 나옵니다.');
+  statusEl.style.display = 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+window.addBatch = addBatch;
+
+/* 다음 세트를 받기 위해 현재 세트만 비운다 (등록된 세트·스캔은 유지, 원격 삭제 없음) */
+function softResetForNext(){
+  rawBuffer = null; lastSorted = null; lastName = 'Invoice.pdf'; lastPageTexts = null; lastXlsName = '';
+  pickAgg = null; xlInfo = {}; xlRows = null; currentPick = null;
+  allocData = null; orderRows = null; orderByReg = null; lastOrderName = ''; pdfInvTotal = 0;
+  xlByBar = {};
+  fileInput.value = ''; fileSelected.textContent = ''; processBtn.disabled = true;
+  var xi = document.getElementById('xlsInput'); if (xi) xi.value = '';
+  var oi = document.getElementById('orderInput'); if (oi) oi.value = '';
+  document.getElementById('xlsSelected').textContent = '';
+  var os = document.getElementById('orderSelected'); if (os) os.textContent = '';
+  var orq = document.getElementById('orderReq'); if (orq){ orq.style.display = 'none'; orq.className = 'order-req'; }
+  document.getElementById('intgReport').innerHTML = '';
+  setIntg('', '');
+  closePickList();
+}
+
+function renderBatches(){
+  var box = document.getElementById('batchList'), st = document.getElementById('batchState');
+  if (!box) return;
+  if (!batches.length){
+    box.innerHTML = '<div class="batch-empty">등록된 세트가 없습니다 — 지금 올린 파일만으로 피킹리스트가 나옵니다.</div>';
+    if (st) st.textContent = '';
+  } else {
+    box.innerHTML = batches.map(function(b, i){
+      var un = (b.uncertain||[]).length;
+      return '<div class="batch-item">'
+        + '<div class="batch-no">' + b.no + '</div>'
+        + '<div class="batch-main"><div class="batch-name">' + escapeHtml(b.pdfName) + '</div>'
+          + '<div class="batch-meta">송장 ' + b.inv + '건'
+          + (b.xlName ? (' · ' + escapeHtml(b.xlName)) : ' · <span class="batch-warn">엑셀 없음</span>')
+          + (un ? (' · <span class="batch-warn">확인요망 ' + un + '건</span>') : (b.exact ? ' · 100% 확정' : ' · 일치'))
+          + '</div></div>'
+        + '<div class="batch-acts">'
+          + '<button class="bbtn" onclick="downloadBatch(' + i + ')">⬇ PDF</button>'
+          + '<button class="bbtn del" onclick="removeBatch(' + i + ')">삭제</button>'
+        + '</div></div>';
+    }).join('');
+    if (st) st.textContent = '등록 ' + batches.length + '세트 · 합계로 피킹';
+  }
+  var totUn = allUncertain().length;
+  var note = document.getElementById('plNote');
+  if (note && totUn) note.innerHTML = '⚠ 확인요망 ' + totUn + '건 — 피킹리스트 맨 위에 송장번호와 함께 표시됩니다.';
+}
+
+function downloadBatch(i){
+  var b = batches[i]; if (!b || !b.sorted) return;
+  var blob = new Blob([b.sorted], { type: 'application/pdf' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'Sorted_' + b.no + '_' + b.pdfName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+}
+window.downloadBatch = downloadBatch;
+
+function removeBatch(i){
+  var b = batches[i]; if (!b) return;
+  if (!confirm('세트 ' + b.no + ' (' + b.pdfName + ') 을 목록에서 뺄까요?\n합계 피킹리스트에서도 빠집니다.')) return;
+  batches.splice(i, 1);
+  batches.forEach(function(x, idx){ x.no = idx + 1; });
+  renderBatches();
+}
+window.removeBatch = removeBatch;
+
 function downloadSorted(){
   if (!lastSorted) return;
   var blob = new Blob([lastSorted], { type: 'application/pdf' });
@@ -1803,6 +2053,7 @@ function resetAll(){
   pickAgg = null; xlInfo = {}; xlRows = null; currentPick = null;
   allocData = null; orderRows = null; orderByReg = null; lastOrderName = ''; pdfInvTotal = 0;
   xlByBar = {}; scanSet = {}; scanOrder = [];
+  batches = []; renderBatches();
   var si = document.getElementById('scanInput'); if (si) si.value = '';
   var sf = document.getElementById('scanFb'); if (sf){ sf.className='scan-fb'; sf.innerHTML=''; }
   var sl = document.getElementById('scanList'); if (sl){ sl.className='scan-list'; sl.innerHTML=''; }
