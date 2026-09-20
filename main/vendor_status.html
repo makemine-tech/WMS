@@ -89,6 +89,9 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
 
 /* 낱개수량 입력 */
 .loose-hint{background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:9px;padding:8px 12px;font-size:12px;color:#C4B5FD;line-height:1.55;margin-bottom:11px;}
+.loose-reset{float:right;margin-left:10px;background:rgba(239,68,68,.16);color:#FCA5A5;border:1px solid rgba(239,68,68,.45);border-radius:7px;padding:5px 10px;font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;}
+.loose-reset:hover{background:rgba(239,68,68,.3);color:#fff;}
+.loose-reset:active{transform:scale(.97);}
 .loosehead{color:#C4B5FD!important;}
 .loosecell{background:rgba(124,58,237,.05);}
 .loose-inp{width:74px;background:#0B1220;border:1px solid #3B2E66;border-radius:7px;padding:7px 8px;color:#fff;font-size:14px;font-weight:700;text-align:right;outline:none;font-variant-numeric:tabular-nums;font-family:inherit;-moz-appearance:textfield;}
@@ -379,8 +382,11 @@ function renderReport(info, data){
   var sortbar='<div class="sortbar"><span class="sortlabel">정렬</span>'
     +sbtn('qty','수량 많은순')+sbtn('pallet','파렛트순')+sbtn('name','이름순')+'</div>';
 
+  var looseReset=(_canEdit && totLoose>0)
+    ? '<button class="loose-reset" onclick="resetLoose()" title="이 업체의 파렛트외 낱개수량을 모두 0 으로">↺ 낱개수량 전체 초기화 ('+nf(totLoose)+'개)</button>'
+    : '';
   var looseHint=_canEdit
-    ? '<div class="loose-hint">✍ <b>파렛트외 낱개수량</b> 칸을 누르면 <b>창고(센터)별 입력란</b>이 열립니다. 각 창고 수량을 입력하면 <b>합계</b>가 자동 계산되어 <b>총 재고</b>에 즉시 반영·저장됩니다. (담당자에게는 합계만 표시)</div>'
+    ? '<div class="loose-hint">'+looseReset+'✍ <b>파렛트외 낱개수량</b> 칸을 누르면 <b>창고(센터)별 입력란</b>이 열립니다. 각 창고 수량을 입력하면 <b>합계</b>가 자동 계산되어 <b>총 재고</b>에 즉시 반영·저장됩니다. (담당자에게는 합계만 표시)</div>'
     : '';
 
   var searchBar='<div class="searchbar"><span class="sicon">🔎</span>'
@@ -447,6 +453,7 @@ function renderReport(info, data){
       +'<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
       +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="location.href=\'/wms_vendors.html?gid='+encodeURIComponent(info.gid||'')+'\'">‹ 업체관리</button>'
+      +'<button class="tbtn" onclick="location.href=\'/wms.html\'">🏭 창고관리</button>'
     : _canEdit
     ? '<button class="tbtn dt" onclick="showDetail()">🔍 세부내역으로 보기</button>'
       +'<button class="tbtn hl" onclick="closeInventory()">✅ 재고조사 마감</button>'
@@ -454,6 +461,7 @@ function renderReport(info, data){
       +'<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
       +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="location.href=\'/wms_vendors.html?gid='+encodeURIComponent(info.gid||'')+'\'">‹ 업체관리</button>'
+      +'<button class="tbtn" onclick="location.href=\'/wms.html\'">🏭 창고관리</button>'
     : '<button class="tbtn" onclick="openHistory()">📜 이력</button>'
       +'<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
       +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
@@ -805,6 +813,18 @@ function saveLooseWh(encKey){
   }
 }
 window.saveLooseWh=saveLooseWh;
+
+/* 낱개수량 전체 초기화 — 이 업체의 vendorLoose 노드를 통째로 지운다(= 전 품목 0).
+   낱개수량은 이 화면에서만 쓰는 실물조사 입력값이라 다른 기능과 연동되지 않는다. */
+function resetLoose(){
+  if(!_canEdit || !_lastInfo || !_lastInfo.gid || !_lastInfo.vendorId) return;
+  var tot=0; (_rows||[]).forEach(function(r){ tot+=looseSum(_loose[r._k]); });
+  if(!confirm('파렛트외 낱개수량을 모두 0 으로 되돌릴까요?\n\n현재 낱개 합계: '+nf(tot)+'개\n되돌릴 수 없습니다. (파렛트 수량은 그대로입니다)')) return;
+  db.ref('vendorLoose/'+_lastInfo.gid+'/'+_lastInfo.vendorId).remove()
+    .then(function(){ _loose={}; _looseOpen={}; rerenderCurrent(); })   /* 구독도 곧 같은 값으로 갱신된다 */
+    .catch(function(e){ alert('초기화 실패: '+(e&&e.message||e)); });
+}
+window.resetLoose=resetLoose;
 
 function doLogout(){ auth.signOut().then(function(){ location.replace('/wms_login.html'); }); }
 window.doLogout=doLogout;
