@@ -99,7 +99,16 @@
       var decided = false;
       auth.onAuthStateChanged(function(user){
         if (decided) return;
-        if (!user) { decided = true; window.WMSAccess.level = 0; redirectToLogin(); return; }
+        /* 로그인 복원이 아직 안 끝난 상태에서 null 이 올 수 있다(특히 SDK 를 늦게 실은 페이지).
+           바로 로그인으로 보내면 로그인 → 페이지 → 로그인 … 으로 무한 반복되므로 한 번 더 확인한다. */
+        if (!user) {
+          setTimeout(function(){
+            if (decided) return;
+            if (auth.currentUser) return;          /* 복원됨 — 다음 콜백이 처리 */
+            decided = true; window.WMSAccess.level = 0; redirectToLogin();
+          }, 1500);
+          return;
+        }
 
         db.ref('superadmins/' + user.uid).get().then(function(adminSnap){
           if (adminSnap.exists()) { decided = true; finish(3, required); return; }
