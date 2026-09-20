@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>테일즈 마이너스재고 조정 — 재고조사풀</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- 로그인 게이트(wms_access.js)가 쓰는 SDK — 미리 싣지 않으면 로그인 확인 전에 튕겨 무한 반복된다 -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<style>
+  :root{ --bg:#0b0d12; --surface:#141822; --surface2:#1c2331; --border:#2a3040;
+         --text:#e6e9f0; --muted:#8b94a8; --accent:#4ade80; --accent2:#fbbf24; --red:#f05050; --blue:#3b82f6; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:1.2rem .9rem 3rem; }
+  .wrap{ width:100%; max-width:1180px; margin:0 auto; }
+
+  .top{ display:flex; align-items:center; justify-content:space-between; gap:.8rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .ttl{ font-size:1.3rem; font-weight:900; letter-spacing:-.4px; }
+  .ttl small{ display:block; font-family:'Space Mono',monospace; font-size:.62rem; color:var(--muted); font-weight:400; letter-spacing:.12em; margin-top:.2rem; }
+  .home{ background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:8px;
+         padding:.45rem .8rem; font-size:.78rem; font-weight:700; text-decoration:none; }
+  .home:hover{ color:var(--text); }
+
+  /* 하위 메뉴 */
+  .tools{ display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.7rem; margin-bottom:1.1rem; }
+  .tool{ text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:.9rem;
+         cursor:pointer; font-family:inherit; color:var(--text); }
+  .tool:hover{ border-color:var(--blue); }
+  .tool.on{ border-color:var(--accent); background:rgba(74,222,128,.08); }
+  .tool.soon{ opacity:.45; cursor:default; }
+  .tool-n{ font-size:.95rem; font-weight:800; }
+  .tool-d{ font-size:.72rem; color:var(--muted); line-height:1.5; margin-top:.25rem; }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1rem; margin-bottom:.9rem; }
+  .card-h{ font-size:.95rem; font-weight:800; margin-bottom:.5rem; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .rule{ font-size:.78rem; color:var(--muted); line-height:1.75; }
+  .rule b{ color:var(--text); }
+
+  .drop{ border:2px dashed var(--border); border-radius:12px; padding:1.6rem 1rem; text-align:center; cursor:pointer; position:relative; }
+  .drop:hover,.drop.over{ border-color:var(--accent); background:rgba(74,222,128,.05); }
+  .drop input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .drop-t{ font-size:.95rem; font-weight:700; }
+  .drop-s{ font-size:.72rem; color:var(--muted); margin-top:.3rem; }
+  .fname{ font-size:.78rem; color:var(--accent); font-weight:700; margin-top:.5rem; }
+
+  .stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem; margin:.8rem 0; }
+  @media(max-width:700px){ .stats{ grid-template-columns:repeat(2,1fr); } }
+  .st{ background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:.6rem .7rem; }
+  .st-l{ font-size:.66rem; color:var(--muted); font-weight:700; }
+  .st-v{ font-size:1.35rem; font-weight:900; margin-top:.15rem; }
+  .st-v.ok{ color:var(--accent); } .st-v.warn{ color:var(--accent2); } .st-v.bad{ color:var(--red); }
+
+  .btn{ width:100%; padding:.85rem; border:none; border-radius:10px; background:var(--accent); color:#06281a;
+        font-family:inherit; font-size:.95rem; font-weight:900; cursor:pointer; }
+  .btn:hover{ filter:brightness(1.08); }
+  .btn:disabled{ background:var(--surface2); color:#555c6b; cursor:not-allowed; }
+  .btn.ghost{ background:var(--surface2); color:var(--text); border:1px solid var(--border); font-weight:700; }
+
+  table{ width:100%; border-collapse:collapse; font-size:.8rem; }
+  th{ background:var(--surface2); color:var(--muted); text-align:left; padding:.45rem .55rem; border-bottom:1px solid var(--border); white-space:nowrap; font-size:.72rem; }
+  td{ padding:.4rem .55rem; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
+  td.num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tbl-wrap{ max-height:420px; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+  .old{ color:var(--muted); text-decoration:line-through; }
+  .new{ color:var(--accent); font-weight:800; }
+  .neg{ color:var(--red); font-weight:800; }
+  .from{ font-size:.72rem; color:var(--muted); }
+  .empty{ padding:1.6rem; text-align:center; color:var(--muted); font-size:.82rem; }
+  .warnbox{ border:1px solid rgba(240,80,80,.45); background:rgba(240,80,80,.08); border-radius:10px; padding:.7rem .85rem;
+            font-size:.78rem; color:#fca5a5; line-height:1.6; margin-bottom:.7rem; }
+  .hide{ display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="ttl">🧮 테일즈 마이너스재고 조정<small>TALES · MINUS TO ZERO</small></div>
+    <a class="home" href="/stock_check.html">‹ 재고조사풀</a>
+  </div>
+
+  <!-- ① 마이너스 제로화 -->
+  <div id="viewMinus">
+    <div class="card">
+      <div class="card-h">🧮 마이너스 제로화 (이벳)</div>
+      <div class="rule">
+        · 같은 <b>상품명 + 관리명</b>끼리 묶고, 옵션명의 <b>유통기한(6자리)</b>으로 순서를 봅니다.<br>
+        · 어떤 유통기한의 재고가 <b>마이너스</b>면 <b>그 다음 유통기한</b>의 수량에서 빼서 0으로 만듭니다. (모자라면 그 다음 유통기한으로 계속)<br>
+        · <b>진행종료·전산 재고 0</b>인 줄은 바뀔 것이 없어 결과에서 빠집니다.<br>
+        · 받은 엑셀에는 <b>변동이 있는 줄만</b> 들어가고, <b>G열(가용재고조사수량)</b>에 바로 입력할 수량이 적힙니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept=".xlsx,.xls,.csv">
+        <div class="drop-t">📑 재고조사 엑셀을 끌어다 놓거나 클릭</div>
+        <div class="drop-s">상품명 · 관리명 · 옵션코드 · 옵션명 · 전산상가용재고 … 열을 자동으로 찾습니다</div>
+      </div>
+      <div class="fname" id="fname"></div>
+    </div>
+
+    <div id="result" class="hide">
+      <div class="stats">
+        <div class="st"><div class="st-l">전체 줄</div><div class="st-v" id="stAll">0</div></div>
+        <div class="st"><div class="st-l">마이너스</div><div class="st-v bad" id="stNeg">0</div></div>
+        <div class="st"><div class="st-l">조정됨</div><div class="st-v ok" id="stFix">0</div></div>
+        <div class="st"><div class="st-l">조정 불가</div><div class="st-v warn" id="stShort">0</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">⬇ 업로드용 파일 받기 <span class="from" id="dlNote"></span></div>
+        <button class="btn" id="dlBtn" onclick="downloadFixed()">업로드용 엑셀 받기 (변동 줄만)</button>
+      </div>
+
+      <div class="card">
+        <div class="card-h">🔁 변동 내역 <span class="from" id="chgNote"></span></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>상품명</th><th>관리명</th><th>옵션명(유통기한)</th><th>옵션코드</th>
+              <th style="text-align:right">전산</th><th style="text-align:right">조정 후</th><th>사유</th></tr></thead>
+            <tbody id="chgBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" id="shortCard">
+        <div class="card-h">⚠ 조정 불가 — 같은 상품에 뺄 수량이 없음</div>
+        <div class="warnbox">이 줄들은 마이너스를 없앨 재고가 같은 상품 안에 없습니다. <b>업로드용 엑셀에서는 빠집니다.</b> 실물을 확인해 직접 처리해 주세요.</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>상품명</th><th>관리명</th><th>옵션명</th><th>옵션코드</th><th style="text-align:right">남은 마이너스</th></tr></thead>
+            <tbody id="shortBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   테일즈 마이너스재고 조정 — 마이너스 제로화 (이벳)
+   같은 상품(상품명+관리명) 안에서, 마이너스 재고를 '그 다음 유통기한' 수량으로 메운다.
+   유통기한은 옵션명 끝의 6자리(YYMMDD). 예: (1C_280101) → 280101
+═══════════════════════════════════════════════════════════ */
+var HEAD = ['상품명','관리명','옵션코드','옵션명','전산상가용재고','전산상불량재고','가용재고조사수량','불량재고조사수량','비고'];
+var rows = [], changed = [], shorts = [], srcName = '';
+
+function showTool(){ /* 지금은 도구가 하나 — 자리만 잡아 둔다 */ }
+window.showTool = showTool;
+
+function num(v){ var n = parseFloat(String(v == null ? '' : v).replace(/[, ]/g,'')); return isNaN(n) ? 0 : n; }
+function expOf(opt){ var m = String(opt||'').match(/(\d{6})\s*\)?\s*$/); return m ? m[1] : ''; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmtExp(e){ return e ? ('20'+e.slice(0,2)+'.'+e.slice(2,4)+'.'+e.slice(4,6)) : ''; }
+
+/* 파일 받기 */
+var drop = document.getElementById('drop'), fileInput = document.getElementById('file');
+fileInput.addEventListener('change', function(){ if (fileInput.files[0]) readFile(fileInput.files[0]); });
+drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', function(){ drop.classList.remove('over'); });
+drop.addEventListener('drop', function(e){
+  e.preventDefault(); drop.classList.remove('over');
+  var f = e.dataTransfer.files[0];
+  if (f) readFile(f);
+});
+
+function readFile(file){
+  srcName = file.name;
+  document.getElementById('fname').textContent = '✓ ' + file.name + ' — 계산 중...';
+  var r = new FileReader();
+  r.onload = function(e){
+    try { parseAndFix(new Uint8Array(e.target.result)); }
+    catch(err){ document.getElementById('fname').textContent = '❌ ' + err.message; }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+/* 열 찾기 — 제목이 조금 달라도 찾도록 */
+function colIndexes(header){
+  var h = header.map(function(x){ return String(x||'').replace(/\s/g,''); });
+  function find(cands, dflt){
+    for (var c=0;c<cands.length;c++){
+      for (var i=0;i<h.length;i++){ if (h[i].indexOf(cands[c]) >= 0) return i; }
+    }
+    return dflt;
+  }
+  return {
+    name: find(['상품명'], 0), mg: find(['관리명'], 1), code: find(['옵션코드'], 2), opt: find(['옵션명'], 3),
+    qty: find(['전산상가용재고','가용재고'], 4), bad: find(['전산상불량재고','불량재고'], 5),
+    chkQty: find(['가용재고조사수량'], 6), chkBad: find(['불량재고조사수량'], 7), memo: find(['비고'], 8)
+  };
+}
+
+function parseAndFix(bytes){
+  var wb = XLSX.read(bytes, { type:'array' });
+  var ws = wb.Sheets[wb.SheetNames[0]];
+  var aoa = XLSX.utils.sheet_to_json(ws, { header:1, raw:false, defval:'' });
+  if (!aoa.length) throw new Error('빈 파일입니다');
+  var C = colIndexes(aoa[0]);
+  rows = aoa.slice(1)
+    .filter(function(r){ return String(r[C.name]||'').trim() || String(r[C.code]||'').trim(); })
+    .map(function(r, i){
+      return { i:i, raw:r,
+        name:String(r[C.name]||'').trim(), mg:String(r[C.mg]||'').trim(),
+        code:String(r[C.code]||'').trim(), opt:String(r[C.opt]||'').trim(),
+        qty:num(r[C.qty]), bad:num(r[C.bad]),
+        exp:expOf(r[C.opt]), ended:/진행종료/.test(String(r[C.opt]||'')),
+        newQty:num(r[C.qty]), why:'' };
+    });
+
+  /* 상품(상품명+관리명)별로 묶어 마이너스를 메운다 */
+  var groups = {};
+  rows.forEach(function(r){ var k = r.name + '|' + r.mg; (groups[k] = groups[k] || []).push(r); });
+  changed = []; shorts = [];
+  Object.keys(groups).forEach(function(k){
+    var g = groups[k];
+    var negs = g.filter(function(r){ return r.newQty < 0; })
+                .sort(function(a,b){ return (a.exp||'999999').localeCompare(b.exp||'999999'); });
+    negs.forEach(function(n){
+      var need = -n.newQty, took = [];
+      /* 유통기한이 있으면 '그 다음(늦은) 유통기한'부터, 없으면 이른 유통기한부터 */
+      var donors = n.exp
+        ? g.filter(function(r){ return r !== n && r.exp && r.exp > n.exp && r.newQty > 0; })
+           .sort(function(a,b){ return a.exp.localeCompare(b.exp); })
+        : g.filter(function(r){ return r !== n && r.newQty > 0; })
+           .sort(function(a,b){ return (a.exp||'999999').localeCompare(b.exp||'999999'); });
+      donors.forEach(function(d){
+        if (need <= 0) return;
+        var take = Math.min(need, d.newQty);
+        d.newQty -= take; need -= take;
+        d.why = (d.why ? d.why + ' · ' : '') + (fmtExp(n.exp) || n.opt) + ' 마이너스 ' + take + ' 상계';
+        took.push({ d:d, take:take });
+      });
+      if (took.length){
+        n.why = took.map(function(t){ return (fmtExp(t.d.exp) || t.d.opt) + ' 에서 ' + t.take; }).join(' · ') + ' 가져옴';
+      }
+      n.newQty = -need;                 /* 0 이면 해결, 음수면 아직 부족 */
+      if (need > 0) shorts.push({ r:n, left:need });
+    });
+  });
+
+  changed = rows.filter(function(r){ return r.newQty !== r.qty; });
+  render();
+}
+
+function render(){
+  var negN = rows.filter(function(r){ return r.qty < 0; }).length;
+  document.getElementById('stAll').textContent = rows.length;
+  document.getElementById('stNeg').textContent = negN;
+  document.getElementById('stFix').textContent = negN - shorts.length;
+  document.getElementById('stShort').textContent = shorts.length;
+  document.getElementById('fname').textContent = '✓ ' + srcName;
+
+  var body = document.getElementById('chgBody');
+  body.innerHTML = changed.length ? changed.map(function(r){
+    return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.mg) + '</td>'
+      + '<td>' + esc(r.opt) + (r.exp ? ' <span class="from">' + fmtExp(r.exp) + '</span>' : '') + '</td>'
+      + '<td>' + esc(r.code) + '</td>'
+      + '<td class="num"><span class="' + (r.qty < 0 ? 'neg' : 'old') + '">' + r.qty + '</span></td>'
+      + '<td class="num"><span class="new">' + r.newQty + '</span></td>'
+      + '<td class="from">' + esc(r.why) + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="empty">조정할 마이너스 재고가 없습니다.</td></tr>';
+
+  var sb = document.getElementById('shortBody');
+  document.getElementById('shortCard').className = 'card' + (shorts.length ? '' : ' hide');
+  sb.innerHTML = shorts.map(function(s){
+    return '<tr><td>' + esc(s.r.name) + '</td><td>' + esc(s.r.mg) + '</td><td>' + esc(s.r.opt) + '</td>'
+      + '<td>' + esc(s.r.code) + '</td><td class="num neg">' + (-s.left) + '</td></tr>';
+  }).join('');
+
+  document.getElementById('chgNote').textContent = changed.length + '줄';
+  document.getElementById('dlNote').textContent = changed.length ? (changed.length + '줄이 들어갑니다') : '변동 없음';
+  document.getElementById('dlBtn').disabled = !changed.length;
+  document.getElementById('result').className = '';
+}
+
+/* 업로드용 엑셀 — 변동 줄만, G열(가용재고조사수량)에 조정 후 수량 */
+function downloadFixed(){
+  if (!changed.length) return;
+  var aoa = [HEAD.slice()];
+  changed.forEach(function(r){
+    aoa.push([ r.name, r.mg, r.code, r.opt, r.qty, r.bad, r.newQty, '', '' ]);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  /* 옵션코드는 숫자로 바뀌면 앞자리가 날아갈 수 있어 텍스트로 고정 */
+  for (var i=1;i<aoa.length;i++){
+    var c = ws['C'+(i+1)];
+    if (c){ c.t = 's'; c.v = String(c.v); }
+  }
+  ws['!cols'] = [{wch:40},{wch:12},{wch:12},{wch:16},{wch:14},{wch:14},{wch:16},{wch:16},{wch:20}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+  var d = new Date(), p = function(n){ return (n<10?'0':'') + n; };
+  XLSX.writeFile(wb, '마이너스제로화_' + d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + '.xlsx');
+}
+window.downloadFixed = downloadFixed;
+</script>
+<script src="/wms_access.js" data-page="stock_tales_minus" data-floor="2"></script>
+</body>
+</html>
