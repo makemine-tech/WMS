@@ -60,8 +60,27 @@
   .stat-v.sm.bad { color: var(--red); }
   .stat-v.sm.warn { color: #fbbf24; }
 
-  .dl { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin-top: .9rem; }
-  @media(max-width: 900px){ .dl { grid-template-columns: 1fr; } }
+  .dl { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: .8rem; margin-top: .9rem; }
+  @media(max-width: 1000px){ .dl { grid-template-columns: 1fr; } }
+  .sc-col { border-color: rgba(59,130,246,.45); }
+  .sc-state { font-size: .68rem; font-weight: 800; color: #8b94a8; }
+  .sc-state.on { color: #4ade80; }
+  .sc-sets { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .4rem; }
+  .sc-set { display: inline-flex; align-items: center; gap: .25rem; font-size: .72rem; font-weight: 700;
+            border: 1px solid var(--border); border-radius: 7px; padding: .22rem .45rem; cursor: pointer; color: #cbd5e1; }
+  .sc-set.done { border-color: rgba(74,222,128,.45); }
+  .sc-done { color: #4ade80; font-size: .64rem; }
+  .sc-hint { font-size: .68rem; color: #5b6373; }
+  .sc-cnt { display: flex; align-items: center; gap: .35rem; margin: .25rem 0; }
+  .sc-cnt .intg-state { flex: 1; font-size: .68rem; }
+  .sc-mini { background: #1c2331; border: 1px solid var(--border); color: #93a3bb; border-radius: 6px;
+             padding: .25rem .45rem; font-size: .66rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .sc-mini:hover { color: #fff; }
+  .sc-apply { margin-top: .3rem; padding: .45rem .4rem; font-size: .78rem; background: #2563eb; color: #fff; }
+  .sc-only { margin-top: .35rem; padding: .42rem .4rem; font-size: .76rem; background: #1c2331; color: #cbd5e1; border: 1px solid var(--border); }
+  .sc-desc { font-size: .62rem; color: #8b94a8; line-height: 1.4; margin-top: .15rem; }
+  .sc-col .scan-input { font-size: .78rem; padding: .5rem .6rem; }
+  .sc-col .scan-list { max-height: 62px; }
   .dl-col { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: .85rem; }
   .dl-title { font-size: .85rem; font-weight: 800; margin-bottom: .6rem; }
   .dl-box { display: flex; flex-direction: column; gap: .4rem; }
@@ -511,6 +530,21 @@
         <div class="dl-title">⬇ 정렬된 송장 PDF</div>
         <div id="pdfDlBox" class="dl-box"></div>
       </div>
+      <div class="dl-col sc-col">
+        <div class="dl-title">📡 남은 송장 스캔 <span class="sc-state" id="scanApplyState"></span></div>
+        <div class="sc-sets" id="scanSets"></div>
+        <input type="text" id="scanInput" class="scan-input" placeholder="여기를 클릭하고 남은 송장을 연속 스캔" autocomplete="off" spellcheck="false">
+        <div class="scan-fb" id="scanFb"></div>
+        <div class="sc-cnt"><span class="intg-state" id="scanState"></span>
+          <button class="sc-mini" onclick="clearScan()">스캔 지우기</button>
+          <button class="sc-mini" onclick="clearScanApply()">원래대로</button></div>
+        <div class="scan-list" id="scanList"></div>
+        <button class="btn sc-apply" onclick="applyScanRemaining()">스캔 송장 픽킹목록 제외반영</button>
+        <div class="sc-desc">스캔한 것만 남기고, <b>스캔 안 한 송장은 이미 나간 것</b>으로 보고 픽킹에서 뺍니다.</div>
+        <button class="btn sc-only" onclick="applyScanOnly()">스캔 송장만 픽킹적용</button>
+        <div class="sc-desc">다른 세트까지 무시하고 <b>스캔한 송장만</b> 픽킹리스트로 만듭니다.</div>
+      </div>
+
       <div class="dl-col">
         <div class="dl-title">🧾 픽킹리스트 <span id="plScope">(오늘치)</span></div>
         <div class="pl-btns">
@@ -529,19 +563,6 @@
         <div id="copickSummary"></div>
         <div id="veriReport"></div>
         <div id="intgReport"></div>
-      </div>
-    </details>
-
-    <details class="det">
-      <summary>📡 스캔 픽킹 — 스캔한 송장만 출력 <span class="intg-state" id="scanState"></span></summary>
-      <div class="det-body">
-        <input type="text" id="scanInput" class="scan-input" placeholder="여기를 클릭한 뒤 송장 바코드를 스캔하세요 (연속 스캔)" autocomplete="off" spellcheck="false">
-        <div class="scan-fb" id="scanFb"></div>
-        <div class="scan-list" id="scanList"></div>
-        <div class="pl-btns" style="grid-template-columns:2fr 1fr;">
-          <button class="btn pl-b pl-all" onclick="openScanPickList()">스캔분 픽킹리스트 출력</button>
-          <button class="btn-ghost" style="margin-top:0;" onclick="clearScan()">스캔 초기화</button>
-        </div>
       </div>
     </details>
 
@@ -646,6 +667,9 @@ var _pdfDoneCb   = null;   // PDF 처리 완료 후 콜백 (체이닝용)
 var syncReady    = false;  // 로그인·그룹 확인되어 동기화 가능
 var syncGroupId  = null;
 var batches      = [];     // 등록된 세트들 [{no,pdfName,xlName,sorted,raw,invoices,pages,agg,uncertain,inv,multi}] — 밀린 날짜를 함께 피킹
+var curApplied   = null;   // 현재 세트에 스캔 반영(남은 작업만)한 집계
+var scanOnlyMode = false;  // '스캔 송장만 픽킹 적용' 상태
+var scanPick     = {};     // 스캔 대조 대상 세트 (세트번호 → true, 0 = 지금 올린 세트)
 var lastInvoices = null;   // 현재 PDF 의 송장 목록 (합본 PDF 용)
 var lastPageCount= 0;      // 현재 PDF 총 페이지 수
 var sessionBinRev= 0;      // PDF/엑셀이 마지막으로 저장된 시각 (변경 감지용)
@@ -1446,13 +1470,18 @@ function mergeAggs(list){
   return { keys:keys, locTot:locTot, copick:copick };
 }
 
-/* 등록된 세트 + 지금 올라와 있는 세트를 모두 합친 집계 (세트가 없으면 지금 것 그대로) */
-function getDisplayAgg(){
-  var cur = currentSetAgg();
+/* 등록된 세트 + 지금 올라와 있는 세트를 모두 합친 집계 (세트가 없으면 지금 것 그대로)
+   스캔으로 '남은 작업'을 반영한 세트는 그 결과(applied)를 대신 쓴다. */
+function baseDisplayAgg(){
+  var cur = curApplied || currentSetAgg();
   if (!batches.length) return cur;
-  var list = batches.map(function(b){ return b.agg; });
+  var list = batches.map(function(b){ return b.applied || b.agg; });
   if (cur) list.push(cur);
   return mergeAggs(list);
+}
+function getDisplayAgg(){
+  /* ⚠ buildScanAgg 는 동시픽 판정에 baseDisplayAgg 를 쓴다 — 여기서 buildScanAgg 를 부르면 서로를 계속 부르게 되니 주의 */
+  return scanOnlyMode ? buildScanAgg(false) : baseDisplayAgg();   /* 스캔분만 = 고른 세트와 무관하게 스캔한 전부 */
 }
 
 /* ═══ 100% 조인 : 할당리스트(File1) ⋈ 주문내역(File3) — 송장 OCR과 완전 분리 ═══
@@ -1800,20 +1829,35 @@ function scanFeedback(cls, msg){
   el.innerHTML = msg || '';
 }
 /* 스캔 송장 조회 — 주문내역(File3)이 있으면 그 items(정확)를, 없으면 송장 ▶추출을 사용 */
-function getScanRec(digits){
-  if (orderByReg && orderByReg[digits]) return orderByReg[digits];
-  return (pickAgg && pickAgg.regMap) ? pickAgg.regMap[digits] : null;
+/* 스캔한 등기번호가 어느 세트의 송장인지 찾는다 (지금 세트 → 등록된 세트 순).
+   set 0 = 지금 올린 세트, 1·2·3 = 등록된 세트 번호 */
+function findScan(digits){
+  if (orderByReg && orderByReg[digits]) return { set:0, rec: orderByReg[digits], xlByBar: xlByBar, xlInfo: xlInfo };
+  if (pickAgg && pickAgg.regMap && pickAgg.regMap[digits]) return { set:0, rec: pickAgg.regMap[digits], xlByBar: xlByBar, xlInfo: xlInfo };
+  for (var i=0;i<batches.length;i++){
+    var b = batches[i];
+    var r = (b.orderByReg && b.orderByReg[digits]) || (b.regMap && b.regMap[digits]);
+    if (r) return { set: b.no, rec: r, xlByBar: b.xlByBar||{}, xlInfo: b.xlInfo||{} };
+  }
+  return null;
 }
+function getScanRec(digits){ var f = findScan(digits); return f ? f.rec : null; }
+function scanSetNoOf(digits){ var f = findScan(digits); return f ? f.set : null; }
 function onScan(raw){
-  if (!pickAgg || !pickAgg.regMap){ scanFeedback('bad', 'PDF를 먼저 처리하세요'); return; }
+  if (!(pickAgg && pickAgg.regMap) && !batches.length){ scanFeedback('bad', '송장 PDF 를 먼저 올리세요'); return; }
   var digits = String(raw||'').replace(/[^0-9]/g,'');
   if (!digits){ return; }
-  var rec = getScanRec(digits);
-  if (!rec){ scanFeedback('bad', '✗ 송장 없음: ' + escapeHtml(raw)); return; }
-  if (scanSet[digits]){ scanFeedback('warn', '⚠ 이미 스캔됨: ' + escapeHtml(rec.raw)); renderScanState(); return; }
+  var f = findScan(digits);
+  if (!f){ scanFeedback('bad', '✗ 올린 송장 중에 없음: ' + escapeHtml(raw)); return; }
+  if (scanSet[digits]){ scanFeedback('warn', '⚠ 이미 스캔됨: ' + escapeHtml(f.rec.raw)); renderScanState(); return; }
   scanSet[digits] = true; scanOrder.push(digits);
-  scanFeedback('ok', '✓ 인식: ' + escapeHtml(rec.raw) + ' · ' + (rec.tag==='h' ? ('합포 '+rec.qty+'개') : '단포'));
+  scanFeedback('ok', '✓ ' + setLabel(f.set) + ' · ' + escapeHtml(f.rec.raw) + ' · ' + (f.rec.tag==='h' ? ('합포 '+f.rec.qty+'개') : '단포'));
   renderScanState(); syncSavePayload();
+}
+function setLabel(no){
+  if (!no) return batches.length ? ('세트' + (batches.length+1)) : '이번 건';
+  var b = batches[no-1];
+  return '세트' + no + (b ? (' ' + b.pdfName.replace(/\.pdf$/i,'')) : '');
 }
 function removeScan(digits){
   if (scanSet[digits]){ delete scanSet[digits]; scanOrder = scanOrder.filter(function(d){ return d!==digits; }); renderScanState(); syncSavePayload(); }
@@ -1845,8 +1889,9 @@ function clearScan(){ scanSet={}; scanOrder=[]; scanFeedback('',''); renderScanS
 function focusScan(){ var el=document.getElementById('scanInput'); if(el) el.focus(); }
 
 /* 스캔분 로케이션·상품명 보정 (엑셀 기준) */
-function cleanItem(loc, bar){
-  var cands = xlByBar[bar];
+function cleanItem(loc, bar, byBar, info){
+  byBar = byBar || xlByBar; info = info || xlInfo;
+  var cands = byBar[bar];
   if (cands && cands.length){
     var c=null, i;
     for (i=0;i<cands.length;i++){ if (cands[i].loc===loc){ c=cands[i]; break; } }
@@ -1855,16 +1900,19 @@ function cleanItem(loc, bar){
     if (!c) c=cands[0];
     return { loc: c.loc, sang: c.sang, opt: c.opt };
   }
-  var inf = xlInfo[bar];
+  var inf = info[bar];
   return { loc: loc, sang: inf?inf.sang:'', opt: inf?inf.opt:'' };
 }
 /* 스캔한 송장들의 아이템 집계 (loc|bar → d/h) */
-function buildScanAgg(){
+function buildScanAgg(onlySelected, onlySetNo){
   var keys={}, locTot={};
   scanOrder.forEach(function(d){
-    var rec = getScanRec(d); if (!rec) return;
+    var f = findScan(d); if (!f) return;
+    if (onlySetNo != null && f.set !== onlySetNo) return;
+    if (onlySelected && anyPicked() && !scanPick[f.set]) return;
+    var rec = f.rec;
     rec.items.forEach(function(it){
-      var c = cleanItem(it.loc, it.bar);
+      var c = cleanItem(it.loc, it.bar, f.xlByBar, f.xlInfo);
       var k = c.loc + '|' + it.bar;
       var nm = (c.sang||c.opt) ? ((c.sang||'')+(c.opt?' / '+c.opt:'')) : (it.prod||'');
       var e = keys[k] || (keys[k] = { loc:c.loc, bar:it.bar, d:0, h:0, name:nm, sang:c.sang||'', opt:c.opt||'' });
@@ -1874,7 +1922,7 @@ function buildScanAgg(){
     });
   });
   // 동시픽 판정은 "전체 출고분"(그날 나갈 단포·합포) 기준 — 스캔 안 한 단포도 알려주기 위함
-  var full = getDisplayAgg();
+  var full = baseDisplayAgg();
   var refLocTot = (full && full.locTot) ? full.locTot : locTot;
   var copick = Object.keys(locTot).filter(function(l){ var r=refLocTot[l]||{d:0,h:0}; return r.d>0 && r.h>0; });
   return { keys:keys, locTot:locTot, copick:copick, refLocTot:refLocTot };
@@ -1883,6 +1931,76 @@ function openScanPickList(){
   if (!scanOrder.length){ scanFeedback('bad', '스캔된 송장이 없습니다'); return; }
   var agg = buildScanAgg();
   openPickList('all', agg, '스캔분 픽킹리스트 · ' + scanOrder.length + '송장');
+}
+
+/* 선택된 세트 목록 (체크박스). 아무것도 안 고르면 전부로 본다 */
+function anyPicked(){ for (var k in scanPick){ if (scanPick[k]) return true; } return false; }
+function pickedSets(){
+  var all = batches.map(function(b){ return b.no; });
+  if (currentSetDone()) all.push(0);
+  var sel = all.filter(function(n){ return scanPick[n]; });
+  return sel.length ? sel : all;
+}
+window.toggleScanPick = function(no, on){ scanPick[no] = !!on; renderScanPanel(); };
+
+/* ① 스캔한 것만 남기기 — 스캔 안 한 송장은 이미 나간 것으로 보고 픽킹에서 뺀다 */
+function applyScanRemaining(){
+  if (!scanOrder.length){ scanFeedback('bad', '먼저 남은 송장을 스캔하세요'); return; }
+  var sel = pickedSets();
+  var names = sel.map(setLabel).join(', ');
+  var cnt = scanOrder.filter(function(d){ var f=findScan(d); return f && sel.indexOf(f.set)>=0; }).length;
+  if (!cnt){ scanFeedback('bad', '고른 세트에 해당하는 스캔이 없습니다'); return; }
+  if (!confirm('[' + names + '] 에서 스캔한 ' + cnt + '건만 남기고,\n스캔하지 않은 송장은 이미 출고된 것으로 보고 픽킹에서 뺍니다.\n\n계속할까요?')) return;
+  sel.forEach(function(no){
+    var agg = buildScanAgg(false, no);
+    if (no === 0) curApplied = agg; else if (batches[no-1]) batches[no-1].applied = agg;
+  });
+  scanOnlyMode = false;
+  renderScanPanel(); renderBatches(); renderCopickSummary();
+  setStatus('success', '✅ 남은 작업만 반영 — [' + names + '] 스캔 ' + cnt + '건 기준으로 픽킹리스트를 다시 만들었습니다. (스캔 안 한 송장은 출고 완료로 간주)');
+  statusEl.style.display = 'block';
+}
+window.applyScanRemaining = applyScanRemaining;
+
+/* ② 스캔한 것만 픽킹 — 다른 세트까지 전부 무시하고 스캔분만 리스트로 */
+function applyScanOnly(){
+  if (!scanOrder.length){ scanFeedback('bad', '먼저 송장을 스캔하세요'); return; }
+  scanOnlyMode = true;
+  renderScanPanel(); renderBatches(); renderCopickSummary();
+  setStatus('success', '✅ 스캔분만 픽킹 적용 — 스캔한 ' + scanOrder.length + '건만 픽킹리스트에 나옵니다. [원래대로]를 누르면 전체로 돌아갑니다.');
+  statusEl.style.display = 'block';
+}
+window.applyScanOnly = applyScanOnly;
+
+/* 반영 취소 — 처음 올린 전체 상태로 */
+function clearScanApply(){
+  scanOnlyMode = false; curApplied = null;
+  batches.forEach(function(b){ b.applied = null; });
+  renderScanPanel(); renderBatches(); renderCopickSummary();
+  setStatus('info', '↩ 원래대로 — 올린 파일 전체 기준으로 돌아갔습니다.');
+  statusEl.style.display = 'block';
+}
+window.clearScanApply = clearScanApply;
+
+/* 스캔 칸 그리기 — 세트 고르기 + 스캔 수 + 버튼 상태 */
+function renderScanPanel(){
+  var box = document.getElementById('scanSets');
+  if (!box) return;
+  var list = batches.map(function(b){ return { no:b.no, nm:b.pdfName, applied: !!b.applied }; });
+  if (currentSetDone()) list.push({ no:0, nm:lastName, applied: !!curApplied });
+  box.innerHTML = list.length <= 1
+    ? '<div class="sc-hint">' + (list.length ? '세트 1개 — 스캔한 송장이 이 세트에 반영됩니다.' : '송장 PDF 를 올리면 세트가 생깁니다.') + '</div>'
+    : list.map(function(x){
+        return '<label class="sc-set' + (x.applied?' done':'') + '"><input type="checkbox"' + (scanPick[x.no]?' checked':'')
+          + ' onchange="toggleScanPick(' + x.no + ', this.checked)"> ' + escapeHtml(x.nm.replace(/\.pdf$/i,''))
+          + (x.applied ? ' <span class="sc-done">반영됨</span>' : '') + '</label>';
+      }).join('');
+  var st = document.getElementById('scanApplyState');
+  if (st){
+    var applied = batches.some(function(b){ return b.applied; }) || !!curApplied || scanOnlyMode;
+    st.className = 'sc-state' + (applied ? ' on' : '');
+    st.textContent = scanOnlyMode ? '스캔분만 적용 중' : (applied ? '남은 작업만 반영 중' : '');
+  }
 }
 
 /* 스캔 입력창 — 바코드 스캐너는 값 입력 후 Enter 전송 */
@@ -2035,6 +2153,12 @@ function stashCurrentSet(){
     invoices: lastInvoices || [],
     pages: lastPageCount || 0,
     agg: currentSetAgg(),
+    /* 스캔 대조용 — 이 세트의 송장별 내역과 엑셀 보정표를 같이 보관한다 */
+    regMap: (pickAgg && pickAgg.regMap) || {},
+    orderByReg: orderByReg || null,
+    xlByBar: xlByBar || {},
+    xlInfo: xlInfo || {},
+    applied: null,          /* 스캔 반영 후의 집계 (남은 작업만) */
     uncertain: computeUncertain(),
     inv: (lastInvoices || []).length,
     multi: (lastInvoices || []).filter(function(v){ return (v.qty||0) >= 2; }).length,
@@ -2046,6 +2170,7 @@ function stashCurrentSet(){
 
 /* 다음 세트를 받기 위해 현재 세트만 비운다 (등록분·스캔은 유지) */
 function clearCurrentSet(){
+  curApplied = null;
   rawBuffer = null; lastSorted = null; lastName = 'Invoice.pdf'; lastPageTexts = null; lastXlsName = '';
   lastInvoices = null; lastPageCount = 0;
   pickAgg = null; xlInfo = {}; xlRows = null; currentPick = null;
@@ -2123,6 +2248,7 @@ function renderBatches(){
   if (rep) rep.innerHTML = un.length
     ? '<div class="verd-note">⚠ 육안 확인요망 ' + un.length + '건 — 픽킹리스트 맨 위에 송장번호와 함께 나옵니다. (수량은 엑셀 기준으로 이미 반영)</div>'
     : '';
+  renderScanPanel();
   var note = document.getElementById('plNote');
   if (note) note.innerHTML = un.length ? ('확인요망 ' + un.length + '건 포함 — 리스트 맨 위 확인') : '';
 }
@@ -2214,7 +2340,7 @@ function resetAll(){
   }
   batches = [];
   clearCurrentSet();
-  scanSet = {}; scanOrder = [];
+  scanSet = {}; scanOrder = []; scanPick = {}; scanOnlyMode = false;
   renderBatches();
   var si = document.getElementById('scanInput'); if (si) si.value = '';
   var sf = document.getElementById('scanFb'); if (sf){ sf.className='scan-fb'; sf.innerHTML=''; }
