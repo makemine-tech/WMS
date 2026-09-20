@@ -4,21 +4,72 @@
      출력  { ok, answer, ms }
    Claude 가 ask_tools.js 의 조회 도구로 창고를 직접 찾아보고 답한다 (읽기 전용 — 입출고는 하지 않는다).
    숫자(파렛트 수·빈칸 수)는 도구가 계산하므로 AI 가 세다 틀릴 일이 없다.
-   API 키는 Firebase 비밀값 ANTHROPIC_API_KEY (firebase functions:secrets:set ANTHROPIC_API_KEY).
+
+   인증 — ID 페더레이션(WIF): 저장해 둘 API 키가 없다.
+     이 함수의 서비스 계정으로 구글이 서명한 ID 토큰을 메타데이터 서버에서 받아
+     Anthropic 에 내밀면 몇 분짜리 접근 토큰을 준다 (SDK 가 만료 전에 알아서 다시 받는다).
+     필요한 값은 .env 의 ANTHROPIC_FEDERATION_RULE_ID / ANTHROPIC_ORGANIZATION_ID /
+     ANTHROPIC_SERVICE_ACCOUNT_ID / ANTHROPIC_WORKSPACE_ID (비밀이 아니라 식별자다).
+     ASK_SERVICE_ACCOUNT 에 이 함수를 돌릴 구글 서비스계정 이메일을 넣는다.
+   예비: 환경변수 ANTHROPIC_API_KEY 가 있으면 그 키를 쓴다 (페더레이션을 안 쓸 때만).
 =========================================================== */
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
-const { defineSecret } = require('firebase-functions/params');
+const { defineString } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const Anthropic = require('@anthropic-ai/sdk').default;
 const { betaTool } = require('@anthropic-ai/sdk/helpers/beta/json-schema');
+const { oidcFederationProvider } = require('@anthropic-ai/sdk/lib/credentials/oidc-federation');
 const T = require('./ask_tools');
 
 if (!admin.apps.length) admin.initializeApp();
 
 const FUNC_REGION = 'asia-southeast1';
-const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
 const ASK_MODEL = 'claude-opus-5';
+const WIF_RULE = defineString('ANTHROPIC_FEDERATION_RULE_ID', { default: '' });
+const WIF_ORG = defineString('ANTHROPIC_ORGANIZATION_ID', { default: '' });
+const WIF_SVAC = defineString('ANTHROPIC_SERVICE_ACCOUNT_ID', { default: '' });
+const WIF_WS = defineString('ANTHROPIC_WORKSPACE_ID', { default: '' });
+
+/* 구글이 서명한 이 함수의 ID 토큰 — format=full 이라야 email 클레임이 들어간다 */
+const META_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity'
+  + '?audience=https://api.anthropic.com&format=full';
+async function googleIdentityToken() {
+  const r = await fetch(META_URL, { headers: { 'Metadata-Flavor': 'Google' } });
+  if (!r.ok) throw new Error('구글 메타데이터 서버에서 ID 토큰을 받지 못했어요 (' + r.status + ')');
+  return (await r.text()).trim();
+}
+
+/* 받은 접근 토큰은 만료 1분 전까지 재사용 — 질문 하나에 API 요청이 여러 번이라 매번 교환하면 느리다 */
+let _fedProvider = null, _fedToken = null;
+function federationCredentials() {
+  if (!_fedProvider) {
+    _fedProvider = oidcFederationProvider({
+      identityTokenProvider: googleIdentityToken,
+      federationRuleId: WIF_RULE.value(),
+      organizationId: WIF_ORG.value(),
+      serviceAccountId: WIF_SVAC.value() || undefined,
+      workspaceId: WIF_WS.value() || undefined,
+      baseURL: 'https://api.anthropic.com',
+      fetch,
+    });
+  }
+  return async (opts) => {
+    const now = Date.now() / 1000;
+    if (!(opts && opts.forceRefresh) && _fedToken && (_fedToken.expiresAt == null || _fedToken.expiresAt - now > 60)) {
+      return _fedToken;
+    }
+    _fedToken = await _fedProvider(opts);
+    return _fedToken;
+  };
+}
+
+function anthropicClient() {
+  if (WIF_RULE.value() && WIF_ORG.value()) return new Anthropic({ credentials: federationCredentials() });
+  if (process.env.ANTHROPIC_API_KEY) return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  throw new HttpsError('failed-precondition',
+    'AI 인증이 설정되지 않았어요 — 관리자: .env 에 ANTHROPIC_FEDERATION_RULE_ID·ANTHROPIC_ORGANIZATION_ID 를 넣고 다시 배포해 주세요');
+}
 
 /* 그 창고를 볼 권한이 있는지 — database.rules.json 의 warehouses 규칙과 같은 기준 */
 async function canReadWarehouse(uid, wid) {
@@ -143,7 +194,8 @@ exports.askWarehouse = onCall(
     memory: '512MiB',
     timeoutSeconds: 120,
     cors: true,
-    secrets: [ANTHROPIC_API_KEY],
+    /* ID 페더레이션은 "이 함수가 누구인지"로 인증하므로, 전용 서비스계정으로 돌린다 */
+    serviceAccount: process.env.ASK_SERVICE_ACCOUNT || undefined,
   },
   async (request) => {
     const t0 = Date.now();
@@ -167,7 +219,7 @@ exports.askWarehouse = onCall(
     });
     messages.push({ role: 'user', content: '오늘: ' + seoulToday() + '\n창고: ' + (wh.name || wid) + '\n\n질문: ' + question });
 
-    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    const client = anthropicClient();
     let final;
     try {
       final = await client.beta.messages.toolRunner({
@@ -183,9 +235,18 @@ exports.askWarehouse = onCall(
         messages,
       });
     } catch (err) {
+      if (err instanceof HttpsError) throw err;
       if (err instanceof Anthropic.AuthenticationError) {
-        logger.error('Claude 인증 실패', { message: err.message });
-        throw new HttpsError('failed-precondition', 'AI 키가 올바르지 않아요 — 관리자에게 알려 주세요');
+        /* 어느 서비스계정으로 돌고 있는지 함께 남긴다 — 페더레이션 규칙의 email/sub 와 맞춰 보기 위함 */
+        let runAs = '?';
+        try {
+          const r = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
+            { headers: { 'Metadata-Flavor': 'Google' } });
+          if (r.ok) runAs = (await r.text()).trim();
+        } catch (e) { /* 메타데이터가 없으면 그냥 '?' */ }
+        logger.error('Claude 인증 실패 — 페더레이션 규칙(sub·email·audience)이나 키를 확인',
+          { message: err.message, runAs, rule: WIF_RULE.value() ? '설정됨' : '없음' });
+        throw new HttpsError('failed-precondition', 'AI 인증에 실패했어요 — 관리자에게 알려 주세요');
       }
       if (err instanceof Anthropic.RateLimitError) {
         throw new HttpsError('resource-exhausted', '질문이 몰려 잠시 쉬어야 해요 — 조금 뒤 다시 물어봐 주세요');
