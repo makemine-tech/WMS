@@ -1877,7 +1877,7 @@ function onScan(raw){
   if (!f){ scanFeedback('bad', '✗ 올린 송장 중에 없음: ' + escapeHtml(raw)); return; }
   if (scanSet[digits]){ scanFeedback('warn', '⚠ 이미 스캔됨: ' + escapeHtml(f.rec.raw)); renderScanState(); return; }
   scanSet[digits] = true; scanOrder.push(digits);
-  saveLocal();
+  saveScanState();
   scanFeedback('ok', '✓ ' + setLabel(f.set) + ' · ' + escapeHtml(f.rec.raw) + ' · ' + (f.rec.tag==='h' ? ('합포 '+f.rec.qty+'개') : '단포'));
   renderScanState(); syncSavePayload();
 }
@@ -1886,8 +1886,18 @@ function setLabel(no){
   var b = batches[no-1];
   return '세트' + no + (b ? (' ' + b.pdfName.replace(/\.pdf$/i,'')) : '');
 }
+var _scanSaveT = null;
+function saveScanState(){
+  saveLocal();                       /* 이 PC — 즉시 */
+  if (_scanSaveT) clearTimeout(_scanSaveT);
+  _scanSaveT = setTimeout(function(){ _scanSaveT = null; pushSetState(); }, 700);   /* 공유본 — 몰아서 */
+}
 function removeScan(digits){
-  if (scanSet[digits]){ delete scanSet[digits]; scanOrder = scanOrder.filter(function(d){ return d!==digits; }); renderScanState(); syncSavePayload(); }
+  if (scanSet[digits]){
+    delete scanSet[digits];
+    scanOrder = scanOrder.filter(function(d){ return d!==digits; });
+    renderScanState(); syncSavePayload(); saveScanState();   /* 지운 것이 새로고침 때 되살아나지 않게 */
+  }
 }
 function renderScanState(){
   var n = scanOrder.length;
@@ -1912,7 +1922,7 @@ function renderScanState(){
   }
   list.innerHTML = html;
 }
-function clearScan(){ scanSet={}; scanOrder=[]; scanFeedback('',''); renderScanState(); syncSavePayload(); saveLocal(); focusScan(); }
+function clearScan(){ scanSet={}; scanOrder=[]; scanFeedback('',''); renderScanState(); syncSavePayload(); saveScanState(); focusScan(); }
 function focusScan(){ var el=document.getElementById('scanInput'); if(el) el.focus(); }
 
 /* 스캔분 로케이션·상품명 보정 (엑셀 기준) */
