@@ -61,11 +61,13 @@
 
   /* 로그인은 되어 있는데 등급이 모자란 경우 — 로그인으로 보내면 로그인이 다시 이 페이지로 돌려보내
      무한 반복이 된다. 그래서 보내지 않고 이유를 화면에 띄운다. */
-  function showDenied(level, required){
-    window.WMSAccess.reason = '등급 부족 (필요 ' + required + ' · 내 등급 ' + level + ')';
+  function showDenied(level, required, err){
+    window.WMSAccess.reason = (level < 0 ? ('확인 실패: ' + (err || '')) : ('등급 부족 (필요 ' + required + ' · 내 등급 ' + level + ')'));
+    if (document.getElementById('wmsDeniedBox')) return;   /* 두 번 띄우지 않기 */
     var lv = ['비회원','로그인 회원','작업 그룹원','슈퍼관리자'];
     var failed = (level < 0);   /* -1 = 권한 확인 자체가 실패 */
     var box = document.createElement('div');
+    box.id = 'wmsDeniedBox';
     box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0b0d12;color:#e6e9f0;'
       + 'display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;'
       + 'font-family:system-ui,-apple-system,sans-serif;';
@@ -77,7 +79,8 @@
       +   '페이지 <b style="color:#e6e9f0">' + PAGE_KEY + '</b><br>'
       +   '필요 등급 <b style="color:#e6e9f0">' + (lv[required] || required) + '</b><br>'
       +   '내 등급 <b style="color:#fbbf24">' + (failed ? '확인 실패' : (lv[level] || level)) + '</b><br><br>'
-      +   '관리자에게 작업 그룹 등록 또는 등급 조정을 요청해 주세요.'
+      +   (failed ? ('오류: <b style="color:#fca5a5">' + String(err || '알 수 없음').replace(/[<>]/g,'') + '</b><br>네트워크·로그인 상태를 확인한 뒤 새로고침해 주세요.')
+                : '관리자에게 작업 그룹 등록 또는 등급 조정을 요청해 주세요.')
       + '</div>'
       + '<div style="margin-top:20px;display:flex;gap:8px;justify-content:center">'
       +   '<a href="/index.html" style="background:#1c2331;border:1px solid #2a3040;color:#e6e9f0;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;text-decoration:none">홈으로</a>'
@@ -115,6 +118,7 @@
       if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     } catch (e) { /* 이미 초기화됨 */ }
 
+    var auth0 = firebase.auth();   /* 먼저 인증을 준비시킨다 */
     var db = firebase.database();
 
     db.ref('pageAccess/' + PAGE_KEY).get().then(function(snap){
@@ -124,7 +128,7 @@
 
       if (required <= 0) { window.WMSAccess.level = 0; window.WMSAccess.ready = true; return; }
 
-      var auth = firebase.auth();
+      var auth = auth0 || firebase.auth();
       var decided = false;
       auth.onAuthStateChanged(function(user){
         if (decided) return;
@@ -139,14 +143,24 @@
           return;
         }
 
-        db.ref('superadmins/' + user.uid).get().then(function(adminSnap){
+        /* 한 번 실패하면 잠깐 뒤 다시 — 페이지가 막 열렸을 때의 일시적 오류를 넘긴다 */
+        function getOnce(path){
+          return db.ref(path).get().catch(function(e1){
+            return new Promise(function(res, rej){
+              setTimeout(function(){ db.ref(path).get().then(res).catch(function(e2){ rej(e2 || e1); }); }, 900);
+            });
+          });
+        }
+        getOnce('superadmins/' + user.uid).then(function(adminSnap){
           if (adminSnap.exists()) { decided = true; finish(3, required); return; }
           if (required <= 1) { decided = true; finish(1, required); return; }
-          db.ref('userGroup/' + user.uid).get().then(function(gSnap){
+          getOnce('userGroup/' + user.uid).then(function(gSnap){
             var lvl = gSnap.exists() ? 2 : 1;
             decided = true; finish(lvl, required);
-          }).catch(function(e){ decided = true; console.warn('[WMSAccess] userGroup 조회 실패', e); showDenied(-1, required); });
-        }).catch(function(e){ decided = true; console.warn('[WMSAccess] superadmins 조회 실패', e); showDenied(-1, required); });
+          }).catch(function(e){ decided = true; console.warn('[WMSAccess] userGroup 조회 실패', e);
+            showDenied(-1, required, (e && (e.code || e.message)) || e); });
+        }).catch(function(e){ decided = true; console.warn('[WMSAccess] superadmins 조회 실패', e);
+          showDenied(-1, required, (e && (e.code || e.message)) || e); });
       });
 
       function finish(level, req){
