@@ -60,7 +60,17 @@
   .stat-v.sm.bad { color: var(--red); }
   .stat-v.sm.warn { color: #fbbf24; }
 
-  .dl { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: .8rem; margin-top: .9rem; }
+  .dl { display: grid; grid-template-columns: 1fr auto 1fr; gap: .8rem; margin-top: .9rem; align-items: start; }
+  .dl.sc-open { grid-template-columns: 1fr 1.1fr 1fr; }
+  .sc-body { display: none; }
+  .dl.sc-open .sc-body { display: block; }
+  .sc-toggle { width: 100%; text-align: left; white-space: nowrap; background: none; border: none; color: #93a3bb;
+               font-family: inherit; font-size: .8rem; font-weight: 800; cursor: pointer; padding: 0 0 .2rem; }
+  .sc-toggle:hover { color: #e6e9f0; }
+  .dl.sc-open .sc-toggle { color: #e6e9f0; margin-bottom: .4rem; }
+  .dl.sc-open .sc-arrow { transform: rotate(90deg); display: inline-block; }
+  .sc-why { font-size: .64rem; color: #8b94a8; line-height: 1.5; margin-bottom: .45rem; }
+  .sc-col:not(.on) { opacity: .85; }
   @media(max-width: 1000px){ .dl { grid-template-columns: 1fr; } }
   .sc-col { border-color: rgba(59,130,246,.45); }
   .sc-state { font-size: .68rem; font-weight: 800; color: #8b94a8; }
@@ -530,8 +540,13 @@
         <div class="dl-title">⬇ 정렬된 송장 PDF</div>
         <div id="pdfDlBox" class="dl-box"></div>
       </div>
-      <div class="dl-col sc-col">
-        <div class="dl-title">📡 남은 송장 스캔 <span class="sc-state" id="scanApplyState"></span></div>
+      <div class="dl-col sc-col" id="scCol">
+        <button class="sc-toggle" id="scToggle" onclick="toggleScanCol()">
+          <span class="sc-arrow">▸</span> 📡 남은 송장 스캔
+          <span class="sc-state" id="scanApplyState"></span>
+        </button>
+        <div class="sc-body" id="scBody">
+        <div class="sc-why">일부만 출고하고 남은 송장이 있을 때만 씁니다. 남은 송장을 스캔해 <b>이미 나간 건</b>을 픽킹에서 빼세요.</div>
         <div class="sc-sets" id="scanSets"></div>
         <input type="text" id="scanInput" class="scan-input" placeholder="여기를 클릭하고 남은 송장을 연속 스캔" autocomplete="off" spellcheck="false">
         <div class="scan-fb" id="scanFb"></div>
@@ -543,6 +558,7 @@
         <div class="sc-desc">스캔한 것만 남기고, <b>스캔 안 한 송장은 이미 나간 것</b>으로 보고 픽킹에서 뺍니다.</div>
         <button class="btn sc-only" onclick="applyScanOnly()">스캔 송장만 픽킹적용</button>
         <div class="sc-desc">다른 세트까지 무시하고 <b>스캔한 송장만</b> 픽킹리스트로 만듭니다.</div>
+        </div>
       </div>
 
       <div class="dl-col">
@@ -1943,6 +1959,17 @@ function pickedSets(){
 }
 window.toggleScanPick = function(no, on){ scanPick[no] = !!on; renderScanPanel(); };
 
+/* 스캔 칸 펼치기/접기 — 가끔 쓰는 기능이라 평소엔 접어 둔다 */
+function toggleScanCol(open){
+  var dl = document.querySelector('.dl'); if (!dl) return;
+  var now = dl.classList.contains('sc-open');
+  var next = (open == null) ? !now : !!open;
+  dl.classList.toggle('sc-open', next);
+  var col = document.getElementById('scCol'); if (col) col.classList.toggle('on', next);
+  if (next) setTimeout(focusScan, 60);
+}
+window.toggleScanCol = toggleScanCol;
+
 /* ① 스캔한 것만 남기기 — 스캔 안 한 송장은 이미 나간 것으로 보고 픽킹에서 뺀다 */
 function applyScanRemaining(){
   if (!scanOrder.length){ scanFeedback('bad', '먼저 남은 송장을 스캔하세요'); return; }
@@ -1999,7 +2026,8 @@ function renderScanPanel(){
   if (st){
     var applied = batches.some(function(b){ return b.applied; }) || !!curApplied || scanOnlyMode;
     st.className = 'sc-state' + (applied ? ' on' : '');
-    st.textContent = scanOnlyMode ? '스캔분만 적용 중' : (applied ? '남은 작업만 반영 중' : '');
+    st.textContent = scanOnlyMode ? '· 스캔분만 적용 중' : (applied ? '· 남은 작업만 반영 중' : (scanOrder.length ? ('· 스캔 ' + scanOrder.length + '건') : ''));
+    if (applied) toggleScanCol(true);
   }
 }
 
