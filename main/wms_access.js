@@ -59,6 +59,35 @@
     location.replace(ret);
   }
 
+  /* 로그인은 되어 있는데 등급이 모자란 경우 — 로그인으로 보내면 로그인이 다시 이 페이지로 돌려보내
+     무한 반복이 된다. 그래서 보내지 않고 이유를 화면에 띄운다. */
+  function showDenied(level, required){
+    window.WMSAccess.reason = '등급 부족 (필요 ' + required + ' · 내 등급 ' + level + ')';
+    var lv = ['비회원','로그인 회원','작업 그룹원','슈퍼관리자'];
+    var failed = (level < 0);   /* -1 = 권한 확인 자체가 실패 */
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0b0d12;color:#e6e9f0;'
+      + 'display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;'
+      + 'font-family:system-ui,-apple-system,sans-serif;';
+    box.innerHTML =
+      '<div style="max-width:440px">'
+      + '<div style="font-size:44px;margin-bottom:14px">🔒</div>'
+      + '<div style="font-size:19px;font-weight:800;margin-bottom:10px">' + (failed ? '권한을 확인하지 못했습니다' : '이 페이지를 볼 권한이 없습니다') + '</div>'
+      + '<div style="font-size:13px;color:#8b94a8;line-height:1.85">'
+      +   '페이지 <b style="color:#e6e9f0">' + PAGE_KEY + '</b><br>'
+      +   '필요 등급 <b style="color:#e6e9f0">' + (lv[required] || required) + '</b><br>'
+      +   '내 등급 <b style="color:#fbbf24">' + (failed ? '확인 실패' : (lv[level] || level)) + '</b><br><br>'
+      +   '관리자에게 작업 그룹 등록 또는 등급 조정을 요청해 주세요.'
+      + '</div>'
+      + '<div style="margin-top:20px;display:flex;gap:8px;justify-content:center">'
+      +   '<a href="/index.html" style="background:#1c2331;border:1px solid #2a3040;color:#e6e9f0;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;text-decoration:none">홈으로</a>'
+      +   '<a href="' + LOGIN_PATH + '" style="background:#2563eb;color:#fff;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;text-decoration:none">다른 계정으로 로그인</a>'
+      + '</div></div>';
+    var put = function(){ document.body.appendChild(box); };
+    if (document.body) put(); else document.addEventListener('DOMContentLoaded', put);
+  }
+
+
   /* firebase SDK 보장 — 없으면 compat 스크립트 순차 주입 */
   function ensureFirebase(cb){
     if (window.firebase && firebase.database && firebase.auth) { cb(); return; }
@@ -116,14 +145,15 @@
           db.ref('userGroup/' + user.uid).get().then(function(gSnap){
             var lvl = gSnap.exists() ? 2 : 1;
             decided = true; finish(lvl, required);
-          }).catch(function(e){ decided = true; console.warn('[WMSAccess] userGroup 조회 실패', e); redirectToLogin(); });
-        }).catch(function(e){ decided = true; console.warn('[WMSAccess] superadmins 조회 실패', e); redirectToLogin(); });
+          }).catch(function(e){ decided = true; console.warn('[WMSAccess] userGroup 조회 실패', e); showDenied(-1, required); });
+        }).catch(function(e){ decided = true; console.warn('[WMSAccess] superadmins 조회 실패', e); showDenied(-1, required); });
       });
 
       function finish(level, req){
         window.WMSAccess.level = level;
         window.WMSAccess.ready = true;
-        if (level < req) redirectToLogin();
+        /* 로그인 상태에서 등급이 모자라면 튕기지 않고 이유를 보여 준다 (무한 반복 방지) */
+        if (level < req) showDenied(level, req);
       }
     }).catch(function(e){
       /* pageAccess 읽기 실패 — 보안상 floor 만이라도 적용 */
