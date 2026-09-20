@@ -166,6 +166,19 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
 @media(max-width:640px){ .hist-body{padding:12px;} .hist-item{flex-direction:column;align-items:stretch;} .hist-acts{justify-content:flex-end;} }
 
 /* ── 세부내역(관리자 전용): 상품 × 유통기한 × 보관장소 ── */
+.tbtn.exp{background:rgba(245,158,11,.16);border-color:rgba(245,158,11,.5);color:#FCD34D;}
+.tbtn.exp:hover{background:rgba(245,158,11,.28);color:#FDE68A;}
+/* 유통기한 기록표 — 상품별 한 줄, 클립보드 복사용 */
+.el-modes{display:flex;gap:7px;margin-bottom:12px;}
+.el-mode{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--bd);color:var(--sub);border-radius:9px;padding:9px 8px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;}
+.el-mode.on{background:rgba(245,158,11,.18);border-color:rgba(245,158,11,.55);color:#FCD34D;}
+.el-ta{width:100%;height:300px;background:#0B1220;border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:13.5px;line-height:1.75;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;outline:none;}
+.el-ta:focus{border-color:#F59E0B;}
+.el-foot{display:flex;align-items:center;gap:10px;margin-top:11px;}
+.el-note{flex:1;font-size:11.5px;color:var(--sub);line-height:1.6;}
+.el-copy{background:#F59E0B;color:#1a1200;border:none;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;flex-shrink:0;}
+.el-copy:hover{background:#FBBF24;}
+.el-copy.done{background:#34D399;color:#04241a;}
 .tbtn.dt{background:rgba(59,130,246,.18);border-color:rgba(59,130,246,.55);color:#93C5FD;}
 .tbtn.dt:hover{background:rgba(59,130,246,.3);color:#DBEAFE;}
 .dt-hint{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);border-radius:9px;padding:8px 12px;font-size:12px;color:#93C5FD;line-height:1.55;margin-bottom:11px;}
@@ -458,7 +471,8 @@ function renderReport(info, data){
     ? '<div class="rpt-title">👁 관리자 미리보기 · 재고 현황</div>'
     : '<div class="rpt-title">재고 현황 보고서</div>';
   var rightBtns=isDetail
-    ? '<button class="tbtn dt" onclick="showSummary()">‹ 요약으로</button>'
+    ? '<button class="tbtn exp" onclick="openExpList()">📅 유통기한기록표</button>'
+      +'<button class="tbtn dt" onclick="showSummary()">‹ 요약으로</button>'
       +'<button class="tbtn" onclick="exportExcel()">📊 엑셀</button>'
       +'<button class="tbtn" onclick="window.print()">🖨 인쇄</button>'
       +'<button class="tbtn" onclick="location.href=\'/wms_vendors.html?gid='+encodeURIComponent(info.gid||'')+'\'">‹ 업체관리</button>'
@@ -940,6 +954,81 @@ function ensureHistOverlay(){
 }
 function closeHist(){ var o=document.getElementById('histOverlay'); if(o) o.style.display='none'; }
 window.closeHist=closeHist;
+
+/* ── 유통기한 기록표 (세부내역 전용) ───────────────────────
+   상품마다 유통기한 한 개만 뽑아 "상품명 - 20270416" 한 줄씩. 이름순.
+   짧음 = 그 상품의 가장 이른 유통기한, 김 = 가장 늦은 유통기한.
+   메신저로 붙여넣어 전달하는 용도라 텍스트 복사만 제공한다. */
+var _expMode='short';   /* short | long */
+function expListLines(){
+  var out=[], none=[];
+  (_detail||[]).forEach(function(d){
+    var exps=(d.groups||[]).map(function(g){ return String(g.exp||''); }).filter(function(e){ return e.length===6; });
+    if(!exps.length){ none.push(String(d.p.name||'')); return; }
+    exps.sort();
+    var e=_expMode==='long' ? exps[exps.length-1] : exps[0];
+    out.push({name:String(d.p.name||''), exp:'20'+e});
+  });
+  out.sort(function(a,b){ return a.name.localeCompare(b.name,'ko'); });
+  none.sort(function(a,b){ return a.localeCompare(b,'ko'); });
+  return { lines: out.map(function(x){ return x.name+' - '+x.exp; }), none: none };
+}
+function ensureExpOverlay(){
+  var o=document.getElementById('expOverlay');
+  if(!o){ o=document.createElement('div'); o.id='expOverlay'; o.className='hist-overlay';
+    o.onclick=function(e){ if(e.target===o) closeExpList(); }; document.body.appendChild(o); }
+  o.style.display='flex';
+  return o;
+}
+function closeExpList(){ var o=document.getElementById('expOverlay'); if(o) o.style.display='none'; }
+window.closeExpList=closeExpList;
+function openExpList(){
+  ensureExpOverlay();
+  renderExpList();
+}
+window.openExpList=openExpList;
+function setExpMode(m){ _expMode=(m==='long'?'long':'short'); renderExpList(); }
+window.setExpMode=setExpMode;
+function renderExpList(){
+  var o=ensureExpOverlay(), r=expListLines();
+  var noneNote=r.none.length
+    ? '유통기한 미기재 '+r.none.length+'개 품목은 빠졌어요 ('+esc(r.none.slice(0,3).join(', '))+(r.none.length>3?' 외':'')+').'
+    : '파렛트에 적힌 유통기한 기준입니다.';
+  o.innerHTML='<div class="hist-card"><div class="hist-hd"><span>📅 유통기한 기록표</span>'
+    +'<button class="hist-x" onclick="closeExpList()">✕</button></div>'
+    +'<div class="hist-body">'
+      +'<div class="el-modes">'
+        +'<button class="el-mode'+(_expMode==='short'?' on':'')+'" onclick="setExpMode(\'short\')">유통기한 짧은 것</button>'
+        +'<button class="el-mode'+(_expMode==='long'?' on':'')+'" onclick="setExpMode(\'long\')">유통기한 긴 것</button>'
+      +'</div>'
+      +'<textarea class="el-ta" id="expTa" readonly onclick="this.select()">'+esc(r.lines.join('\n'))+'</textarea>'
+      +'<div class="el-foot"><div class="el-note">'+nf(r.lines.length)+'개 품목 · 이름순 · '+(_expMode==='long'?'상품마다 가장 늦은':'상품마다 가장 이른')+' 유통기한<br>'+noneNote+'</div>'
+      +'<button class="el-copy" id="expCopyBtn" onclick="copyExpList()">📋 복사</button></div>'
+    +'</div></div>';
+}
+function copyExpList(){
+  var ta=document.getElementById('expTa'), btn=document.getElementById('expCopyBtn');
+  if(!ta) return;
+  var txt=ta.value;
+  var done=function(){ if(btn){ btn.textContent='✓ 복사됨'; btn.classList.add('done');
+    setTimeout(function(){ btn.textContent='📋 복사'; btn.classList.remove('done'); }, 1800); } };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done).catch(function(){ legacyCopy(ta, btn, done); });
+  } else legacyCopy(ta, btn, done);
+}
+window.copyExpList=copyExpList;
+/* 클립보드 권한이 막힌 브라우저용 — 그래도 안 되면 글이 선택된 상태로 두어 바로 손으로 복사하게 한다 */
+function legacyCopy(ta, btn, done){
+  var ok=false;
+  try{
+    ta.removeAttribute('readonly'); ta.focus(); ta.select(); ta.setSelectionRange(0, 999999);
+    ok=!!(document.execCommand && document.execCommand('copy'));
+    ta.setAttribute('readonly','readonly');
+  }catch(e){ ok=false; }
+  if(ok){ done(); return; }
+  try{ ta.focus(); ta.select(); }catch(e){}
+  if(btn){ btn.textContent='길게 눌러 복사'; setTimeout(function(){ btn.textContent='📋 복사'; }, 2600); }
+}
 
 /* 이력 목록 열기 (관리자·담당자 공통) */
 function openHistory(){
