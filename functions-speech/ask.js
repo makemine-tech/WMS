@@ -64,6 +64,23 @@ function federationCredentials() {
   };
 }
 
+/* 인증이 틀렸을 때 — 이 함수가 실제로 어떤 신분증을 내밀고 있는지 (규칙과 대조용).
+   토큰 자체는 남기지 않고 클레임만 남긴다. */
+async function identityDiag() {
+  const out = { runAs: '?', iss: '?', sub: '?', email: '?', aud: '?' };
+  try {
+    const r = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
+      { headers: { 'Metadata-Flavor': 'Google' } });
+    if (r.ok) out.runAs = (await r.text()).trim();
+  } catch (e) { /* 메타데이터 없음 */ }
+  try {
+    const jwt = await googleIdentityToken();
+    const p = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64').toString('utf8'));
+    out.iss = p.iss; out.sub = p.sub; out.email = p.email; out.aud = p.aud;
+  } catch (e) { out.tokenError = String((e && e.message) || e).slice(0, 200); }
+  return out;
+}
+
 function anthropicClient() {
   if (WIF_RULE.value() && WIF_ORG.value()) return new Anthropic({ credentials: federationCredentials() });
   if (process.env.ANTHROPIC_API_KEY) return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -194,8 +211,10 @@ exports.askWarehouse = onCall(
     memory: '512MiB',
     timeoutSeconds: 120,
     cors: true,
-    /* ID 페더레이션은 "이 함수가 누구인지"로 인증하므로, 전용 서비스계정으로 돌린다 */
-    serviceAccount: process.env.ASK_SERVICE_ACCOUNT || undefined,
+    /* ID 페더레이션은 "이 함수가 누구인지"로 인증한다 → 페더레이션 규칙에 등록한 그 계정으로 돌려야 한다.
+       ⚠ .env 로 넘기면 배포 시점에 반영되지 않아 기본 컴퓨트 계정으로 떠서 인증이 깨진다 (실제로 그랬다).
+       비밀값이 아니라 식별자라 코드에 둔다. */
+    serviceAccount: process.env.ASK_SERVICE_ACCOUNT || 'wms-ai@makechango-wms.iam.gserviceaccount.com',
   },
   async (request) => {
     const t0 = Date.now();
@@ -236,17 +255,16 @@ exports.askWarehouse = onCall(
       });
     } catch (err) {
       if (err instanceof HttpsError) throw err;
-      if (err instanceof Anthropic.AuthenticationError) {
-        /* 어느 서비스계정으로 돌고 있는지 함께 남긴다 — 페더레이션 규칙의 email/sub 와 맞춰 보기 위함 */
-        let runAs = '?';
-        try {
-          const r = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
-            { headers: { 'Metadata-Flavor': 'Google' } });
-          if (r.ok) runAs = (await r.text()).trim();
-        } catch (e) { /* 메타데이터가 없으면 그냥 '?' */ }
-        logger.error('Claude 인증 실패 — 페더레이션 규칙(sub·email·audience)이나 키를 확인',
-          { message: err.message, runAs, rule: WIF_RULE.value() ? '설정됨' : '없음' });
-        throw new HttpsError('failed-precondition', 'AI 인증에 실패했어요 — 관리자에게 알려 주세요');
+      const msg = String((err && err.message) || err);
+      /* 인증·토큰교환 실패는 실제 내민 클레임을 함께 남긴다 (규칙의 sub/email/audience 와 대조) */
+      if (err instanceof Anthropic.AuthenticationError || /401|Token exchange|authentication/i.test(msg)) {
+        const d = await identityDiag();
+        logger.error('Claude 인증 실패 — 페더레이션 규칙과 대조하세요', {
+          message: msg.slice(0, 400), 실제서비스계정: d.runAs, 토큰_iss: d.iss, 토큰_sub: d.sub,
+          토큰_email: d.email, 토큰_aud: d.aud, 토큰오류: d.tokenError || '',
+          규칙: WIF_RULE.value(), 조직: WIF_ORG.value(), svac: WIF_SVAC.value(), 워크스페이스: WIF_WS.value() || '(미지정)',
+        });
+        throw new HttpsError('failed-precondition', 'AI 인증에 실패했어요 — 관리자에게 알려 주세요 (서버 기록에 원인 있음)');
       }
       if (err instanceof Anthropic.RateLimitError) {
         throw new HttpsError('resource-exhausted', '질문이 몰려 잠시 쉬어야 해요 — 조금 뒤 다시 물어봐 주세요');
