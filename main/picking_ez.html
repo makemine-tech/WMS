@@ -118,6 +118,16 @@ h1 em{color:var(--g);font-style:normal}
 /* 재출력 버튼 */
 .btn-reprint{padding:.35rem .75rem;border-radius:6px;border:1.5px solid rgba(240,88,88,.6);background:transparent;color:rgba(240,88,88,.8);font-size:.72rem;font-weight:700;cursor:pointer;font-family:var(--mo);white-space:nowrap;transition:background .15s;}
 .btn-reprint:hover{background:rgba(240,88,88,.12);}
+/* 송장검색 */
+.inv-search{display:none;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.35rem}
+.inv-search.open{display:flex}
+.inv-search input{background:#0f0f0f;color:var(--tx);border:1px solid #2a2a2a;border-radius:6px;padding:.4rem .6rem;font-size:.85rem;font-family:var(--mo);min-width:0;flex:1;max-width:320px}
+.inv-search input:focus{outline:none;border-color:var(--b)}
+.inv-search-res{font-size:.75rem;width:100%;line-height:1.6}
+.inv-search-res .hit-btn{background:transparent;border:1px solid var(--b);color:var(--b);border-radius:4px;padding:1px 7px;margin:2px 3px 0 0;font-family:var(--mo);font-size:.72rem;cursor:pointer}
+.grp-card.search-hit{outline:3px solid var(--b);outline-offset:2px;opacity:1!important;animation:hitPulse 1s ease-in-out 3}
+@keyframes hitPulse{50%{box-shadow:0 0 0 6px rgba(91,156,246,.35)}}
+.inv-hit-tag{display:inline-block;background:var(--b);color:#0f1117;border-radius:4px;padding:1px 7px;font-size:.68rem;font-weight:700;font-family:var(--mo)}
 /* DEBUG RAW */
 .raw-toggle{font-size:.68rem;color:var(--mu);cursor:pointer;padding:.3rem 0;user-select:none}
 .raw-box{font-family:var(--mo);font-size:.7rem;color:var(--mu);word-break:break-all;line-height:1.6;max-height:120px;overflow-y:auto;background:var(--s2);padding:.5rem;border-radius:4px;margin-top:.3rem;display:none;border:1px solid var(--br)}
@@ -340,12 +350,19 @@ h1 em{color:var(--g);font-style:normal}
     <button class="fb on" id="gf-all"    onclick="setGFlt('all',this)">전체</button>
     <button class="fb"    id="gf-multi"  onclick="setGFlt('multi',this)">합포만</button>
     <button class="fb"    id="gf-single" onclick="setGFlt('single',this)">단포만</button>
+    <button class="fb"    id="gf-search" onclick="toggleInvSearch()">🔍 송장검색</button>
     <label style="font-size:.75rem;color:var(--mu);cursor:pointer;display:flex;align-items:center;gap:.3rem;margin-left:auto">
       <input type="checkbox" id="chkAll" onchange="toggleAllChk(this.checked)" style="cursor:pointer;accent-color:var(--g)">전체선택
     </label>
     <button class="btn btn-g" onclick="printChecked()" style="font-size:.8rem;padding:.45rem 1rem">🖨 체크 인쇄</button>
   </div>
-  <div class="frow" id="custRow" style="display:none;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.35rem">
+  <div class="inv-search" id="invSearchRow">
+    <input id="invSearchInp" type="text" inputmode="numeric" placeholder="송장(등기)번호 — 전체 또는 4자리 이상" onkeydown="if(event.key==='Enter')doInvSearch()">
+    <button class="btn btn-g" style="font-size:.78rem;padding:.4rem .9rem" onclick="doInvSearch()">찾기</button>
+    <button class="btn btn-s" style="font-size:.78rem;padding:.4rem .9rem" onclick="clearInvSearch()">지우기</button>
+    <div class="inv-search-res" id="invSearchRes"></div>
+  </div>
+  <div class="frow" id="custRow"style="display:none;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.35rem">
     <span style="font-size:.72rem;color:var(--mu);letter-spacing:.02em">주문처 우선출력</span>
     <select id="custFlt" onchange="setCustFlt(this.value)"
       style="background:#0f0f0f;color:var(--tx);border:1px solid #2a2a2a;border-radius:6px;padding:.35rem .55rem;font-size:.78rem;font-family:inherit;cursor:pointer;min-width:160px">
@@ -1168,6 +1185,7 @@ function updateDoneSection() {
     var isM = batch.isMulti, invCnt = batch.invCount || (batch.invNums||[]).length;
     var card = document.createElement('div');
     card.className = 'grp-card done-card';
+    card.dataset.invs = (batch.invNums||[]).join('|');
     var ih = (batch.items||[]).map(function(it){
       var p=[];
       if(it.loc&&it.loc!=='—') p.push('<span class="tg tg-l" style="font-size:.67rem">'+escH(it.loc)+'</span>');
@@ -1204,6 +1222,80 @@ function updateDoneSection() {
       '</div>';
     list.appendChild(card);
   });
+}
+
+/* ─────────────── 송장검색 ───────────────
+   미인쇄 → 그룹 카드, 인쇄완료 → 인쇄완료 목록 카드를 찾아 스크롤 + 강조 */
+function invDigits(s){ return String(s||'').replace(/\D/g,''); }
+function toggleInvSearch() {
+  var row = document.getElementById('invSearchRow');
+  var open = !row.classList.contains('open');
+  row.classList.toggle('open', open);
+  document.getElementById('gf-search').classList.toggle('on', open);
+  if (open) document.getElementById('invSearchInp').focus();
+  else clearInvSearch();
+}
+function clearInvSearch() {
+  document.getElementById('invSearchInp').value = '';
+  document.getElementById('invSearchRes').innerHTML = '';
+  document.querySelectorAll('.grp-card.search-hit').forEach(function(c){ c.classList.remove('search-hit'); });
+}
+function doInvSearch() {
+  var q = invDigits(document.getElementById('invSearchInp').value);
+  var res = document.getElementById('invSearchRes');
+  if (q.length < 4) { res.innerHTML = '<span style="color:var(--y)">4자리 이상 입력하세요</span>'; return; }
+  var exact = invoices.filter(function(i){ return invDigits(i.invNum) === q; });
+  var hits = exact.length ? exact : invoices.filter(function(i){ return invDigits(i.invNum).indexOf(q) !== -1; });
+  if (!hits.length) { res.innerHTML = '<span style="color:var(--r)">❌ 이 작업에 없는 송장입니다: '+escH(q)+'</span>'; return; }
+  if (hits.length === 1) { locateInvoice(hits[0].invNum); return; }
+  res.innerHTML = '<span style="color:var(--mu)">'+hits.length+'건 일치 — 선택하세요:</span><br>' +
+    hits.slice(0,30).map(function(i){
+      return '<button class="hit-btn" data-inv="'+escH(i.invNum)+'" onclick="locateInvoice(this.dataset.inv)">'+
+        escH(i.invNum)+(printedInvNums[i.invNum]?' ✓':'')+'</button>';
+    }).join('') + (hits.length>30 ? ' <span style="color:var(--mu)">… 더 길게 입력하세요</span>' : '');
+}
+function locateInvoice(n) {
+  var res = document.getElementById('invSearchRes');
+  var inv = invoices.find(function(i){ return i.invNum === n; });
+  if (!inv) return;
+  document.querySelectorAll('.grp-card.search-hit').forEach(function(c){ c.classList.remove('search-hit'); });
+  var printed = !!printedInvNums[n];
+  var hasInv = function(el){ return (el.dataset.invs||'').split('|').indexOf(n) !== -1; };
+  var card = null;
+  if (printed) {
+    updateDoneSection();
+    var list = document.getElementById('doneList');
+    if (!list.classList.contains('open')) toggleDoneList();
+    card = Array.prototype.find.call(list.querySelectorAll('.done-card'), hasInv);
+  } else {
+    /* 합포/단포·주문처 필터 때문에 안 보이면 해제 */
+    var isM = (inv.totalQty||0) >= 2;
+    if ((grpFlt==='multi' && !isM) || (grpFlt==='single' && isM)) {
+      grpFlt = 'all';
+      ['gf-all','gf-multi','gf-single'].forEach(function(id){ document.getElementById(id).classList.toggle('on', id==='gf-all'); });
+    }
+    if (custFlt !== 'all' && (inv.customer||'(미상)') !== custFlt) {
+      custFlt = 'all';
+      var sel = document.getElementById('custFlt'); if (sel) sel.value = 'all';
+    }
+    renderGrpList();
+    var chk = Array.prototype.find.call(document.querySelectorAll('#grpList .grp-chk'), hasInv);
+    if (chk) card = chk.closest('.grp-card');
+  }
+  var items = (inv.items||[]).map(function(it){ return escH(it.prd||'—')+(it.qty>1?' ×'+it.qty:''); }).join(', ');
+  var info = '<span class="inv-hit-tag">'+escH(n)+'</span> ' +
+    (printed ? '<b style="color:var(--r)">✓ 인쇄완료</b>' : '<b style="color:var(--g)">미인쇄</b>') +
+    ' · '+((inv.totalQty||0)>=2?'합포':'단포') +
+    (inv.customer ? ' · '+escH(inv.customer) : '') +
+    ' · 페이지 '+(((inv.pages||[])[0]+1)||'—') +
+    '<br><span style="color:var(--mu)">'+items+'</span>';
+  if (card) {
+    card.classList.add('search-hit');
+    card.scrollIntoView({ behavior:'smooth', block:'center' });
+    res.innerHTML = info + '<br><span style="color:var(--b)">↓ 파란 테두리 카드에 있습니다'+(printed?' (인쇄완료 목록)':'')+'</span>';
+  } else {
+    res.innerHTML = info + '<br><span style="color:var(--y)">⚠️ 해당 카드를 화면에서 찾지 못했습니다</span>';
+  }
 }
 
 function setGFlt(type, btn) {
