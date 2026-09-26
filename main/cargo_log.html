@@ -77,6 +77,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 .chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.35rem}
 .chip{border:1px solid var(--br);background:var(--s2);color:var(--mu);border-radius:20px;padding:.18rem .6rem;font-size:12px}
 .chip:hover{color:var(--tx);border-color:var(--mu)}
+.chip.pin{color:var(--tx);border-color:var(--b);font-weight:700}
 
 /* ── 목록 ── */
 .bar{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-bottom:.7rem}
@@ -277,14 +278,22 @@ function matchAt(name, q){
   if (qi === Q.length && first === 0 && Q.length >= 2) return { pos: 50, from: 0, to: 0 };
   return null;
 }
+/* 기본 업체 — 사전에 없어도 항상 맨 앞 */
+var PINNED = { vendor: ['메이크마인', '메이크창고'] };
 function suggest(type, q, limit){
-  var d = dict[type] || {}, out = [];
-  Object.keys(d).forEach(function(name){
+  var d = dict[type] || {}, out = [], pin = PINNED[type] || [];
+  var names = pin.concat(Object.keys(d).filter(function(k){ return pin.indexOf(k) < 0; }));
+  names.forEach(function(name){
     var m = q ? matchAt(name, q) : { pos: 0, from: 0, to: 0 };
     if (!m) return;
-    out.push({ name: name, m: m, n: d[name].n || 0, t: d[name].t || 0 });
+    var x = d[name] || {};
+    out.push({ name: name, m: m, n: x.n || 0, t: x.t || 0, pin: pin.indexOf(name) >= 0 });
   });
-  out.sort(function(a, b){ return (a.m.pos === 0) !== (b.m.pos === 0) ? (a.m.pos === 0 ? -1 : 1) : (b.n - a.n) || (b.t - a.t); });
+  out.sort(function(a, b){
+    if ((a.m.pos === 0) !== (b.m.pos === 0)) return a.m.pos === 0 ? -1 : 1;
+    if (!q && a.pin !== b.pin) return a.pin ? -1 : 1;
+    return (b.n - a.n) || (b.t - a.t);
+  });
   return out.slice(0, limit || 8);
 }
 
@@ -319,8 +328,16 @@ function attachAC(input, type, onPick){
   box.addEventListener('mousedown', function(e){ var it = e.target.closest('.ac-item'); if (it){ e.preventDefault(); pick(+it.dataset.i); } });
 }
 /* 자주 쓰는 것 칩 (최대 6개) */
+/* 업체 칩: 기본(메이크마인·메이크창고) → 최근에 쓴 순 → 많이 쓴 순, 최대 12개.
+   많이 쓴 순만 보이면 새로 넣은 업체가 오래된 큰 업체에 밀려 안 보이므로 최근 순을 먼저 둔다 */
 function renderChips(){
-  $('vChips').innerHTML = suggest('vendor', '', 6).map(function(it){ return '<button class="chip" data-v="' + esc(it.name) + '">' + esc(it.name) + '</button>'; }).join('');
+  var d = dict.vendor || {}, pin = PINNED.vendor, seen = {}, list = [];
+  function push(nm, isPin){ if (!nm || seen[nm] || list.length >= 12) return; seen[nm] = 1; list.push({ name: nm, pin: isPin }); }
+  pin.forEach(function(nm){ push(nm, true); });
+  var ks = Object.keys(d);
+  ks.slice().sort(function(a, b){ return (d[b].t || 0) - (d[a].t || 0); }).slice(0, 5).forEach(function(nm){ push(nm); });
+  ks.slice().sort(function(a, b){ return (d[b].n || 0) - (d[a].n || 0); }).forEach(function(nm){ push(nm); });
+  $('vChips').innerHTML = list.map(function(it){ return '<button class="chip' + (it.pin ? ' pin' : '') + '" data-v="' + esc(it.name) + '">' + esc(it.name) + '</button>'; }).join('');
 }
 $('vChips').addEventListener('click', function(e){ var c = e.target.closest('.chip'); if (c){ $('fVendor').value = c.dataset.v; focusNext('vendor'); } });
 
