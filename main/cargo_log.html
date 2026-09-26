@@ -171,7 +171,7 @@ table.t th.si{cursor:pointer}
       <div class="ac"><input id="fVendor" placeholder="업체명 — 초성으로도 찾기 (예: ㅁㅋ)" autocomplete="off"><div class="chips" id="vChips"></div></div>
 
       <!-- 택배출고: 창고별 여러 줄 -->
-      <div class="lb parcel-only">창고별 파렛트</div>
+      <div class="lb parcel-only">파렛트<br><span style="font-weight:400;font-size:11px">하루 1건 — 같은 날 다시 넣으면 합쳐짐</span></div>
       <div class="parcel-only">
         <div id="whLines"></div>
         <button class="btn btn-sm" onclick="addLine()">+ 창고 추가</button>
@@ -341,9 +341,9 @@ function loadWarehouses(){
     renderWhBtns(); refreshLineSelects();
   }).catch(function(e){ $('fWhBtns').innerHTML = '<span class="note">창고 목록을 불러오지 못했습니다: ' + esc(e.code || e.message) + '</span>'; });
 }
-function whOptions(cur){
+function whOptions(cur, parcel){
   var names = whList.map(function(w){ return w.name; });
-  var h = '<option value="">창고 선택</option>' + whList.map(function(w){ return '<option value="' + esc(w.name) + '"' + (w.name === cur ? ' selected' : '') + '>' + esc(w.name) + ' (' + w.plt + ')</option>'; }).join('');
+  var h = '<option value="">' + (parcel ? '기본 (창고 구분 없음)' : '창고 선택') + '</option>' + whList.map(function(w){ return '<option value="' + esc(w.name) + '"' + (w.name === cur ? ' selected' : '') + '>' + esc(w.name) + ' (' + w.plt + ')</option>'; }).join('');
   if (cur && names.indexOf(cur) < 0) h += '<option value="' + esc(cur) + '" selected>' + esc(cur) + ' (목록에 없음)</option>';
   return h;
 }
@@ -356,13 +356,13 @@ function renderWhBtns(){
 }
 function setWh(v){ $('fWh').value = v || ''; renderWhBtns(); }
 $('fWhBtns').addEventListener('click', function(e){ var b = e.target.closest('.whb'); if (!b) return; setWh($('fWh').value === b.dataset.v ? '' : b.dataset.v); if ($('fWh').value) $('fAJ').focus(); });
-function refreshLineSelects(){ document.querySelectorAll('#whLines select[data-l=wh]').forEach(function(sel){ var v = sel.value; sel.innerHTML = whOptions(v); }); }
+function refreshLineSelects(){ document.querySelectorAll('#whLines select[data-l=wh]').forEach(function(sel){ var v = sel.value; sel.innerHTML = whOptions(v, true); }); }
 
 /* ─────────── 입력 폼 ─────────── */
 function setKind(k){
   kind = k;
   document.querySelectorAll('.kind').forEach(function(b){ b.classList.toggle('on', b.dataset.k === k); });
-  var parcel = k === 'parcel' && !editId;
+  var parcel = k === 'parcel';
   document.querySelectorAll('.parcel-only').forEach(function(el){ el.classList.toggle('hide', !parcel); });
   document.querySelectorAll('.single-only').forEach(function(el){ el.classList.toggle('hide', parcel); });
   $('fEtc').parentNode.firstChild.textContent = ETC_LABEL[k] || '기타';
@@ -373,8 +373,9 @@ document.querySelectorAll('.kind').forEach(function(b){ b.addEventListener('clic
 function addLine(v){
   v = v || {};
   var d = document.createElement('div'); d.className = 'whl';
+  if (v.wh == null && !$('whLines').children.length) v.wh = '';   /* 첫 줄은 기본(구분 없음) */
   if (v.wh == null){ var usedW = readLines().map(function(l){ return l.wh; }); var nx = whList.filter(function(w){ return usedW.indexOf(w.name) < 0; })[0]; v.wh = nx ? nx.name : ''; }   /* 다음 줄은 아직 안 쓴 창고로 */
-  d.innerHTML = '<label>창고<select data-l="wh">' + whOptions(v.wh) + '</select></label>' +
+  d.innerHTML = '<label>창고<select data-l="wh">' + whOptions(v.wh, true) + '</select></label>' +
     '<label>AJ(아주)<input data-l="aj" type="number" inputmode="numeric" min="0" placeholder="0" value="' + (v.aj || '') + '"></label>' +
     '<label>우체국<input data-l="etc" type="number" inputmode="numeric" min="0" placeholder="0" value="' + (v.etc || '') + '"></label>' +
     '<label>박스<input data-l="box" type="number" inputmode="numeric" min="0" placeholder="0" value="' + (v.box || '') + '"></label>' +
@@ -397,7 +398,7 @@ function lineTotal(){
   $('lineTot').innerHTML = '합계 &nbsp; AJ <b>' + fmt(aj) + '</b> · 우체국 <b>' + fmt(et) + '</b> · <span style="color:var(--y)">총 파렛트 <b>' + fmt(aj + et) + '</b></span>' + (bx ? ' · 박스 <b>' + fmt(bx) + '</b>' : '') + (L.length > 1 ? ' <span class="note">(' + L.length + '개 창고)</span>' : '');
 }
 function focusNext(from){
-  if (from === 'vendor'){ if (kind === 'parcel' && !editId){ var f = $('whLines').querySelector('[data-l=aj]'); if (f) f.focus(); } else { var b = $('fWhBtns').querySelector('.whb'); if (b) b.focus(); } }
+  if (from === 'vendor'){ if (kind === 'parcel'){ var f = $('whLines').querySelector('[data-l=aj]'); if (f) f.focus(); } else { var b = $('fWhBtns').querySelector('.whb'); if (b) b.focus(); } }
 }
 
 var curWork = '';
@@ -421,17 +422,80 @@ $('formCard').addEventListener('keydown', function(e){
   if (e.key === 'Enter' && !e.isComposing && e.target.tagName === 'INPUT'){ e.preventDefault(); saveEntry(); }
 });
 
+/* ── 택배출고: 하루(날짜+업체) 1건 마감 ──
+   창고별 내역은 parts 에 모으고, 레코드에는 합계만. 비고 = 창고별 내역 + 메모(note) */
+var BASIC = '기본';
+function partsFromLines(L){
+  var p = {};
+  L.forEach(function(l){ var k = l.wh || BASIC, x = p[k] = p[k] || { aj: 0, etc: 0, box: 0 }; x.aj += l.aj; x.etc += l.etc; x.box += l.box; });
+  return p;
+}
+function partsOf(r){ if (r.parts) return r.parts; var p = {}; p[r.wh && r.wh !== '여러 창고' ? r.wh : BASIC] = { aj: r.aj || 0, etc: r.etc || 0, box: r.box || 0 }; return p; }
+function mergeParts(a, b){
+  var p = JSON.parse(JSON.stringify(a || {}));
+  Object.keys(b || {}).forEach(function(k){ var x = p[k] = p[k] || { aj: 0, etc: 0, box: 0 }; x.aj += b[k].aj || 0; x.etc += b[k].etc || 0; x.box += b[k].box || 0; });
+  return p;
+}
+function partKeys(p){                                                  /* 창고 목록 순서(파렛트 많은 순), 기본은 맨 뒤 */
+  var order = whList.map(function(w){ return w.name; });
+  return Object.keys(p).filter(function(k){ var x = p[k]; return x.aj || x.etc || x.box; }).sort(function(a, b){
+    if (a === BASIC) return 1; if (b === BASIC) return -1;
+    var i = order.indexOf(a), j = order.indexOf(b); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j) || a.localeCompare(b, 'ko');
+  });
+}
+function partTxt(x){ var t = []; if (x.aj) t.push('AJ' + x.aj); if (x.etc) t.push('우체국' + x.etc); if (x.box) t.push('박스' + x.box); return t.join('·'); }
+function parcelMemo(p, note){
+  var ks = partKeys(p), named = ks.filter(function(k){ return k !== BASIC; });
+  var seg = named.length ? ks.map(function(k){ return k + ' ' + partTxt(p[k]); }).join(' / ') : '';
+  return [seg, note].filter(Boolean).join(' / ');
+}
+function parcelTotals(p, note){
+  var t = { aj: 0, etc: 0, box: 0 }; Object.keys(p).forEach(function(k){ t.aj += p[k].aj || 0; t.etc += p[k].etc || 0; t.box += p[k].box || 0; });
+  var named = partKeys(p).filter(function(k){ return k !== BASIC; });
+  t.wh = named.length === 1 && !(p[BASIC] && (p[BASIC].aj || p[BASIC].etc || p[BASIC].box)) ? named[0] : (named.length ? '여러 창고' : '');
+  t.parts = p; t.note = note || ''; t.memo = parcelMemo(p, note);
+  return t;
+}
+function joinNote(a, b){ a = (a || '').trim(); b = (b || '').trim(); if (!b || a.split(' / ').indexOf(b) >= 0) return a; return a ? a + ' / ' + b : b; }
+function saveParcel(date, vendor, memo, work, fee){
+  var L = readLines().filter(function(l){ return l.aj || l.etc || l.box; });
+  if (!L.length && !vendor && !memo && !fee){ toast('수량을 입력하세요'); return; }
+  var add = partsFromLines(L), by = (me && (me.email || '').split('@')[0]) || '', now = Date.now();
+  $('saveBtn').disabled = true;
+  var done = function(){ $('saveBtn').disabled = false; };
+  if (editId){                                                           /* 수정 = 그 건을 통째로 바꿈 */
+    var old = logs.filter(function(x){ return x.id === editId; })[0] || {};
+    var t = parcelTotals(add, memo);
+    var rec = Object.assign({}, old, { date: date, kind: 'parcel', vendor: vendor, wh: t.wh, aj: t.aj, etc: t.etc, box: t.box, parts: t.parts, note: t.note, memo: t.memo, work: work, fee: fee, editedBy: by, editedAt: now });
+    delete rec.id; delete rec.batch;
+    return base.child('logs/' + editId).set(rec).then(function(){ toast('✎ 택배출고를 수정했습니다 — 총 파렛트 ' + (t.aj + t.etc)); resetForm(true); }).catch(function(e){ toast('저장 실패: ' + (e.code || e.message)); }).then(done);
+  }
+  base.child('logs').orderByChild('date').startAt(date).endAt(date).get().then(function(snap){
+    var hit = null; snap.forEach(function(c){ var v = c.val(); if (!hit && v.kind === 'parcel' && (v.vendor || '') === vendor){ hit = v; hit.id = c.key; } });
+    var parts = hit ? mergeParts(partsOf(hit), add) : add;
+    var note = hit ? joinNote(hit.note != null ? hit.note : (hit.parts ? '' : hit.memo), memo) : memo;
+    var t = parcelTotals(parts, note);
+    var rec = { date: date, kind: 'parcel', vendor: vendor, wh: t.wh, aj: t.aj, etc: t.etc, box: t.box, parts: t.parts, note: t.note, memo: t.memo,
+      work: (hit && hit.work === 'Y') || work === 'Y' ? 'Y' : '', fee: (hit ? hit.fee || 0 : 0) + fee, by: hit ? hit.by || by : by, at: hit ? hit.at || now : now };
+    if (hit){ rec.editedBy = by; rec.editedAt = now; if (hit.src) rec.src = hit.src; }
+    var id = hit ? hit.id : base.child('logs').push().key;
+    return base.child('logs/' + id).set(rec).then(function(){
+      bumpDict('vendor', vendor);
+      toast((hit ? '➕ 오늘 택배출고에 합쳤습니다' : '✔ 택배출고 기록') + ' — AJ ' + t.aj + ' · 우체국 ' + t.etc + ' · 총 ' + (t.aj + t.etc) + ' 파렛트');
+      resetForm(true);
+      if (date !== today() && !inPeriod(date)) toast('기록했습니다 — 지금 보는 기간 밖의 날짜입니다');
+      $('fVendor').focus();
+    });
+  }).catch(function(e){ toast('저장 실패: ' + (e.code || e.message)); }).then(done);
+}
+
 function saveEntry(){
   if (!gid){ toast('로그인·그룹 확인 중입니다'); return; }
   var date = $('fDate').value || today(), vendor = $('fVendor').value.trim(), memo = $('fMemo').value.trim(), work = curWork, fee = n($('fFee').value);
+  if (kind === 'parcel') return saveParcel(date, vendor, memo, work, fee);
   var rows = [];
-  if (kind === 'parcel' && !editId){
-    readLines().forEach(function(l){ if (l.wh || l.aj || l.etc || l.box) rows.push(l); });
-    if (!rows.length && (vendor || memo || fee)) rows.push({ wh: '', aj: 0, etc: 0, box: 0 });
-  } else {
-    var one = { wh: $('fWh').value.trim(), aj: n($('fAJ').value), etc: n($('fEtc').value), box: n($('fBox').value) };
-    if (one.wh || one.aj || one.etc || one.box || vendor || memo || fee) rows.push(one);
-  }
+  var one = { wh: $('fWh').value.trim(), aj: n($('fAJ').value), etc: n($('fEtc').value), box: n($('fBox').value) };
+  if (one.wh || one.aj || one.etc || one.box || vendor || memo || fee) rows.push(one);
   if (!rows.length){ toast('업체·창고·수량 중 하나는 입력하세요'); return; }
   var by = (me && (me.email || '').split('@')[0]) || '', now = Date.now(), batch = rows.length > 1 ? 'b' + now.toString(36) : '';
   var up = {};
@@ -467,13 +531,56 @@ function editEntry(id){
   setKind(r.kind);
   $('fDate').value = r.date; $('fVendor').value = r.vendor || ''; setWh(r.wh || '');
   $('fAJ').value = r.aj || ''; $('fEtc').value = r.etc || ''; $('fBox').value = r.box || ''; $('fMemo').value = r.memo || ''; $('fFee').value = r.fee || ''; setWork(r.work || '');
-  $('editing').textContent = '✎ ' + dLabel(r.date) + ' ' + KIND[r.kind] + ' 기록을 수정 중' + (r.batch ? ' (여러 창고 중 한 줄)' : '');
+  if (r.kind === 'parcel'){
+    $('whLines').innerHTML = '';
+    var p = partsOf(r), ks = partKeys(p); if (!ks.length) ks = [BASIC];
+    ks.forEach(function(k){ var x = p[k] || {}; addLine({ wh: k === BASIC ? '' : k, aj: x.aj, etc: x.etc, box: x.box }); });
+    $('fMemo').value = r.note != null ? r.note : (r.parts ? '' : (r.memo || ''));
+  }
+  $('editing').textContent = '✎ ' + dLabel(r.date) + ' ' + KIND[r.kind] + ' 기록을 수정 중' + (r.kind === 'parcel' ? ' (저장하면 이 내용으로 바뀜 — 합치지 않음)' : '');
   $('editing').classList.remove('hide'); $('cancelEdit').classList.remove('hide');
   $('saveBtn').textContent = '💾 수정 저장';
   document.querySelectorAll('tr.sel').forEach(function(tr){ tr.classList.remove('sel'); });
   var tr = document.querySelector('tr[data-id="' + id + '"]'); if (tr) tr.classList.add('sel');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+/* ── 안내 메시지 (카톡·문자에 붙여넣기용) ── */
+function msgText(r){
+  var d = new Date(r.date + 'T00:00:00'), tp = (r.aj || 0) + (r.etc || 0);
+  var head = { parcel: '출고', out: '출고', in: '입고', ret: '반품 양품화', etc: '입출고' }[r.kind] || '입출고';
+  var L = [String(d.getMonth() + 1).padStart(2, '0') + '월 ' + String(d.getDate()).padStart(2, '0') + '일 ' + W.charAt(d.getDay()) + '요일 ' + head + '수량 안내드립니다.'];
+  if (r.vendor) L.push('업체 ' + r.vendor);
+  L.push('(' + (KIND[r.kind] || r.kind) + ')');
+  if (r.kind === 'parcel' || r.aj) L.push('아주 ' + (r.aj || 0) + '개');
+  if (r.kind === 'parcel' || r.etc) L.push((r.kind === 'parcel' ? '우체국' : '기타') + ' ' + (r.etc || 0) + '개');
+  L.push('총 파렛트 ' + tp + '개');
+  if (r.box) L.push('박스 ' + r.box + '개');
+  if (r.work === 'Y' || r.fee) L.push('작업 ' + (r.work === 'Y' ? '유' : '무') + (r.fee ? ' · 작업비 ' + fmt(r.fee) + '원' : ''));
+  var tail = [], note = r.kind === 'parcel' ? (r.note != null ? r.note : (r.parts ? '' : r.memo)) : r.memo;
+  if (note) tail.push('비고 ' + note);
+  if (r.kind === 'parcel'){
+    var p = partsOf(r), named = partKeys(p).filter(function(k){ return k !== BASIC; });
+    if (named.length) partKeys(p).forEach(function(k){ var x = p[k]; tail.push('창고 ' + (k === BASIC ? '기본(구분없음)' : k) + '  토탈 ' + ((x.aj || 0) + (x.etc || 0)) + '개' + (x.aj && x.etc ? ' (아주 ' + x.aj + ' · 우체국 ' + x.etc + ')' : '')); });
+  } else if (r.wh) tail.push('창고 ' + r.wh + '  토탈 ' + tp + '개');
+  if (tail.length) L.push('', ...tail);
+  return L.join('\n');
+}
+function msgEntry(id){
+  var r = logs.filter(function(x){ return x.id === id; })[0]; if (!r) return;
+  var txt = msgText(r);
+  $('popRoot').innerHTML = '<div class="modal-bg" onclick="if(event.target===this)this.remove()"><div class="modal"><h3>📝 안내 메시지</h3>' +
+    '<textarea id="msgTxt" rows="' + Math.min(16, txt.split('\n').length + 1) + '" style="width:100%;font-family:inherit;font-size:14px;line-height:1.6;background:var(--s2);color:var(--tx);border:1px solid var(--br);border-radius:9px;padding:.7rem;resize:vertical">' + esc(txt) + '</textarea>' +
+    '<div class="note" style="margin-top:.4rem">내용을 고친 뒤 복사해도 됩니다. 원래 기록은 바뀌지 않습니다.</div>' +
+    '<div class="form-ft"><button class="btn" onclick="document.getElementById(\'popRoot\').innerHTML=\'\'">닫기</button><button class="btn btn-p" onclick="copyMsg()">📋 복사</button></div></div></div>';
+  copyMsg(true);
+}
+function copyMsg(auto){
+  var t = $('msgTxt'); if (!t) return;
+  var ok = function(){ toast('📋 안내 메시지를 복사했습니다 — 붙여넣기 하세요'); };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t.value).then(ok).catch(function(){ if (!auto){ t.select(); document.execCommand('copy'); ok(); } });
+  else { t.select(); document.execCommand('copy'); ok(); }
+}
+
 function delEntry(id){
   var r = logs.filter(function(x){ return x.id === id; })[0]; if (!r) return;
   if (!confirm(dLabel(r.date) + ' ' + KIND[r.kind] + ' ' + (r.vendor || '') + ' ' + (r.wh || '') + ' 기록을 삭제할까요?')) return;
@@ -581,7 +688,7 @@ function render(){
       '<td>' + esc(x.vendor || '') + '</td><td>' + esc(x.wh || '') + '</td>' +
       '<td class="n">' + (x.aj || '') + '</td><td class="n">' + (x.etc || '') + '</td><td class="n" style="color:var(--y)">' + ((x.aj || 0) + (x.etc || 0) || '') + '</td>' +
       '<td class="n">' + (x.box || '') + '</td><td style="text-align:center">' + (x.work === 'Y' ? '<b style="color:var(--g)">유</b>' : '<span class="note">무</span>') + '</td><td class="n">' + (x.fee ? fmt(x.fee) : '') + '</td><td class="memo">' + esc(x.memo || '') + '</td>' +
-      '<td><button class="act-btn" title="수정" onclick="editEntry(\'' + x.id + '\')">✎</button><button class="act-btn del" title="삭제" onclick="delEntry(\'' + x.id + '\')">✕</button></td></tr>';
+      '<td><button class="act-btn" title="안내 메시지 복사" onclick="msgEntry(\'' + x.id + '\')">📝</button><button class="act-btn" title="수정" onclick="editEntry(\'' + x.id + '\')">✎</button><button class="act-btn del" title="삭제" onclick="delEntry(\'' + x.id + '\')">✕</button></td></tr>';
   });
   h += '</tbody><tfoot><tr><td colspan="5">합계 ' + fmt(T.cnt) + '건' + (on ? ' (필터 적용)' : '') + '</td><td class="n">' + fmt(T.aj) + '</td><td class="n">' + fmt(T.etc) + '</td><td class="n" style="color:var(--y)">' + fmt(T.plt) + '</td><td class="n">' + fmt(T.box) + '</td><td style="text-align:center">' + (T.workY ? '유 ' + T.workY : '') + '</td><td class="n">' + (T.fee ? fmt(T.fee) : '') + '</td><td colspan="2"></td></tr></tfoot></table></div>';
   $('listBox').innerHTML = h;
