@@ -422,7 +422,7 @@ $('formCard').addEventListener('keydown', function(e){
   if (e.key === 'Enter' && !e.isComposing && e.target.tagName === 'INPUT'){ e.preventDefault(); saveEntry(); }
 });
 
-/* ── 택배출고: 하루(날짜+업체) 1건 마감 ──
+/* ── 택배출고: 하루(날짜) 1건 마감 — 업체와 상관없이 합침 ──
    창고별 내역은 parts 에 모으고, 레코드에는 합계만. 비고 = 창고별 내역 + 메모(note) */
 var BASIC = '기본';
 function partsFromLines(L){
@@ -456,6 +456,7 @@ function parcelTotals(p, note){
   t.parts = p; t.note = note || ''; t.memo = parcelMemo(p, note);
   return t;
 }
+function splitVendors(v){ return String(v || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean); }
 function joinNote(a, b){ a = (a || '').trim(); b = (b || '').trim(); if (!b || a.split(' / ').indexOf(b) >= 0) return a; return a ? a + ' / ' + b : b; }
 function saveParcel(date, vendor, memo, work, fee){
   var L = readLines().filter(function(l){ return l.aj || l.etc || l.box; });
@@ -471,17 +472,28 @@ function saveParcel(date, vendor, memo, work, fee){
     return base.child('logs/' + editId).set(rec).then(function(){ toast('✎ 택배출고를 수정했습니다 — 총 파렛트 ' + (t.aj + t.etc)); resetForm(true); }).catch(function(e){ toast('저장 실패: ' + (e.code || e.message)); }).then(done);
   }
   base.child('logs').orderByChild('date').startAt(date).endAt(date).get().then(function(snap){
-    var hit = null; snap.forEach(function(c){ var v = c.val(); if (!hit && v.kind === 'parcel' && (v.vendor || '') === vendor){ hit = v; hit.id = c.key; } });
-    var parts = hit ? mergeParts(partsOf(hit), add) : add;
-    var note = hit ? joinNote(hit.note != null ? hit.note : (hit.parts ? '' : hit.memo), memo) : memo;
+    /* 업체와 상관없이 그날 택배출고는 1건 — 이미 여러 건이 있으면(예전 기록) 모두 첫 건으로 합친다 */
+    var hits = []; snap.forEach(function(c){ var v = c.val(); if (v.kind === 'parcel'){ v.id = c.key; hits.push(v); } });
+    hits.sort(function(a, b){ return (a.at || 0) - (b.at || 0); });
+    var hit = hits[0] || null, parts = {}, note = '', vendors = [], feeSum = 0, wk = work === 'Y';
+    hits.forEach(function(h){
+      parts = mergeParts(parts, partsOf(h));
+      note = joinNote(note, h.note != null ? h.note : (h.parts ? '' : h.memo));
+      splitVendors(h.vendor).forEach(function(v){ if (vendors.indexOf(v) < 0) vendors.push(v); });
+      feeSum += h.fee || 0; if (h.work === 'Y') wk = true;
+    });
+    parts = mergeParts(parts, add); note = joinNote(note, memo);
+    splitVendors(vendor).forEach(function(v){ if (vendors.indexOf(v) < 0) vendors.push(v); });
     var t = parcelTotals(parts, note);
-    var rec = { date: date, kind: 'parcel', vendor: vendor, wh: t.wh, aj: t.aj, etc: t.etc, box: t.box, parts: t.parts, note: t.note, memo: t.memo,
-      work: (hit && hit.work === 'Y') || work === 'Y' ? 'Y' : '', fee: (hit ? hit.fee || 0 : 0) + fee, by: hit ? hit.by || by : by, at: hit ? hit.at || now : now };
+    var rec = { date: date, kind: 'parcel', vendor: vendors.join(', '), wh: t.wh, aj: t.aj, etc: t.etc, box: t.box, parts: t.parts, note: t.note, memo: t.memo,
+      work: wk ? 'Y' : '', fee: feeSum + fee, by: hit ? hit.by || by : by, at: hit ? hit.at || now : now };
     if (hit){ rec.editedBy = by; rec.editedAt = now; if (hit.src) rec.src = hit.src; }
-    var id = hit ? hit.id : base.child('logs').push().key;
-    return base.child('logs/' + id).set(rec).then(function(){
+    var id = hit ? hit.id : base.child('logs').push().key, up = {};
+    up['logs/' + id] = rec;
+    hits.slice(1).forEach(function(h){ up['logs/' + h.id] = null; });     /* 합쳐진 나머지 건은 지움 */
+    return base.update(up).then(function(){
       bumpDict('vendor', vendor);
-      toast((hit ? '➕ 오늘 택배출고에 합쳤습니다' : '✔ 택배출고 기록') + ' — AJ ' + t.aj + ' · 우체국 ' + t.etc + ' · 총 ' + (t.aj + t.etc) + ' 파렛트');
+      toast((hit ? '➕ 그날 택배출고에 합쳤습니다' + (hits.length > 1 ? ' (따로 있던 ' + hits.length + '건도 하나로)' : '') : '✔ 택배출고 기록') + ' — AJ ' + t.aj + ' · 우체국 ' + t.etc + ' · 총 ' + (t.aj + t.etc) + ' 파렛트');
       resetForm(true);
       if (date !== today() && !inPeriod(date)) toast('기록했습니다 — 지금 보는 기간 밖의 날짜입니다');
       $('fVendor').focus();
