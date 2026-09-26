@@ -75,7 +75,9 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 .ac-item small{color:var(--mu);font-size:11px;white-space:nowrap}
 .ac-item mark{background:none;color:var(--y);font-weight:800}
 .chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.35rem}
-.chip{border:1px solid var(--br);background:var(--s2);color:var(--mu);border-radius:20px;padding:.18rem .6rem;font-size:12px}
+.chip{border:1px solid var(--br);background:var(--s2);color:var(--mu);border-radius:20px;padding:.18rem .6rem;font-size:12px;display:inline-flex;align-items:center;gap:.25rem}
+.chip .cx{color:var(--mu);font-size:13px;line-height:1;padding:0 .1rem;margin-right:-.2rem;border-radius:50%;opacity:.55}
+.chip .cx:hover{color:var(--r);opacity:1}
 .chip:hover{color:var(--tx);border-color:var(--mu)}
 .chip.pin{color:var(--tx);border-color:var(--b);font-weight:700}
 .chip.pin2{color:var(--tx);border-color:var(--o);font-weight:700}
@@ -298,7 +300,7 @@ function matchAt(name, q){
   return null;
 }
 /* 기본 업체 — 사전에 없어도 항상 맨 앞 */
-var PINNED = { vendor: ['메이크마인', '메이크창고(박스앤캔)'] };
+var PINNED = { vendor: ['메이크창고(박스앤캔)', '메이크마인'] };
 var PIN_CLS = { '메이크마인': 'pin', '메이크창고(박스앤캔)': 'pin2' };   /* 메이크마인 = 파랑, 메이크창고(박스앤캔) = 주황 테두리 */
 var ALIAS = { '메이크창고': '메이크창고(박스앤캔)' };                  /* 예전 이름은 목록에서 숨김 (기록은 그대로) */
 function suggest(type, q, limit){
@@ -358,9 +360,20 @@ function renderChips(){
   var ks = Object.keys(d);
   ks.slice().sort(function(a, b){ return (d[b].t || 0) - (d[a].t || 0); }).slice(0, 5).forEach(function(nm){ push(nm); });
   ks.slice().sort(function(a, b){ return (d[b].n || 0) - (d[a].n || 0); }).forEach(function(nm){ push(nm); });
-  $('vChips').innerHTML = list.map(function(it){ return '<button class="chip' + (it.pin ? ' ' + (PIN_CLS[it.name] || 'pin') : '') + '" data-v="' + esc(it.name) + '">' + esc(it.name) + '</button>'; }).join('');
+  $('vChips').innerHTML = list.map(function(it){ return '<button class="chip' + (it.pin ? ' ' + (PIN_CLS[it.name] || 'pin') : '') + '" data-v="' + esc(it.name) + '">' + esc(it.name) + (it.pin ? '' : '<span class="cx" title="목록에서 지우기 (기록은 그대로)">×</span>') + '</button>'; }).join('');
 }
-$('vChips').addEventListener('click', function(e){ var c = e.target.closest('.chip'); if (c){ $('fVendor').value = c.dataset.v; focusNext('vendor'); } });
+$('vChips').addEventListener('click', function(e){
+  var c = e.target.closest('.chip'); if (!c) return;
+  if (e.target.closest('.cx')){ e.stopPropagation(); removeVendorChip(c.dataset.v); return; }
+  $('fVendor').value = c.dataset.v; focusNext('vendor');
+});
+/* × = 업체 목록(자동완성 사전)에서만 삭제. 저장된 기록은 그대로이고, 다시 입력하면 목록에 다시 생긴다 */
+function removeVendorChip(name){
+  var x = (dict.vendor || {})[name]; if (!x || !base) return;
+  base.child('dict/vendor/' + (x._k || name.replace(/[.#$\[\]\/]/g, '_'))).remove()
+    .then(function(){ toast('「' + name + '」을(를) 업체 목록에서 뺐습니다 — 다시 입력하면 다시 생깁니다'); })
+    .catch(function(e){ toast('삭제 실패: ' + (e.code || e.message)); });
+}
 
 /* ── 창고 = 메이크창고(WMS)에 등록된 이 그룹의 창고, 적재 파렛트 많은 순 ── */
 var whList = [];
@@ -1172,7 +1185,7 @@ WMSync.onAuth(function(st){
   loadWarehouses();
   base.child('dict').on('value', function(s){
     var d = s.val() || {}; dict = { vendor: {}, wh: {} };
-    ['vendor', 'wh'].forEach(function(t){ Object.keys(d[t] || {}).forEach(function(k){ var v = d[t][k]; dict[t][v.name || k] = v; }); });
+    ['vendor', 'wh'].forEach(function(t){ Object.keys(d[t] || {}).forEach(function(k){ var v = d[t][k]; dict[t][v.name || k] = Object.assign({ _k: k }, v); }); });
     renderChips();
   });
   subscribe();
