@@ -228,6 +228,10 @@
     ded.dedEtc = n(row.dedEtc);
     ded.yearEnd = n(row.yearEnd);
 
+    /* 최저임금 점검 — 2024년부터 식대 등 복리후생비·정기상여 전액 산입. 연장·야간·휴일수당은 제외 */
+    var mh = monthHours(emp.sched), minPay = n(row.base) + n(row.pos) + n(row.etc) + n(row.meal) + n(row.car);
+    if (n(row.base) > 0 && minPay < R.minWage * mh) notes.push('최저임금 미달 의심: 월 ' + mh + '시간 기준 ' + Math.round(R.minWage * mh).toLocaleString() + '원 이상이어야 함');
+
     var dedTotal = 0;
     DED_ITEMS.forEach(function (it) { dedTotal += ded[it.k]; });
     var coTotal = co.pension + co.health + co.ltc + co.emp + co.empStab + co.accident;
@@ -239,15 +243,162 @@
     };
   }
 
-  /* 통상시급 · 연장/야간/휴일 수당 (근로기준법 56조) */
-  function hourly(row) { return Math.round((n(row.base) + n(row.pos)) / 209); }
-  function overtimePay(row) {
-    var h = n(row.hourly) || hourly(row);
+  /* ═══════════ 근태 ═══════════ */
+
+  /* 공휴일 (관공서의 공휴일에 관한 규정 — 5인 이상 사업장은 유급휴일).
+     2026: 노동절(5/1)·제헌절(7/17) 공휴일 지정. 설·추석은 토요일과 겹쳐도 대체공휴일 없음.
+     회사별 추가·삭제는 설정 화면(settings.holidayAdd / holidayDel)에서. */
+  var HOLIDAYS = {
+    2026: {
+      '2026-01-01': '신정', '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
+      '2026-03-01': '삼일절', '2026-03-02': '대체공휴일(삼일절)', '2026-05-01': '노동절', '2026-05-05': '어린이날',
+      '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일(부처님오신날)', '2026-06-03': '지방선거일', '2026-06-06': '현충일',
+      '2026-07-17': '제헌절', '2026-08-15': '광복절', '2026-08-17': '대체공휴일(광복절)',
+      '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
+      '2026-10-03': '개천절', '2026-10-05': '대체공휴일(개천절)', '2026-10-09': '한글날', '2026-12-25': '성탄절'
+    }
+  };
+  function holidayName(date, settings) {
+    settings = settings || {};
+    var add = settings.holidayAdd || {}, del = settings.holidayDel || {};
+    if (del[date]) return '';
+    if (add[date]) return add[date];
+    var y = HOLIDAYS[+date.slice(0, 4)] || {};
+    return y[date] || '';
+  }
+
+  var DEFAULT_SCHED = { in: '09:00', out: '18:00', brk: 60, days: [1, 2, 3, 4, 5] };
+  function schedOf(emp) {
+    var s = (emp && emp.sched) || {};
+    return { in: s.in || DEFAULT_SCHED.in, out: s.out || DEFAULT_SCHED.out, brk: s.brk != null && s.brk !== '' ? n(s.brk) : DEFAULT_SCHED.brk, days: s.days && s.days.length ? s.days : DEFAULT_SCHED.days };
+  }
+  function toMin(t) { if (!t) return null; var m = String(t).match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function schedDailyH(s) { var a = toMin(s.in), b = toMin(s.out); if (a == null || b == null) return 8; if (b <= a) b += 1440; return Math.max(0, (b - a - n(s.brk)) / 60); }
+  /* 월 소정근로시간 = (주 소정시간 + 주휴시간) × 365/7/12 — 주 40시간이면 209시간 */
+  function monthHours(sched) {
+    var s = schedOf({ sched: sched });
+    var weekly = Math.min(40, Math.min(8, schedDailyH(s)) * s.days.length);
+    if (weekly <= 0) return 209;
+    var paidRest = weekly >= 15 ? weekly / 5 : 0;              /* 주 15시간 미만은 주휴 없음 */
+    if (paidRest > 8) paidRest = 8;
+    return Math.round((weekly + paidRest) * 365 / 7 / 12);
+  }
+
+  var DAY_TYPES = {                     /* paid: 소정근로를 한 것으로 봄, leave: 연차 차감일수 */
+    work:   { label: '근무' },
+    annual: { label: '연차',     paid: 1, leave: 1 },
+    halfAm: { label: '오전반차', paid: 1, leave: 0.5, halfWork: 1 },
+    halfPm: { label: '오후반차', paid: 1, leave: 0.5, halfWork: 1 },
+    sick:   { label: '병가(무급)' },
+    paidOff:{ label: '유급휴가', paid: 1 },
+    event:  { label: '경조휴가', paid: 1 },
+    absent: { label: '결근' },
+    off:    { label: '휴무' }
+  };
+
+  /* 22:00~06:00 과 겹치는 분 */
+  function nightMinutes(a, b) {
+    var tot = 0;
+    for (var d = -1440; d <= 1440; d += 1440) {
+      tot += Math.max(0, Math.min(b, d + 1440 + 360) - Math.max(a, d + 1320));
+    }
+    return tot;
+  }
+
+  /* 하루 계산. kind: 'work'(소정근무일) | 'rest'(무급휴무일, 예: 토) | 'holiday'(주휴일·공휴일) */
+  function dayCalc(rec, sched, kind) {
+    rec = rec || {};
+    var t = DAY_TYPES[rec.type || 'work'] || DAY_TYPES.work, r = { workMin: 0, nightMin: 0, late: 0, early: 0, absent: 0, leave: t.leave || 0, paid: !!t.paid, kind: kind, type: rec.type || 'work' };
+    var a = toMin(rec.in), b = toMin(rec.out);
+    if (a != null && b != null) {
+      if (b <= a) b += 1440;                                   /* 자정 넘김 */
+      /* 휴게 미입력 시 (근로기준법 54조: 4시간 30분, 8시간 1시간 이상)
+         체류 8시간 30분 이상 → 소정 휴게(최소 60분), 4시간 초과 → 30분 */
+      var span = b - a;
+      var brk = rec.brk != null && rec.brk !== '' ? n(rec.brk) : (span >= 510 ? Math.max(60, n(sched.brk)) : (span > 240 ? 30 : 0));
+      r.workMin = Math.max(0, b - a - brk);
+      r.nightMin = Math.max(0, nightMinutes(a, b) - (rec.nightBrk ? n(rec.nightBrk) : 0));
+      if (kind === 'work' && (rec.type || 'work') === 'work') {
+        var sa = toMin(sched.in), sb = toMin(sched.out); if (sb != null && sa != null && sb <= sa) sb += 1440;
+        if (sa != null && a > sa) r.late = a - sa;
+        if (sb != null && b < sb) r.early = sb - b;
+      }
+    } else if (kind === 'work' && (rec.type || 'work') === 'absent') r.absent = 1;
+    return r;
+  }
+
+  /* 한 달 요약. days = { 'DD': rec }, 주 단위(월~일) 40시간 초과분도 연장으로 합산.
+     월 경계에 걸친 주는 이 달에 속한 날만 본다(근사). */
+  function monthSummary(days, emp, ym, settings) {
+    days = days || {};
+    var s = schedOf(emp), y = +ym.slice(0, 4), m = +ym.slice(5, 7), last = new Date(y, m, 0).getDate();
+    var S = { workDays: 0, workMin: 0, otMin: 0, nightMin: 0, holMin: 0, restMin: 0, late: 0, lateCnt: 0, early: 0, earlyCnt: 0, absent: 0, leave: 0, paidDays: 0, weeksNoRest: 0, daily: {} };
+    /* 단시간근로자(소정 1일 8시간 미만)는 소정시간 초과분부터 초과근로 (기간제법 6조) */
+    var capDay = Math.min(480, Math.round(schedDailyH(s) * 60)) || 480, capWeek = Math.min(2400, capDay * s.days.length) || 2400;
+    var weekReg = 0, weekAbsent = false, weekHasWork = false;
+    for (var d = 1; d <= last; d++) {
+      var dd = String(d).padStart(2, '0'), date = ym + '-' + dd, dow = new Date(y, m - 1, d).getDay();
+      var hol = holidayName(date, settings);
+      var kind = hol ? 'holiday' : (s.days.indexOf(dow) >= 0 ? 'work' : (dow === 0 ? 'holiday' : 'rest'));
+      var r = dayCalc(days[dd], s, kind);
+      r.holiday = hol; r.dow = dow;
+      if (kind === 'holiday') S.holMin += r.workMin;
+      else if (kind === 'rest') { S.otMin += r.workMin; S.restMin += r.workMin; }
+      else {
+        var reg = Math.min(r.workMin, capDay), dayOt = Math.max(0, r.workMin - capDay);
+        if (weekReg + reg > capWeek) { dayOt += weekReg + reg - capWeek; reg = Math.max(0, capWeek - weekReg); }
+        weekReg += reg; S.otMin += dayOt; r.otMin = dayOt;
+        if (r.workMin > 0) { S.workDays++; weekHasWork = true; }
+        if (r.paid) S.paidDays += (DAY_TYPES[r.type].halfWork ? 0.5 : 1);
+        if (r.late) { S.late += r.late; S.lateCnt++; }
+        if (r.early) { S.early += r.early; S.earlyCnt++; }
+        if (r.absent) { S.absent++; weekAbsent = true; }
+      }
+      if (kind !== 'work' && r.workMin > 0) S.workDays++;
+      S.workMin += r.workMin; S.nightMin += r.nightMin; S.leave += r.leave;
+      S.daily[dd] = r;
+      if (dow === 0 || d === last) {                          /* 주 마감(일요일) */
+        if (weekAbsent && weekHasWork) S.weeksNoRest++;
+        weekReg = 0; weekAbsent = false; weekHasWork = false;
+      }
+    }
+    var h = function (min) { return Math.round(min / 6) / 10; }; /* 0.1시간 단위 */
+    S.workH = h(S.workMin); S.otH = h(S.otMin); S.nightH = h(S.nightMin); S.holH = h(S.holMin);
+    return S;
+  }
+
+  /* 연차 (근로기준법 60조, 입사일 기준). usedFn(from,to) → 기간 내 사용일수 */
+  function leaveInfo(emp, today, usedFn) {
+    if (!emp.joined) return null;
+    var j = new Date(emp.joined + 'T00:00:00'), t = new Date(today + 'T00:00:00');
+    var months = (t.getFullYear() - j.getFullYear()) * 12 + (t.getMonth() - j.getMonth()) - (t.getDate() < j.getDate() ? 1 : 0);
+    var from, to, grant;
+    if (months < 12) {
+      grant = Math.min(11, Math.max(0, months));            /* 1년 미만: 1개월 개근마다 1일 */
+      from = emp.joined; var e = new Date(j); e.setFullYear(e.getFullYear() + 1); e.setDate(e.getDate() - 1); to = iso(e);
+    } else {
+      var yrs = Math.floor(months / 12);
+      grant = Math.min(25, 15 + Math.floor((yrs - 1) / 2));
+      var s = new Date(j); s.setFullYear(j.getFullYear() + yrs); var e2 = new Date(s); e2.setFullYear(e2.getFullYear() + 1); e2.setDate(e2.getDate() - 1);
+      from = iso(s); to = iso(e2);
+    }
+    var used = usedFn ? usedFn(from, to) : 0;
+    return { grant: grant, used: used, left: grant - used, from: from, to: to, firstYear: months < 12 };
+  }
+  function iso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
+  /* 통상시급 · 연장/야간/휴일 수당 (근로기준법 56조)
+     5인 미만 사업장(under5)은 가산 미적용: 연장·휴일 ×1.0, 야간 가산 없음 */
+  function hourly(row, mh) { return Math.round((n(row.base) + n(row.pos)) / (mh || 209)); }
+  function overtimePay(row, opt) {
+    opt = opt || {};
+    var h = n(row.hourly) || hourly(row, opt.monthHours);
+    var u5 = !!opt.under5, hh = n(row.holH);
     return {
-      hourly: h,
-      ot: Math.round(h * 1.5 * n(row.otH)),
-      night: Math.round(h * 0.5 * n(row.nightH)),
-      hol: Math.round(h * 1.5 * Math.min(n(row.holH), 8) + h * 2 * Math.max(n(row.holH) - 8, 0))
+      hourly: h, under5: u5,
+      ot: Math.round(h * (u5 ? 1 : 1.5) * n(row.otH)),
+      night: u5 ? 0 : Math.round(h * 0.5 * n(row.nightH)),
+      hol: u5 ? Math.round(h * hh) : Math.round(h * 1.5 * Math.min(hh, 8) + h * 2 * Math.max(hh - 8, 0))
     };
   }
 
@@ -256,7 +407,9 @@
     PAY_ITEMS: PAY_ITEMS, NONTAX_ITEMS: NONTAX_ITEMS, DED_ITEMS: DED_ITEMS,
     ratesFor: ratesFor, pensionBounds: pensionBounds, taxTableFor: taxTableFor,
     incomeTax: incomeTax, calcRow: calcRow, birthFrom: birthFrom, ageAt: ageAt,
-    hourly: hourly, overtimePay: overtimePay
+    hourly: hourly, overtimePay: overtimePay,
+    HOLIDAYS: HOLIDAYS, holidayName: holidayName, DAY_TYPES: DAY_TYPES, DEFAULT_SCHED: DEFAULT_SCHED,
+    schedOf: schedOf, monthHours: monthHours, dayCalc: dayCalc, monthSummary: monthSummary, leaveInfo: leaveInfo, toMin: toMin
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.PayrollCalc = api;
