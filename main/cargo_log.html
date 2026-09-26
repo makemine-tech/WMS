@@ -116,6 +116,20 @@ table.t tfoot td{position:sticky;bottom:0;background:var(--s2);font-weight:800;b
 .fpop input[type=text]{font-size:13px;padding:.35rem .5rem}
 .fpop .ft{display:flex;gap:.3rem;justify-content:space-between}
 .grp-tbl td,.grp-tbl th{font-size:12.5px}
+.whbtns{display:flex;gap:.35rem;flex-wrap:wrap}
+.whb{border:1.5px solid var(--br);background:var(--s2);color:var(--tx);border-radius:9px;padding:.5rem .8rem;font-weight:700;font-size:14px}
+.whb small{color:var(--mu);font-weight:400;font-size:11px;margin-left:.3rem}
+.whb.on{background:var(--y);border-color:var(--y);color:#0b0d12}
+.whb.on small{color:#0b0d12}
+.whl select{padding:.5rem .4rem;font-size:14px}
+.fbar{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem}
+.fbar .fb{border:1px solid var(--br);background:var(--s2);color:var(--mu);border-radius:20px;padding:.3rem .75rem;font-size:12.5px;font-weight:700}
+.fbar .fb.act{background:var(--y);border-color:var(--y);color:#0b0d12}
+.selbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.35);border-radius:10px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:13px}
+table.t td.ck,table.t th.ck{width:30px;text-align:center;padding-left:.3rem;padding-right:.1rem}
+table.t input.rs,table.t #rsAll{width:16px;height:16px;accent-color:var(--r);cursor:pointer}
+table.t tr.picked td{background:rgba(248,113,113,.07)}
+table.t th.si{cursor:pointer}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:70;display:flex;align-items:flex-start;justify-content:center;padding:8vh 12px}
 .modal{background:var(--s1);border:1px solid var(--br);border-radius:14px;width:100%;max-width:520px;padding:1.2rem}
 .modal h3{font-size:16px;margin-bottom:.7rem}
@@ -166,7 +180,7 @@ table.t tfoot td{position:sticky;bottom:0;background:var(--s2);font-weight:800;b
 
       <!-- 입고·출고·기타: 한 줄 -->
       <div class="lb single-only">창고</div>
-      <div class="ac single-only"><input id="fWh" placeholder="창고 위치 (예: A창고)" autocomplete="off"><div class="chips" id="wChips"></div></div>
+      <div class="single-only"><input type="hidden" id="fWh"><div class="whbtns" id="fWhBtns"><span class="note">메이크창고 창고 목록 불러오는 중…</span></div></div>
       <div class="lb single-only">파렛트 · 박스</div>
       <div class="row3 single-only">
         <label>AJ(아주)<input id="fAJ" type="number" inputmode="numeric" min="0" placeholder="0"></label>
@@ -175,7 +189,7 @@ table.t tfoot td{position:sticky;bottom:0;background:var(--s2);font-weight:800;b
       </div>
 
       <div class="lb">작업 · 작업비</div>
-      <div class="wk"><div class="seg" id="fWork"><button data-w="" class="on">–</button><button data-w="Y">Y 작업</button><button data-w="N">N</button></div><input id="fFee" type="number" inputmode="numeric" min="0" placeholder="작업비 (원)"></div>
+      <div class="wk"><div class="seg" id="fWork"><button data-w="" class="on">무</button><button data-w="Y">유</button></div><input id="fFee" type="number" inputmode="numeric" min="0" placeholder="작업비 (원)"></div>
 
       <div class="lb">비고</div>
       <div><input id="fMemo" placeholder="메모 (선택)" autocomplete="off"></div>
@@ -197,7 +211,7 @@ table.t tfoot td{position:sticky;bottom:0;background:var(--s2);font-weight:800;b
       <span class="sp"></span>
       <div class="seg" id="viewSeg"><button data-v="list" class="on">목록</button><button data-v="stat">통계</button></div>
       <select id="grpBy" class="hide" style="width:auto;font-size:13px;padding:.4rem .5rem">
-        <option value="date">일자별</option><option value="vendor">업체별</option><option value="wh">창고별</option><option value="kind">구분별</option><option value="vendor_kind">업체 × 구분</option>
+        <option value="vendor">업체별</option><option value="date">일자별</option><option value="wh">창고별</option><option value="kind">구분별</option><option value="vendor_kind">업체 × 구분</option>
       </select>
       <button class="btn btn-sm" onclick="clearFilters()" id="clrBtn">필터 해제</button>
       <button class="btn btn-sm" onclick="copyTable()">📋 복사</button>
@@ -205,8 +219,10 @@ table.t tfoot td{position:sticky;bottom:0;background:var(--s2);font-weight:800;b
       <button class="btn btn-sm btn-p" onclick="exportXlsx()">⬇ 엑셀 다운로드</button>
     </div>
     <div class="stats" id="stats"></div>
+    <div class="fbar" id="fbar"></div>
+    <div class="selbar hide" id="selBar"></div>
     <div id="listBox"></div>
-    <div class="note" style="margin-top:.6rem">· 머리글을 누르면 정렬(▲▼), ▾ 를 누르면 값 골라 보기(필터). 박스·비고는 정렬·필터 대상이 아닙니다.<br>· [📋 복사]는 지금 보이는 표를 복사합니다 — 엑셀·구글시트에 그대로 붙여넣기 됩니다.<br>· [⬆ 엑셀 업로드]는 「화물 입출고내역.xls」 양식을 그대로 읽습니다(같은 기록은 건너뜀). [⬇ 엑셀 다운로드]는 같은 양식(작업비 기준표 + 월/일·입출고-기타·업체명·박스수·파렛트수·작업여부·작업비·비고·기록자)에 창고·AJ·우체국·기타 열과 통계 시트를 덧붙여 받습니다. 값이 없는 칸은 공란입니다.<br>· ✎ 누르면 위 입력칸으로 불러와 수정합니다. 같은 그룹 사람끼리 실시간으로 공유됩니다.</div>
+    <div class="note" style="margin-top:.6rem">· 머리글을 누르면 정렬(▲▼), ▾ 를 누르면 값 골라 보기(필터). 박스·비고는 정렬·필터 대상이 아닙니다.<br>· [📋 복사]는 지금 보이는 표를 복사합니다 — 엑셀·구글시트에 그대로 붙여넣기 됩니다.<br>· [⬆ 엑셀 업로드]는 「화물 입출고내역.xls」 양식을 그대로 읽습니다(같은 기록은 건너뜀). [⬇ 엑셀 다운로드]는 같은 양식(작업비 기준표 + 월/일·입출고-기타·업체명·박스수·파렛트수·작업여부·작업비·비고·기록자)에 창고·AJ·우체국·기타 열과 통계 시트를 덧붙여 받습니다. 값이 없는 칸은 공란입니다.<br>· <b>여러 줄 한꺼번에 삭제</b>: 왼쪽 칸을 하나 체크하고 Shift+클릭하면 그 사이가 모두 선택됩니다. 휴대폰은 처음·끝 두 줄을 체크하고 [↕ 사이 모두 선택]. 머리글 체크 = 지금 보이는 목록 전체(기간·필터 적용). 20건 이상은 건수를 입력해야 지워집니다.<br>· ✎ 누르면 위 입력칸으로 불러와 수정합니다. 같은 그룹 사람끼리 실시간으로 공유됩니다.</div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -305,10 +321,42 @@ function attachAC(input, type, onPick){
 /* 자주 쓰는 것 칩 (최대 6개) */
 function renderChips(){
   $('vChips').innerHTML = suggest('vendor', '', 6).map(function(it){ return '<button class="chip" data-v="' + esc(it.name) + '">' + esc(it.name) + '</button>'; }).join('');
-  $('wChips').innerHTML = suggest('wh', '', 6).map(function(it){ return '<button class="chip" data-v="' + esc(it.name) + '">' + esc(it.name) + '</button>'; }).join('');
 }
 $('vChips').addEventListener('click', function(e){ var c = e.target.closest('.chip'); if (c){ $('fVendor').value = c.dataset.v; focusNext('vendor'); } });
-$('wChips').addEventListener('click', function(e){ var c = e.target.closest('.chip'); if (c){ $('fWh').value = c.dataset.v; $('fAJ').focus(); } });
+
+/* ── 창고 = 메이크창고(WMS)에 등록된 이 그룹의 창고, 적재 파렛트 많은 순 ── */
+var whList = [];
+function loadWarehouses(){
+  return db.ref('groups/' + gid).get().then(function(g){
+    var wids = g.exists() ? Object.keys(g.val()).filter(function(k){ return k !== '_init'; }) : [];
+    return Promise.all(wids.map(function(wid){
+      return Promise.all([db.ref('warehouses/' + wid + '/name').get(), db.ref('warehouses/' + wid + '/cells').get()]).then(function(r){
+        var cells = r[1].val() || {}, used = 0;
+        Object.keys(cells).forEach(function(k){ var c = cells[k]; if (c && (c.type === 'rack' || c.type === 'shelf')) used += Object.values(c.slots || {}).filter(Boolean).length; });
+        return { id: wid, name: r[0].val() || wid, plt: used };
+      }).catch(function(){ return null; });
+    }));
+  }).then(function(a){
+    whList = a.filter(Boolean).sort(function(x, y){ return (y.plt - x.plt) || x.name.localeCompare(y.name, 'ko'); });
+    renderWhBtns(); refreshLineSelects();
+  }).catch(function(e){ $('fWhBtns').innerHTML = '<span class="note">창고 목록을 불러오지 못했습니다: ' + esc(e.code || e.message) + '</span>'; });
+}
+function whOptions(cur){
+  var names = whList.map(function(w){ return w.name; });
+  var h = '<option value="">창고 선택</option>' + whList.map(function(w){ return '<option value="' + esc(w.name) + '"' + (w.name === cur ? ' selected' : '') + '>' + esc(w.name) + ' (' + w.plt + ')</option>'; }).join('');
+  if (cur && names.indexOf(cur) < 0) h += '<option value="' + esc(cur) + '" selected>' + esc(cur) + ' (목록에 없음)</option>';
+  return h;
+}
+function renderWhBtns(){
+  var cur = $('fWh').value;
+  if (!whList.length){ $('fWhBtns').innerHTML = '<span class="note">이 그룹에 등록된 창고가 없습니다 — 메이크창고(WMS)에서 창고를 먼저 만드세요.</span>'; return; }
+  var h = whList.map(function(w){ return '<button class="whb' + (w.name === cur ? ' on' : '') + '" data-v="' + esc(w.name) + '">' + esc(w.name) + '<small>' + w.plt + '파렛트</small></button>'; }).join('');
+  if (cur && !whList.some(function(w){ return w.name === cur; })) h += '<button class="whb on" data-v="' + esc(cur) + '">' + esc(cur) + '<small>목록에 없음</small></button>';
+  $('fWhBtns').innerHTML = h;
+}
+function setWh(v){ $('fWh').value = v || ''; renderWhBtns(); }
+$('fWhBtns').addEventListener('click', function(e){ var b = e.target.closest('.whb'); if (!b) return; setWh($('fWh').value === b.dataset.v ? '' : b.dataset.v); if ($('fWh').value) $('fAJ').focus(); });
+function refreshLineSelects(){ document.querySelectorAll('#whLines select[data-l=wh]').forEach(function(sel){ var v = sel.value; sel.innerHTML = whOptions(v); }); }
 
 /* ─────────── 입력 폼 ─────────── */
 function setKind(k){
@@ -325,15 +373,16 @@ document.querySelectorAll('.kind').forEach(function(b){ b.addEventListener('clic
 function addLine(v){
   v = v || {};
   var d = document.createElement('div'); d.className = 'whl';
-  d.innerHTML = '<label class="ac">창고<input data-l="wh" autocomplete="off" placeholder="A창고" value="' + esc(v.wh || '') + '"></label>' +
+  if (v.wh == null){ var usedW = readLines().map(function(l){ return l.wh; }); var nx = whList.filter(function(w){ return usedW.indexOf(w.name) < 0; })[0]; v.wh = nx ? nx.name : ''; }   /* 다음 줄은 아직 안 쓴 창고로 */
+  d.innerHTML = '<label>창고<select data-l="wh">' + whOptions(v.wh) + '</select></label>' +
     '<label>AJ(아주)<input data-l="aj" type="number" inputmode="numeric" min="0" placeholder="0" value="' + (v.aj || '') + '"></label>' +
     '<label>우체국<input data-l="etc" type="number" inputmode="numeric" min="0" placeholder="0" value="' + (v.etc || '') + '"></label>' +
     '<label>박스<input data-l="box" type="number" inputmode="numeric" min="0" placeholder="0" value="' + (v.box || '') + '"></label>' +
     '<button class="x" title="이 줄 빼기">✕</button>';
   $('whLines').appendChild(d);
-  attachAC(d.querySelector('[data-l=wh]'), 'wh', function(){ d.querySelector('[data-l=aj]').focus(); });
+  d.querySelector('[data-l=wh]').addEventListener('change', function(){ d.querySelector('[data-l=aj]').focus(); });
   d.querySelector('.x').onclick = function(){ d.remove(); if (!$('whLines').children.length) addLine(); lineTotal(); };
-  d.addEventListener('input', lineTotal);
+  d.addEventListener('input', lineTotal); d.addEventListener('change', lineTotal);
   lineTotal();
   return d;
 }
@@ -348,7 +397,7 @@ function lineTotal(){
   $('lineTot').innerHTML = '합계 &nbsp; AJ <b>' + fmt(aj) + '</b> · 우체국 <b>' + fmt(et) + '</b> · <span style="color:var(--y)">총 파렛트 <b>' + fmt(aj + et) + '</b></span>' + (bx ? ' · 박스 <b>' + fmt(bx) + '</b>' : '') + (L.length > 1 ? ' <span class="note">(' + L.length + '개 창고)</span>' : '');
 }
 function focusNext(from){
-  if (from === 'vendor'){ if (kind === 'parcel' && !editId){ var f = $('whLines').querySelector('[data-l=wh]'); if (f) f.focus(); } else $('fWh').focus(); }
+  if (from === 'vendor'){ if (kind === 'parcel' && !editId){ var f = $('whLines').querySelector('[data-l=aj]'); if (f) f.focus(); } else { var b = $('fWhBtns').querySelector('.whb'); if (b) b.focus(); } }
 }
 
 var curWork = '';
@@ -360,6 +409,7 @@ function resetForm(keep){
   $('editing').classList.add('hide'); $('cancelEdit').classList.add('hide');
   $('saveBtn').textContent = '💾 기록 (Enter)';
   ['fVendor','fWh','fAJ','fEtc','fBox','fMemo','fFee'].forEach(function(id){ $(id).value = ''; });
+  renderWhBtns();
   setWork('');
   $('whLines').innerHTML = '';
   if (!keep) $('fDate').value = today();
@@ -415,7 +465,7 @@ function editEntry(id){
   var r = logs.filter(function(x){ return x.id === id; })[0]; if (!r) return;
   editId = id; kind = r.kind;
   setKind(r.kind);
-  $('fDate').value = r.date; $('fVendor').value = r.vendor || ''; $('fWh').value = r.wh || '';
+  $('fDate').value = r.date; $('fVendor').value = r.vendor || ''; setWh(r.wh || '');
   $('fAJ').value = r.aj || ''; $('fEtc').value = r.etc || ''; $('fBox').value = r.box || ''; $('fMemo').value = r.memo || ''; $('fFee').value = r.fee || ''; setWork(r.work || '');
   $('editing').textContent = '✎ ' + dLabel(r.date) + ' ' + KIND[r.kind] + ' 기록을 수정 중' + (r.batch ? ' (여러 창고 중 한 줄)' : '');
   $('editing').classList.remove('hide'); $('cancelEdit').classList.remove('hide');
@@ -453,10 +503,11 @@ document.querySelectorAll('#viewSeg button').forEach(function(b){ b.addEventList
   view = b.dataset.v; document.querySelectorAll('#viewSeg button').forEach(function(x){ x.classList.toggle('on', x === b); });
   $('grpBy').classList.toggle('hide', view !== 'stat'); render();
 }); });
-$('grpBy').addEventListener('change', render);
+$('grpBy').addEventListener('change', function(){ statSort = null; render(); });
 
 function subscribe(){
   if (!base) return;
+  picked = {}; lastPick = null;
   if (logsRef) logsRef.off();
   var r = periodRange();
   $('listBox').innerHTML = '<div class="card empty">불러오는 중…</div>';
@@ -478,7 +529,7 @@ var COLS = [
   { k:'etc',    l:'우체국·기타', sort:true, num:true, get:function(r){ return r.etc || 0; } },
   { k:'plt',    l:'파렛트 계', sort:true, filter:true, num:true, get:function(r){ return (r.aj || 0) + (r.etc || 0); }, fget:pltTag },
   { k:'box',    l:'박스',   num:true,                get:function(r){ return r.box || 0; } },
-  { k:'work',   l:'작업',   sort:true, filter:true,  get:function(r){ return r.work || '-'; } },
+  { k:'work',   l:'작업',   sort:true, filter:true,  get:function(r){ return r.work === 'Y' ? '유' : '무'; } },
   { k:'fee',    l:'작업비', sort:true, num:true,     get:function(r){ return r.fee || 0; } },
   { k:'memo',   l:'비고',                            get:function(r){ return r.memo || ''; } }
 ];
@@ -511,10 +562,14 @@ function render(){
     '<div class="stat"><div class="k">우체국·기타</div><div class="v">' + fmt(T.etc) + '</div></div>' +
     '<div class="stat"><div class="k">파렛트 합계</div><div class="v" style="color:var(--y)">' + fmt(T.plt) + '</div></div>' +
     '<div class="stat"><div class="k">박스</div><div class="v">' + fmt(T.box) + '</div></div>' +
-    '<div class="stat"><div class="k">작업 Y · 작업비</div><div class="v" style="font-size:15px">' + fmt(T.workY) + '건 · ' + fmt(T.fee) + '</div></div>';
-  if (view === 'stat') return renderStat(a, r);
+    '<div class="stat"><div class="k">작업 유 · 작업비</div><div class="v" style="font-size:15px">' + fmt(T.workY) + '건 · ' + fmt(T.fee) + '</div></div>';
+  renderFbar();
+  if (view === 'stat'){ $('selBar').classList.add('hide'); return renderStat(a, r); }
   if (!logs.length){ $('listBox').innerHTML = '<div class="card empty">' + (r[0] === r[1] ? dLabel(r[0]) : dLabel(r[0]) + ' ~ ' + dLabel(r[1])) + ' 기록이 없습니다.<br>위 입력칸에서 바로 기록하세요.</div>'; return; }
-  var h = '<div class="tbl-wrap"><table class="t" id="mainTbl"><thead><tr>';
+  var vis = {}; a.forEach(function(x){ vis[x.id] = 1; });
+  Object.keys(picked).forEach(function(id){ if (!vis[id]) delete picked[id]; });   /* 안 보이게 된 줄은 선택 해제 */
+  var allOn = a.length && a.every(function(x){ return picked[x.id]; });
+  var h = '<div class="tbl-wrap"><table class="t" id="mainTbl"><thead><tr><th class="ck"><input type="checkbox" id="rsAll" title="보이는 목록 전체 선택"' + (allOn ? ' checked' : '') + '></th>';
   COLS.forEach(function(c){
     h += '<th class="' + (c.sort ? 'srt' : '') + '"' + (c.num ? ' style="text-align:right"' : '') + (c.sort ? ' data-s="' + c.k + '"' : '') + '>' + c.l +
       (sortK === c.k ? '<span class="ar">' + (sortD > 0 ? '▲' : '▼') + '</span>' : '') +
@@ -522,20 +577,81 @@ function render(){
   });
   h += '<th></th></tr></thead><tbody>';
   a.forEach(function(x){
-    h += '<tr data-id="' + x.id + '"' + (x.id === editId ? ' class="sel"' : '') + '><td>' + dLabel(x.date) + '</td><td><span class="kb ' + x.kind + '">' + (KIND[x.kind] || x.kind) + '</span></td>' +
+    h += '<tr data-id="' + x.id + '" class="' + (x.id === editId ? 'sel' : '') + (picked[x.id] ? ' picked' : '') + '"><td class="ck"><input type="checkbox" class="rs" data-id="' + x.id + '"' + (picked[x.id] ? ' checked' : '') + '></td><td>' + dLabel(x.date) + '</td><td><span class="kb ' + x.kind + '">' + (KIND[x.kind] || x.kind) + '</span></td>' +
       '<td>' + esc(x.vendor || '') + '</td><td>' + esc(x.wh || '') + '</td>' +
       '<td class="n">' + (x.aj || '') + '</td><td class="n">' + (x.etc || '') + '</td><td class="n" style="color:var(--y)">' + ((x.aj || 0) + (x.etc || 0) || '') + '</td>' +
-      '<td class="n">' + (x.box || '') + '</td><td style="text-align:center">' + (x.work === 'Y' ? '<b style="color:var(--g)">Y</b>' : x.work === 'N' ? '<span class="note">N</span>' : '') + '</td><td class="n">' + (x.fee ? fmt(x.fee) : '') + '</td><td class="memo">' + esc(x.memo || '') + '</td>' +
+      '<td class="n">' + (x.box || '') + '</td><td style="text-align:center">' + (x.work === 'Y' ? '<b style="color:var(--g)">유</b>' : '<span class="note">무</span>') + '</td><td class="n">' + (x.fee ? fmt(x.fee) : '') + '</td><td class="memo">' + esc(x.memo || '') + '</td>' +
       '<td><button class="act-btn" title="수정" onclick="editEntry(\'' + x.id + '\')">✎</button><button class="act-btn del" title="삭제" onclick="delEntry(\'' + x.id + '\')">✕</button></td></tr>';
   });
-  h += '</tbody><tfoot><tr><td colspan="4">합계 ' + fmt(T.cnt) + '건' + (on ? ' (필터 적용)' : '') + '</td><td class="n">' + fmt(T.aj) + '</td><td class="n">' + fmt(T.etc) + '</td><td class="n" style="color:var(--y)">' + fmt(T.plt) + '</td><td class="n">' + fmt(T.box) + '</td><td style="text-align:center">' + (T.workY ? 'Y ' + T.workY : '') + '</td><td class="n">' + (T.fee ? fmt(T.fee) : '') + '</td><td colspan="2"></td></tr></tfoot></table></div>';
+  h += '</tbody><tfoot><tr><td colspan="5">합계 ' + fmt(T.cnt) + '건' + (on ? ' (필터 적용)' : '') + '</td><td class="n">' + fmt(T.aj) + '</td><td class="n">' + fmt(T.etc) + '</td><td class="n" style="color:var(--y)">' + fmt(T.plt) + '</td><td class="n">' + fmt(T.box) + '</td><td style="text-align:center">' + (T.workY ? '유 ' + T.workY : '') + '</td><td class="n">' + (T.fee ? fmt(T.fee) : '') + '</td><td colspan="2"></td></tr></tfoot></table></div>';
   $('listBox').innerHTML = h;
   $('listBox').querySelectorAll('th[data-s]').forEach(function(th){ th.addEventListener('click', function(e){
     if (e.target.closest('.fl')) return;
     var k = th.dataset.s; if (sortK === k) sortD = -sortD; else { sortK = k; sortD = k === 'date' ? -1 : 1; } render();
   }); });
   $('listBox').querySelectorAll('.fl').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); openFilter(b.dataset.f, b); }); });
+  shown = a;
+  $('rsAll').addEventListener('change', function(){ var on = this.checked; a.forEach(function(x){ if (on) picked[x.id] = 1; else delete picked[x.id]; }); lastPick = null; render(); });
+  $('listBox').querySelector('tbody').addEventListener('click', function(e){
+    var cb = e.target.closest('.rs'); if (!cb) return;
+    var idx = a.findIndex(function(x){ return x.id === cb.dataset.id; }), on = cb.checked;
+    if (e.shiftKey && lastPick != null){                                    /* Shift+클릭 = 사이 전체 */
+      var lo = Math.min(lastPick, idx), hi = Math.max(lastPick, idx);
+      for (var i = lo; i <= hi; i++){ if (on) picked[a[i].id] = 1; else delete picked[a[i].id]; }
+    } else { if (on) picked[cb.dataset.id] = 1; else delete picked[cb.dataset.id]; }
+    lastPick = idx; render();
+  });
+  renderSelBar();
 }
+
+/* ── 범위 선택 삭제 ── */
+var picked = {}, lastPick = null, shown = [];
+function pickedList(){ return shown.filter(function(x){ return picked[x.id]; }); }
+function renderSelBar(){
+  var p = pickedList(), bar = $('selBar');
+  if (!p.length){ bar.classList.add('hide'); return; }
+  var tp = p.reduce(function(s, x){ return s + (x.aj || 0) + (x.etc || 0); }, 0);
+  var ds = p.map(function(x){ return x.date; }).sort();
+  bar.innerHTML = '<b>' + fmt(p.length) + '건 선택</b><span class="note">' + dLabel(ds[0]) + (ds.length > 1 && ds[0] !== ds[ds.length - 1] ? ' ~ ' + dLabel(ds[ds.length - 1]) : '') + ' · 파렛트 ' + fmt(tp) + '</span>' +
+    '<span style="flex:1"></span>' +
+    (p.length >= 2 ? '<button class="btn btn-sm" onclick="fillBetween()" title="선택한 첫 줄과 마지막 줄 사이를 모두 선택 (휴대폰에서 범위 선택)">↕ 사이 모두 선택</button>' : '') +
+    '<button class="btn btn-sm" onclick="picked={};lastPick=null;render()">선택 해제</button>' +
+    '<button class="btn btn-sm btn-r" onclick="deletePicked()">🗑 ' + fmt(p.length) + '건 삭제</button>';
+  bar.classList.remove('hide');
+}
+function fillBetween(){
+  var idx = []; shown.forEach(function(x, i){ if (picked[x.id]) idx.push(i); });
+  if (idx.length < 2) return;
+  for (var i = idx[0]; i <= idx[idx.length - 1]; i++) picked[shown[i].id] = 1;
+  render();
+}
+function deletePicked(){
+  var p = pickedList(); if (!p.length) return;
+  var ds = p.map(function(x){ return x.date; }).sort();
+  var msg = fmt(p.length) + '건을 삭제합니다 (' + ds[0] + ' ~ ' + ds[ds.length - 1] + ').\n삭제하면 되돌릴 수 없습니다.';
+  if (p.length >= 20){
+    var ans = prompt(msg + '\n\n확인을 위해 삭제할 건수 「' + p.length + '」 를 입력하세요.');
+    if (ans == null) return;
+    if (String(ans).replace(/[^\d]/g, '') !== String(p.length)){ toast('건수가 달라 취소했습니다'); return; }
+  } else if (!confirm(msg)) return;
+  var chunks = [], cur = {}, c = 0;
+  p.forEach(function(x){ cur['logs/' + x.id] = null; if (++c >= 400){ chunks.push(cur); cur = {}; c = 0; } });
+  if (c) chunks.push(cur);
+  chunks.reduce(function(pr, up){ return pr.then(function(){ return base.update(up); }); }, Promise.resolve()).then(function(){
+    if (editId && picked[editId]) resetForm(true);
+    picked = {}; lastPick = null; toast('🗑 ' + fmt(p.length) + '건 삭제했습니다');
+  }).catch(function(e){ toast('삭제 실패: ' + (e.code || e.message)); });
+}
+
+/* ── 필터 막대: 목록·통계 어디서든 같은 필터 ── */
+var FBAR = [['kind', '구분'], ['vendor', '업체'], ['wh', '창고'], ['work', '작업'], ['plt', '파렛트']];
+function renderFbar(){
+  $('fbar').innerHTML = '<span class="note" style="margin-right:.2rem">필터</span>' + FBAR.map(function(f){
+    var v = flt[f[0]];
+    return '<button class="fb' + (v ? ' act' : '') + '" data-f="' + f[0] + '">' + f[1] + (v ? ': ' + esc(v.length === 1 ? v[0] : v.length + '개') : '') + ' ▾</button>';
+  }).join('');
+}
+$('fbar').addEventListener('click', function(e){ var b = e.target.closest('.fb'); if (b){ e.stopPropagation(); openFilter(b.dataset.f, b); } });
 
 /* 엑셀식 값 골라 보기 */
 function openFilter(k, anchor){
@@ -577,29 +693,35 @@ function groupRows(a, by){
 var GRP_LABEL = { date: '날짜', vendor: '업체', wh: '창고', kind: '구분', vendor_kind: '업체 | 구분' };
 function statMatrix(a){
   var by = $('grpBy').value, rows = groupRows(a, by), T = totals(a);
-  var head = [GRP_LABEL[by], '건수', 'AJ', '우체국·기타', '파렛트 계', '택배출고', '입고', '출고', '기타', '반품양품화', '박스', '작업Y', '작업비'];
-  var body = rows.map(function(x){ return [by === 'date' ? dLabel(x.key) : x.key, x.cnt, x.aj, x.etc, x.plt, x.k.parcel, x.k.in, x.k.out, x.k.etc, x.k.ret, x.box, x.workY, x.fee]; });
+  var head = [GRP_LABEL[by], '건수', 'AJ', '우체국·기타', '파렛트 계', '택배출고', '입고', '출고', '기타', '반품양품화', '박스', '작업 유', '작업비'];
+  var body = rows.map(function(x){ return [by === 'date' ? x.key : x.key, x.cnt, x.aj, x.etc, x.plt, x.k.parcel, x.k.in, x.k.out, x.k.etc, x.k.ret, x.box, x.workY, x.fee]; });
   var tk = { parcel: 0, in: 0, out: 0, etc: 0, ret: 0 }; a.forEach(function(r){ tk[r.kind] += (r.aj || 0) + (r.etc || 0); });
   var foot = ['합계', T.cnt, T.aj, T.etc, T.plt, tk.parcel, tk.in, tk.out, tk.etc, tk.ret, T.box, T.workY, T.fee];
   return { head: head, body: body, foot: foot };
 }
+var statSort = null;   /* { i: 열 번호, d: 1|-1 } — null 이면 기본 순서 */
 function renderStat(a, r){
-  if (!a.length){ $('listBox').innerHTML = '<div class="card empty">집계할 기록이 없습니다.</div>'; return; }
+  if (!a.length){ $('listBox').innerHTML = '<div class="card empty">집계할 기록이 없습니다.' + (Object.keys(flt).some(function(k){ return flt[k]; }) ? '<br>필터를 확인하세요.' : '') + '</div>'; return; }
   var M = statMatrix(a);
-  var h = '<div class="tbl-wrap"><table class="t grp-tbl" id="mainTbl"><thead><tr>' + M.head.map(function(x, i){ return '<th' + (i ? ' style="text-align:right"' : '') + '>' + x + '</th>'; }).join('') + '</tr></thead><tbody>' +
+  if (statSort) M.body.sort(function(p, q){ var A = p[statSort.i], B = q[statSort.i]; return (typeof A === 'number' ? A - B : String(A).localeCompare(String(B), 'ko')) * statSort.d; });
+  if ($('grpBy').value === 'date') M.body.forEach(function(row){ row[0] = dLabel(row[0]); });
+  var h = '<div class="tbl-wrap"><table class="t grp-tbl" id="mainTbl"><thead><tr>' + M.head.map(function(x, i){ return '<th class="si" data-i="' + i + '"' + (i ? ' style="text-align:right"' : '') + '>' + x + (statSort && statSort.i === i ? '<span class="ar">' + (statSort.d > 0 ? '▲' : '▼') + '</span>' : '') + '</th>'; }).join('') + '</tr></thead><tbody>' +
     M.body.map(function(row){ return '<tr>' + row.map(function(v, i){ return i ? '<td class="n"' + (i === 4 ? ' style="color:var(--y)"' : '') + '>' + (v ? fmt(v) : '') + '</td>' : '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') +
     '</tbody><tfoot><tr>' + M.foot.map(function(v, i){ return i ? '<td class="n">' + fmt(v) + '</td>' : '<td>' + v + '</td>'; }).join('') + '</tr></tfoot></table></div>' +
     '<div class="note" style="margin-top:.4rem">택배출고·입고·출고·기타·반품양품화 열은 파렛트 수(AJ+우체국·기타)입니다. 위에서 건 필터가 통계에도 적용됩니다.</div>';
   $('listBox').innerHTML = h;
+  $('listBox').querySelectorAll('th.si').forEach(function(th){ th.addEventListener('click', function(){
+    var i = +th.dataset.i; statSort = statSort && statSort.i === i ? (statSort.d < 0 ? { i: i, d: 1 } : null) : { i: i, d: i ? -1 : 1 }; render();
+  }); });
 }
 
 /* ─────────── 내보내기 ─────────── */
 function blank(v){ return v ? v : ''; }                         /* 0·빈값은 공란 */
 function listMatrix(a){
   var head = ['날짜', '구분', '업체', '창고', 'AJ', '우체국·기타', '파렛트 계', '박스', '작업', '작업비', '비고', '기록자'];
-  var body = a.map(function(x){ return [x.date, KIND[x.kind] || x.kind, x.vendor || '', x.wh || '', blank(x.aj), blank(x.etc), blank((x.aj || 0) + (x.etc || 0)), blank(x.box), x.work || '', blank(x.fee), x.memo || '', x.by || '']; });
+  var body = a.map(function(x){ return [x.date, KIND[x.kind] || x.kind, x.vendor || '', x.wh || '', blank(x.aj), blank(x.etc), blank((x.aj || 0) + (x.etc || 0)), blank(x.box), x.work === 'Y' ? '유' : '무', blank(x.fee), x.memo || '', x.by || '']; });
   var T = totals(a);
-  return { head: head, body: body, foot: ['합계', T.cnt + '건', '', '', T.aj, T.etc, T.plt, T.box, T.workY ? 'Y ' + T.workY : '', blank(T.fee), '', ''] };
+  return { head: head, body: body, foot: ['합계', T.cnt + '건', '', '', T.aj, T.etc, T.plt, T.box, T.workY ? '유 ' + T.workY : '', blank(T.fee), '', ''] };
 }
 
 /* ── 기존 「화물 입출고내역.xls」 양식 ──
@@ -621,7 +743,7 @@ function buildLedgerSheet(a){
   var rows = a.slice().sort(function(x, y){ return x.date.localeCompare(y.date) || (x.at || 0) - (y.at || 0); });
   var aoa = FEE_BLOCK.map(function(r){ return r.slice(); }).concat([XL_HEAD]);
   rows.forEach(function(x){
-    aoa.push([xlSerial(x.date), KIND[x.kind] || x.kind, x.vendor || '', blank(x.box), blank((x.aj || 0) + (x.etc || 0)), x.work || '', blank(x.fee), x.memo || '', x.by || '', x.wh || '', blank(x.aj), blank(x.etc)]);
+    aoa.push([xlSerial(x.date), KIND[x.kind] || x.kind, x.vendor || '', blank(x.box), blank((x.aj || 0) + (x.etc || 0)), x.work === 'Y' ? '유' : '무', blank(x.fee), x.memo || '', x.by || '', x.wh || '', blank(x.aj), blank(x.etc)]);
   });
   var ws = XLSX.utils.aoa_to_sheet(aoa);
   var won = '_-"₩"* #,##0_-;\\-"₩"* #,##0_-;_-"₩"* "-"_-;_-@_-';
@@ -699,9 +821,9 @@ function importXlsx(file){
           if (!aj && !et) et = plt;                                                     /* 파렛트수만 있으면 '기타'로 */
           var k = kindOf(kt);
           if (k === 'etc' && kt && kt !== '기타') memo = '[' + kt + '] ' + memo;
-          var w = String(g(r, 'work') || '').trim().toUpperCase();
+          var w = String(g(r, 'work') || '').trim().toUpperCase(); w = /^(Y|유|O|○|1|YES)$/.test(w) ? 'Y' : '';   /* 공란·N·무 = 무 */
           out.push({ date: date, kind: k, vendor: vendor, wh: String(g(r, 'wh') || '').trim(), aj: aj, etc: et, box: box,
-            work: w === 'Y' || w === 'N' ? w : '', fee: fee, memo: memo.trim(), by: String(g(r, 'by') || '').trim() });
+            work: w, fee: fee, memo: memo.trim(), by: String(g(r, 'by') || '').trim() });
         });
         if (!out.length) throw new Error('올릴 기록이 없습니다');
         var ds = out.map(function(r){ return r.date; }).sort(), from = ds[0], to = ds[ds.length - 1];
@@ -764,8 +886,9 @@ function exportXlsx(){
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, buildLedgerSheet(a), SHEET_NAME);          /* 기존 입출고내역.xls 와 같은 양식 */
     var cur = $('grpBy').value;
-    ['date', 'vendor', 'wh', 'kind'].forEach(function(by){
+    ['vendor', 'date', 'wh', 'kind'].forEach(function(by){
       $('grpBy').value = by; var M = statMatrix(a);
+      if (by === 'date') M.body.forEach(function(row){ row[0] = dLabel(row[0]); });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([M.head].concat(M.body, [M.foot])), GRP_LABEL[by] + '통계');
     });
     $('grpBy').value = cur;
@@ -779,7 +902,6 @@ $('fDate').value = today();
 setKind('parcel');
 setPer('today');
 attachAC($('fVendor'), 'vendor', function(){ focusNext('vendor'); });
-attachAC($('fWh'), 'wh', function(){ $('fAJ').focus(); });
 
 WMSync.init('cargo_log', { requireAuth: true });
 WMSync.onAuth(function(st){
@@ -788,6 +910,7 @@ WMSync.onAuth(function(st){
   me = st.user; gid = st.groupId; db = firebase.database();
   base = db.ref('wms_sync/groups/' + gid + '/cargo');
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
+  loadWarehouses();
   base.child('dict').on('value', function(s){
     var d = s.val() || {}; dict = { vendor: {}, wh: {} };
     ['vendor', 'wh'].forEach(function(t){ Object.keys(d[t] || {}).forEach(function(k){ var v = d[t][k]; dict[t][v.name || k] = v; }); });
