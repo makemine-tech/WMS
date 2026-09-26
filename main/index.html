@@ -809,6 +809,20 @@ body{
         <div class="app-eng">EXCEL MERGE</div>
       </a>
 
+      <!-- 급여관리 — 숨김. 슈퍼관리자로 로그인된 경우에만 아래 스크립트가 보이게 한다 (페이지 자체도 2중 인증) -->
+      <a class="app-tile" id="tilePayroll" style="display:none" target="_blank" rel="noopener" href="payroll.html">
+        <div class="app-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="6" width="18" height="13" rx="2"/>
+            <path d="M8 6V4h8v2"/>
+            <circle cx="12" cy="12.5" r="2.2"/>
+            <path d="M12 14.7V17"/>
+          </svg>
+        </div>
+        <div class="app-name">급여관리 🔒</div>
+        <div class="app-eng">PAYROLL</div>
+      </a>
+
     </div>
   </div>
 
@@ -874,6 +888,32 @@ body{
 </div>
 
 <script>
+/* 숨김 메뉴 — 슈퍼관리자로 로그인돼 있으면 급여관리 타일을 드러낸다.
+   화면 표시만 담당하고, 실제 보호는 payroll.html 의 2중 인증 + DB 규칙이 한다.
+   첫 화면 로딩을 늦추지 않도록 페이지가 다 뜬 뒤 SDK 를 싣는다. */
+(function(){
+  function load(src){ return new Promise(function(ok, no){ var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
+  function reveal(){
+    var V = 'https://www.gstatic.com/firebasejs/10.13.2/';
+    var chain = (window.firebase && firebase.auth) ? Promise.resolve()
+      : load(V + 'firebase-app-compat.js').then(function(){ return load(V + 'firebase-auth-compat.js'); }).then(function(){ return load(V + 'firebase-database-compat.js'); });
+    chain.then(function(){
+      if (!firebase.apps.length) firebase.initializeApp({
+        apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI", authDomain:"makewon.com",
+        databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId:"makechango-wms", appId:"1:333385336098:web:94f07492421965ab32917b" });
+      firebase.auth().onAuthStateChanged(function(u){
+        if (!u) return;
+        firebase.database().ref('superadmins/' + u.uid).get().then(function(s){
+          if (s.exists()) document.getElementById('tilePayroll').style.display = '';
+        }).catch(function(){});
+      });
+    }).catch(function(){});
+  }
+  if (document.readyState === 'complete') setTimeout(reveal, 300);
+  else window.addEventListener('load', function(){ setTimeout(reveal, 300); });
+})();
+
 /* CLOCK */
 (function(){
   function tick(){
