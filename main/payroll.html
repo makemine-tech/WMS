@@ -132,7 +132,9 @@ table.list tr.left td{opacity:.5}
 .fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.6rem .8rem}
 .fg label{display:flex;flex-direction:column;gap:.25rem;font-size:11.5px;color:var(--mu)}
 .fg label.full{grid-column:1/-1}
+.fgrp{grid-column:1/-1;display:flex;flex-direction:column;gap:.25rem;font-size:11.5px;color:var(--mu)}
 .fg input,.fg select,.fg textarea{width:100%}
+.fg input[type=checkbox]{width:auto;flex:none}
 .fsec{font-size:12px;font-weight:800;color:var(--b);margin:1rem 0 .5rem;letter-spacing:.04em}
 .chks{display:flex;gap:.9rem;flex-wrap:wrap;font-size:13px}
 .chks label{display:flex;gap:.3rem;align-items:center;color:var(--tx);flex-direction:row}
@@ -288,7 +290,7 @@ table.list tr.left td{opacity:.5}
         <select id="attEmp"></select>
         <span id="attBadge"></span>
         <span class="sp"></span>
-        <button class="btn btn-sm" onclick="attFillSched()" title="비어 있는 소정근무일에 기본 출퇴근 시각을 채웁니다">⚡ 소정근무로 채우기</button>
+        <button class="btn btn-sm" onclick="attFillSched()" title="근무패턴·기간을 골라 출퇴근 시각을 채웁니다">⚡ 소정근무로 채우기</button>
         <label class="btn btn-sm" style="cursor:pointer">📥 출퇴근기록 가져오기<input type="file" accept=".xlsx,.xls,.csv" class="hide" onchange="attImport(this.files[0]);this.value=''"></label>
         <button class="btn btn-p" id="attSaveBtn" onclick="saveAtt()">💾 저장</button>
       </div>
@@ -622,7 +624,31 @@ function saveSettings(){ return putEnc('settings', S.settings); }
 function empById(id){ for (var i = 0; i < S.employees.length; i++) if (S.employees[i].id === id) return S.employees[i]; return null; }
 function calcOpt(ym){ return { ym: ym, stab: S.company.stab || 'lt150', accidentRate: num(S.company.accidentRate) / 100 }; }
 /* 확정된 달은 확정 당시 스냅샷, 작성 중인 달은 현재 사원정보로 계산 */
-function rowEmp(run, row){ return (run.status === 'closed' && row.empSnap) ? row.empSnap : (empById(row.empId) || row.empSnap || {}); }
+function rowEmp(run, row){ return (run.status === 'closed' && row.empSnap) ? row.empSnap : ce(empById(row.empId) || row.empSnap || {}); }
+
+/* ── 소정근무 스케줄: 회사 기본 → 근무패턴 → 개인(직접 입력) 순으로 결정 ── */
+var BASE_SCHED = { in: '10:00', out: '19:00', brkFrom: '13:00', brkTo: '14:00', days: [1, 2, 3, 4, 5] };
+function companySched(){ return Object.assign({}, BASE_SCHED, S.company.sched || {}); }
+function patterns(){ return S.settings.patterns || []; }
+function findPattern(id){ return patterns().filter(function(p){ return p.id === id; })[0] || null; }
+function schedModeOf(e){ return e.schedMode || (e.sched && e.sched.in ? 'custom' : 'company'); }
+function effSched(e){
+  var base = companySched(), mode = schedModeOf(e), p, name;
+  if (mode === 'custom'){ p = e.sched || base; name = '개인'; }
+  else if (mode === 'pattern' && findPattern(e.patternId)){ p = findPattern(e.patternId); name = p.name; }
+  else { p = base; name = '회사 기본'; }
+  var days = (e.schedDays && e.schedDays.length) ? e.schedDays : ((p.days && p.days.length) ? p.days : base.days);
+  var s = { in: p.in || base.in, out: p.out || base.out, brkFrom: p.brkFrom || '', brkTo: p.brkTo || '', days: days, name: name };
+  if (!s.brkFrom || !s.brkTo){ s.brkFrom = s.brkTo = ''; s.brk = p.brk != null && p.brk !== '' ? num(p.brk) : 60; }
+  return s;
+}
+/* 계산용 사본 — sched 를 확정값으로 채워 계산 엔진에 넘긴다 */
+function ce(e){ return Object.assign({}, e, { sched: effSched(e), schedMode: 'custom' }); }
+function schedText(s){
+  s = s || {};
+  var b = (s.brkFrom && s.brkTo) ? ' · 휴게 ' + s.brkFrom + '~' + s.brkTo : ' · 휴게 ' + (s.brk != null ? s.brk : 60) + '분';
+  return (s.in || '') + '~' + (s.out || '') + b;
+}
 function rowRes(run, row){ return (run.status === 'closed' && row.res) ? row.res : C.calcRow(rowEmp(run, row), row, calcOpt(run.ym)); }
 
 function enterApp(){
@@ -825,7 +851,7 @@ function otNotes(e, row){
 function attSummaryFor(ym, e){
   var doc = S.att[ym], days = doc && doc.days && doc.days[e.id];
   if (!days || !Object.keys(days).length) return null;
-  return C.monthSummary(days, e, ym, S.settings);
+  return C.monthSummary(days, ce(e), ym, S.settings);
 }
 function applyAttToRun(){
   if (!curRun || curRun.status === 'closed') return;
@@ -935,7 +961,7 @@ function renderAttSummary(ym, list){
   var T = { workDays:0, workMin:0, otMin:0, nightMin:0, holMin:0, absent:0, leave:0 };
   list.forEach(function(e){
     var days = (curAtt.days || {})[e.id], has = days && Object.keys(days).length;
-    var m = C.monthSummary(days || {}, e, ym, S.settings);
+    var m = C.monthSummary(days || {}, ce(e), ym, S.settings);
     Object.keys(T).forEach(function(k){ T[k] += m[k]; });
     var lv = u5 ? null : C.leaveInfo(e, today, leaveUsedFn(e.id));
     h += '<tr class="click" onclick="attSel=\'' + e.id + '\';renderAtt()"><td><b>' + esc(e.name) + '</b>' + (has ? '' : ' <span class="note">기록 없음</span>') + (e.otMode === 'fixed' ? ' <span class="note">포괄</span>' : '') + '</td>' +
@@ -954,10 +980,10 @@ function renderAttSummary(ym, list){
 
 function attTypeOpts(v){ return Object.keys(C.DAY_TYPES).map(function(k){ return '<option value="' + k + '"' + ((v || 'work') === k ? ' selected' : '') + '>' + C.DAY_TYPES[k].label + '</option>'; }).join(''); }
 function renderAttDays(ym, e){
-  var days = attDays(e.id), sc = C.schedOf(e), y = +ym.slice(0,4), mo = +ym.slice(5,7), last = new Date(y, mo, 0).getDate();
+  var days = attDays(e.id), sc = C.schedOf(ce(e)), y = +ym.slice(0,4), mo = +ym.slice(5,7), last = new Date(y, mo, 0).getDate();
   var list = attEmps(ym), idx = list.findIndex(function(x){ return x.id === e.id; });
   var h = '<div class="bar no-print" style="margin-bottom:.5rem"><button class="btn btn-sm" ' + (idx > 0 ? 'onclick="attSel=\'' + list[idx - 1].id + '\';renderAtt()"' : 'disabled') + '>← 이전</button>' +
-    '<b>' + esc(e.name) + '</b><span class="note">소정 ' + sc.in + '~' + sc.out + ' · 휴게 ' + sc.brk + '분 · ' + sc.days.map(function(d){ return W_KO.charAt(d); }).join('') + (e.otMode === 'fixed' ? ' · 고정 연장수당' : '') + '</span>' +
+    '<b>' + esc(e.name) + '</b><span class="note">' + esc(effSched(e).name) + ' ' + esc(schedText(sc)) + ' · ' + sc.days.map(function(d){ return W_KO.charAt(d); }).join('') + (e.otMode === 'fixed' ? ' · 고정 연장수당' : '') + '</span>' +
     '<button class="btn btn-sm" ' + (idx < list.length - 1 ? 'onclick="attSel=\'' + list[idx + 1].id + '\';renderAtt()"' : 'disabled') + '>다음 →</button></div>';
   h += '<div class="att-wrap"><table class="att"><thead><tr><th>날짜</th><th>구분</th><th>출근</th><th>퇴근</th><th>휴게(분)</th><th>근로</th><th>연장</th><th>야간</th><th>휴일</th><th>비고</th></tr></thead><tbody>';
   for (var d = 1; d <= last; d++){
@@ -973,7 +999,7 @@ function renderAttDays(ym, e){
       '<td class="v" data-c="work"></td><td class="v ot" data-c="ot"></td><td class="v nt" data-c="night"></td><td class="v hl" data-c="hol"></td><td class="warn" data-c="memo"></td></tr>';
   }
   h += '</tbody><tfoot><tr><td colspan="5" style="text-align:right;font-weight:700;padding:.5rem">이달 합계</td><td class="v" data-t="work"></td><td class="v ot" data-t="ot"></td><td class="v nt" data-t="night"></td><td class="v hl" data-t="hol"></td><td data-t="memo" class="warn"></td></tr></tfoot></table></div>';
-  h += '<div class="note" style="margin-top:.5rem">휴게를 비워두면 체류 8시간 30분 이상 → 소정 휴게(' + Math.max(60, sc.brk) + '분), 4시간 초과 → 30분으로 자동 계산합니다. 빨간 날짜 = 일요일·공휴일(휴일근로), 파란 날짜 = 휴무일(연장근로).</div>';
+  h += '<div class="note" style="margin-top:.5rem">휴게를 비워두면 ' + (sc.brkFrom ? '휴게시간(' + sc.brkFrom + '~' + sc.brkTo + ')을 온전히 지난 날은 그만큼 빼고, 휴게시간 중에 출근·퇴근한 날은' : '체류 8시간 30분 이상은 ' + Math.max(60, sc.brk) + '분,') + ' 법정 최소(4시간 초과 30분 · 8시간 30분 이상 60분)를 뺍니다. 휴게 칸에 분을 적으면 그 값이 우선합니다.<br>빨간 날짜 = 일요일·공휴일(휴일근로), 파란 날짜 = 휴무일(연장근로). [패턴] 표시 = 그날만 다른 근무패턴.</div>';
   $('attBody').innerHTML = h;
   var tb = $('attBody').querySelector('tbody');
   tb.addEventListener('change', function(ev){
@@ -988,10 +1014,11 @@ function renderAttDays(ym, e){
   updateAttDays(ym, e);
 }
 function updateAttDays(ym, e){
-  var m = C.monthSummary(attDays(e.id), e, ym, S.settings), tb = $('attBody');
+  var m = C.monthSummary(attDays(e.id), ce(e), ym, S.settings), tb = $('attBody');
   Object.keys(m.daily).forEach(function(dd){
     var r = m.daily[dd], tr = tb.querySelector('tr[data-d="' + dd + '"]'); if (!tr) return;
     var ot = r.kind === 'rest' ? r.workMin : (r.kind === 'work' ? (r.otMin || 0) : 0), hl = r.kind === 'holiday' ? r.workMin : 0, memo = [];
+    var rec = attDays(e.id)[dd]; if (rec && rec.pat) memo.push('[' + rec.pat.name + ']');
     if (r.late) memo.push('지각 ' + r.late + '분'); if (r.early) memo.push('조퇴 ' + r.early + '분'); if (r.absent) memo.push('결근');
     tr.querySelector('[data-c="work"]').textContent = hm(r.workMin);
     tr.querySelector('[data-c="ot"]').textContent = hm(ot);
@@ -1007,20 +1034,52 @@ function updateAttDays(ym, e){
   ft.querySelector('[data-t="memo"]').textContent = [m.lateCnt ? '지각 ' + m.lateCnt + '회' : '', m.absent ? '결근 ' + m.absent + '일' : '', m.leave ? '연차 ' + m.leave + '일' : ''].filter(Boolean).join(' · ');
 }
 
+/* 소정근무로 채우기 — 대상·근무패턴·기간·덮어쓰기를 골라 채운다.
+   '사원별 기본'이 아닌 패턴으로 채운 날은 rec.pat 에 그 패턴을 남겨 휴게·지각 판정도 그 패턴으로 한다. */
 function attFillSched(){
-  var ym = curAtt.ym, y = +ym.slice(0,4), mo = +ym.slice(5,7), last = new Date(y, mo, 0).getDate(), today = todayStr();
+  var ym = curAtt.ym, last = new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate(), today = todayStr();
+  var endD = ym + '-' + String(last).padStart(2, '0'); if (today.slice(0, 7) === ym) endD = today;
+  var who = attSel === '__all' ? '재직자 전체 (' + attEmps(ym).length + '명)' : esc(empById(attSel).name);
+  $('modalRoot').innerHTML = '<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px"><h3>⚡ 소정근무로 채우기</h3>' +
+    '<div class="fg">' +
+      '<label class="full">대상<input value="' + who + '" disabled></label>' +
+      '<label class="full">근무 패턴<select id="flPat"><option value="">사원별 기본 스케줄 (사원 정보에 설정된 것)</option>' +
+        '<option value="__co">회사 기본 · ' + esc(schedText(companySched())) + '</option>' +
+        patterns().map(function(p){ return '<option value="' + p.id + '">' + esc(p.name) + ' · ' + esc(schedText(p)) + '</option>'; }).join('') + '</select></label>' +
+      '<label>시작일<input type="date" id="flFrom" value="' + ym + '-01" min="' + ym + '-01" max="' + ym + '-' + last + '"></label>' +
+      '<label>종료일<input type="date" id="flTo" value="' + endD + '" min="' + ym + '-01" max="' + ym + '-' + last + '"></label>' +
+      '<div class="chks" style="grid-column:1/-1"><label><input type="checkbox" id="flOver">이미 입력된 날도 덮어쓰기 (연차·결근 등 구분이 있는 날은 그대로)</label></div>' +
+      '<div class="chks" style="grid-column:1/-1"><label><input type="checkbox" id="flRest">휴무일·휴일도 채우기 (토·일·공휴일 특근)</label></div>' +
+    '</div><div class="note" style="margin-top:.6rem">근무패턴은 [설정 → 근무 패턴]에서 만들고 고칩니다. 예: 성수기 09:00~20:00, 단축근무 10:00~16:00.</div>' +
+    '<div class="modal-ft"><button class="btn" onclick="closeModal()">취소</button><button class="btn btn-p" onclick="doFillSched()">채우기</button></div></div></div>';
+}
+function doFillSched(){
+  var ym = curAtt.ym, y = +ym.slice(0,4), mo = +ym.slice(5,7);
+  var pv = $('flPat').value, from = $('flFrom').value, to = $('flTo').value, over = $('flOver').checked, rest = $('flRest').checked;
+  if (!from || !to || from > to){ toast('기간을 확인하세요'); return; }
+  var pat = pv === '__co' ? Object.assign({ name: '회사 기본' }, companySched()) : (pv ? findPattern(pv) : null);
   var targets = attSel === '__all' ? attEmps(ym) : [empById(attSel)], n = 0;
   targets.forEach(function(e){
-    var sc = C.schedOf(e), days = attDays(e.id);
-    for (var d = 1; d <= last; d++){
+    var own = effSched(e), days = attDays(e.id);
+    var useP = pat && !(pat.in === own.in && pat.out === own.out && (pat.brkFrom || '') === own.brkFrom && (pat.brkTo || '') === own.brkTo) ? pat : null;
+    var s = useP || own;
+    for (var d = +from.slice(8); d <= +to.slice(8); d++){
       var dd = String(d).padStart(2, '0'), date = ym + '-' + dd, dow = new Date(y, mo - 1, d).getDay();
-      if (date > today || days[dd] || C.holidayName(date, S.settings) || sc.days.indexOf(dow) < 0) continue;
+      var workday = own.days.indexOf(dow) >= 0 && !C.holidayName(date, S.settings);
+      if (!workday && !rest) continue;
       if ((e.joined && date < e.joined) || (e.left && date > e.left)) continue;
-      days[dd] = { in: sc.in, out: sc.out }; n++;
+      var rec = days[dd];
+      if (rec && (rec.type && rec.type !== 'work')) continue;             /* 연차·결근 등은 건드리지 않음 */
+      if (rec && (rec.in || rec.out) && !over) continue;
+      rec = rec || {};
+      rec.in = s.in; rec.out = s.out; delete rec.brk;
+      if (useP) rec.pat = { name: useP.name, in: useP.in, out: useP.out, brkFrom: useP.brkFrom || '', brkTo: useP.brkTo || '', brk: useP.brk }; else delete rec.pat;
+      days[dd] = rec; n++;
     }
   });
-  if (!n){ toast('채울 빈 근무일이 없습니다'); return; }
-  setAttDirty(true); renderAtt(); toast(n + '일을 소정근무로 채웠습니다 — 다른 날만 고친 뒤 저장하세요');
+  closeModal();
+  if (!n){ toast('채울 날이 없습니다 (이미 입력됐거나 휴무일)'); return; }
+  setAttDirty(true); renderAtt(); toast(n + '일을 채웠습니다' + (pat ? ' · ' + pat.name : '') + ' — 다른 날만 고친 뒤 저장하세요');
 }
 function saveAtt(){
   if (!curAtt) return;
@@ -1135,7 +1194,7 @@ function renderEmp(){
 function openEmp(id){
   var e = id ? JSON.parse(JSON.stringify(empById(id))) : { id: uid(), fam: 1, kids: 0, taxPct: 100, ex: {}, defaults: {} };
   e.ex = e.ex || {}; e.defaults = e.defaults || {};
-  var d = e.defaults, sc = C.schedOf(e);
+  var d = e.defaults, sc = effSched(e), smode = schedModeOf(e);
   function inp(k, l, v, type, extra){ return '<label>' + l + '<input data-f="' + k + '" type="' + (type || 'text') + '" value="' + esc(v == null ? '' : v) + '"' + (extra || '') + '></label>'; }
   function money(k, l){ return '<label>' + l + '<input data-d="' + k + '" inputmode="numeric" value="' + esc(fmtB(d[k])) + '"></label>'; }
   var h = '<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>' + (id ? '사원 정보 — ' + esc(e.name) : '사원 등록') + '</h3>' +
@@ -1151,36 +1210,56 @@ function openEmp(id){
       inp('kids', '그중 8~20세 자녀 수', e.kids, 'number', ' min="0" max="10"') +
       '<label>원천징수 비율<select data-f="taxPct">' + [80,100,120].map(function(p){ return '<option' + (+e.taxPct === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select></label>' +
       '<label>신고 보수월액 (선택)<input data-f="reportWage" inputmode="numeric" value="' + esc(fmtB(e.reportWage)) + '" placeholder="비우면 매월 과세급여"></label>' +
-      '<label class="full">자동계산 제외<div class="chks">' +
+      '<div class="fgrp">자동계산 제외<div class="chks">' +
         [['tax','소득세'],['pension','국민연금'],['health','건강보험(+요양)'],['ltc','장기요양만'],['emp','고용보험']].map(function(x){ return '<label><input type="checkbox" data-x="' + x[0] + '"' + (e.ex[x[0]] ? ' checked' : '') + '>' + x[1] + '</label>'; }).join('') +
-      '</div></label>' +
-      '<label class="full">두루누리 사회보험 지원<div class="chks"><label><input type="checkbox" data-f="durunuri"' + (e.durunuri ? ' checked' : '') + '>적용 (10인 미만 · 월보수 270만원 미만 · 최대 36개월 · 국민연금·고용보험 80%)</label>' +
-        '<label>지원 시작월 <input type="month" data-f="durunuriFrom" value="' + esc(e.durunuriFrom || '') + '" style="width:auto"></label></div></label>' +
+      '</div></div>' +
+      '<div class="fgrp">두루누리 사회보험 지원<div class="chks"><label><input type="checkbox" data-f="durunuri"' + (e.durunuri ? ' checked' : '') + '>적용 (10인 미만 · 월보수 270만원 미만 · 최대 36개월 · 국민연금·고용보험 80%)</label>' +
+        '<label>지원 시작월 <input type="month" data-f="durunuriFrom" value="' + esc(e.durunuriFrom || '') + '" style="width:auto"></label></div></div>' +
     '</div><div class="fsec">근무 스케줄 · 연장수당</div><div class="fg">' +
-      '<label>출근<input type="time" data-s="in" value="' + esc(sc.in) + '"></label>' +
-      '<label>퇴근<input type="time" data-s="out" value="' + esc(sc.out) + '"></label>' +
-      '<label>휴게 (분)<input type="number" data-s="brk" min="0" value="' + esc(sc.brk) + '"></label>' +
+      '<label>근무 스케줄<select id="empSchedMode">' +
+        '<option value="company"' + (smode === 'company' ? ' selected' : '') + '>회사 기본 (' + esc(schedText(companySched())) + ')</option>' +
+        patterns().map(function(p){ return '<option value="p:' + p.id + '"' + (smode === 'pattern' && e.patternId === p.id ? ' selected' : '') + '>패턴 · ' + esc(p.name) + ' (' + esc(schedText(p)) + ')</option>'; }).join('') +
+        '<option value="custom"' + (smode === 'custom' ? ' selected' : '') + '>직접 입력</option></select></label>' +
+      '<label class="cs">출근<input type="time" data-s="in" value="' + esc(sc.in) + '"></label>' +
+      '<label class="cs">퇴근<input type="time" data-s="out" value="' + esc(sc.out) + '"></label>' +
+      '<label class="cs">휴게 시작<input type="time" data-s="brkFrom" value="' + esc(sc.brkFrom || '') + '"></label>' +
+      '<label class="cs">휴게 끝<input type="time" data-s="brkTo" value="' + esc(sc.brkTo || '') + '"></label>' +
       '<label>연장수당 방식<select data-f="otMode"><option value="hours"' + (e.otMode !== 'fixed' ? ' selected' : '') + '>근태 시간으로 계산</option><option value="fixed"' + (e.otMode === 'fixed' ? ' selected' : '') + '>고정(포괄) 금액 — 부족분만 경고</option></select></label>' +
-      '<label class="full">근무 요일<div class="chks">' + ['일','월','화','수','목','금','토'].map(function(d, i){ return '<label><input type="checkbox" data-dow="' + i + '"' + (sc.days.indexOf(i) >= 0 ? ' checked' : '') + '>' + d + '</label>'; }).join('') +
-        '<span class="note" id="empMh"></span></div></label>' +
+      '<div class="fgrp">근무 요일<div class="chks">' + ['일','월','화','수','목','금','토'].map(function(d, i){ return '<label><input type="checkbox" data-dow="' + i + '"' + (sc.days.indexOf(i) >= 0 ? ' checked' : '') + '>' + d + '</label>'; }).join('') +
+        '<span class="note" id="empMh"></span></div></div>' +
     '</div><div class="fsec">매월 기본값 (새 달 만들 때 채워짐)</div><div class="fg">' +
       money('base', '기본급') + money('pos', '직책수당') + money('ot', '고정 연장수당 (포괄일 때)') + money('etc', '기타수당') + money('meal', '식대 (비과세 20만)') + money('car', '자가운전보조금 (비과세 20만)') + money('child', '보육수당 (비과세 20만)') + money('dedEtc', '기타공제') +
     '</div><div class="fsec">메모</div><div class="fg"><label class="full"><textarea data-f="memo" rows="2">' + esc(e.memo || '') + '</textarea></label></div>' +
     '<div class="modal-ft">' + (id ? '<button class="btn btn-r" style="margin-right:auto" onclick="deleteEmp(\'' + e.id + '\')">삭제</button>' : '') +
       '<button class="btn" onclick="closeModal()">취소</button><button class="btn btn-p" id="empSave">저장</button></div></div></div>';
   $('modalRoot').innerHTML = h;
-  function readSched(){
-    var m = $('modalRoot'), s = { days: [] };
-    m.querySelectorAll('[data-s]').forEach(function(el){ s[el.dataset.s] = el.dataset.s === 'brk' ? num(el.value) : el.value; });
-    m.querySelectorAll('[data-dow]').forEach(function(el){ if (el.checked) s.days.push(+el.dataset.dow); });
-    return s;
+  /* 모드에 따라 스케줄을 풀어 보여 주고, 직접 입력일 때만 시각 칸을 연다 */
+  function readMode(){
+    var v = $('empSchedMode').value, days = [];
+    $('modalRoot').querySelectorAll('[data-dow]').forEach(function(el){ if (el.checked) days.push(+el.dataset.dow); });
+    var o = { schedMode: v === 'custom' ? 'custom' : v.indexOf('p:') === 0 ? 'pattern' : 'company', patternId: v.indexOf('p:') === 0 ? v.slice(2) : '', schedDays: days };
+    if (o.schedMode === 'custom'){
+      o.sched = { days: days };
+      $('modalRoot').querySelectorAll('[data-s]').forEach(function(el){ o.sched[el.dataset.s] = el.value; });
+    }
+    return o;
   }
-  function showMh(){ $('empMh').textContent = '→ 월 소정근로 ' + C.monthHours(readSched()) + '시간 (통상시급·최저임금 기준)'; }
-  $('modalRoot').querySelectorAll('[data-s],[data-dow]').forEach(function(el){ el.addEventListener('change', showMh); });
-  showMh();
+  function syncSched(fromSelect){
+    var o = readMode(), custom = o.schedMode === 'custom';
+    $('modalRoot').querySelectorAll('.cs').forEach(function(l){ l.style.display = custom ? '' : 'none'; });
+    var s = effSched(Object.assign({}, e, o));
+    if (fromSelect && custom) return showMh(s);
+    if (!custom) $('modalRoot').querySelectorAll('[data-s]').forEach(function(el){ el.value = s[el.dataset.s] || ''; });
+    showMh(s);
+  }
+  function showMh(s){ $('empMh').textContent = '→ ' + schedText(s) + ' · 월 소정근로 ' + C.monthHours(s) + '시간 (통상시급·최저임금 기준)'; }
+  $('empSchedMode').addEventListener('change', function(){ syncSched(true); });
+  $('modalRoot').querySelectorAll('[data-s],[data-dow]').forEach(function(el){ el.addEventListener('change', function(){ syncSched(false); }); });
+  syncSched(false);
   $('empSave').onclick = function(){
-    var m = $('modalRoot');
-    e.sched = readSched();
+    var m = $('modalRoot'), o = readMode();
+    e.schedMode = o.schedMode; e.patternId = o.patternId; e.schedDays = o.schedDays;
+    if (o.schedMode === 'custom') e.sched = o.sched; else delete e.sched;
     m.querySelectorAll('[data-f]').forEach(function(el){
       var k = el.dataset.f;
       if (el.type === 'checkbox') e[k] = el.checked;
@@ -1323,7 +1402,7 @@ function renderSet(){
     '<label>급여 지급일 (익월 N일)<input data-c="payDay" type="number" min="1" max="31" value="' + esc(co.payDay || '') + '"></label>' +
     '<label>고용안정·직능 (사업주)<select data-c="stab">' + Object.keys(C.STAB_LABEL).map(function(k){ return '<option value="' + k + '"' + ((co.stab || 'lt150') === k ? ' selected' : '') + '>' + C.STAB_LABEL[k] + '</option>'; }).join('') + '</select></label>' +
     '<label>산재보험 요율 % (사업장 고지 요율)<input data-c="accidentRate" type="number" step="0.001" value="' + esc(co.accidentRate || '') + '" placeholder="예: 0.9"></label>' +
-    '<label class="full"><span class="chks"><label><input type="checkbox" data-c="under5"' + (co.under5 ? ' checked' : '') + '>상시근로자 5인 미만 사업장 — 연장·야간·휴일 가산수당, 연차휴가 미적용</label></span></label>' +
+    '<div class="chks" style="grid-column:1/-1"><label><input type="checkbox" data-c="under5"' + (co.under5 ? ' checked' : '') + '>상시근로자 5인 미만 사업장 — 연장·야간·휴일 가산수당, 연차휴가 미적용</label></div>' +
     '</div><div class="modal-ft"><button class="btn btn-p" onclick="saveSet()">회사 정보 저장</button></div></div>';
 
   h += '<div class="card" style="margin-top:.8rem"><div class="fsec" style="margin-top:0">적용 요율 — ' + esc(R.label) + '</div><div style="overflow:auto"><table class="list"><tbody>' +
@@ -1335,6 +1414,8 @@ function renderSet(){
     '<tr><td>두루누리</td><td>월보수 270만원 미만 · 80%</td><td class="note">10인 미만 사업장 신규가입 · 최대 36개월</td></tr>' +
     '<tr><td>비과세 한도</td><td>식대 · 자가운전보조금 · 보육수당 각 월 20만원</td><td class="note">최저임금 ' + fmt(R.minWage) + '원/시간 (월 209시간 ' + fmt(R.minWage * 209) + '원)</td></tr>' +
     '</tbody></table></div><div class="note" style="margin-top:.5rem">요율이 바뀌면 코드의 한 곳(payroll_calc.js RATES)만 고치면 전체에 반영됩니다. 확정한 달은 확정 당시 금액이 유지됩니다.</div></div>';
+
+  h += '<div class="card" style="margin-top:.8rem"><div class="fsec" style="margin-top:0">🕘 근무 패턴 (소정근무 · 점심시간)</div><div id="patBox"></div></div>';
 
   h += '<div class="card" style="margin-top:.8rem"><div class="fsec" style="margin-top:0">📅 공휴일 (근태 휴일근로 판정)</div>' +
     '<div class="bar"><select id="holYear" onchange="renderHolidays()">' + [2026, 2027].map(function(y){ return '<option' + (y === holYear ? ' selected' : '') + '>' + y + '</option>'; }).join('') + '</select>' +
@@ -1353,6 +1434,7 @@ function renderSet(){
     '<div class="note" style="margin-bottom:.6rem">예전 「급여관리 프로그램 (.xlsm)」 파일을 고르면 <b>사원정보 · 회사정보 · 급여입력(현재 월)</b>을 읽어 옵니다. 파일은 이 브라우저 안에서만 읽히고 서버로 올라가지 않습니다. 같은 이름의 사원은 정보를 갱신합니다.</div>' +
     '<input type="file" accept=".xlsm,.xlsx,.xls" onchange="importExcel(this.files[0]);this.value=\'\'"><div id="impBox" style="margin-top:.6rem"></div></div>';
   $('setBody').innerHTML = h;
+  renderPatterns();
   renderHolidays();
 
   ref('audit').orderByChild('t').limitToLast(15).get().then(function(s){
@@ -1365,6 +1447,69 @@ function saveSet(){
   document.querySelectorAll('[data-c]').forEach(function(el){ var k = el.dataset.c; S.company[k] = el.type === 'checkbox' ? el.checked : (k === 'payDay' || k === 'accidentRate') ? num(el.value) : el.value.trim(); });
   saveCompany().then(function(){ $('coName').textContent = S.company.name || ''; toast('저장했습니다'); });
 }
+/* ── 근무 패턴: 0행 = 회사 기본(모든 사원의 기본값), 그 아래 = 골라 쓰는 패턴 ── */
+function renderPatterns(){
+  var co = companySched(), W = '일월화수목금토';
+  function row(p, i, isBase){
+    var used = isBase ? S.employees.filter(function(e){ return !e.left && schedModeOf(e) === 'company'; }).length
+                      : S.employees.filter(function(e){ return !e.left && schedModeOf(e) === 'pattern' && e.patternId === p.id; }).length;
+    return '<tr data-pi="' + (isBase ? 'base' : i) + '">' +
+      '<td>' + (isBase ? '<b>회사 기본</b>' : '<input data-p="name" value="' + esc(p.name) + '" style="width:110px">') + '</td>' +
+      '<td><input type="time" data-p="in" value="' + esc(p.in || '') + '"></td><td><input type="time" data-p="out" value="' + esc(p.out || '') + '"></td>' +
+      '<td><input type="time" data-p="brkFrom" value="' + esc(p.brkFrom || '') + '"></td><td><input type="time" data-p="brkTo" value="' + esc(p.brkTo || '') + '"></td>' +
+      '<td class="note" data-mh></td><td class="note">' + used + '명</td>' +
+      '<td>' + (isBase ? '' : '<button class="rm" title="삭제" onclick="delPattern(' + i + ')">✕</button>') + '</td></tr>';
+  }
+  var h = '<div style="overflow:auto"><table class="list"><thead><tr><th>이름</th><th>출근</th><th>퇴근</th><th>휴게 시작</th><th>휴게 끝</th><th>하루 근로</th><th>사용</th><th></th></tr></thead><tbody>' +
+    row(co, -1, true) + patterns().map(function(p, i){ return row(p, i, false); }).join('') + '</tbody></table></div>' +
+    '<div class="bar" style="margin-top:.5rem"><span class="lbl">회사 기본 근무요일</span><span class="chks">' +
+      W.split('').map(function(d, i){ return '<label><input type="checkbox" data-cd="' + i + '"' + (co.days.indexOf(i) >= 0 ? ' checked' : '') + '>' + d + '</label>'; }).join('') + '</span>' +
+    '<span class="sp"></span><button class="btn btn-sm" onclick="addPattern()">+ 패턴 추가</button><button class="btn btn-p btn-sm" onclick="savePatterns()">근무 패턴 저장</button></div>' +
+    '<div class="note">· <b>회사 기본</b>은 사원 정보에서 따로 정하지 않은 모든 사원에게 적용됩니다.<br>' +
+    '· 패턴(예: 성수기·단축근무·오전조)은 ① 사원 정보에서 그 사원의 기본으로 고르거나, ② 근태의 [⚡ 소정근무로 채우기]에서 기간을 정해 그때만 쓸 수 있습니다.<br>' +
+    '· 휴게 시간대를 비우면 휴게 60분으로 봅니다. 저장하면 작성 중인 달의 계산에 바로 반영되고, 확정한 달은 바뀌지 않습니다.</div>';
+  $('patBox').innerHTML = h;
+  $('patBox').querySelectorAll('tbody tr').forEach(updPatMh);
+  $('patBox').onchange = function(ev){ var tr = ev.target.closest('tbody tr'); if (tr) updPatMh(tr); };
+}
+function readPatRow(tr){ var p = {}; tr.querySelectorAll('[data-p]').forEach(function(el){ p[el.dataset.p] = el.value.trim(); }); return p; }
+function updPatMh(tr){
+  var p = readPatRow(tr), s = C.schedOf({ sched: { in: p.in, out: p.out, brkFrom: p.brkFrom, brkTo: p.brkTo, brk: (p.brkFrom && p.brkTo) ? undefined : 60, days: [1,2,3,4,5] } });
+  var min = (function(){ var a = C.toMin(s.in), b = C.toMin(s.out); if (a == null || b == null) return 0; if (b <= a) b += 1440; return b - a - s.brk; })();
+  tr.querySelector('[data-mh]').textContent = min > 0 ? hm(min) + (min > 480 ? ' ⚠8h초과' : '') : '';
+}
+function collectPatterns(){
+  var base = null, list = [], old = patterns();
+  $('patBox').querySelectorAll('tbody tr').forEach(function(tr){
+    var p = readPatRow(tr), i = tr.dataset.pi;
+    if (i === 'base') base = p;
+    else list.push(Object.assign({ id: (old[+i] && old[+i].id) || ('p' + Date.now().toString(36) + i) }, p, { name: p.name || '패턴' }));
+  });
+  var days = []; $('patBox').querySelectorAll('[data-cd]').forEach(function(el){ if (el.checked) days.push(+el.dataset.cd); });
+  return { base: Object.assign(base, { days: days.length ? days : [1,2,3,4,5] }), list: list };
+}
+function addPattern(){
+  var c = collectPatterns(); S.company.sched = c.base;
+  c.list.push({ id: 'p' + Date.now().toString(36), name: '새 패턴', in: '09:00', out: '18:00', brkFrom: '12:00', brkTo: '13:00' });
+  S.settings.patterns = c.list; renderPatterns();
+  toast('행을 추가했습니다 — 이름·시간을 정하고 [근무 패턴 저장]');
+}
+function delPattern(i){
+  var c = collectPatterns(), p = c.list[i];
+  var users = S.employees.filter(function(e){ return schedModeOf(e) === 'pattern' && e.patternId === p.id; });
+  if (!confirm('「' + p.name + '」 패턴을 삭제할까요?' + (users.length ? '\n이 패턴을 쓰는 사원 ' + users.length + '명은 회사 기본으로 돌아갑니다.' : ''))) return;
+  c.list.splice(i, 1); S.company.sched = c.base; S.settings.patterns = c.list; renderPatterns();
+  toast('삭제했습니다 — [근무 패턴 저장]을 눌러야 반영됩니다');
+}
+function savePatterns(){
+  var c = collectPatterns();
+  var bad = [c.base].concat(c.list).filter(function(p){ return !p.in || !p.out || (!!p.brkFrom !== !!p.brkTo); });
+  if (bad.length){ toast('출근·퇴근은 필수이고, 휴게는 시작·끝을 모두 넣거나 모두 비워 주세요'); return; }
+  S.company.sched = c.base; S.settings.patterns = c.list;
+  Promise.all([saveCompany(), saveSettings()]).then(function(){ renderPatterns(); toast('근무 패턴을 저장했습니다'); })
+    .catch(function(e){ toast('저장 실패: ' + e.message); });
+}
+
 var holYear = 2026;
 function holidaysOf(y){
   var st = S.settings, out = {}, base = C.HOLIDAYS[y] || {};

@@ -267,12 +267,25 @@
     return y[date] || '';
   }
 
-  var DEFAULT_SCHED = { in: '09:00', out: '18:00', brk: 60, days: [1, 2, 3, 4, 5] };
-  function schedOf(emp) {
-    var s = (emp && emp.sched) || {};
-    return { in: s.in || DEFAULT_SCHED.in, out: s.out || DEFAULT_SCHED.out, brk: s.brk != null && s.brk !== '' ? n(s.brk) : DEFAULT_SCHED.brk, days: s.days && s.days.length ? s.days : DEFAULT_SCHED.days };
-  }
+  /* 소정근무 = 출근·퇴근 + 휴게 시간대(brkFrom~brkTo, 예: 점심 13~14시) 또는 휴게 분(brk).
+     화면 쪽에서 회사 기본 → 근무패턴 → 개인 설정 순으로 풀어 emp.sched 에 넣어 준다. */
+  var DEFAULT_SCHED = { in: '10:00', out: '19:00', brkFrom: '13:00', brkTo: '14:00', days: [1, 2, 3, 4, 5] };
   function toMin(t) { if (!t) return null; var m = String(t).match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function winLen(f, t) { var a = toMin(f), b = toMin(t); if (a == null || b == null) return 0; if (b <= a) b += 1440; return b - a; }
+  function schedOf(emp) {
+    var s = (emp && emp.sched) || {}, D = DEFAULT_SCHED;
+    var blank = !s.in && !s.out;
+    var brkFrom = s.brkFrom || (blank && s.brk == null ? D.brkFrom : ''), brkTo = s.brkTo || (blank && s.brk == null ? D.brkTo : '');
+    var brk = (brkFrom && brkTo) ? winLen(brkFrom, brkTo) : (s.brk != null && s.brk !== '' ? n(s.brk) : 60);
+    return { in: s.in || D.in, out: s.out || D.out, brkFrom: brkFrom, brkTo: brkTo, brk: brk, days: s.days && s.days.length ? s.days : D.days, name: s.name || '' };
+  }
+  /* 휴게 시간대를 [a,b] 체류 중에 온전히 지났으면 그 길이, 아니면 0 (자정 넘김 포함).
+     점심 도중에 퇴근·출근했다면 점심을 쉬지 않은 것으로 본다 → 법정 최소만 적용 */
+  function overlapWin(a, b, f, t) {
+    var wf = toMin(f), wt = toMin(t); if (wf == null || wt == null) return 0; if (wt <= wf) wt += 1440;
+    var tot = 0; for (var d = -1440; d <= 1440; d += 1440) if (a <= wf + d && b >= wt + d) tot += wt - wf;
+    return tot;
+  }
   function schedDailyH(s) { var a = toMin(s.in), b = toMin(s.out); if (a == null || b == null) return 8; if (b <= a) b += 1440; return Math.max(0, (b - a - n(s.brk)) / 60); }
   /* 월 소정근로시간 = (주 소정시간 + 주휴시간) × 365/7/12 — 주 40시간이면 209시간 */
   function monthHours(sched) {
@@ -310,12 +323,16 @@
     rec = rec || {};
     var t = DAY_TYPES[rec.type || 'work'] || DAY_TYPES.work, r = { workMin: 0, nightMin: 0, late: 0, early: 0, absent: 0, leave: t.leave || 0, paid: !!t.paid, kind: kind, type: rec.type || 'work' };
     var a = toMin(rec.in), b = toMin(rec.out);
+    if (rec.pat) sched = schedOf({ sched: Object.assign({ days: sched.days }, rec.pat) });   /* 그날만 다른 근무패턴 */
     if (a != null && b != null) {
       if (b <= a) b += 1440;                                   /* 자정 넘김 */
-      /* 휴게 미입력 시 (근로기준법 54조: 4시간 30분, 8시간 1시간 이상)
-         체류 8시간 30분 이상 → 소정 휴게(최소 60분), 4시간 초과 → 30분 */
-      var span = b - a;
-      var brk = rec.brk != null && rec.brk !== '' ? n(rec.brk) : (span >= 510 ? Math.max(60, n(sched.brk)) : (span > 240 ? 30 : 0));
+      /* 휴게 미입력 시: 휴게 시간대가 있으면 실제로 겹친 만큼 빼되,
+         법정 최소(근로기준법 54조 — 4시간 30분, 8시간 1시간)보다 적으면 최소치 적용 */
+      var span = b - a, legal = span >= 510 ? 60 : (span > 240 ? 30 : 0), brk;
+      if (rec.brk != null && rec.brk !== '') brk = n(rec.brk);
+      else if (sched.brkFrom && sched.brkTo) brk = Math.max(overlapWin(a, b, sched.brkFrom, sched.brkTo), legal);
+      else brk = span >= 510 ? Math.max(60, n(sched.brk)) : legal;
+      r.brk = brk;
       r.workMin = Math.max(0, b - a - brk);
       r.nightMin = Math.max(0, nightMinutes(a, b) - (rec.nightBrk ? n(rec.nightBrk) : 0));
       if (kind === 'work' && (rec.type || 'work') === 'work') {
@@ -409,7 +426,7 @@
     incomeTax: incomeTax, calcRow: calcRow, birthFrom: birthFrom, ageAt: ageAt,
     hourly: hourly, overtimePay: overtimePay,
     HOLIDAYS: HOLIDAYS, holidayName: holidayName, DAY_TYPES: DAY_TYPES, DEFAULT_SCHED: DEFAULT_SCHED,
-    schedOf: schedOf, monthHours: monthHours, dayCalc: dayCalc, monthSummary: monthSummary, leaveInfo: leaveInfo, toMin: toMin
+    schedOf: schedOf, overlapWin: overlapWin, monthHours: monthHours, dayCalc: dayCalc, monthSummary: monthSummary, leaveInfo: leaveInfo, toMin: toMin
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.PayrollCalc = api;
