@@ -115,6 +115,9 @@ h1 em{color:var(--g);font-style:normal}
 /* 완료된 카드 스타일 */
 .grp-card.done-card{opacity:.55;border-color:rgba(240,88,88,.3);background:rgba(240,88,88,.04);}
 .grp-card.done-card:hover{opacity:.75;}
+/* 인쇄 묶음 머리줄 */
+.done-bundle{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:1rem 0 .4rem;padding:.5rem .7rem;border-radius:6px;background:rgba(240,88,88,.08);border:1px solid rgba(240,88,88,.3);font-size:.78rem;font-family:var(--mo);color:rgba(240,88,88,.9);}
+.done-bundle-no{font-weight:900;font-size:.85rem;}
 /* 재출력 버튼 */
 .btn-reprint{padding:.35rem .75rem;border-radius:6px;border:1.5px solid rgba(240,88,88,.6);background:transparent;color:rgba(240,88,88,.8);font-size:.72rem;font-weight:700;cursor:pointer;font-family:var(--mo);white-space:nowrap;transition:background .15s;}
 .btn-reprint:hover{background:rgba(240,88,88,.12);}
@@ -1154,46 +1157,43 @@ function toggleDoneList() {
   arrow.textContent = list.classList.contains('open') ? '▼' : '▶';
 }
 
-/* 인쇄완료 목록에 그릴 배열 — 재출력(reprintDone)이 이 배열을 그대로 참조 */
-var doneRenderList = [];
+/* 인쇄완료 목록 = 인쇄 묶음(체크 인쇄 1회 / 개별 인쇄 1회) 단위.
+   먼저 인쇄한 묶음이 위, 나중 묶음이 아래로 쌓임. 묶음 안에는 인쇄 전 목록과 같은 그룹 카드.
+   재출력(reprintBundle / reprintDone)이 이 배열을 그대로 참조 */
+var doneBundles = [];
 /* batch 이력이 있으면 그대로, 없지만 인쇄된 송장이 있으면 송장별로 복원(폴백).
    실시간 동기화로 batches 노드가 비어도 인쇄완료 목록/재출력이 유지되게 함. */
 function pkBuildDoneList(){
-  return pkMergeJobs(pkRawDoneList());
+  return pkBuildBundles(pkRawDoneList());
 }
-/* 한 번에 인쇄한 그룹들(= 체크 인쇄 1회)을 카드 1장으로 합침 → 재출력도 통합 1회.
-   jobId 가 있으면 jobId 기준, 없으면(이전 기록) 같은 사람이 3초 이내 연속 기록한 것끼리 묶음. */
-function pkMergeJobs(raw){
+/* jobId 가 같은 batch 끼리 한 묶음. jobId 없는 이전 기록은 같은 사람이 1.5초 이내 연속 기록한 것끼리
+   (체크 인쇄 1회는 동시에 기록되므로 한 묶음, 따로 누른 인쇄는 각각 묶음) */
+function pkBuildBundles(raw){
   var jobs = [], cur = null, prev = null;
   raw.forEach(function(b){
-    var same = cur && (b.jobId ? b.jobId === cur.jobId
-      : (!prev.jobId && (b.by||'') === (prev.by||'') && Math.abs((prev.ts||0) - (b.ts||0)) <= 3000));
-    if (!same){ cur = { jobId: b.jobId || '', members: [] }; jobs.push(cur); }
-    cur.members.push(b); prev = b;
+    var same = cur && (b.synthetic ? cur.synthetic
+      : b.jobId ? b.jobId === cur.jobId
+      : (!prev.jobId && !prev.synthetic && (b.by||'') === (prev.by||'') && Math.abs((prev.ts||0) - (b.ts||0)) <= 1500));
+    if (!same){ cur = { jobId: b.jobId || '', synthetic: !!b.synthetic, batches: [] }; jobs.push(cur); }
+    cur.batches.push(b); prev = b;
   });
-  return jobs.map(function(j){
-    var m = j.members;
-    if (m.length === 1) return m[0];
-    if (j.jobId) m = m.slice().sort(function(a,b){ return (a.jobSeq||0) - (b.jobSeq||0); });
-    else if (m[0].synthetic) m = m.slice().sort(function(a,b){ return ((a.pages||[])[0]||0) - ((b.pages||[])[0]||0); });
-    var invNums = [], pages = [], seenPg = {}, cust = {}, anyMulti = false, anySingle = false;
+  jobs.forEach(function(j){
+    var m = j.batches;
+    /* 묶음 안 순서 = 인쇄한 카드 순서 */
+    if (j.jobId) m.sort(function(a,b){ return (a.jobSeq||0) - (b.jobSeq||0); });
+    else if (j.synthetic) m.sort(function(a,b){ return ((a.pages||[])[0]||0) - ((b.pages||[])[0]||0); });
+    else m.sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+    var invNums = [], pages = [], seen = {}, ts = 0;
     m.forEach(function(b){
       (b.invNums||[]).forEach(function(n){ invNums.push(n); });
-      (b.pages||[]).forEach(function(p){ if (!seenPg[p]){ seenPg[p]=1; pages.push(p); } });
-      if (b.isMulti) anyMulti = true; else anySingle = true;
-      var cs = b.customerSummary, n = b.invCount || (b.invNums||[]).length;
-      if (cs && cs.kind === 'single') cust[cs.name||'(미상)'] = (cust[cs.name||'(미상)']||0) + n;
-      else if (cs && cs.counts) Object.keys(cs.counts).forEach(function(k){ cust[k] = (cust[k]||0) + cs.counts[k]; });
+      (b.pages||[]).forEach(function(p){ if (!seen[p]){ seen[p]=1; pages.push(p); } });
+      ts = Math.max(ts, b.ts||0);
     });
-    var ck = Object.keys(cust);
-    return {
-      ts: m[0].ts, merged: true, groupCount: m.length,
-      isMulti: anyMulti && !anySingle, mixedKind: anyMulti && anySingle,
-      items: m.slice(0, 3).map(function(b){ return (b.items||[])[0]; }).filter(Boolean),
-      customerSummary: ck.length === 1 ? { kind:'single', name: ck[0] } : (ck.length ? { kind:'mixed', counts: cust } : null),
-      invNums: invNums, invCount: invNums.length, pages: pages
-    };
+    j.ts = ts; j.invNums = invNums; j.invCount = invNums.length; j.pages = pages;
   });
+  /* 먼저 인쇄한 묶음이 위 */
+  jobs.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
+  return jobs;
 }
 function pkRawDoneList(){
   if (printedBatches && printedBatches.length) return printedBatches;
@@ -1213,59 +1213,68 @@ function pkRawDoneList(){
     };
   });
 }
+function doneCardHtml(batch, bi, gi){
+  var isM = batch.isMulti, invCnt = batch.invCount || (batch.invNums||[]).length;
+  var ih = (batch.items||[]).map(function(it){
+    var p=[];
+    if(it.loc&&it.loc!=='—') p.push('<span class="tg tg-l" style="font-size:.67rem">'+escH(it.loc)+'</span>');
+    p.push('<span style="font-size:.84rem">'+escH(it.prd||'—')+'</span>');
+    if(it.qty>1) p.push('<b style="color:var(--y);font-family:var(--mo)">×'+it.qty+'</b>');
+    return '<div style="display:flex;align-items:center;gap:.35rem;padding:.1rem 0">'+p.join('')+'</div>';
+  }).join('');
+  /* 주문처 요약 표시 */
+  var custLabel = '';
+  var cs = batch.customerSummary;
+  if (cs) {
+    if (cs.kind === 'single' && cs.name && cs.name !== '(미상)') {
+      custLabel = '<span class="tg" style="font-size:.65rem;background:rgba(80,140,255,.10);color:#7fb0ff;border:1px solid rgba(80,140,255,.25)">'+escH(cs.name)+'</span>';
+    } else if (cs.kind === 'mixed' && cs.counts) {
+      var kk = Object.keys(cs.counts);
+      custLabel = '<span class="tg" style="font-size:.65rem;background:rgba(200,160,80,.10);color:#e0b878;border:1px solid rgba(200,160,80,.25)">주문처 '+kk.length+'종</span>';
+    }
+  }
+  return '<div class="grp-body" style="position:relative">'+
+      '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
+        '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>'+
+        custLabel+
+        '<span style="font-size:.65rem;color:rgba(240,88,88,.7);font-family:var(--mo)">✓ 인쇄완료</span>'+
+      '</div>'+
+      '<div>'+ih+'</div>'+
+    '</div>'+
+    '<div style="display:flex;flex-direction:column;align-items:center;gap:.4rem;flex-shrink:0;min-width:80px">'+
+      '<div style="text-align:center">'+
+        '<div style="font-family:var(--mo);font-size:2.2rem;font-weight:900;color:rgba(240,88,88,.5);line-height:1">'+invCnt+'</div>'+
+        '<div style="font-size:.63rem;color:var(--mu);font-family:var(--mo)">건</div>'+
+      '</div>'+
+      '<button class="btn-reprint" onclick="reprintDone('+bi+','+gi+')">↺ 재출력</button>'+
+    '</div>';
+}
 function updateDoneSection() {
   var sec  = document.getElementById('doneSection');
   var list = document.getElementById('doneList');
   var cnt  = document.getElementById('doneCnt');
-  doneRenderList = pkBuildDoneList();
-  var doneInvTotal = doneRenderList.reduce(function(s,b){ return s + (b.invCount || (b.invNums||[]).length); }, 0);
-  cnt.textContent = doneInvTotal + '건' + (doneRenderList.length > 1 ? ' · 인쇄 ' + doneRenderList.length + '회' : '');
-  sec.style.display = doneRenderList.length ? '' : 'none';
+  doneBundles = pkBuildDoneList();
+  var doneInvTotal = doneBundles.reduce(function(s,b){ return s + b.invCount; }, 0);
+  cnt.textContent = doneInvTotal + '건' + (doneBundles.length ? ' · ' + doneBundles.length + '묶음' : '');
+  sec.style.display = doneBundles.length ? '' : 'none';
   list.innerHTML = '';
-  doneRenderList.forEach(function(batch, di) {
-    var isM = batch.isMulti, invCnt = batch.invCount || (batch.invNums||[]).length;
-    var card = document.createElement('div');
-    card.className = 'grp-card done-card';
-    card.dataset.invs = (batch.invNums||[]).join('|');
-    var ih = (batch.items||[]).map(function(it){
-      var p=[];
-      if(it.loc&&it.loc!=='—') p.push('<span class="tg tg-l" style="font-size:.67rem">'+escH(it.loc)+'</span>');
-      p.push('<span style="font-size:.84rem">'+escH(it.prd||'—')+'</span>');
-      if(it.qty>1) p.push('<b style="color:var(--y);font-family:var(--mo)">×'+it.qty+'</b>');
-      return '<div style="display:flex;align-items:center;gap:.35rem;padding:.1rem 0">'+p.join('')+'</div>';
-    }).join('');
-    if (batch.merged && batch.groupCount > (batch.items||[]).length)
-      ih += '<div style="font-size:.72rem;color:var(--mu);padding:.1rem 0">… 외 '+(batch.groupCount-(batch.items||[]).length)+'그룹 (총 '+batch.groupCount+'그룹 한번에 인쇄)</div>';
-    var kindTag = batch.mixedKind ? '<span class="tg tg-m" style="font-size:.67rem">합포+단포</span>'
-      : '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>';
-    /* 주문처 요약 표시 */
-    var custLabel = '';
-    var cs = batch.customerSummary;
-    if (cs) {
-      if (cs.kind === 'single' && cs.name && cs.name !== '(미상)') {
-        custLabel = '<span class="tg" style="font-size:.65rem;background:rgba(80,140,255,.10);color:#7fb0ff;border:1px solid rgba(80,140,255,.25)">'+escH(cs.name)+'</span>';
-      } else if (cs.kind === 'mixed' && cs.counts) {
-        var kk = Object.keys(cs.counts);
-        custLabel = '<span class="tg" style="font-size:.65rem;background:rgba(200,160,80,.10);color:#e0b878;border:1px solid rgba(200,160,80,.25)">주문처 '+kk.length+'종</span>';
-      }
-    }
-    card.innerHTML =
-      '<div class="grp-body" style="position:relative">'+
-        '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
-          kindTag+
-          custLabel+
-          '<span style="font-size:.65rem;color:rgba(240,88,88,.7);font-family:var(--mo)">✓ 인쇄완료</span>'+
-        '</div>'+
-        '<div>'+ih+'</div>'+
-      '</div>'+
-      '<div style="display:flex;flex-direction:column;align-items:center;gap:.4rem;flex-shrink:0;min-width:80px">'+
-        '<div style="text-align:center">'+
-          '<div style="font-family:var(--mo);font-size:2.2rem;font-weight:900;color:rgba(240,88,88,.5);line-height:1">'+invCnt+'</div>'+
-          '<div style="font-size:.63rem;color:var(--mu);font-family:var(--mo)">건</div>'+
-        '</div>'+
-        '<button class="btn-reprint" onclick="reprintDone('+di+')">↺ 재출력</button>'+
-      '</div>';
-    list.appendChild(card);
+  doneBundles.forEach(function(bd, bi) {
+    var head = document.createElement('div');
+    head.className = 'done-bundle';
+    var tm = bd.ts ? new Date(bd.ts) : null;
+    var tmStr = tm ? (' · ' + ('0'+tm.getHours()).slice(-2) + ':' + ('0'+tm.getMinutes()).slice(-2)) : (bd.synthetic ? ' · 이전 기록' : '');
+    head.innerHTML =
+      '<span class="done-bundle-no">묶음 '+(bi+1)+'</span>'+
+      '<span>'+bd.invCount+'건 · '+bd.batches.length+'그룹'+tmStr+'</span>'+
+      '<button class="btn-reprint" style="margin-left:auto" onclick="reprintBundle('+bi+')">↺ 묶음 재출력 ('+bd.invCount+'건)</button>';
+    list.appendChild(head);
+    bd.batches.forEach(function(batch, gi){
+      var card = document.createElement('div');
+      card.className = 'grp-card done-card';
+      card.dataset.invs = (batch.invNums||[]).join('|');
+      card.innerHTML = doneCardHtml(batch, bi, gi);
+      list.appendChild(card);
+    });
   });
 }
 
@@ -1570,7 +1579,8 @@ function markInvoicesPrinted(invNums, pages, opts) {
   }).filter(Boolean);
   var custCnt = {};
   freshInvs.forEach(function(i){
-    var c = i.customer || '(미상)';
+    /* Firebase 키에 못 쓰는 문자(. # $ / [ ])가 있으면 batch 기록이 통째로 실패하므로 치환 */
+    var c = String(i.customer || '(미상)').replace(/[.#$\/\[\]]/g, '_');
     custCnt[c] = (custCnt[c]||0) + 1;
   });
   var customerSummary;
@@ -1609,7 +1619,8 @@ function markInvoicesPrinted(invNums, pages, opts) {
 }
 
 /* 페이지 인덱스 배열로 PDF 합본 */
-function buildPdfFromPages(pages, cb, errCb) {
+function buildPdfFromPages(pages, cb, errCb, opts) {
+  opts = opts || {};
   loadPdfLib(function(){
     PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
       return PDFLib.PDFDocument.create().then(function(out){
@@ -1619,7 +1630,7 @@ function buildPdfFromPages(pages, cb, errCb) {
         });
         var topMm = getTopMarginMm(), kinds = kindsByPage();
         var labels = list.map(function(pg, i){
-          return seqPng(kinds[pg] ? kinds[pg] + '종 ' : '', (i + 1) + ' / ' + list.length);
+          return seqPng(kinds[pg] ? kinds[pg] + '종 ' : '', (i + 1) + ' / ' + list.length + (opts.reprint ? ' (재출력)' : ''));
         });
         return Promise.all([out.copyPages(src, list)].concat(labels.map(function(l){ return out.embedPng(l.url); })))
           .then(function(r){
@@ -1661,7 +1672,7 @@ function printGrp(btn) {
     buildPdfFromPages(claimedPages, function(bytes){
       var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
       var done=function(){
-        markInvoicesPrinted(claimed, claimedPages, {});
+        markInvoicesPrinted(claimed, claimedPages, { jobId: Date.now().toString(36) + Math.random().toString(36).slice(2,6) });
         renderGrpList();
         updateDoneSection();
         updateGrpStats();
@@ -1693,16 +1704,24 @@ function pagesForInvNums(invNums, fallbackPages){
 
 
 /* ─────────────── 재출력 (인쇄완료 목록에서) ─────────────── */
-function reprintDone(di) {
-  var batch = doneRenderList[di];
-  if (!batch) return;
+/* 묶음 전체 재출력 */
+function reprintBundle(bi) {
+  var bd = doneBundles[bi];
+  if (bd) reprintPages(bd, '묶음 '+(bi+1)+' 전체 ');
+}
+/* 묶음 안 그룹 1개 재출력 */
+function reprintDone(bi, gi) {
+  var bd = doneBundles[bi];
+  if (bd && bd.batches[gi]) reprintPages(bd.batches[gi], '');
+}
+function reprintPages(batch, label) {
   if (!rawBuffer) {
     alert('PDF 원본이 이 PC 에 없습니다.\n상단/하단의 [PDF 선택] 으로 원본을 한 번 열어주세요.');
     var rb = document.getElementById('reuploadBox'); if (rb) rb.style.display = 'block';
     return;
   }
   if (!batch.pages || !batch.pages.length) { alert('이 항목의 페이지 정보가 없어 재출력할 수 없습니다.'); return; }
-  if (!confirm('송장 '+(batch.invCount || (batch.invNums||[]).length)+'건('+batch.pages.length+'장)을 한번에 재출력합니다.\n프린터 확인 후 진행해주세요.')) return;
+  if (!confirm(label+'송장 '+(batch.invCount || (batch.invNums||[]).length)+'건('+batch.pages.length+'장)을 재출력합니다.\n프린터 확인 후 진행해주세요.')) return;
   buildPdfFromPages(batch.pages, function(bytes){
     var blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob);
     if(location.protocol==='file:'){
@@ -1712,7 +1731,7 @@ function reprintDone(di) {
       var w=window.open(url,'_blank');
       if(w) w.onload=function(){w.print();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
     }
-  });
+  }, null, { reprint: true });
 }
 
 
