@@ -101,6 +101,12 @@ h1 em{color:var(--g);font-style:normal}
 .grp-card.checked{border-color:var(--g);background:rgba(74,240,168,.04)}
 .grp-chk{width:18px;height:18px;cursor:pointer;flex-shrink:0;margin-top:.2rem;accent-color:var(--g)}
 .grp-body{flex:1;min-width:0}
+/* 박스 크기 입력칸 (카드 오른쪽, 건수 왼쪽) */
+.box-inp{align-self:center;flex-shrink:0;width:9rem;height:4.2rem;padding:.3rem .5rem;border-radius:6px;border:1.5px solid rgba(240,88,88,.55);background:transparent;color:var(--tx);font-size:1.5rem;font-weight:800;text-align:center;font-family:var(--mo);outline:none}
+.box-inp:focus{border-color:var(--y);background:rgba(255,200,80,.06)}
+.box-inp::placeholder{color:var(--mu);font-size:.8rem;font-weight:400}
+#boxFltBar{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
+@media (max-width:640px){.box-inp{width:4.5rem;height:3rem;font-size:1.1rem}}
 .grp-prt{padding:.38rem .85rem;border-radius:6px;border:1.5px solid var(--g);background:transparent;color:var(--g);font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--mo);flex-shrink:0;white-space:nowrap}
 .grp-prt:hover{background:rgba(74,240,168,.12)}
 /* STAMP */
@@ -354,6 +360,7 @@ h1 em{color:var(--g);font-style:normal}
     <button class="fb"    id="gf-multi"  onclick="setGFlt('multi',this)">합포만</button>
     <button class="fb"    id="gf-single" onclick="setGFlt('single',this)">단포만</button>
     <button class="fb"    id="gf-search" onclick="toggleInvSearch()">🔍 송장검색</button>
+    <span id="boxFltBar"></span>
     <label style="font-size:.75rem;color:var(--mu);cursor:pointer;display:flex;align-items:center;gap:.3rem;margin-left:auto">
       <input type="checkbox" id="chkAll" onchange="toggleAllChk(this.checked)" style="cursor:pointer;accent-color:var(--g)">전체선택
     </label>
@@ -892,6 +899,79 @@ function buildLocGroups() {
    - 주문처='all' (전체/합포/단포): 상품구성만 키 → 주문처 무관 묶임
    - 주문처='특정': 상품구성+주문처 키 → 주문처별로 쪼개짐
    인쇄된 송장은 항상 제외되어 중복 출력 구조적 차단. */
+function prodKeyOf(items) {
+  return (items||[]).map(function(it){
+    return (it.loc||'—')+'|'+(it.prd||'—')+'|'+(it.qty||1);
+  }).sort().join(';;');
+}
+
+/* ─────────────── 박스 크기 메모 (이 페이지 전용) ───────────────
+   상품구성(prodKey)별로 '30' '45' 같은 박스 크기를 기억. 같은 구성은 다음 작업에서도 그대로.
+   저장: localStorage + (연동 시) wms_sync/groups/{gid}/picking_ez/boxes/{boxKey} */
+var boxSizes = {};      /* { boxKey: '30' } */
+var boxFlt = null;      /* null=박스 필터 없음, ''=미입력, '30' 등 */
+try { boxSizes = JSON.parse(localStorage.getItem('pkBoxSizes') || '{}') || {}; } catch(e){ boxSizes = {}; }
+function boxKeyOf(items) {
+  var s = prodKeyOf(items), h = 5381;
+  for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return 'b' + h.toString(36) + s.length.toString(36);
+}
+function boxOfItems(items) { return boxSizes[boxKeyOf(items)] || ''; }
+/* 송장 표기용: '30' → '30박스 ', 이미 '박스'로 끝나면 그대로 */
+function boxLabel(v) { v = String(v||'').trim(); return v ? (/박스$/.test(v) ? v : v + '박스') + ' ' : ''; }
+var boxSaveTimers = {};
+function setBoxSize(key, val) {
+  val = String(val||'').trim().slice(0, 12);
+  if (val) boxSizes[key] = val; else delete boxSizes[key];
+  try { localStorage.setItem('pkBoxSizes', JSON.stringify(boxSizes)); } catch(e){}
+  clearTimeout(boxSaveTimers[key]);
+  boxSaveTimers[key] = setTimeout(function(){
+    if (pkReady && pkGid && typeof firebase !== 'undefined')
+      firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/boxes/' + key).set(val || null)
+        .catch(function(err){ console.warn('[picking] 박스 저장 실패', err); });
+  }, 400);
+  renderBoxFilter();
+}
+/* 원격 반영: 입력 중인 칸은 건드리지 않고 값만 갱신 */
+function applyRemoteBoxes(v) {
+  boxSizes = v || {};
+  try { localStorage.setItem('pkBoxSizes', JSON.stringify(boxSizes)); } catch(e){}
+  var typing = document.activeElement && document.activeElement.classList.contains('box-inp');
+  if (typing) {
+    document.querySelectorAll('.box-inp').forEach(function(el){
+      if (el !== document.activeElement) el.value = boxSizes[el.dataset.bk] || '';
+    });
+    renderBoxFilter();
+  } else if (typeof renderGrpList === 'function') renderGrpList();
+}
+function setBoxFlt(v) {
+  boxFlt = (boxFlt === v) ? null : v;
+  renderGrpList();
+}
+/* 박스별 필터 버튼: 현재 목록(합포/단포·주문처 필터 반영)에 입력된 값 + 미입력 */
+var boxFltBase = [];
+function renderBoxFilter() {
+  var bar = document.getElementById('boxFltBar');
+  if (!bar) return;
+  var cnt = {}, none = 0;
+  boxFltBase.forEach(function(g){
+    var b = boxOfItems(g.items);
+    if (b) cnt[b] = (cnt[b]||0) + g.invoices.length; else none += g.invoices.length;
+  });
+  var keys = Object.keys(cnt).sort(function(a,b){
+    var na = parseFloat(a), nb = parseFloat(b);
+    if (isFinite(na) && isFinite(nb) && na !== nb) return na - nb;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  if (boxFlt !== null && boxFlt !== '' && !cnt[boxFlt]) boxFlt = null;
+  var btn = function(v, label, n){
+    return '<button class="fb'+(boxFlt === v ? ' on' : '')+'" data-v="'+escH(v).replace(/"/g,'&quot;')+'" onclick="setBoxFlt(this.dataset.v)">'+escH(label)+' <span style="opacity:.6">'+n+'</span></button>';
+  };
+  bar.innerHTML = '<span style="font-size:.72rem;color:var(--mu)">박스별</span>' +
+    keys.map(function(k){ return btn(k, k, cnt[k]); }).join('') +
+    (none ? btn('', '미입력', none) : '');
+}
+
 function getActiveGroups(opts) {
   opts = opts || {};
   var custOpt = opts.custFlt || 'all';
@@ -910,9 +990,7 @@ function getActiveGroups(opts) {
   /* 2. 그룹화 */
   var gmap = {};
   active.forEach(function(inv){
-    var prodKey = inv.items.map(function(it){
-      return (it.loc||'—')+'|'+(it.prd||'—')+'|'+(it.qty||1);
-    }).sort().join(';;');
+    var prodKey = prodKeyOf(inv.items);
     var key = splitByCustomer ? (prodKey + '@@cust=' + (inv.customer||'')) : prodKey;
     if (!gmap[key]) {
       gmap[key] = {
@@ -1354,6 +1432,7 @@ function locateInvoice(n) {
 
 function setGFlt(type, btn) {
   grpFlt = type;
+  if (type === 'all') boxFlt = null;   /* [전체] 는 박스 필터도 해제 */
   ['gf-all','gf-multi','gf-single'].forEach(function(id){
     document.getElementById(id).classList.remove('on');
   });
@@ -1415,6 +1494,10 @@ function renderGrpList() {
   var data = groups;
   if (grpFlt==='multi')  data = data.filter(function(g){ return g.isMulti; });
   if (grpFlt==='single') data = data.filter(function(g){ return !g.isMulti; });
+  /* 박스별 필터 (버튼은 박스 필터 적용 전 목록 기준으로 집계) */
+  boxFltBase = data;
+  renderBoxFilter();
+  if (boxFlt !== null) data = data.filter(function(g){ return boxOfItems(g.items) === boxFlt; });
 
   /* 안내 라벨: 주문처 우선출력일 때 현재 표시 그룹/송장 수 */
   var hint = document.getElementById('custHint');
@@ -1474,6 +1557,7 @@ function renderGrpList() {
         '</div>'+
         '<div>'+ih+'</div>'+
       '</div>'+
+      '<input class="box-inp" type="text" maxlength="12" data-bk="'+boxKeyOf(grp.items)+'" value="'+escH(boxOfItems(grp.items)).replace(/"/g,'&quot;')+'" placeholder="박스" title="박스 크기 (예: 15, 30, 45, 60) — 입력 즉시 저장, 인쇄 시 송장에 30박스 처럼 표기" oninput="setBoxSize(this.dataset.bk,this.value)">'+
       '<div style="display:flex;flex-direction:column;align-items:center;gap:.4rem;flex-shrink:0;min-width:80px">'+
         '<div style="text-align:center">'+
           '<div style="font-family:var(--mo);font-size:2.2rem;font-weight:900;color:'+(isM?'var(--y)':'var(--tx)')+';line-height:1">'+cnt+'</div>'+
@@ -1530,6 +1614,15 @@ function kindsByPage(){
     (inv.items||[]).forEach(function(it){ s[(it.prd && it.prd !== '—') ? it.prd : (it.bc||'') + '|' + (it.loc||'')] = 1; });
     var k = Object.keys(s).length;
     (inv.pages||[]).forEach(function(p){ map[p] = k; });
+  });
+  return map;
+}
+/* 페이지 → 그 송장 상품구성에 적어둔 박스 크기 */
+function boxByPage(){
+  var map = {};
+  (invoices||[]).forEach(function(inv){
+    var b = boxOfItems(inv.items);
+    if (b) (inv.pages||[]).forEach(function(p){ map[p] = b; });
   });
   return map;
 }
@@ -1628,9 +1721,9 @@ function buildPdfFromPages(pages, cb, errCb, opts) {
         pages.forEach(function(pg){
           if (pg<tot && !added[pg]) { added[pg]=1; list.push(pg); }
         });
-        var topMm = getTopMarginMm(), kinds = kindsByPage();
+        var topMm = getTopMarginMm(), kinds = kindsByPage(), boxes = boxByPage();
         var labels = list.map(function(pg, i){
-          return seqPng(kinds[pg] ? kinds[pg] + '종 ' : '', (i + 1) + ' / ' + list.length + (opts.reprint ? ' (재출력)' : ''));
+          return seqPng(boxLabel(boxes[pg]) + (kinds[pg] ? kinds[pg] + '종 ' : ''), (i + 1) + ' / ' + list.length + (opts.reprint ? ' (재출력)' : ''));
         });
         return Promise.all([out.copyPages(src, list)].concat(labels.map(function(l){ return out.embedPng(l.url); })))
           .then(function(r){
@@ -2030,6 +2123,17 @@ function pkAttach(){
       pkLoadRemoteJob(m);
     }
   }, function(err){ console.warn('[picking] meta 읽기 실패', err); });
+
+  /* boxes: 상품구성별 박스 크기 메모 (작업 교체와 무관하게 유지) */
+  firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/boxes').on('value', function(snap){
+    if (!pkReady) return;
+    var v = snap.val();
+    if (v) applyRemoteBoxes(v);
+    else if (Object.keys(boxSizes).length) {
+      /* 원격이 비어 있으면 이 PC 에 적어둔 것을 올려 공유 시작 */
+      snap.ref.set(boxSizes).catch(function(err){ console.warn('[picking] 박스 업로드 실패', err); });
+    }
+  }, function(err){ console.warn('[picking] boxes 읽기 실패', err); });
 
   /* printed: 실시간 인쇄완료 집합 */
   pkBase.child('printed').on('value', function(snap){
