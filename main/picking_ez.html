@@ -1722,8 +1722,16 @@ function buildPdfFromPages(pages, cb, errCb, opts) {
           if (pg<tot && !added[pg]) { added[pg]=1; list.push(pg); }
         });
         var topMm = getTopMarginMm(), kinds = kindsByPage(), boxes = boxByPage();
+        /* 순번은 그룹(카드)별로 따로: opts.segments = [[그룹1 페이지들], [그룹2 페이지들], ...]
+           → 2종 1/5 … 5/5, 3종 1/5 … 5/5. segments 없으면 전체 1개 그룹 */
+        var seq = {};
+        (opts.segments && opts.segments.length ? opts.segments : [list]).forEach(function(seg){
+          var own = seg.filter(function(pg){ return added[pg] && !seq[pg]; });
+          own.forEach(function(pg, i){ seq[pg] = { n: i + 1, total: own.length }; });
+        });
         var labels = list.map(function(pg, i){
-          return seqPng(boxLabel(boxes[pg]) + (kinds[pg] ? kinds[pg] + '종 ' : ''), (i + 1) + ' / ' + list.length + (opts.reprint ? ' (재출력)' : ''));
+          var s = seq[pg] || { n: i + 1, total: list.length };
+          return seqPng(boxLabel(boxes[pg]) + (kinds[pg] ? kinds[pg] + '종 ' : ''), s.n + ' / ' + s.total + (opts.reprint ? ' (재출력)' : ''));
         });
         return Promise.all([out.copyPages(src, list)].concat(labels.map(function(l){ return out.embedPng(l.url); })))
           .then(function(r){
@@ -1824,7 +1832,9 @@ function reprintPages(batch, label) {
       var w=window.open(url,'_blank');
       if(w) w.onload=function(){w.print();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
     }
-  }, null, { reprint: true });
+  }, null, { reprint: true,
+             /* 묶음 재출력도 그룹(카드)별로 순번 */
+             segments: batch.batches ? batch.batches.map(function(b){ return b.pages || []; }) : null });
 }
 
 
@@ -1891,7 +1901,9 @@ function printChecked() {
         if(w) w.onload=function(){w.print();markAll();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
         else { pkReleasePrint(allClaimed); msg.className='msg er'; msg.textContent='❌ 팝업이 차단되었습니다'; }
       }
-    }, function(e){ pkReleasePrint(allClaimed); msg.className='msg er';msg.textContent='❌ '+e.message;});
+    }, function(e){ pkReleasePrint(allClaimed); msg.className='msg er';msg.textContent='❌ '+e.message;},
+       /* 순번은 선택한 그룹(카드)별로 1부터 */
+       { segments: kept.map(function(k){ return k.pages; }) });
   });
 }
 
