@@ -1527,16 +1527,21 @@ function kindsByPage(){
 /* '2종 12 / 200' 을 90° 오른쪽으로 돌린(위→아래로 읽는) PNG 로 그림.
    pdf-lib 기본 글꼴은 한글이 안 돼서 캔버스로 그려 이미지로 넣음 */
 var SEQ_PT = 16, SEQ_SCALE = 4;
-function seqPng(txt){
-  var px = SEQ_PT * SEQ_SCALE, font = '900 ' + px + 'px "Malgun Gothic","Apple SD Gothic Neo",sans-serif';
+/* kindTxt('2종 ') 는 작게, seqTxt('12 / 200') 는 크게 — 밑줄(baseline) 맞춤 */
+function seqPng(kindTxt, seqTxt){
+  var px = SEQ_PT * SEQ_SCALE, kpx = Math.round(px * 0.6);
+  var fam = '"Malgun Gothic","Apple SD Gothic Neo",sans-serif';
+  var fBig = '900 ' + px + 'px ' + fam, fSmall = '700 ' + kpx + 'px ' + fam;
   var c = document.createElement('canvas'), ctx = c.getContext('2d');
-  ctx.font = font;
-  var tw = Math.ceil(ctx.measureText(txt).width), th = Math.ceil(px * 1.2);
+  ctx.font = fSmall; var kw = kindTxt ? Math.ceil(ctx.measureText(kindTxt).width) : 0;
+  ctx.font = fBig;   var sw = Math.ceil(ctx.measureText(seqTxt).width);
+  var tw = kw + sw, th = Math.ceil(px * 1.2), base = Math.round(px * 0.98);
   c.width = th; c.height = tw;
   ctx = c.getContext('2d');
   ctx.translate(th, 0); ctx.rotate(Math.PI / 2);
-  ctx.font = font; ctx.fillStyle = '#000'; ctx.textBaseline = 'top';
-  ctx.fillText(txt, 0, px * 0.1);
+  ctx.fillStyle = '#000'; ctx.textBaseline = 'alphabetic';
+  if (kindTxt){ ctx.font = fSmall; ctx.fillText(kindTxt, 0, base); }
+  ctx.font = fBig; ctx.fillText(seqTxt, kw, base);
   return { url: c.toDataURL('image/png'), w: th / SEQ_SCALE, h: tw / SEQ_SCALE };
 }
 /* 송장 오른쪽 끝에 세로로 '종류 순번 / 전체' 인쇄 (아래 끝 = 하단 안내문 근처) */
@@ -1617,8 +1622,8 @@ function buildPdfFromPages(pages, cb, errCb) {
         });
         var topMm = getTopMarginMm(), kinds = kindsByPage();
         var labels = list.map(function(pg, i){
-          return (kinds[pg] ? kinds[pg] + '종 ' : '') + (i + 1) + ' / ' + list.length;
-        }).map(seqPng);
+          return seqPng(kinds[pg] ? kinds[pg] + '종 ' : '', (i + 1) + ' / ' + list.length);
+        });
         return Promise.all([out.copyPages(src, list)].concat(labels.map(function(l){ return out.embedPng(l.url); })))
           .then(function(r){
             var ps = r[0];
