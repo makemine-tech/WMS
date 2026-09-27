@@ -415,6 +415,7 @@ var invoices  = [];      // { invNum, totalQty, pages[], items[], customer } —
 var locGroups = [];      // 피킹리스트
 /* 송장 단위 인쇄 추적 (그룹화는 렌더 시점에 동적으로 계산) */
 var printedInvNums = {}; // { invNum: 1 } — 인쇄완료 송장 집합
+var printedMeta = {};    // { invNum: {ts, by} } — 원격 선점 시각 (인쇄 1회 = 같은 ts)
 var printedBatches = []; // [{ts, isMulti, items, customerSummary, invNums, pages}] — 인쇄 단위 스냅샷
 var curFlt = 'all', grpFlt = 'all', custFlt = 'all';
 var SESSION_KEY = 'ez_picking_v1';
@@ -1237,30 +1238,31 @@ function toggleDoneList() {
 
 /* 인쇄완료 목록 = 인쇄 묶음(체크 인쇄 1회 / 개별 인쇄 1회) 단위.
    먼저 인쇄한 묶음이 위, 나중 묶음이 아래로 쌓임. 묶음 안에는 인쇄 전 목록과 같은 그룹 카드.
-   재출력(reprintBundle / reprintDone)이 이 배열을 그대로 참조 */
+   재출력(reprintBundle)이 이 배열을 그대로 참조 */
 var doneBundles = [];
-/* batch 이력이 있으면 그대로, 없지만 인쇄된 송장이 있으면 송장별로 복원(폴백).
-   실시간 동기화로 batches 노드가 비어도 인쇄완료 목록/재출력이 유지되게 함. */
 function pkBuildDoneList(){
   return pkBuildBundles(pkRawDoneList());
 }
-/* jobId 가 같은 batch 끼리 한 묶음. jobId 없는 이전 기록은 같은 사람이 1.5초 이내 연속 기록한 것끼리
-   (체크 인쇄 1회는 동시에 기록되므로 한 묶음, 따로 누른 인쇄는 각각 묶음) */
+/* jobId 가 같은 batch 끼리 한 묶음. jobId 없는 이전 batch 는 같은 사람이 1.5초 이내 연속 기록한 것끼리 */
 function pkBuildBundles(raw){
-  var jobs = [], cur = null, prev = null;
-  raw.forEach(function(b){
-    var same = cur && (b.synthetic ? cur.synthetic
-      : b.jobId ? b.jobId === cur.jobId
-      : (!prev.jobId && !prev.synthetic && (b.by||'') === (prev.by||'') && Math.abs((prev.ts||0) - (b.ts||0)) <= 1500));
-    if (!same){ cur = { jobId: b.jobId || '', synthetic: !!b.synthetic, batches: [] }; jobs.push(cur); }
-    cur.batches.push(b); prev = b;
+  var map = {}, order = [];
+  var put = function(key, b){
+    if (!map[key]){ map[key] = { jobId: key, batches: [] }; order.push(key); }
+    map[key].batches.push(b);
+  };
+  raw.filter(function(b){ return b.jobId; }).forEach(function(b){ put(b.jobId, b); });
+  var legacy = raw.filter(function(b){ return !b.jobId; }).sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+  var li = 0, prev = null;
+  legacy.forEach(function(b){
+    if (!prev || (b.by||'') !== (prev.by||'') || Math.abs((prev.ts||0) - (b.ts||0)) > 1500) li++;
+    put('L' + li, b); prev = b;
   });
+  var jobs = order.map(function(k){ return map[k]; });
   jobs.forEach(function(j){
     var m = j.batches;
-    /* 묶음 안 순서 = 인쇄한 카드 순서 */
-    if (j.jobId) m.sort(function(a,b){ return (a.jobSeq||0) - (b.jobSeq||0); });
-    else if (j.synthetic) m.sort(function(a,b){ return ((a.pages||[])[0]||0) - ((b.pages||[])[0]||0); });
-    else m.sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+    /* 묶음 안 순서 = 인쇄한 카드 순서 (이전 batch 는 ts 역순이 카드 순서) */
+    if (j.jobId.charAt(0) === 'L') m.sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+    else m.sort(function(a,b){ return (a.jobSeq||0) - (b.jobSeq||0); });
     var invNums = [], pages = [], seen = {}, ts = 0;
     m.forEach(function(b){
       (b.invNums||[]).forEach(function(n){ invNums.push(n); });
@@ -1268,28 +1270,54 @@ function pkBuildBundles(raw){
       ts = Math.max(ts, b.ts||0);
     });
     j.ts = ts; j.invNums = invNums; j.invCount = invNums.length; j.pages = pages;
+    j.restored = m.some(function(b){ return b.synthetic; });
   });
   /* 먼저 인쇄한 묶음이 위 */
   jobs.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
   return jobs;
 }
+/* 인쇄 이력(batches) + 이력이 없는 인쇄완료 송장은 선점 시각(printed.ts)으로 묶음 복원.
+   인쇄 1회에 선점한 송장은 모두 같은 ts → 한 묶음, 그 안은 상품구성별 그룹 카드 */
 function pkRawDoneList(){
-  if (printedBatches && printedBatches.length) return printedBatches;
-  var nums = Object.keys(printedInvNums || {}).filter(function(n){ return printedInvNums[n]; });
-  if (!nums.length) return [];
-  return nums.map(function(n){
-    var inv = null;
-    for (var i=0; i<invoices.length; i++){ if (invoices[i].invNum === n){ inv = invoices[i]; break; } }
-    inv = inv || {};
-    return {
-      ts: 0, synthetic: true,
-      isMulti: (inv.totalQty||0) >= 2,
-      items: inv.items || [],
-      customerSummary: inv.customer ? { kind:'single', name: inv.customer } : null,
-      invNums: [n], invCount: 1,
-      pages: inv.pages || []
-    };
+  var list = (printedBatches || []).slice();
+  var inBatch = {};
+  list.forEach(function(b){ (b.invNums||[]).forEach(function(n){ inBatch[n] = 1; }); });
+  var nums = Object.keys(printedInvNums || {}).filter(function(n){ return printedInvNums[n] && !inBatch[n]; });
+  if (!nums.length) return list;
+  var invByNum = {};
+  invoices.forEach(function(i){ invByNum[i.invNum] = i; });
+  var runs = {};   /* 'ts|by' → { prodKey → group } */
+  nums.forEach(function(n){
+    var inv = invByNum[n] || { invNum: n, items: [], pages: [] };
+    var m = (printedMeta && printedMeta[n]) || { ts: 0, by: '' };
+    var rk = m.ts + '|' + m.by;
+    var run = runs[rk] || (runs[rk] = { ts: m.ts, by: m.by, groups: {} });
+    var pk = prodKeyOf(inv.items);
+    var g = run.groups[pk] || (run.groups[pk] = { items: inv.items || [], isMulti: (inv.totalQty||0) >= 2, invs: [], cust: {} });
+    g.invs.push(inv);
+    var c = inv.customer || '(미상)'; g.cust[c] = (g.cust[c]||0) + 1;
   });
+  Object.keys(runs).forEach(function(rk){
+    var run = runs[rk];
+    /* 인쇄 전 목록과 같은 순서: 합포 우선, 건수 많은 순 */
+    var gs = Object.keys(run.groups).map(function(k){ return run.groups[k]; });
+    gs.sort(function(a,b){ if (a.isMulti !== b.isMulti) return a.isMulti ? -1 : 1; return b.invs.length - a.invs.length; });
+    gs.forEach(function(g, gi){
+      var pages = [];
+      g.invs.slice().sort(function(a,b){ return ((a.pages||[])[0]||0) - ((b.pages||[])[0]||0); })
+        .forEach(function(i){ (i.pages||[]).forEach(function(p){ pages.push(p); }); });
+      var ck = Object.keys(g.cust);
+      list.push({
+        ts: run.ts, by: run.by, synthetic: true,
+        jobId: 'P' + rk, jobSeq: gi,
+        isMulti: g.isMulti, items: g.items,
+        customerSummary: ck.length === 1 ? { kind:'single', name: ck[0] } : { kind:'mixed', counts: g.cust },
+        invNums: g.invs.map(function(i){ return i.invNum; }), invCount: g.invs.length,
+        pages: pages
+      });
+    });
+  });
+  return list;
 }
 function doneCardHtml(batch, bi, gi){
   var isM = batch.isMulti, invCnt = batch.invCount || (batch.invNums||[]).length;
@@ -1324,7 +1352,6 @@ function doneCardHtml(batch, bi, gi){
         '<div style="font-family:var(--mo);font-size:2.2rem;font-weight:900;color:rgba(240,88,88,.5);line-height:1">'+invCnt+'</div>'+
         '<div style="font-size:.63rem;color:var(--mu);font-family:var(--mo)">건</div>'+
       '</div>'+
-      '<button class="btn-reprint" onclick="reprintDone('+bi+','+gi+')">↺ 재출력</button>'+
     '</div>';
 }
 function updateDoneSection() {
@@ -1340,7 +1367,7 @@ function updateDoneSection() {
     var head = document.createElement('div');
     head.className = 'done-bundle';
     var tm = bd.ts ? new Date(bd.ts) : null;
-    var tmStr = tm ? (' · ' + ('0'+tm.getHours()).slice(-2) + ':' + ('0'+tm.getMinutes()).slice(-2)) : (bd.synthetic ? ' · 이전 기록' : '');
+    var tmStr = tm ? (' · ' + ('0'+tm.getHours()).slice(-2) + ':' + ('0'+tm.getMinutes()).slice(-2)) : (bd.restored ? ' · 이전 기록' : '');
     head.innerHTML =
       '<span class="done-bundle-no">묶음 '+(bi+1)+'</span>'+
       '<span>'+bd.invCount+'건 · '+bd.batches.length+'그룹'+tmStr+'</span>'+
@@ -1663,8 +1690,12 @@ function extractCardPayload(cardChkEl) {
 /* 미인쇄 송장 중 invNum 목록을 인쇄완료로 마킹하고 batch 기록 */
 function markInvoicesPrinted(invNums, pages, opts) {
   opts = opts || {};
-  /* 안전장치: 이미 인쇄된 송장이 있으면 중복 등록 방지 */
-  var fresh = invNums.filter(function(n){ return !printedInvNums[n]; });
+  /* 안전장치: 이미 인쇄 이력(batch)에 있는 송장은 중복 등록 방지.
+     ※ printedInvNums 로 거르면 안 됨 — 인쇄 클릭 시 선점 트랜잭션이 먼저 printed 에 올리므로
+       여기 올 때쯤엔 전부 '인쇄됨'이라 batch 가 한 건도 기록되지 않던 버그가 있었음 */
+  var batched = {};
+  (printedBatches || []).forEach(function(b){ (b.invNums||[]).forEach(function(n){ batched[n] = 1; }); });
+  var fresh = invNums.filter(function(n){ return !batched[n]; });
   if (!fresh.length) return false;
   /* batch 생성용 메타 수집 */
   var freshInvs = fresh.map(function(n){
@@ -1809,11 +1840,6 @@ function pagesForInvNums(invNums, fallbackPages){
 function reprintBundle(bi) {
   var bd = doneBundles[bi];
   if (bd) reprintPages(bd, '묶음 '+(bi+1)+' 전체 ');
-}
-/* 묶음 안 그룹 1개 재출력 */
-function reprintDone(bi, gi) {
-  var bd = doneBundles[bi];
-  if (bd && bd.batches[gi]) reprintPages(bd.batches[gi], '');
 }
 function reprintPages(batch, label) {
   if (!rawBuffer) {
@@ -2151,12 +2177,15 @@ function pkAttach(){
   pkBase.child('printed').on('value', function(snap){
     if (!pkReady) return;
     var v = snap.val() || {};
-    var map = {};
+    var map = {}, meta = {};
     Object.keys(v).forEach(function(k){
       var inv = (v[k] && v[k].inv != null) ? v[k].inv : k;
       map[inv] = 1;
+      /* 선점 시각 — 같은 인쇄 1회는 같은 ts (batch 기록이 없을 때 묶음 복원용) */
+      meta[inv] = { ts: (v[k] && v[k].ts) || 0, by: (v[k] && v[k].by) || '' };
     });
     printedInvNums = map;
+    printedMeta = meta;
     pkRerender();
   }, function(err){ console.warn('[picking] printed 읽기 실패', err); });
 
