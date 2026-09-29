@@ -1258,6 +1258,7 @@ function groupRows(rows) {
       palletTotal: first.palletT,
       palletNo: first.palletN,
       booking: first.__booking || 0,
+      dispatch: (items.find(i => String(i.dispatch || '').trim()) || {}).dispatch || '',
       eta: first.eta,
       pos: [...new Set(items.map(i => i.po).filter(Boolean))],
       boxSum: items.reduce((s, i) => s + (i.box || 0), 0),
@@ -2157,6 +2158,16 @@ function exitInvoiceMode() {
      2) RC센터(천안·인천 등) → truck_shipment 홀수페이지 중 매칭(N번째 팔레트)
         밀크런(나머지)         → download 앞절반 중 매칭
 ========================================================= */
+/* 엑셀 배차방식 → 라벨 종류. '트럭' = 트럭쉽먼트 라벨, '밀크런' = 밀크런(download) 라벨.
+   값이 없거나 모르는 값이면 '' → 예전처럼 센터에 트럭 라벨이 있는지로 판단 */
+function dispatchMode(g) {
+  const d = String((g && g.dispatch) || '').replace(/\s+/g, '').toLowerCase();
+  if (!d) return '';
+  if (/밀크런|milk/.test(d)) return 'milkrun';
+  if (/트럭|truck/.test(d)) return 'truck';
+  return '';
+}
+
 function isRcCenter(center) {
   // 패턴 단순 휴리스틱: 센터명에 "(RC)"가 있거나 truck 파일에 있는 센터로 매칭
   return /\(RC\)/.test(center) ||
@@ -2196,14 +2207,15 @@ function labelMatchesPallet(page, tot, no) {
 
 /* 한 센터에 대한 라벨 페이지([{url, kind}] 배열) 생성, 인덱스는 팔레트 번호 1..N
    kind: 'truck' (정사각 라벨, 페이지 가득) | 'milkrun' (가로 PDF, 90도 회전 가득) */
-async function getLabelPagesForCenter(center, origin) {
+async function getLabelPagesForCenter(center, origin, onlyMilkrun) {
   const cn = normCenter(center);
   const on = normOrigin(origin);   // 같은 센터라도 출고지가 다르면 라벨도 갈라야 한다
 
   // truck: 모든 파일의 매칭 페이지를 누적 → PALLET 번호 오름차순 정렬
   // (분할된 truck_shipment 파일이 같은 센터에 여러 개 있어도 통합 인쇄)
+  // 배차방식이 밀크런인 출고건이면 같은 센터에 트럭 라벨이 있어도 건너뛴다
   const truckMatches = [];
-  for (const it of pdfStore.truck) {
+  for (const it of (onlyMilkrun ? [] : pdfStore.truck)) {
     const allowed = pickPagesForCategory(it);
     for (const i of allowed) {
       const pg = it.pages[i - 1];
@@ -2332,6 +2344,7 @@ async function resolveTruckAssignments() {
   for (const g of GROUPS) {
     const cn = normCenter(g.center);
     if (!(byCenter[cn] && byCenter[cn].length)) continue;   // 트럭 라벨 있는 센터만
+    if (dispatchMode(g) === 'milkrun') continue;             // 배차방식 밀크런 → 트럭 매칭 대상 아님
     const key = shipmentKey(g);
     if (!shipments[key]) shipments[key] = { key, cn, palletTotal: g.palletTotal, centerDisplay: g.center, eta: formatEta(g.eta, new Date().getFullYear()), groups: [] };
     shipments[key].groups.push(g);
@@ -2464,7 +2477,11 @@ async function buildIntegratedStage() {
 
     // 2) 매칭 라벨 페이지
     let labelUrl = null, kind = null;
-    if ((assign.byCenter[cn] || []).length) {
+    /* 라벨 종류는 엑셀 배차방식으로 정한다 (트럭 → 트럭쉽먼트, 밀크런 → 밀크런).
+       같은 센터에 트럭·밀크런 출고가 함께 있어도 서로 섞이지 않게. 배차방식이 비었을 때만 센터 기준 */
+    const mode = dispatchMode(g);
+    const useTruck = mode === 'truck' || (mode === '' && (assign.byCenter[cn] || []).length);
+    if (useTruck) {
       // ── 트럭 센터: ① 연속 파렛트번호 ↔ 라벨 PALLET 번호 직접 매칭 (우선)
       const direct = assign.byCenterPallet && assign.byCenterPallet[cn] && assign.byCenterPallet[cn][g.palletNo];
       if (direct) {
@@ -2486,9 +2503,10 @@ async function buildIntegratedStage() {
       /* 출고지별로 라벨을 따로 집는다. 라벨에 출고지 글자가 없으면(못 가르면)
          예전처럼 센터 하나로 순서를 공유해 같은 라벨이 두 번 나오지 않게 한다. */
       const ok = normOrigin(g.origin);
-      const ckey = cn + '||' + ok, shared = cn + '||*';
+      const mk = mode === 'milkrun' ? 'M' : '';   // 밀크런 지정 건은 트럭 라벨 없이 따로 캐시
+      const ckey = cn + '||' + ok + '||' + mk, shared = cn + '||*||' + mk;
       if (!(ckey in dlCache)) {
-        const found = await getLabelPagesForCenter(g.center, g.origin);
+        const found = await getLabelPagesForCenter(g.center, g.origin, mode === 'milkrun');
         if (found.byOrigin) dlCache[ckey] = found;
         else {
           /* 출고지로 못 가른 센터는 목록 하나를 계속 나눠 쓴다 (다시 만들면 같은 라벨이 두 번 붙는다) */
