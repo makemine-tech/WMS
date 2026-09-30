@@ -53,6 +53,13 @@ h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
 .rename-hint{font-size:11px;color:#60A5FA;opacity:.55;margin-left:5px;}
 .prow .pname:hover .rename-hint{opacity:1;}
 .prow .pstale{font-size:10px;color:#64748B;font-weight:500;margin-left:6px;}
+.pmain{flex:1;min-width:0;}
+.pmain .pname{display:block;}
+.ploc{font-size:11.5px;color:#CBD5E1;margin-top:4px;line-height:1.55;white-space:normal;}
+.ploc .lw{color:#94A3B8;font-weight:700;margin-right:4px;}
+.ploc .lc{display:inline-block;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);color:#FDE68A;border-radius:6px;padding:0 6px;margin:1px 3px 1px 0;font-weight:700;}
+.ploc .lc small{color:#CBD5E1;font-weight:600;margin-left:3px;}
+.ploc .ltot{color:#FBBF24;font-weight:800;margin-left:4px;}
 .pzero{display:inline-block;font-size:10px;font-weight:700;color:#FCA5A5;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:1px 7px;margin-left:8px;vertical-align:middle;}
 .sel{background:#0F172A;border:1px solid #334155;border-radius:7px;padding:7px 9px;color:#E2E8F0;font-size:12px;outline:none;font-family:inherit;flex-shrink:0;max-width:170px;}
 .sel.none{color:#FBBF24;border-color:rgba(251,191,36,.4);}
@@ -89,6 +96,30 @@ var GID = (new URLSearchParams(location.search).get('gid')) || localStorage.getI
 var _products=[];   /* 현재 재고 상품명 (창고 slots 합집합 — 상품별재고와 동일) */
 var _vendors={};    /* vendorId -> {name,email,createdAt} */
 var _map={};        /* productKey -> {name, vendorId} */
+var _locs={};       /* 상품명 -> [{wid, whName, ck, qty, exp}] — 미연결 상품 위치·수량 표시용 */
+
+function colAlpha(c){ var s=String.fromCharCode(65+(c%26)); if(c>=26) s=String.fromCharCode(65+Math.floor(c/26)-1)+s; return s; }
+/* 칸 키 "r-c"(0부터) → 배치도 좌표 "B-3" (창고관리 칸 표기와 동일) */
+function cellLabel(ck){ var p=String(ck).split('-'), r=+p[0], c=+p[1]; return (isNaN(r)||isNaN(c))?String(ck):colAlpha(c)+'-'+(r+1); }
+function nf(n){ return (+n||0).toLocaleString('ko-KR'); }
+/* 위치·수량 한 줄: 창고별로 "B-3 120 · C-5×2 240 — 총 3팔 360개" */
+function locHtml(nm){
+  var arr=_locs[nm]; if(!arr||!arr.length) return '';
+  var byWh={}, order=[];
+  arr.forEach(function(l){ if(!byWh[l.wid]){ byWh[l.wid]={name:l.whName, cells:{}, cOrder:[]}; order.push(l.wid); }
+    var w=byWh[l.wid], lb=cellLabel(l.ck);
+    if(!w.cells[lb]){ w.cells[lb]={n:0, qty:0, ck:l.ck}; w.cOrder.push(lb); }
+    w.cells[lb].n++; w.cells[lb].qty+=(+l.qty||0); });
+  var totP=0, totQ=0;
+  var lines=order.map(function(wid){
+    var w=byWh[wid];
+    w.cOrder.sort(function(a,b){ var pa=w.cells[a].ck.split('-'), pb=w.cells[b].ck.split('-'); return (+pa[1]-+pb[1])||(+pa[0]-+pb[0]); });
+    var chips=w.cOrder.map(function(lb){ var c=w.cells[lb]; totP+=c.n; totQ+=c.qty;
+      return '<span class="lc">'+esc(lb)+(c.n>1?'×'+c.n:'')+'<small>'+nf(c.qty)+'개</small></span>'; }).join('');
+    return '<div><span class="lw">📍 '+esc(w.name)+'</span>'+chips+'</div>';
+  });
+  return '<div class="ploc">'+lines.join('')+'<span class="ltot">총 '+totP+'팔 · '+nf(totQ)+'개</span></div>';
+}
 
 function toast(msg){
   toastEl.textContent=msg; toastEl.classList.add('show');
@@ -116,15 +147,22 @@ function renderDenied(msg){
 function loadAll(){
   return db.ref('groups/'+GID).get().then(function(gs){
     var wids = gs.exists() ? Object.keys(gs.val()).filter(function(k){return k!=='_init';}) : [];
+    _locs={};
     var jobs = wids.map(function(wid){
       /* 상품별재고(getPG)와 동일하게 현재 슬롯에 실제로 놓인 상품명만 수집.
          pColors(등록 이력 누적)는 오타·출고완료분이 남으므로 쓰지 않음. */
-      return db.ref('warehouses/'+wid+'/cells').get().then(function(s){
-        var cells=s.val()||{}, names=[];
+      return Promise.all([
+        db.ref('warehouses/'+wid+'/cells').get(),
+        db.ref('warehouses/'+wid+'/name').get().catch(function(){return null;})
+      ]).then(function(res){
+        var cells=res[0].val()||{}, names=[];
+        var whName=(res[1]&&res[1].val())||wid;
         Object.keys(cells).forEach(function(ck){
           var c=cells[ck]; if(!c||!c.slots) return;
           Object.keys(c.slots).forEach(function(sk){
-            var slot=c.slots[sk]; if(slot && slot.name) names.push(slot.name);
+            var slot=c.slots[sk]; if(!(slot && slot.name)) return;
+            names.push(slot.name);
+            (_locs[slot.name]=_locs[slot.name]||[]).push({wid:wid, whName:whName, ck:ck, qty:+slot.qty||0, exp:slot.exp||''});
           });
         });
         return names;
@@ -203,7 +241,8 @@ function render(user){
     var sel=(_map[k]&&_map[k].vendorId)||'';
     var zero=(_products.indexOf(nm)<0) ? '<span class="pzero">재고 0</span>' : '';
     return '<div class="prow'+(isUnlinked?' unlinked':'')+'">'
-      +'<div class="pname" title="클릭 → 상품명 일괄 변경/통합" onclick="renameProduct(\''+encodeURIComponent(nm)+'\')">'+esc(nm)+'<span class="rename-hint">✎ 이름수정</span>'+zero+'</div>'
+      +'<div class="pmain"><div class="pname" title="클릭 → 상품명 일괄 변경/통합" onclick="renameProduct(\''+encodeURIComponent(nm)+'\')">'+esc(nm)+'<span class="rename-hint">✎ 이름수정</span>'+zero+'</div>'
+      +(isUnlinked?locHtml(nm):'')+'</div>'
       +'<select class="sel'+(sel?'':' none')+'" onchange="linkProduct(\''+encodeURIComponent(nm)+'\',this.value)">'
       +vendorOptions(sel)+'</select></div>';
   }
