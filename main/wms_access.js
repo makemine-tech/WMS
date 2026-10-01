@@ -179,5 +179,51 @@
     });
   }
 
-  ensureFirebase(run);
+  /* ── 방문 기록 (사이트 통계 site_stats.html 용) ──────────────────────
+     stats/day/{KST날짜}/{페이지}/v·m·h/{시}  : 조회수 카운터 (+1 만 허용, 누구나)
+     stats/uv/{KST날짜}/{페이지}/{방문자id}   : 순방문자 (브라우저당 하루 1번)
+     stats/log/{KST날짜}/{push}               : 로그인 사용자의 조회 기록 (본인 uid 만)
+     읽기는 슈퍼관리자만. 로컬 개발 서버에서는 기록하지 않는다. */
+  function logVisit(){
+    try {
+      var host = location.hostname;
+      if (!host || host === 'localhost' || host === '127.0.0.1' || /\.localhost$/.test(host) || location.protocol === 'file:') return;
+      var db = firebase.database(), auth = firebase.auth();
+      var inc = firebase.database.ServerValue.increment(1);
+      var k = new Date(Date.now() + 9 * 3600e3).toISOString();     /* KST */
+      var day = k.slice(0, 10), hh = k.slice(11, 13);
+      var mob = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 1 : 0;
+      var base = 'stats/day/' + day + '/' + PAGE_KEY + '/';
+      var up = {}; up[base + 'v'] = inc; up[base + 'h/' + hh] = inc; if (mob) up[base + 'm'] = inc;
+      db.ref().update(up).catch(function(){});
+
+      var vid = null, seenKey = 'wms_uv_' + day + '_' + PAGE_KEY;
+      try {
+        vid = localStorage.getItem('wms_vid');
+        if (!vid) { vid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); localStorage.setItem('wms_vid', vid); }
+        if (!localStorage.getItem(seenKey)) {
+          db.ref('stats/uv/' + day + '/' + PAGE_KEY + '/' + vid).set(true)
+            .then(function(){ try { localStorage.setItem(seenKey, '1'); } catch (e) {} }).catch(function(){});
+        }
+      } catch (e) { /* 저장소 막힌 브라우저 — 순방문자만 빠진다 */ }
+
+      /* 로그인 상태는 복원이 늦게 올 수 있어 잠깐 기다린다 */
+      var done = false;
+      function writeUser(u){
+        if (done || !u) return; done = true;
+        db.ref('stats/log/' + day).push({
+          p: PAGE_KEY, t: firebase.database.ServerValue.TIMESTAMP, u: u.uid,
+          e: String(u.email || u.displayName || '').slice(0, 120),
+          m: mob
+        }).catch(function(){});
+      }
+      var off = auth.onAuthStateChanged(function(u){ if (u) { writeUser(u); off && off(); } });
+      setTimeout(function(){ if (!done) { writeUser(auth.currentUser); } if (off) off(); }, 4000);
+    } catch (e) { /* 통계 실패가 페이지 동작을 막으면 안 된다 */ }
+  }
+
+  ensureFirebase(function(){
+    run();
+    if (window.firebase && firebase.database && firebase.auth && firebase.apps && firebase.apps.length) logVisit();
+  });
 })();

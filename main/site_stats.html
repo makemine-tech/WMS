@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>사이트 통계 — 메이크창고</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<!-- 관문: 슈퍼관리자(3) 고정. 기록 데이터(stats)도 DB 규칙상 슈퍼관리자만 읽는다 -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="/wms_access.js" data-page="site_stats" data-floor="3"></script>
+<script src="/wms_pages.js"></script>
+<style>
+:root{
+  --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
+  --g:#4ade80; --y:#fbbf24; --b:#60a5fa; --bd:#2f5d94; --r:#f87171;
+  --mo:'Space Mono',monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-size:14px}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.4rem .55rem}
+.hide{display:none!important}
+
+.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.gate-box{width:100%;max-width:420px;background:var(--s1);border:1px solid var(--br);border-radius:16px;padding:28px 24px;text-align:center}
+.gate-ic{font-size:40px;margin-bottom:10px}
+.gate-t{font-size:19px;font-weight:900;margin-bottom:6px}
+.gate-s{font-size:12.5px;color:var(--mu);line-height:1.75}
+
+.top{position:sticky;top:0;z-index:20;background:rgba(11,13,18,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--br)}
+.top-in{max-width:1280px;margin:0 auto;padding:.7rem 1rem;display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+.top-t{font-size:17px;font-weight:900}
+.top-e{font-family:var(--mo);font-size:11px;color:var(--mu);letter-spacing:.12em}
+.top-sp{flex:1}
+.top a{font-size:12.5px;color:var(--mu);text-decoration:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
+
+.wrap{max-width:1280px;margin:0 auto;padding:1rem 1rem 3rem}
+.filters{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
+.chip{background:var(--s2);border:1px solid var(--br);color:var(--mu);border-radius:999px;padding:.35rem .8rem;font-size:12.5px;font-weight:700}
+.chip.on{background:var(--b);border-color:var(--b);color:#0b0d12}
+.fl-sep{width:1px;height:22px;background:var(--br);margin:0 .2rem}
+.chk{display:flex;align-items:center;gap:.35rem;font-size:12.5px;color:var(--mu);cursor:pointer}
+.btn{background:var(--s3);border:1px solid var(--br);color:var(--tx);border-radius:7px;padding:.4rem .8rem;font-size:12.5px;font-weight:700}
+.note{font-size:12px;color:var(--mu);margin:-.4rem 0 1rem;line-height:1.7}
+.note b{color:var(--tx)}
+
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.7rem;margin-bottom:1rem}
+.kpi{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.85rem 1rem}
+.kpi .k{font-size:12px;color:var(--mu);margin-bottom:.35rem}
+.kpi .v{font-family:var(--mo);font-size:24px;font-weight:700;letter-spacing:-.02em}
+.kpi .s{font-size:11.5px;color:var(--mu);margin-top:.2rem}
+
+.grid2{display:grid;grid-template-columns:2fr 1fr;gap:.8rem;margin-bottom:.8rem}
+.card{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.9rem 1rem;min-width:0}
+.card-h{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.6rem;flex-wrap:wrap}
+.card-t{font-size:14px;font-weight:800}
+.card-s{font-size:11.5px;color:var(--mu)}
+.chart{width:100%;height:190px;display:block}
+.chart text{fill:var(--mu);font-family:var(--mo);font-size:10px}
+
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--mu);font-weight:700;font-size:11.5px;padding:.45rem .5rem;border-bottom:1px solid var(--br);white-space:nowrap;cursor:pointer;user-select:none}
+th.num,td.num{text-align:right;font-family:var(--mo)}
+td{padding:.45rem .5rem;border-bottom:1px solid #1d2230;vertical-align:middle}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--s2)}
+tr.zero td{color:var(--mu2)}
+tr.sel td{background:rgba(96,165,250,.12)}
+.pk{font-family:var(--mo);font-size:10.5px;color:var(--mu2)}
+.grp{font-size:11px;color:var(--mu)}
+.bar{height:6px;border-radius:3px;background:var(--b);min-width:2px}
+.barcell{width:110px}
+.empty{color:var(--mu);font-size:12.5px;padding:1.2rem;text-align:center}
+.more{margin-top:.6rem;text-align:center}
+
+.tip{position:fixed;z-index:50;pointer-events:none;background:#0f131b;border:1px solid var(--br);border-radius:8px;padding:.45rem .6rem;font-size:12px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.4);white-space:nowrap}
+.tip b{font-family:var(--mo)}
+.loading{color:var(--mu);font-size:13px;padding:2rem;text-align:center}
+
+@media (max-width:900px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid2{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate">
+  <div class="gate-box">
+    <div class="gate-ic">📊</div>
+    <div class="gate-t">사이트 통계</div>
+    <div class="gate-s">슈퍼관리자 권한을 확인하는 중…</div>
+  </div>
+</div>
+
+<div id="app" class="hide">
+  <div class="top"><div class="top-in">
+    <div>
+      <div class="top-t">사이트 통계 · 로그분석 🔒</div>
+      <div class="top-e">SITE ANALYTICS</div>
+    </div>
+    <div class="top-sp"></div>
+    <a href="/wms_admin.html">관리도구</a>
+    <a href="/index.html">홈으로</a>
+  </div></div>
+
+  <div class="wrap">
+    <div class="filters">
+      <button class="chip" data-r="0">오늘</button>
+      <button class="chip" data-r="1">어제</button>
+      <button class="chip on" data-r="7">7일</button>
+      <button class="chip" data-r="30">30일</button>
+      <button class="chip" data-r="90">90일</button>
+      <input type="date" id="fFrom"> ~ <input type="date" id="fTo">
+      <span class="fl-sep"></span>
+      <select id="fPage"><option value="">전체 페이지</option></select>
+      <label class="chk"><input type="checkbox" id="fMe" checked> 슈퍼관리자 방문 제외</label>
+      <button class="btn" id="btnReload">새로고침</button>
+    </div>
+    <div class="note" id="note"></div>
+
+    <div id="body"><div class="loading">불러오는 중…</div></div>
+  </div>
+</div>
+
+<div class="tip hide" id="tip"></div>
+
+<script>
+/* ── 데이터 구조 (wms_access.js 가 기록) ─────────────────────────
+   stats/day/{날짜}/{페이지}  : { v:조회수, m:모바일 조회수, h:{시:조회수} }
+   stats/uv/{날짜}/{페이지}   : { 방문자id:true }  — 브라우저 단위 순방문자
+   stats/log/{날짜}/{push}    : { p:페이지, t:시각, u:uid, e:이메일, m:모바일 } — 로그인 사용자만
+   날짜·시는 모두 한국시간(KST). */
+var db, me = null, SUPERS = {};
+var PAGES = {}, GROUP_OF = {};
+(window.WMS_PAGES || []).forEach(function(g){ g.items.forEach(function(it){ PAGES[it.key] = it; GROUP_OF[it.key] = g.group; }); });
+
+var S = { from: null, to: null, page: '', excl: true, raw: null, logLimit: 200, userSel: '', pageSort: 'v', userSort: 'v' };
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmt(n){ return Math.round(n || 0).toLocaleString('ko-KR'); }
+function kstNow(){ return new Date(Date.now() + 9 * 3600e3); }
+function dstr(d){ return d.toISOString().slice(0, 10); }
+function addDays(s, n){ var d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return dstr(d); }
+function daysBetween(a, b){ var out = [], d = a; while (d <= b && out.length < 400) { out.push(d); d = addDays(d, 1); } return out; }
+function label(k){ return PAGES[k] ? PAGES[k].label : k; }
+function kstTime(t){ var d = new Date(t + 9 * 3600e3).toISOString(); return d.slice(5, 10).replace('-', '/') + ' ' + d.slice(11, 16); }
+
+/* ── 기간 ── */
+function setRange(r){
+  var today = dstr(kstNow());
+  if (r === 0) { S.from = today; S.to = today; }
+  else if (r === 1) { S.from = S.to = addDays(today, -1); }
+  else { S.from = addDays(today, -(r - 1)); S.to = today; }
+  $('fFrom').value = S.from; $('fTo').value = S.to;
+  document.querySelectorAll('.chip').forEach(function(c){ c.classList.toggle('on', +c.dataset.r === r); });
+  load();
+}
+
+/* ── 불러오기 ── */
+function load(){
+  $('body').innerHTML = '<div class="loading">불러오는 중…</div>';
+  var q = function(path){ return db.ref(path).orderByKey().startAt(S.from).endAt(S.to).get().then(function(s){ return s.val() || {}; }); };
+  Promise.all([q('stats/day'), q('stats/uv'), q('stats/log')]).then(function(r){
+    S.raw = { day: r[0], uv: r[1], log: r[2] };
+    render();
+  }).catch(function(e){
+    $('body').innerHTML = '<div class="loading">불러오지 못했습니다: ' + esc(e && (e.code || e.message)) + '</div>';
+  });
+}
+
+/* ── 집계 ── 슈퍼관리자 제외 시: 로그인 기록이 있는 조회를 카운터에서 빼고, 이 브라우저의 방문자id 도 뺀다 */
+function compute(){
+  var R = S.raw, days = daysBetween(S.from, S.to), P = S.page;
+  var myVid = null; try { myVid = localStorage.getItem('wms_vid'); } catch (e) {}
+  var byDay = {}, byHour = new Array(24).fill(0), pages = {}, users = {}, logs = [];
+  var tot = { v: 0, m: 0 }, vids = {}, loginViews = 0;
+  days.forEach(function(d){ byDay[d] = { v: 0, uv: 0 }; });
+  function pg(k){ return pages[k] || (pages[k] = { k: k, v: 0, m: 0, uv: 0, lv: 0, last: 0, users: {} }); }
+
+  Object.keys(R.day).forEach(function(d){
+    var dd = R.day[d] || {};
+    Object.keys(dd).forEach(function(k){
+      if (P && k !== P) return;
+      var x = dd[k] || {}, p = pg(k);
+      p.v += x.v || 0; p.m += x.m || 0;
+      if (byDay[d]) byDay[d].v += x.v || 0;
+      tot.v += x.v || 0; tot.m += x.m || 0;
+      var h = x.h || {}; Object.keys(h).forEach(function(hh){ byHour[+hh] += h[hh] || 0; });
+    });
+  });
+  Object.keys(R.uv).forEach(function(d){
+    var dd = R.uv[d] || {}, daySet = {};
+    Object.keys(dd).forEach(function(k){
+      if (P && k !== P) return;
+      var ids = Object.keys(dd[k] || {}).filter(function(v){ return !(S.excl && v === myVid); });
+      pg(k).uv += ids.length;
+      ids.forEach(function(v){ vids[v] = 1; daySet[v] = 1; });
+    });
+    if (byDay[d]) byDay[d].uv = Object.keys(daySet).length;
+  });
+  Object.keys(R.log).forEach(function(d){
+    var dd = R.log[d] || {};
+    Object.keys(dd).forEach(function(id){
+      var L = dd[id]; if (!L || !L.p) return;
+      if (P && L.p !== P) return;
+      var hh = +new Date((L.t || 0) + 9 * 3600e3).toISOString().slice(11, 13);
+      if (S.excl && SUPERS[L.u]) {             /* 카운터에서 슈퍼관리자 조회분을 뺀다 */
+        var p0 = pg(L.p); p0.v--; if (L.m) { p0.m--; tot.m--; } tot.v--;
+        if (byDay[d]) byDay[d].v--; byHour[hh]--;
+        return;
+      }
+      loginViews++;
+      var p = pg(L.p); p.lv++; p.last = Math.max(p.last, L.t || 0); p.users[L.u] = 1;
+      var u = users[L.u] || (users[L.u] = { u: L.u, e: L.e || L.u, v: 0, pages: {}, last: 0, sa: !!SUPERS[L.u] });
+      u.v++; u.pages[L.p] = (u.pages[L.p] || 0) + 1; u.last = Math.max(u.last, L.t || 0);
+      logs.push(L);
+    });
+  });
+  /* 음수 방지 (카운터 기록이 실패하고 로그만 남은 경우) */
+  Object.keys(pages).forEach(function(k){ var p = pages[k]; p.v = Math.max(p.v, p.lv, 0); p.m = Math.max(p.m, 0); });
+  days.forEach(function(d){ byDay[d].v = Math.max(byDay[d].v, 0); });
+  byHour = byHour.map(function(n){ return Math.max(n, 0); });
+  tot.v = Math.max(tot.v, 0); tot.m = Math.max(tot.m, 0);
+  logs.sort(function(a, b){ return (b.t || 0) - (a.t || 0); });
+  return { days: days, byDay: byDay, byHour: byHour, pages: pages, users: users, logs: logs, tot: tot, uv: Object.keys(vids).length, loginViews: loginViews };
+}
+
+/* ── 그리기 ── */
+function render(){
+  var C = compute();
+  $('note').innerHTML = '기간 <b>' + S.from + ' ~ ' + S.to + '</b> (' + C.days.length + '일, 한국시간)'
+    + (S.page ? ' · 페이지 <b>' + esc(label(S.page)) + '</b>' : '')
+    + ' · 기록은 2026-10-01 부터 쌓입니다. 로그인·관리도구 화면은 기록하지 않습니다.';
+
+  var topPage = Object.keys(C.pages).sort(function(a, b){ return C.pages[b].v - C.pages[a].v; })[0];
+  var html = '<div class="kpis">'
+    + kpi('조회수', fmt(C.tot.v), '하루 평균 ' + fmt(C.tot.v / Math.max(C.days.length, 1)))
+    + kpi('순방문자', fmt(C.uv), '브라우저 기준')
+    + kpi('로그인 사용자', fmt(Object.keys(C.users).length), '로그인 조회 ' + fmt(C.loginViews) + '회')
+    + kpi('모바일 비율', C.tot.v ? Math.round(C.tot.m / C.tot.v * 100) + '%' : '-', '모바일 ' + fmt(C.tot.m) + '회')
+    + kpi('가장 많이 본 페이지', topPage && C.pages[topPage].v ? esc(label(topPage)) : '-', topPage && C.pages[topPage].v ? fmt(C.pages[topPage].v) + '회' : '', true)
+    + '</div>';
+
+  html += '<div class="grid2">'
+    + '<div class="card"><div class="card-h"><span class="card-t">일별 조회수</span><span class="card-s">막대에 올리면 숫자</span></div><svg class="chart" id="chDay"></svg></div>'
+    + '<div class="card"><div class="card-h"><span class="card-t">시간대별 조회수</span><span class="card-s">0~23시, 기간 합계</span></div><svg class="chart" id="chHour"></svg></div>'
+    + '</div>';
+
+  html += '<div class="card" style="margin-bottom:.8rem"><div class="card-h"><span class="card-t">페이지별</span>'
+    + '<span class="card-s">행을 누르면 그 페이지만 봅니다 · 회색 = 기간 내 방문 없음 · 제목을 누르면 정렬</span></div>'
+    + '<div class="tbl-wrap">' + pageTable(C) + '</div></div>';
+
+  html += '<div class="grid2">'
+    + '<div class="card"><div class="card-h"><span class="card-t">최근 기록</span><span class="card-s">로그인 사용자만</span>'
+    + '<select id="fUser" style="margin-left:auto"><option value="">전체 사용자</option>'
+    + Object.keys(C.users).map(function(u){ return '<option value="' + esc(u) + '"' + (S.userSel === u ? ' selected' : '') + '>' + esc(C.users[u].e) + '</option>'; }).join('')
+    + '</select></div><div class="tbl-wrap">' + logTable(C) + '</div></div>'
+    + '<div class="card"><div class="card-h"><span class="card-t">사용자별</span><span class="card-s">로그인 사용자 · 누르면 기록 필터</span></div>'
+    + '<div class="tbl-wrap">' + userTable(C) + '</div></div>'
+    + '</div>';
+
+  $('body').innerHTML = html;
+  barChart($('chDay'), C.days.map(function(d){ return { x: d.slice(5).replace('-', '/'), v: C.byDay[d].v, t: d + '<br>조회 <b>' + fmt(C.byDay[d].v) + '</b> · 순방문자 <b>' + fmt(C.byDay[d].uv) + '</b>' }; }));
+  barChart($('chHour'), C.byHour.map(function(v, h){ return { x: String(h), v: v, t: h + '시대<br>조회 <b>' + fmt(v) + '</b>' }; }));
+  bindTables();
+}
+
+function kpi(k, v, s, small){
+  return '<div class="kpi"><div class="k">' + k + '</div><div class="v"' + (small ? ' style="font-size:15px;font-family:inherit;line-height:1.4;padding-top:.3rem"' : '') + '>' + v + '</div><div class="s">' + (s || '') + '</div></div>';
+}
+
+function pageTable(C){
+  var rows = Object.keys(C.pages).map(function(k){ return C.pages[k]; });
+  if (!S.page) Object.keys(PAGES).forEach(function(k){ if (!C.pages[k]) rows.push({ k: k, v: 0, m: 0, uv: 0, lv: 0, last: 0, users: {} }); });
+  var sk = S.pageSort;
+  rows.sort(function(a, b){ return sk === 'name' ? label(a.k).localeCompare(label(b.k), 'ko') : (b[sk] - a[sk]) || (b.v - a.v) || label(a.k).localeCompare(label(b.k), 'ko'); });
+  var max = Math.max.apply(null, rows.map(function(r){ return r.v; }).concat([1]));
+  return '<table><thead><tr>'
+    + '<th data-ps="name">페이지</th><th data-ps="v" class="num">조회수</th><th></th><th data-ps="uv" class="num">순방문자</th>'
+    + '<th data-ps="lv" class="num">로그인 조회</th><th class="num">사용자</th><th class="num">모바일</th><th data-ps="last">마지막 로그인 방문</th>'
+    + '</tr></thead><tbody>'
+    + rows.map(function(r){
+        var unk = !PAGES[r.k];
+        return '<tr class="click' + (r.v ? '' : ' zero') + (S.page === r.k ? ' sel' : '') + '" data-page="' + esc(r.k) + '">'
+          + '<td>' + esc(label(r.k)) + (unk ? ' <span class="grp">(목록에 없음)</span>' : '') + '<div class="pk">' + esc(r.k) + ' · <span class="grp">' + esc(GROUP_OF[r.k] || '-') + '</span></div></td>'
+          + '<td class="num">' + fmt(r.v) + '</td>'
+          + '<td class="barcell"><div class="bar" style="width:' + (r.v ? Math.max(2, r.v / max * 100) : 0) + '%"></div></td>'
+          + '<td class="num">' + fmt(r.uv) + '</td><td class="num">' + fmt(r.lv) + '</td>'
+          + '<td class="num">' + fmt(Object.keys(r.users).length) + '</td>'
+          + '<td class="num">' + (r.v ? Math.round(r.m / r.v * 100) + '%' : '-') + '</td>'
+          + '<td>' + (r.last ? kstTime(r.last) : '<span class="grp">-</span>') + '</td></tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+function userTable(C){
+  var rows = Object.keys(C.users).map(function(u){ return C.users[u]; }).sort(function(a, b){ return b.v - a.v; });
+  if (!rows.length) return '<div class="empty">기간 내 로그인 사용자 기록이 없습니다.</div>';
+  return '<table><thead><tr><th>사용자</th><th class="num">조회</th><th>많이 쓴 페이지</th><th>마지막</th></tr></thead><tbody>'
+    + rows.map(function(u){
+        var top = Object.keys(u.pages).sort(function(a, b){ return u.pages[b] - u.pages[a]; }).slice(0, 3)
+          .map(function(k){ return esc(label(k)) + ' <span class="pk">' + u.pages[k] + '</span>'; }).join('<br>');
+        return '<tr class="click' + (S.userSel === u.u ? ' sel' : '') + '" data-user="' + esc(u.u) + '"><td>' + esc(u.e) + (u.sa ? ' <span class="grp">관리자</span>' : '') + '</td>'
+          + '<td class="num">' + fmt(u.v) + '</td><td style="font-size:11.5px;line-height:1.6">' + top + '</td><td>' + kstTime(u.last) + '</td></tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+function logTable(C){
+  var L = S.userSel ? C.logs.filter(function(l){ return l.u === S.userSel; }) : C.logs;
+  if (!L.length) return '<div class="empty">기록이 없습니다.</div>';
+  var shown = L.slice(0, S.logLimit);
+  return '<table><thead><tr><th>시각</th><th>사용자</th><th>페이지</th><th></th></tr></thead><tbody>'
+    + shown.map(function(l){
+        return '<tr><td style="font-family:var(--mo);font-size:11.5px;white-space:nowrap">' + kstTime(l.t) + '</td><td>' + esc(l.e || l.u) + '</td>'
+          + '<td>' + esc(label(l.p)) + '</td><td class="grp">' + (l.m ? '📱' : '💻') + '</td></tr>';
+      }).join('')
+    + '</tbody></table>'
+    + (L.length > shown.length ? '<div class="more"><button class="btn" id="btnMore">더 보기 (' + fmt(L.length - shown.length) + '건 남음)</button></div>' : '');
+}
+
+/* 단일 계열 막대 차트 — 막대 끝 4px 라운드, 기준선에 붙임, 막대 사이 2px 이상 간격, 호버 툴팁 */
+function barChart(svg, data){
+  var W = svg.clientWidth || 600, H = 190, pl = 36, pr = 6, pt = 10, pb = 22;
+  var max = Math.max.apply(null, data.map(function(d){ return d.v; }).concat([1]));
+  var nice = niceMax(max), iw = W - pl - pr, ih = H - pt - pb, n = data.length;
+  var step = iw / n, bw = Math.max(2, Math.min(28, step - 2));
+  var g = '';
+  [0, .5, 1].forEach(function(f){
+    var y = pt + ih - ih * f;
+    g += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + y + '" y2="' + y + '" stroke="#232b3b" stroke-width="1"/>'
+      + '<text x="' + (pl - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + fmt(nice * f) + '</text>';
+  });
+  var every = Math.ceil(n / Math.max(1, Math.floor(iw / 44)));
+  data.forEach(function(d, i){
+    var x = pl + step * i + (step - bw) / 2, h = d.v / nice * ih, y = pt + ih - h, r = Math.min(4, bw / 2, h);
+    if (d.v > 0) g += '<path d="' + roundTop(x, y, bw, h, r) + '" fill="#60a5fa"/>';
+    g += '<rect class="hit" data-i="' + i + '" x="' + (pl + step * i) + '" y="' + pt + '" width="' + step + '" height="' + ih + '" fill="transparent"/>';
+    if (i % every === 0) g += '<text x="' + (pl + step * i + step / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(d.x) + '</text>';
+  });
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.innerHTML = g;
+  var tip = $('tip');
+  svg.querySelectorAll('.hit').forEach(function(el){
+    el.addEventListener('mousemove', function(ev){
+      var d = data[+el.dataset.i]; tip.innerHTML = d.t; tip.classList.remove('hide');
+      var x = ev.clientX + 14, y = ev.clientY + 14;
+      if (x + tip.offsetWidth > innerWidth - 8) x = ev.clientX - tip.offsetWidth - 14;
+      tip.style.left = x + 'px'; tip.style.top = y + 'px';
+      el.setAttribute('fill', 'rgba(96,165,250,.08)');
+    });
+    el.addEventListener('mouseleave', function(){ tip.classList.add('hide'); el.setAttribute('fill', 'transparent'); });
+  });
+}
+function roundTop(x, y, w, h, r){
+  return 'M' + x + ',' + (y + h) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y
+    + 'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + h) + 'Z';
+}
+function niceMax(v){ var p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
+
+function bindTables(){
+  document.querySelectorAll('tr[data-page]').forEach(function(tr){
+    tr.addEventListener('click', function(){ S.page = S.page === tr.dataset.page ? '' : tr.dataset.page; $('fPage').value = S.page; render(); });
+  });
+  document.querySelectorAll('tr[data-user]').forEach(function(tr){
+    tr.addEventListener('click', function(){ S.userSel = S.userSel === tr.dataset.user ? '' : tr.dataset.user; S.logLimit = 200; render(); });
+  });
+  document.querySelectorAll('th[data-ps]').forEach(function(th){
+    th.addEventListener('click', function(){ S.pageSort = th.dataset.ps; render(); });
+  });
+  var fu = $('fUser'); if (fu) fu.addEventListener('change', function(){ S.userSel = fu.value; S.logLimit = 200; render(); });
+  var bm = $('btnMore'); if (bm) bm.addEventListener('click', function(){ S.logLimit += 300; render(); });
+}
+
+function start(){
+  db = firebase.database(); me = firebase.auth().currentUser;
+  var sel = $('fPage');
+  (window.WMS_PAGES || []).forEach(function(g){
+    var og = document.createElement('optgroup'); og.label = g.group;
+    g.items.forEach(function(it){ var o = document.createElement('option'); o.value = it.key; o.textContent = it.label; og.appendChild(o); });
+    sel.appendChild(og);
+  });
+  sel.addEventListener('change', function(){ S.page = sel.value; render(); });
+  document.querySelectorAll('.chip').forEach(function(c){ c.addEventListener('click', function(){ setRange(+c.dataset.r); }); });
+  function custom(){
+    var a = $('fFrom').value, b = $('fTo').value; if (!a || !b) return;
+    if (a > b) { var t = a; a = b; b = t; }
+    S.from = a; S.to = b; document.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('on'); }); load();
+  }
+  $('fFrom').addEventListener('change', custom); $('fTo').addEventListener('change', custom);
+  $('fMe').addEventListener('change', function(){ S.excl = $('fMe').checked; if (S.raw) render(); });
+  $('btnReload').addEventListener('click', load);
+  window.addEventListener('resize', function(){ if (S.raw) render(); });
+  db.ref('superadmins').get().then(function(s){ SUPERS = s.val() || {}; }).catch(function(){}).then(function(){ setRange(7); });
+}
+
+/* wms_access.js 가 슈퍼관리자로 확인해 주면 본문을 연다 */
+(function(){
+  var t0 = Date.now();
+  (function wait(){
+    var A = window.WMSAccess;
+    if (A && A.ready && A.level >= 3) {
+      $('gate').classList.add('hide'); $('app').classList.remove('hide'); start();
+      return;
+    }
+    if (Date.now() - t0 < 30000) setTimeout(wait, 150);
+  })();
+})();
+</script>
+</body>
+</html>
