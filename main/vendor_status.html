@@ -146,6 +146,32 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
 .hist-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.62);display:none;align-items:flex-start;justify-content:center;padding:32px 14px;overflow-y:auto;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);}
 .hist-card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--bd);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);}
 .hist-card.wide{max-width:820px;}
+/* 총 파렛트 카드 → 파렛트 추이 팝업 */
+.scard.clickable{cursor:pointer;transition:border-color .15s,background .15s;}
+.scard.clickable:hover{border-color:var(--amber);background:rgba(251,191,36,.06);}
+.trend-hint{display:inline-block;margin-left:4px;font-size:10.5px;color:var(--amber);font-weight:700;}
+.pt-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
+.pt-kpi{background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:11px;padding:11px 10px;text-align:center;}
+.pt-kpi .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;}
+.pt-kpi .v .u{font-size:12px;color:var(--sub);font-weight:700;margin-left:2px;}
+.pt-kpi .l{font-size:11px;color:var(--sub);margin-top:5px;font-weight:600;}
+.pt-kpi .s{font-size:10.5px;color:var(--sub);margin-top:2px;}
+.pt-kpi.hl .v{color:var(--amber);}
+.pt-chart{background:rgba(255,255,255,.02);border:1px solid var(--bd);border-radius:11px;padding:10px 8px 4px;margin-bottom:8px;position:relative;}
+.pt-chart svg{width:100%;height:220px;display:block;}
+.pt-chart svg text{fill:var(--sub);font-size:10px;font-variant-numeric:tabular-nums;}
+.pt-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--sub);margin:0 0 12px 4px;}
+.pt-legend i{display:inline-block;vertical-align:middle;margin-right:5px;}
+.pt-note{font-size:11.5px;color:var(--sub);line-height:1.7;margin-bottom:12px;}
+.pt-note b{color:var(--tx);}
+.pt-tip{position:fixed;z-index:1100;pointer-events:none;background:#0B1220;border:1px solid var(--bd);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.45);white-space:nowrap;display:none;}
+.pt-tip b{font-variant-numeric:tabular-nums;}
+.pt-tbl td,.pt-tbl th{padding:8px 12px;font-size:12.5px;}
+.pt-tbl th{white-space:nowrap;}
+.pt-tbl td.num{white-space:nowrap;}
+.pt-tbl td.dim{color:var(--sub);font-weight:500;}
+.pt-up{color:#F87171;} .pt-down{color:#60A5FA;}
+@media (max-width:560px){ .pt-kpis{grid-template-columns:repeat(2,1fr);} }
 .hist-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:15px 18px;border-bottom:1px solid var(--bd);font-size:15px;font-weight:800;background:rgba(255,255,255,.03);}
 .hist-hd-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;}
 .hist-x{background:rgba(255,255,255,.08);border:1px solid var(--bd);color:var(--sub);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:14px;flex-shrink:0;}
@@ -332,6 +358,7 @@ var _loose={};           /* productKey -> 낱개수량 (실물조사). vendorLoo
 var _baseTotalQty=0;     /* 파렛트 기준 총수량 합 (낱개 제외) — 실시간 총합계 계산용 */
 var _canEdit=false;      /* 관리자 미리보기에서만 낱개 입력 가능 */
 var _rows=[];            /* 현재 표시 중인 행 (엑셀 내보내기용) */
+var _curPal=0;           /* 지금 화면의 총 파렛트 — 파렛트 추이 팝업의 '오늘' 값 */
 
 function sortRows(rows){
   var r=rows.slice();
@@ -400,6 +427,7 @@ function renderReport(info, data){
   var totQty=0, totPal=0, totLoose=0;
   rows.forEach(function(p){ totQty+=(+p.totalQty||0); totPal+=(+p.pallets||0); totLoose+=looseSum(_loose[p._k]); });
   _baseTotalQty=totQty;
+  _curPal=totPal;
   var grand=totQty+totLoose;
 
   function sbtn(mode,label){ return '<button class="sortbtn'+(_sortMode===mode?' active':'')+'" onclick="setSort(\''+mode+'\')">'+label+'</button>'; }
@@ -511,7 +539,7 @@ function renderReport(info, data){
     +'<div class="cards">'
     +'<div class="scard a"><div class="v">'+nf(rows.length)+'</div><div class="l">상품 품목</div></div>'
     +'<div class="scard b"><div class="v" id="grandTotal">'+nf(grand)+'</div><div class="l">총 재고 (낱개포함·개)</div></div>'
-    +'<div class="scard c"><div class="v">'+nf(totPal)+'</div><div class="l">총 파렛트 (팔)</div></div>'
+    +'<div class="scard c clickable" onclick="openPalTrend()" title="30일 평균·최근 2개월 파렛트 추이 보기"><div class="v">'+nf(totPal)+'</div><div class="l">총 파렛트 (팔) <span class="trend-hint">📈 추이</span></div></div>'
     +'</div>'
     + body
     +(isDetail
@@ -956,6 +984,142 @@ function ensureHistOverlay(){
 }
 function closeHist(){ var o=document.getElementById('histOverlay'); if(o) o.style.display='none'; }
 window.closeHist=closeHist;
+
+/* ===================================================================
+   총 파렛트 추이 — 30일 평균 + 최근 2개월 그래프·표
+   일별 기록: vendorStatus/{gid}/{vid}/daily/{YYYY-MM-DD} = {p,q,t}
+     (창고앱 요약본 갱신 때 그날 마지막 값으로 덮어씀 — wms_vendor_projection.js)
+   재고는 창고앱에서만 바뀌므로 기록이 없는 날은 직전 기록값과 같다고 보고 이어 그린다.
+   재고조사 마감(snapshots)의 sumPal 은 실물 확인값이라 별도 점으로 겹쳐 보여준다.
+=================================================================== */
+var PT_DAYS=61, PT_AVG=30;
+function ptKst(ts){ return new Date((ts==null?Date.now():ts)+9*3600e3).toISOString().slice(0,10); }
+function ptAdd(d,n){ var x=new Date(d+'T00:00:00Z'); x.setUTCDate(x.getUTCDate()+n); return x.toISOString().slice(0,10); }
+function ptMD(d){ return (+d.slice(5,7))+'/'+(+d.slice(8,10)); }
+function ptDW(d){ return ptMD(d)+' ('+'일월화수목금토'.charAt(new Date(d+'T00:00:00Z').getUTCDay())+')'; }
+
+function openPalTrend(){
+  var i=_lastInfo||{}; if(!i.gid||!i.vendorId) return;
+  var o=ensureHistOverlay();
+  o.innerHTML='<div class="hist-card wide"><div class="hist-hd"><span>📈 총 파렛트 추이</span><button class="hist-x" onclick="closeHist()">✕</button></div>'
+    +'<div class="hist-body"><div class="hist-empty">불러오는 중…</div></div></div>';
+  var today=ptKst(), from=ptAdd(today,-(PT_DAYS-1)), base='vendorStatus/'+i.gid+'/'+i.vendorId;
+  Promise.all([
+    db.ref(base+'/daily').orderByKey().endAt(today).limitToLast(400).get(),
+    db.ref(base+'/snapshots').get()
+  ]).then(function(r){
+    renderPalTrend(r[0].val()||{}, r[1].val()||{}, today, from);
+  }).catch(function(e){
+    o.querySelector('.hist-body').innerHTML='<div class="hist-empty">불러오지 못했습니다: '+esc(e&&e.message)+'</div>';
+  });
+}
+window.openPalTrend=openPalTrend;
+
+function renderPalTrend(daily, snaps, today, from){
+  var o=document.getElementById('histOverlay'); if(!o) return;
+  /* 오늘은 지금 화면 값(가장 최신)으로 */
+  daily=Object.assign({}, daily); daily[today]={ p:_curPal, t:Date.now() };
+  var keys=Object.keys(daily).sort();
+  var first=keys[0];
+  /* 기간 이전 마지막 기록부터 이어 붙인다 */
+  var last=null; keys.forEach(function(k){ if(k<from) last=+daily[k].p||0; });
+  var days=[]; for(var d=from; d<=today; d=ptAdd(d,1)){
+    var rec=daily[d]; if(rec) last=+rec.p||0;
+    days.push({ d:d, v:(d<first?null:last), rec:!!rec });
+  }
+  var snapByDay={};
+  Object.keys(snaps).forEach(function(k){ var s=snaps[k]; if(!s||!s.closedAt) return; var d=ptKst(s.closedAt);
+    if(d>=from&&d<=today) snapByDay[d]={ v:+s.sumPal||0, memo:s.memo||'' }; });
+
+  var win=days.slice(-PT_AVG).filter(function(x){ return x.v!=null; });
+  var avg=win.length ? win.reduce(function(a,x){ return a+x.v; },0)/win.length : null;
+  var vals=days.filter(function(x){ return x.v!=null; });
+  var mx=vals.length?vals.reduce(function(a,x){ return x.v>a.v?x:a; }):null;
+  var mn=vals.length?vals.reduce(function(a,x){ return x.v<a.v?x:a; }):null;
+  var recDays=Object.keys(daily).filter(function(k){ return k>=from; }).length;
+
+  var kpis='<div class="pt-kpis">'
+    +'<div class="pt-kpi"><div class="v">'+nf(_curPal)+'<span class="u">팔</span></div><div class="l">현재</div><div class="s">'+ptMD(today)+' 기준</div></div>'
+    +'<div class="pt-kpi hl"><div class="v">'+(avg==null?'-':nf(Math.round(avg*10)/10))+'<span class="u">팔</span></div><div class="l">30일 평균</div><div class="s">'+(win.length<PT_AVG?'기록 '+win.length+'일 기준':'최근 30일')+'</div></div>'
+    +'<div class="pt-kpi"><div class="v">'+(mx?nf(mx.v):'-')+'<span class="u">팔</span></div><div class="l">2개월 최대</div><div class="s">'+(mx?ptMD(mx.d):'')+'</div></div>'
+    +'<div class="pt-kpi"><div class="v">'+(mn?nf(mn.v):'-')+'<span class="u">팔</span></div><div class="l">2개월 최소</div><div class="s">'+(mn?ptMD(mn.d):'')+'</div></div>'
+    +'</div>';
+
+  var hasSnap=Object.keys(snapByDay).length>0;
+  var legend='<div class="pt-legend"><span><i style="width:16px;height:2px;background:#60A5FA;"></i>일별 파렛트 (그날 마지막 값)</span>'
+    +(hasSnap?'<span><i style="width:9px;height:9px;border-radius:50%;background:#FBBF24;border:2px solid var(--card);"></i>재고조사 마감</span>':'')
+    +'</div>';
+  var note='<div class="pt-note">일별 기록은 <b>'+(first?ptMD(first):ptMD(today))+'</b>부터 쌓이고 있습니다'
+    +(first>from?' — 그 이전은 그래프가 비어 있으며, 30일 평균은 기록된 날만으로 계산합니다':'')
+    +'. 창고 재고가 바뀌지 않은 날은 직전 값을 이어 씁니다.</div>';
+
+  /* 표: 최근 날짜부터, 기록 시작일까지 */
+  var rows=days.slice().reverse().filter(function(x){ return x.v!=null || snapByDay[x.d]; });
+  var tbl='<div class="tbl-wrap"><table class="pt-tbl"><thead><tr><th class="l">날짜</th><th>파렛트</th><th>전일 대비</th><th class="l">비고</th></tr></thead><tbody>'
+    +rows.map(function(x){
+      var idx=days.indexOf(x), prev=idx>0?days[idx-1].v:null;
+      var df=(x.v!=null&&prev!=null)?x.v-prev:null;
+      var dfh=df==null?'<span class="dim">-</span>':(df>0?'<span class="pt-up">▲ '+nf(df)+'</span>':df<0?'<span class="pt-down">▼ '+nf(-df)+'</span>':'<span class="dim">0</span>');
+      var s=snapByDay[x.d];
+      var memo=(s?'🟡 재고조사 마감 '+nf(s.v)+'팔'+(s.memo?' · '+esc(s.memo):''):'')+(!x.rec&&x.v!=null?(s?' · ':'')+'<span class="dim">변동 없음(이어 씀)</span>':'');
+      return '<tr><td class="l" style="white-space:nowrap">'+ptDW(x.d)+'</td><td class="num'+(x.rec?'':' dim')+'">'+(x.v==null?'-':nf(x.v)+'<span class="u">팔</span>')+'</td><td class="num">'+dfh+'</td><td class="l" style="font-weight:500;font-size:12px;">'+memo+'</td></tr>';
+    }).join('')
+    +'</tbody></table></div>';
+
+  o.innerHTML='<div class="hist-card wide"><div class="hist-hd"><span>📈 총 파렛트 추이 — 최근 2개월</span><button class="hist-x" onclick="closeHist()">✕</button></div>'
+    +'<div class="hist-body">'+kpis+'<div class="pt-chart"><svg id="ptSvg"></svg></div>'+legend+note+tbl+'</div></div>'
+    +'<div class="pt-tip" id="ptTip"></div>';
+  drawPalTrend(document.getElementById('ptSvg'), days, snapByDay, avg);
+}
+
+/* 한 축 꺾은선 — 2px 선, 재고조사 점은 링 두른 9px, 마우스 위치 날짜에 세로선+툴팁 */
+function drawPalTrend(svg, days, snapByDay, avg){
+  var W=svg.clientWidth||760, H=220, pl=40, pr=10, pt=12, pb=24, iw=W-pl-pr, ih=H-pt-pb, n=days.length;
+  var all=days.map(function(x){ return x.v; }).filter(function(v){ return v!=null; })
+    .concat(Object.keys(snapByDay).map(function(k){ return snapByDay[k].v; }));
+  /* 꺾은선이라 0 에서 시작하지 않고 값 범위에 맞춘다 — 하루 몇십 팔 변동이 보이도록 */
+  if(avg!=null) all.push(avg);
+  var hi=Math.max.apply(null, all.concat([1])), lo=Math.min.apply(null, all.length?all:[0]);
+  var span=Math.max(hi-lo, Math.max(10, hi*0.05));
+  var raw=span/4, p10=Math.pow(10,Math.floor(Math.log10(raw))), m=raw/p10, step=(m<=1?1:m<=2?2:m<=2.5?2.5:m<=5?5:10)*p10;
+  var bot=Math.max(0, Math.floor((lo-step*0.5)/step)*step), top=Math.ceil((hi+step*0.5)/step)*step;
+  var X=function(i){ return pl+(n<=1?iw/2:iw*i/(n-1)); }, Y=function(v){ return pt+ih-ih*(v-bot)/(top-bot); };
+  var g='';
+  for(var tv=bot; tv<=top+1e-9; tv+=step){ var y=Y(tv);
+    g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y+'" y2="'+y+'" stroke="rgba(255,255,255,.06)"/>'
+      +'<text x="'+(pl-6)+'" y="'+(y+3)+'" text-anchor="end">'+nf(Math.round(tv))+'</text>'; }
+  var every=Math.max(1,Math.ceil(n/Math.max(1,Math.floor(iw/52))));
+  days.forEach(function(x,i){ if(i%every===0||i===n-1) g+='<text x="'+X(i)+'" y="'+(H-7)+'" text-anchor="middle">'+ptMD(x.d)+'</text>'; });
+  if(avg!=null) g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+Y(avg)+'" y2="'+Y(avg)+'" stroke="#FBBF24" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>'
+    +'<text x="'+(pl+6)+'" y="'+(Y(avg)-6)+'" style="fill:#FBBF24">30일 평균 '+nf(Math.round(avg))+'팔</text>';
+  /* 기록 구간마다 선을 잇는다 (기록 전은 비움) */
+  var path='', on=false;
+  days.forEach(function(x,i){ if(x.v==null){ on=false; return; } path+=(on?'L':'M')+X(i).toFixed(1)+','+Y(x.v).toFixed(1); on=true; });
+  if(path) g+='<path d="'+path+'" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  var lastI=-1; days.forEach(function(x,i){ if(x.v!=null) lastI=i; });
+  if(lastI>=0) g+='<circle cx="'+X(lastI)+'" cy="'+Y(days[lastI].v)+'" r="4" fill="#60A5FA" stroke="#141E33" stroke-width="2"/>';
+  days.forEach(function(x,i){ var s=snapByDay[x.d]; if(s) g+='<circle cx="'+X(i)+'" cy="'+Y(s.v)+'" r="4.5" fill="#FBBF24" stroke="#141E33" stroke-width="2"/>'; });
+  g+='<line id="ptCross" x1="0" x2="0" y1="'+pt+'" y2="'+(pt+ih)+'" stroke="rgba(255,255,255,.25)" style="display:none"/>'
+    +'<rect id="ptHit" x="'+pl+'" y="'+pt+'" width="'+iw+'" height="'+ih+'" fill="transparent"/>';
+  svg.setAttribute('viewBox','0 0 '+W+' '+H); svg.innerHTML=g;
+
+  var tip=document.getElementById('ptTip'), cross=document.getElementById('ptCross'), hit=document.getElementById('ptHit');
+  function move(ev){
+    var r=svg.getBoundingClientRect(), sx=(ev.clientX-r.left)*W/r.width;
+    var i=Math.round((sx-pl)/(n<=1?1:iw/(n-1))); i=Math.max(0,Math.min(n-1,i));
+    var x=days[i], s=snapByDay[x.d];
+    cross.setAttribute('x1',X(i)); cross.setAttribute('x2',X(i)); cross.style.display='';
+    tip.innerHTML='<b>'+ptDW(x.d)+'</b><br>파렛트 <b>'+(x.v==null?'기록 전':nf(x.v)+'팔')+'</b>'+(x.v!=null&&!x.rec?' <span style="color:var(--sub)">(이어 씀)</span>':'')
+      +(s?'<br><span style="color:#FBBF24">재고조사 마감 <b>'+nf(s.v)+'팔</b></span>':'');
+    tip.style.display='block';
+    var tx=ev.clientX+14; if(tx+tip.offsetWidth>innerWidth-8) tx=ev.clientX-tip.offsetWidth-14;
+    tip.style.left=tx+'px'; tip.style.top=(ev.clientY+14)+'px';
+  }
+  function leave(){ tip.style.display='none'; cross.style.display='none'; }
+  hit.addEventListener('mousemove',move); hit.addEventListener('mouseleave',leave);
+  hit.addEventListener('touchstart',function(e){ move(e.touches[0]); },{passive:true});
+  hit.addEventListener('touchmove',function(e){ move(e.touches[0]); },{passive:true});
+}
 
 /* ── 유통기한 기록표 (세부내역 전용) ───────────────────────
    상품마다 유통기한 한 개만 뽑아 "상품명 - 20270416" 한 줄씩. 이름순.
