@@ -919,10 +919,21 @@ body{
    첫 화면 로딩을 늦추지 않도록 페이지가 다 뜬 뒤 SDK 를 싣는다. */
 (function(){
   function load(src){ return new Promise(function(ok, no){ var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
+  /* 페이지 끝의 wms_access.js 가 SDK 를 싣고 초기화한다 — 같이 실으면 SDK 가 두 번 들어가므로 끝나기를 기다린다.
+     (게이트가 SDK 를 못 실었을 때만 직접 싣는다) */
+  function sdkReady(){ return window.firebase && firebase.auth && firebase.database && firebase.apps && firebase.apps.length; }
+  function waitSdk(){
+    return new Promise(function(ok){
+      var t0 = Date.now();
+      (function poll(){ if (sdkReady() || Date.now() - t0 > 8000) ok(); else setTimeout(poll, 200); })();
+    });
+  }
   function reveal(){
     var V = 'https://www.gstatic.com/firebasejs/10.13.2/';
-    var chain = (window.firebase && firebase.auth) ? Promise.resolve()
-      : load(V + 'firebase-app-compat.js').then(function(){ return load(V + 'firebase-auth-compat.js'); }).then(function(){ return load(V + 'firebase-database-compat.js'); });
+    var chain = waitSdk().then(function(){
+      if (window.firebase && firebase.auth && firebase.database) return;
+      return load(V + 'firebase-app-compat.js').then(function(){ return load(V + 'firebase-auth-compat.js'); }).then(function(){ return load(V + 'firebase-database-compat.js'); });
+    });
     chain.then(function(){
       if (!firebase.apps.length) firebase.initializeApp({
         apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI", authDomain:"makewon.com",
@@ -1036,5 +1047,6 @@ body{
 })();
 </script>
 
+<script src="/wms_access.js" data-page="index" data-floor="0"></script>
 </body>
 </html>
