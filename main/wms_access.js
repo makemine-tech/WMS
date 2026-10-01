@@ -222,6 +222,29 @@
     } catch (e) { /* 통계 실패가 페이지 동작을 막으면 안 된다 */ }
   }
 
+  /* ── 구글 애널리틱스(GA4) — 지역·도시·유입경로·기기 분석용 ──
+     페이지에 이미 gtag 가 박혀 있으면 그대로 두고(중복 집계 방지), 없는 페이지에만 같은 태그를 싣는다.
+     로그인 사용자 정보(이메일 등)는 GA 로 보내지 않는다. 로컬 개발 서버에서는 싣지 않는다. */
+  var GA_ID = 'G-CJKYQB2TTY';
+  function loadGA(){
+    try {
+      var host = location.hostname;
+      if (!host || host === 'localhost' || host === '127.0.0.1' || /\.localhost$/.test(host) || location.protocol === 'file:') return;
+      var ss = document.getElementsByTagName('script');
+      for (var i = 0; i < ss.length; i++) { if (/googletagmanager\.com\/gtag\/js/.test(ss[i].src || '')) return; }
+      var s = document.createElement('script');
+      s.async = true; s.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA_ID;
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = window.gtag || function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', GA_ID);
+    } catch (e) { /* 분석 실패가 페이지 동작을 막으면 안 된다 */ }
+  }
+  /* 페이지가 head 아래쪽에 gtag 를 둔 경우까지 보고 판단하도록 문서를 다 읽은 뒤 실행 */
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadGA);
+  else loadGA();
+
   ensureFirebase(function(){
     run();
     if (window.firebase && firebase.database && firebase.auth && firebase.apps && firebase.apps.length) logVisit();
