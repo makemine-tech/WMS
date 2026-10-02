@@ -157,7 +157,7 @@
           var nt = ws.getCell('A' + (sumR + 1)); nt.font = { name: '맑은 고딕', size: 9, italic: true, color: { argb: 'FF7F7F7F' } }; nt.fill = NOFILL; nt.border = {}; nt.alignment = { horizontal: 'left', vertical: 'middle' };
           for (var r8 = sumR + 1; r8 <= sumR + 3; r8++) for (var c5 = 1; c5 <= w; c5++){ var z = ws.getRow(r8).getCell(c5); if (r8 > sumR + 1 || c5 > 1) z.style = {}; } }
         for (var r3 = 6; r3 <= (sumR || 37); r3++) ws.getCell('A' + r3).alignment = A_C;
-        ws.getColumn(1).width = 10; ws.getColumn(2).width = b === '곡' ? 20 : 34; if (b === '곡') ws.getColumn(3).width = 14;
+        ws.getColumn(1).width = 10; ws.getColumn(2).width = b === '곡' ? 20 : 46; if (b === '곡') ws.getColumn(3).width = 14;
         for (var c4 = b === '곡' ? 4 : 3; c4 <= w; c4++) ws.getColumn(c4).width = 11;
         var lr3 = lastRow(ws, 12, 16);
         if (lr3 >= 1 && txt(ws.getCell('L1').value)){ ws.getColumn(11).width = 3; styleHead(ws.getRow(1), 16, 12); body(ws, 1, 2, lr3, 12, 16);
@@ -214,6 +214,7 @@
       { d: '2026-10-03', t: '엑셀 디자인: 글꼴 맑은 고딕 10, 제목줄 남색·흰 글씨, 합계줄 연한 남색·굵게, 연회색 테두리, 눈금선 끔, 숫자 천 단위 쉼표(번호류 제외), 열 너비 맞춤, 제목줄 고정·필터, 시트 탭 색(곡 초록·셀 주황·오 보라·청구 남색·점검 빨강) — 청구내역서·작업비정산서 양식은 그대로' },
       { d: '2026-10-03', t: '로켓쉽먼트 조건을 그래놀라 → 포인트나인 상품 전체(당쉼·서리태 등)로 넓힘 (9월 당쉼 혈당컷 40개 송장 누락 발견)' },
       { d: '2026-10-03', t: '번개배송(Q10 일본 등) = 송장당 출고비 1,500 × 1.1, 착불·기타비용 시트에 송장별 한 줄' },
+      { d: '2026-10-03', t: '셀·오 보관비 품명 = 그날 화물 입출고 내용(메모 + 파렛트 수, 없으면 박스) 「올리브영 발송 1 / 울산화물발송 4」 형식' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -348,9 +349,11 @@
           ['곡', '셀', '오'].forEach(function(b){
             var ws = wb.getWorksheet(b + '_보관비'), L = LAY[b], name = BRAND[b]; if (!ws) return;
             ws.getCell('A1').value = Y + '.' + String(M).padStart(2, '0') + ' 파렛 수량';
-            var cin = {}, cout = {}, list = [];
+            var cin = {}, cout = {}, list = [], desc = {};   /* desc = 그날 품명(입출고 내용) — 8월처럼 「올리브영 발송 1 / 울산화물발송 4」 */
             ca.forEach(function(r){ if (typeof r[0] !== 'number' || r[2] !== name) return; var d = Math.floor(r[0]);
               if (r[1] === '입고') cin[d] = (cin[d] || 0) + (+r[4] || 0); else cout[d] = (cout[d] || 0) + (+r[4] || 0);
+              var memo = String(r[7] || '').trim() || (r[1] === '입고' ? '입고' : '출고'), q = +r[4] ? ' ' + (+r[4]) : +r[3] ? ' ' + (+r[3]) + '박스' : '';
+              (desc[d] = desc[d] || []).push(memo + q);
               list.push([r[1], M + '월' + (d - S0 + 1) + '일', r[7] || '', r[4] === '' ? null : +r[4], r[3] === '' ? null : +r[3]]); });
             var sum = function(o){ return Object.keys(o).reduce(function(s, k){ return s + o[k]; }, 0); }, sI = sum(cin), sO = sum(cout);
             var need = MC.start[b] + sI - sO - MC.end[b];
@@ -364,7 +367,7 @@
               var r = first + i, dd = serial(i + 1), row = ws.getRow(r);
               cur += (cin[dd] || 0) - fl[i] - (cout[dd] || 0); T.I += cin[dd] || 0; T.E += fl[i]; T.O += cout[dd] || 0; T.S += cur * unit;
               row.getCell('A').value = dd; row.getCell('A').numFmt = 'm"월" d"일"';
-              if (b === '곡'){ row.getCell('B').value = i === 0 ? '상세내역 우측 셀참조' : null; row.getCell('C').value = null; } else row.getCell('B').value = null;
+              if (b === '곡'){ row.getCell('B').value = i === 0 ? '상세내역 우측 셀참조' : null; row.getCell('C').value = null; } else row.getCell('B').value = desc[dd] ? desc[dd].join(' / ') : null;
               ws.getCell(L.I + r).value = cin[dd] || null; ws.getCell(L.E + r).value = fl[i] || null; ws.getCell(L.O + r).value = cout[dd] || null; ws.getCell(L.cost + r).value = 3000;
               ws.getCell(L.cur + r).value = { formula: (i === 0 ? L.start : L.cur + (r - 1)) + '+' + L.I + r + '-' + L.E + r + '-' + L.O + r, result: cur };
               ws.getCell(L.unit + r).value = { formula: '(17500*1.1)/' + ND, result: unit };
