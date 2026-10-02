@@ -86,7 +86,7 @@ function buildCardHtml(A, R){
     + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">이번 달 원본으로 바꿀 데이터 시트 — 쓸 파일 확인</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
       : '<div class="sec-note">이번 달 원본으로 바꿀 데이터 시트가 정해지지 않았습니다 (대화창에서 요청하면 업체 설정에 넣습니다).</div>')
     + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매달 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
-    + '<div style="display:flex;gap:.6rem;align-items:center;margin-top:.8rem;flex-wrap:wrap"><button class="btn p" id="buildBtn" onclick="buildDraft()">📥 ' + yy + '월_거래내역서_' + esc(VW.name) + '.xlsx 내려받기</button>'
+    + '<div style="display:flex;gap:.6rem;align-items:center;margin-top:.8rem;flex-wrap:wrap"><button class="btn p" id="buildBtn" onclick="buildDraft()">📥 ' + yy + '월_거래내역서_' + esc(VW.name) + '_초안.xlsx 내려받기</button><span class="sm dim">초안입니다 — 엑셀에서 확인·수정해 저장한 뒤 맨 아래 <b>완료 확정</b>에 올려 주세요</span>'
     + '<span class="sm dim" id="buildMsg"></span></div>'
     + '<div id="buildLog">' + buildLogHtml() + '</div>';
 }
@@ -185,14 +185,13 @@ function bestSourceSheet(xwb, tplHeads){
   return best;
 }
 
-function buildDraft(){
-  if (!VW || !VW.A) return;
-  var btn = $('buildBtn'), msg = function(t){ var e = $('buildMsg'); if (e) e.textContent = t; };
-  btn.disabled = true;
+/* 초안 만들기 (내려받기·완료 확정 비교에 같이 씀) → { wb, log, name } */
+function makeDraft(msg){
+  msg = msg || function(){};
   var A = VW.A, R = cfgOf(VW.vkey), run = runOf(), eng = engineOf(VW.vkey), log = [], wb;
   var yy = YM.slice(5, 7), dd = lastDay(YM);
   msg('표본 여는 중…');
-  decryptBox(VW.meta).then(function(bytes){
+  return decryptBox(VW.meta).then(function(bytes){
     if (/\.xls$/i.test(VW.meta.name)){   /* 옛 xls 는 xlsx 로 바꿔서 연다 (서식 일부 빠질 수 있음) */
       var x = XLSX.read(bytes, { type: 'array', cellStyles: true }); bytes = XLSX.write(x, { type: 'array', bookType: 'xlsx' });
       log.push(['안내', '표본이 옛 xls 형식이라 xlsx 로 바꿔 열었습니다 — 서식 일부가 다를 수 있음']);
@@ -282,10 +281,18 @@ function buildDraft(){
     /* 노란 표시를 끈 업체는 지운다 */
     if (optOf().noYellow) wb.eachSheet(function(ws){ ws.eachRow(function(row){ row.eachCell(function(c){ if (c.fill && c.fill.fgColor && c.fill.fgColor.argb === 'FFFFF2B3') c.fill = { type: 'pattern', pattern: 'none' }; }); }); });
     wb.calcProperties = wb.calcProperties || {}; wb.calcProperties.fullCalcOnLoad = true;
+    return { wb: wb, log: log, name: yy + '월_거래내역서_' + VW.name + '.xlsx' };
+  });
+}
+function buildDraft(){
+  if (!VW || !VW.A) return;
+  var btn = $('buildBtn'), msg = function(t){ var e = $('buildMsg'); if (e) e.textContent = t; }, log, name;
+  btn.disabled = true;
+  makeDraft(msg).then(function(D){
+    log = D.log; name = D.name.replace(/\.xlsx$/,'_초안.xlsx');
     msg('엑셀 쓰는 중…');
-    return wb.xlsx.writeBuffer();
+    return D.wb.xlsx.writeBuffer();
   }).then(function(buf){
-    var name = yy + '월_거래내역서_' + VW.name + '.xlsx';
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = name;
     document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
     var nCheck = log.filter(function(l){ return l[0] === '확인 필요'; }).length;

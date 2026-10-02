@@ -20,14 +20,17 @@ function samplesByVendor(){
   var g = {};
   Object.keys(ALLBOX).forEach(function(ym){
     Object.keys(ALLBOX[ym] || {}).forEach(function(id){
-      var m = ALLBOX[ym][id]; if (!m || m.type !== 'statement') return;
+      var m = ALLBOX[ym][id]; if (!m || m.type !== 'statement' || m.superseded) return;
       var name = SETTLE_STMT.vendorFromFile(m.name);
       (g[name] = g[name] || []).push({ ym: ym, id: id, m: m });
     });
   });
-  Object.keys(g).forEach(function(k){ g[k].sort(function(a, b){ return a.ym < b.ym ? 1 : -1; }); });
+  /* 최근 달 먼저, 같은 달이면 완료 확정본 먼저 */
+  Object.keys(g).forEach(function(k){ g[k].sort(function(a, b){ return a.ym !== b.ym ? (a.ym < b.ym ? 1 : -1) : (b.m.final ? 1 : 0) - (a.m.final ? 1 : 0); }); });
   return g;
 }
+/* 이번 달 초안의 틀 = 정산월보다 앞 달 중 가장 최근 (없으면 맨 앞) */
+function defaultSample(list){ for (var i = 0; i < list.length; i++) if (list[i].ym < YM) return list[i]; return list[0]; }
 
 function renderVendors(){
   var box = $('tabVendors'); if (!box) return;
@@ -40,11 +43,12 @@ function renderVendors(){
   } else {
     html += '<div class="card"><div class="card-h"><span class="card-t">업체 ' + names.length + '곳</span><span class="card-s">룰이 코드에 반영된 업체는 ⚙️ 표시 · 룰은 대화창에서 요청</span></div>'
       + names.map(function(n){
-        var list = g[n], v = VENDORS[vKey(n)], en = engineOf(vKey(n)), cnt = en && en.ruleList ? en.ruleList.length : 0;
-        var pickSel = list.length > 1 ? '<select class="tsel" id="smp_' + vKey(n) + '">' + list.map(function(x){ return '<option value="' + x.ym + '|' + x.id + '">' + esc(ymLabel(x.ym)) + ' · ' + esc(x.m.name) + '</option>'; }).join('') + '</select>'
+        var list = g[n], v = VENDORS[vKey(n)], en = engineOf(vKey(n)), cnt = en && en.ruleList ? en.ruleList.length : 0, dft = defaultSample(list);
+        var pickSel = list.length > 1 ? '<select class="tsel" id="smp_' + vKey(n) + '">' + list.map(function(x){ return '<option value="' + x.ym + '|' + x.id + '"' + (x === dft ? ' selected' : '') + '>' + esc(ymLabel(x.ym)) + ' · ' + (x.m.final ? '✅ ' : '') + esc(x.m.name) + '</option>'; }).join('') + '</select>'
           : '<span class="sm dim">' + esc(ymLabel(list[0].ym)) + ' · ' + esc(list[0].m.name) + '</span>';
-        var sc = v && v.score, pc = sc ? sc.pct : null;
-        return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>')
+        var sc = v && v.score, pc = sc ? sc.pct : null, dn = doneOf(vKey(n), YM);
+        var stTag = dn ? '<span class="chk okk">✅ ' + esc(ymLabel(YM)) + ' 완료 확정 ' + esc(ftime(dn.at)) + '</span>' : '<span class="chk warn">⏳ ' + esc(ymLabel(YM)) + ' 작업 중</span>';
+        return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>')
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button></div></div>';
@@ -55,7 +59,8 @@ function renderVendors(){
 
 function startVendor(name){
   var g = samplesByVendor()[name]; if (!g || !g.length) return;
-  var sel = $('smp_' + vKey(name)), pick = g[0];
+  var sel = $('smp_' + vKey(name)), pick = defaultSample(g);
+  FINAL_MSG = '';
   if (sel){ var p = sel.value.split('|'); pick = g.filter(function(x){ return x.ym === p[0] && x.id === p[1]; })[0] || g[0]; }
   VW = { vkey: vKey(name), name: name, fileId: pick.id, ym: pick.ym, meta: pick.m, A: null, zero: false, err: '' };
   renderWork();
@@ -210,6 +215,7 @@ function renderWork(){
     + '<div style="overflow-x:auto"><table class="ftbl wk"><thead><tr><th>행</th><th>내역</th><th>상태</th><th style="text-align:right">수량</th><th style="text-align:right">단가</th><th style="text-align:right">금액</th><th style="text-align:right">비중</th><th>수량 출처 · 비고</th></tr></thead><tbody>' + itemRows + '</tbody></table></div></div>'
     + '<div class="card"><div class="card-h"><span class="card-t">② 데이터 시트 (표본)</span><span class="card-s">표본 안의 근거 시트 · 이번 달 파일함에서 짝이 될 원본</span></div>'
     + (sheetRows ? '<div style="overflow-x:auto"><table class="ftbl wk"><thead><tr><th>시트</th><th>상태</th><th>종류 · 제목줄</th><th>쓰는 항목</th><th>' + esc(ymLabel(YM)) + ' 원본</th></tr></thead><tbody>' + sheetRows + '</tbody></table></div>' : '<div class="empty-s">데이터 시트 없음</div>') + '</div>'
-    + '<div class="card rulecard">' + ruleListHtml() + '</div>';
+    + '<div class="card rulecard">' + ruleListHtml() + '</div>'
+    + '<div class="card" id="finalCard">' + finalCardHtml() + '</div>';
   saveScore(S.pct);
 }
