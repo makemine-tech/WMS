@@ -8,7 +8,7 @@
      · 작업비정산서 = 작업상세 요약표를 가리킴 (피벗 없음)
      · 기타작업내역 = 「쿠팡 발주서」(0930_포인트나인크루) Sheet1, 작업금액 = 박스수 × 작업비(단가) × 1.1
      · 곡·셀·오 보관비 = 그 달 일수, 단가 (17500×1.1)/일수, 입고·파렛트출고 = 「화물 입출고 엑셀」, 택배 파렛트 = 송장 건수 비례로 마감 재고에 맞춤
-     · 택배착불및기타비용 = MONTHS[정산월].cod (대표님 메모)
+     · 택배착불및기타비용 = MONTHS[정산월].cod (대표님 메모) + 이벗 주문목록 메이크창고·로켓쉽먼트_다이렉트·그래놀라 송장별 한 줄(비용은 대표님 입력)
    달마다 넣는 값(시작·마감 파렛트, 착불 메모)은 MONTHS 에 — 대화창에서 알려 주시면 넣음.
 ============================================================ */
 (function(){
@@ -130,6 +130,7 @@
       { d: '2026-10-03', t: '기타작업내역 = 0930 형식 Sheet1, 작업금액 = 박스수 × 작업비(단가) × 1.1 · 원본에 없는 별도 출고 줄은 대표님이 추가' },
       { d: '2026-10-03', t: '청구내역서 재고보관비 = 곡·셀·오 보관비 합계 줄 (8월 파일은 셀시어스가 8/31 하루치를 가리켰음)' },
       { d: '2026-10-03', t: '착불·기타비용 = 대표님 메모 (건수 × 건당 × 1.1)' },
+      { d: '2026-10-03', t: '착불 시트에 이벗 전체주문목록 고객사 메이크창고 · 판매처 로켓쉽먼트_다이렉트 · 상품명 그래놀라 송장을 송장별 한 줄(날짜=등록일, 건수 1)로 추가 — 비용은 수량 따라 달라 대표님이 엑셀에서 직접 입력(노란 칸)' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -302,18 +303,38 @@
           work._stor = stor;
         });
       }).then(function(){
-        /* 착불·기타비용 */
+        /* 착불·기타비용 = 대표님 메모 + 이벗 주문목록 로켓쉽먼트 그래놀라 송장 (비용은 대표님이 엑셀에서 직접) */
         var ws = wb.getWorksheet('택배착불및기타비용'); if (!ws) return;
-        for (var r = 2; r <= Math.max(ws.rowCount, 20); r++) ['A', 'B', 'C', 'D', 'E'].forEach(function(c){ ws.getCell(c + r).value = null; ws.getCell(c + r).fill = NOFILL; });
-        var tot = 0;
-        (MC.cod || []).forEach(function(x, i){ var r = 2 + i, v = x[2] * x[3] * 1.1; tot += v;
-          ws.getCell('A' + r).value = serial(x[0]); ws.getCell('A' + r).numFmt = 'm"월" d"일"'; ws.getCell('B' + r).value = x[1]; ws.getCell('C' + r).value = x[2]; ws.getCell('D' + r).value = x[3];
-          ws.getCell('E' + r).value = { formula: 'PRODUCT(C' + r + ':D' + r + ')*1.1', result: v }; });
-        var F = 2 + (MC.cod || []).length;
-        ws.getCell('E' + F).value = { formula: 'SUM(E2:E' + Math.max(2, F - 1) + ')', result: tot };
-        st.getCell('G38').value = { formula: '택배착불및기타비용!E' + F, result: tot };
-        work._cod = tot;
-        log.push(['자동 적용', '착불·기타비용 ' + (MC.cod || []).length + '줄 · ' + won(tot)]);
+        var eb = ids.filter(function(id){ return box[id].type === 'ebut_orders'; });
+        if (!eb.length) log.push(['확인 필요', '파일함에 이벗 전체주문목록이 없습니다 — 로켓쉽먼트 그래놀라 송장을 착불 시트에 못 넣었어요']);
+        var rk = {}, rkOrd = [];
+        return eb.reduce(function(p, id){ return p.then(function(){ return rd(id).then(function(xwb){
+          var a = XLSX.utils.sheet_to_json(xwb.Sheets[xwb.SheetNames[0]], { header: 1, defval: '' }), H = (a[0] || []).map(function(h){ return String(h).replace(/\s/g, ''); });
+          var c = function(n){ return H.indexOf(n); }, iC = c('고객사'), iS = c('판매처'), iP = c('상품명'), iQ = c('수량'), iN = c('송장번호'), iD = c('등록일'), iR = c('수령자');
+          if (iS < 0 || iN < 0) return;
+          a.slice(1).forEach(function(r){
+            if (String(r[iC]).trim() !== '메이크창고' || !/^로켓쉽먼트_다이렉트/.test(String(r[iS]).trim()) || !/그래놀라/.test(r[iP]) || !r[iN]) return;
+            var k = String(r[iN]).trim(), nm = (String(r[iP]).match(/그래놀라\s*([^\s(]+)/) || [, String(r[iP])])[1];
+            if (!rk[k]){ rk[k] = { d: String(r[iD]).slice(0, 10), to: r[iR], it: [] }; rkOrd.push(k); }
+            rk[k].it.push(nm + ' ' + r[iQ]); });
+        }); }); }, Promise.resolve()).then(function(){
+          for (var r = 2; r <= Math.max(ws.rowCount, 40); r++) ['A', 'B', 'C', 'D', 'E'].forEach(function(c){ ws.getCell(c + r).value = null; ws.getCell(c + r).fill = NOFILL; });
+          var tot = 0, n = 0;
+          (MC.cod || []).forEach(function(x){ var r = 2 + n++, v = x[2] * x[3] * 1.1; tot += v;
+            ws.getCell('A' + r).value = serial(x[0]); ws.getCell('A' + r).numFmt = 'm"월" d"일"'; ws.getCell('B' + r).value = x[1]; ws.getCell('C' + r).value = x[2]; ws.getCell('D' + r).value = x[3];
+            ws.getCell('E' + r).value = { formula: 'C' + r + '*D' + r + '*1.1', result: v }; });
+          rkOrd.sort(function(x, y){ return rk[x].d.localeCompare(rk[y].d) || x.localeCompare(y); }).forEach(function(k){ var x = rk[k], r = 2 + n++, dd = x.d.split('-');
+            ws.getCell('A' + r).value = dd.length === 3 ? Math.round(Date.UTC(+dd[0], +dd[1] - 1, +dd[2]) / 864e5) + 25569 : x.d; ws.getCell('A' + r).numFmt = 'm"월" d"일"';
+            ws.getCell('B' + r).value = '로켓쉽먼트 그래놀라 ' + x.to + ' · ' + x.it.join(', ') + ' · 송장 ' + k; ws.getCell('C' + r).value = 1;
+            ws.getCell('D' + r).fill = YEL; ws.getCell('E' + r).value = { formula: 'C' + r + '*D' + r + '*1.1', result: 0 }; });
+          if (rkOrd.length){ mark(ws, 'D' + (2 + (MC.cod || []).length) + ':D' + (1 + n), '로켓쉽먼트 그래놀라 ' + rkOrd.length + '건 — 비용(노란 칸)은 수량 따라 대표님이 직접 입력');
+            log.push(['확인 필요', '착불 시트에 로켓쉽먼트 그래놀라 송장 ' + rkOrd.length + '건 — 비용 칸(노란색)은 직접 입력해 주세요']); }
+          var F = 2 + n;
+          ws.getCell('E' + F).value = { formula: 'SUM(E2:E' + Math.max(2, F - 1) + ')', result: tot };
+          st.getCell('G38').value = { formula: '택배착불및기타비용!E' + F, result: tot };
+          work._cod = tot;
+          log.push(['자동 적용', '착불·기타비용 ' + n + '줄 · ' + won(tot) + (rkOrd.length ? ' (그래놀라 ' + rkOrd.length + '건 비용 입력 전)' : '')]);
+        });
       }).then(function(){
         /* 청구내역서 결과값·표시 */
         var setR = function(a, v){ var c = st.getCell(a); c.value = c.value && c.value.formula ? { formula: c.value.formula, result: v } : v; };
@@ -328,7 +349,7 @@
         mark(st, 'G6', '보관비 = 곡·셀·오 보관비 합계 줄 (30일이면 ÷30)');
         mark(st, 'G22', '작업비 = 새 포장 기준 (작업상세 요약표 → 작업비정산서)');
         mark(st, 'F23', '파렛트수 = 기타작업내역 합계 — 별도 출고 줄 추가 시 같이 늘어남');
-        mark(st, 'G38', '착불·기타비용 = 대표님 메모만');
+        mark(st, 'G38', '착불·기타비용 = 대표님 메모 + 로켓쉽먼트 그래놀라 송장(비용 직접 입력)');
         beautify(wb);
         var ck = wb.getWorksheet('점검(확정 전 삭제)'); if (ck) wb.removeWorksheet(ck.id);
         ck = wb.addWorksheet('점검(확정 전 삭제)');
