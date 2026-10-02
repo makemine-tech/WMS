@@ -114,7 +114,7 @@
       var cargoId = ids.filter(function(id){ return box[id].type === 'cargo_io'; })[0];
       if (!rows.length) log.push(['확인 필요', '파일함에 이번 달 「포인트나인크루 출고 ROW」가 없습니다']);
       if (!etcId) log.push(['확인 필요', '파일함에 0930_포인트나인크루(쿠팡 발주서 종류)가 없습니다 — 기타작업내역은 지난달 그대로']);
-      if (!cargoId) log.push(['확인 필요', '파일함에 화물 입출고 엑셀이 없습니다 — 보관비 입고·출고가 비어요']);
+      if (!cargoId && !(ctx.CARGO && ctx.CARGO.length)) log.push(['확인 필요', '화물 입출고 엑셀도, 입출고 화물관리 ' + YM + ' 기록도 없습니다 — 보관비 입고·출고가 비어요']);
       var work = {}, stor = {}, vC = 0, vD = 0, vF = 0, vG = 0;
       var rd = function(id){ ctx.msg && ctx.msg(box[id].name + ' 읽는 중…'); return ctx.readBox(box[id]); };
 
@@ -209,6 +209,13 @@
         if (!work.곡 || !work.셀 || !work.오) return;
         return (cargoId ? rd(cargoId) : Promise.resolve(null)).then(function(cb){
           var ca = cb ? XLSX.utils.sheet_to_json(cb.Sheets['입출고내역'] || cb.Sheets[cb.SheetNames[0]], { header: 1, defval: '' }) : [];
+          /* 엑셀이 없으면 입출고 화물관리 기록 → 같은 모양 [날짜시리얼, 입고/출고, 업체, 박스, 파렛트, , , 메모] (택배출고 parcel 은 택배 파렛트라 제외) */
+          if (!cb && ctx.CARGO){ var skip = 0;
+            ctx.CARGO.forEach(function(x){ if (!x || !x.date) return; var k = x.kind === 'in' ? '입고' : x.kind === 'out' ? '출고' : null; if (!k){ if (/곡물|셀시어스|오리진|당쉼|포인트/.test(x.vendor || '')) skip++; return; }
+              var d = Math.round(Date.parse(x.date + 'T00:00:00Z') / 864e5) + 25569, p = (+x.aj || 0) + (+x.etc || 0);
+              String(x.vendor || '').split(',').forEach(function(v){ v = v.trim(); var nm = /곡물/.test(v) ? '곡물도감' : /셀시어스/.test(v) ? '셀시어스' : /오리진|당쉼/.test(v) ? '오리진케어' : v; ca.push([d, k, nm, x.box || '', p, '', '', x.memo || x.note || '']); }); });
+            log.push(['안내', '보관비 입고·출고 = 입출고 화물관리 ' + YM + ' 기록 (화물 입출고 엑셀이 파일함에 없음)' + (skip ? ' · 택배출고·기타 ' + skip + '건은 제외' : '')]); }
+          else if (cb) log.push(['안내', '보관비 입고·출고 = 파일함 화물 입출고 엑셀']);
           var LAY = { 곡: { start: 'D6', I: 'D', E: 'E', O: 'F', cost: 'G', cur: 'H', unit: 'I', sum: 'J' }, 셀: { start: 'C6', I: 'C', E: 'D', O: 'E', cost: 'F', cur: 'G', unit: 'H', sum: 'I' }, 오: { start: 'C6', I: 'C', E: 'D', O: 'E', cost: 'F', cur: 'G', unit: 'H', sum: 'I' } };
           ['곡', '셀', '오'].forEach(function(b){
             var ws = wb.getWorksheet(b + '_보관비'), L = LAY[b], name = BRAND[b]; if (!ws) return;

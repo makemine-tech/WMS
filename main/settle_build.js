@@ -263,6 +263,7 @@ function makeDraft(msg){
     msg('업체 룰 적용 중…');
     /* afterBuild 는 Promise 를 돌려줘도 된다 — 이번 달 파일함(BOX)·원본 읽기(readBox → SheetJS 통합문서)·화면 메시지(msg) 제공 */
     var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: BOX, msg: msg,
+      CARGO: (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : null,   /* 입출고 화물관리 그 달 기록 */
       readBox: function(m){ return decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); } };
     return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
       .catch(function(e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); });
