@@ -38,13 +38,13 @@ function renderVendors(){
   if (!names.length){
     html += '<div class="soon">아직 표본이 없습니다.<br>파일함에서 정산월을 <b>지난달</b>로 바꾸고 <b>00_정산서완료</b> 폴더의 거래내역서를 올려 주세요.</div>';
   } else {
-    html += '<div class="card"><div class="card-h"><span class="card-t">업체 ' + names.length + '곳</span><span class="card-s">룰을 적어 둔 업체는 ✍️ 표시</span></div>'
+    html += '<div class="card"><div class="card-h"><span class="card-t">업체 ' + names.length + '곳</span><span class="card-s">룰이 코드에 반영된 업체는 ⚙️ 표시 · 룰은 대화창에서 요청</span></div>'
       + names.map(function(n){
-        var list = g[n], v = VENDORS[vKey(n)], cnt = v && v.rules ? (Object.keys(v.rules.items || {}).length + Object.keys(v.rules.sheets || {}).length + (v.rules.memo ? 1 : 0)) : 0;
+        var list = g[n], v = VENDORS[vKey(n)], en = engineOf(vKey(n)), cnt = en && en.ruleList ? en.ruleList.length : 0;
         var pickSel = list.length > 1 ? '<select class="tsel" id="smp_' + vKey(n) + '">' + list.map(function(x){ return '<option value="' + x.ym + '|' + x.id + '">' + esc(ymLabel(x.ym)) + ' · ' + esc(x.m.name) + '</option>'; }).join('') + '</select>'
           : '<span class="sm dim">' + esc(ymLabel(list[0].ym)) + ' · ' + esc(list[0].m.name) + '</span>';
         var sc = v && v.score, pc = sc ? sc.pct : null;
-        return '<div class="row"><div class="ck">' + (cnt ? '✍️' : '🏢') + '</div><div class="lb">' + esc(n) + (cnt ? '<small>룰 ' + cnt + '개 적음</small>' : '<small>아직 룰 없음</small>')
+        return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>')
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button></div></div>';
@@ -84,52 +84,46 @@ function candidates(kind){
   return hits.map(function(id){ return '<div class="sm">📎 ' + esc(BOX[id].name) + '</div>'; }).join('');
 }
 
-function ruleBox(kind, key, name, val){
-  return '<textarea class="rule" data-k="' + kind + '" data-key="' + esc(key) + '" data-name="' + esc(name) + '" rows="2" placeholder="이번 달 룰 — 예: 택배비 리스트에서 택배크기=극소 건수, 누락오배송 제외" onblur="saveRule(this)">' + esc(val || '') + '</textarea>';
-}
-function saveRule(el){
-  if (!VW) return;
-  var path = 'settlement/vendors/' + VW.vkey + '/rules/' + (el.dataset.k === 'memo' ? 'memo' : el.dataset.k + '/' + el.dataset.key);
-  var v = el.value.trim(), old = el.dataset.saved != null ? el.dataset.saved : (el.defaultValue || '').trim();
-  if (v === old) return;
-  var p = el.dataset.k === 'memo' ? db.ref(path).set(v || null) : db.ref(path).update({ name: el.dataset.name, text: v || null, at: firebase.database.ServerValue.TIMESTAMP });
-  p.then(function(){ el.dataset.saved = v; el.classList.add('saved'); setTimeout(function(){ el.classList.remove('saved'); }, 900); })
-   .catch(function(e){ toast('저장 실패: ' + ((e && e.code) || e)); });
-}
-
 function won(n){ return n == null ? '' : Math.round(n).toLocaleString('ko-KR'); }
 
-/* ═══ 정확도 ═══
-   항목 단계: ⬜ 없음 0 · ✍️ 설명만 0.5 · ⚙️ 자동 계산 연결 0.8 · 📌 고정값 / ✏️ 매번 입력 1 · ✅ 지난달과 일치 1
-   항목은 지난달 금액 비중으로 가중 (큰 금액을 해결할수록 크게 오름). 데이터 시트 준비도 20% 반영.
-   자동 계산(⚙️)·일치(✅)는 업체별 계산 코드가 붙으면 SETTLE_ENGINES[업체키] 가 { auto:{행:true}, verified:{행:true} } 로 알려 준다. */
-var LV = {
-  none:   { v: 0,   ic: '⬜', t: '룰 없음',       c: '#3a4255' },
-  text:   { v: 0.5, ic: '✍️', t: '설명만',        c: '#a78bfa' },
-  auto:   { v: 0.8, ic: '⚙️', t: '자동 계산',      c: '#60a5fa' },
-  fixed:  { v: 1,   ic: '📌', t: '고정값',        c: '#2dd4bf' },
-  manual: { v: 1,   ic: '✏️', t: '매번 입력',      c: '#2dd4bf' },
-  ok:     { v: 1,   ic: '✅', t: '지난달과 일치',   c: '#4ade80' },
-  copy:   { v: 1,   ic: '📋', t: '원본 그대로',    c: '#2dd4bf' },
-  skip:   { v: 1,   ic: '➖', t: '안 씀',         c: '#2dd4bf' }
-};
+/* ═══ 업체 설정은 코드(settle_engines.js)에만 있다 ═══
+   화면에서 룰을 적는 칸은 없다 — 대표님이 대화에서 요청하면 Claude 가 settle_engines.js 에 넣는다.
+   SETTLE_ENGINES[업체키] = {
+     items:    { 행: 'fixed' | 'manual' | 'auto' }   📌 지난달 그대로 · ✏️ 매달 화면에서 입력 · ⚙️ 자동 계산
+     sheets:   { 시트이름: 'copy' | 'skip' }          📋 이번 달 원본으로 교체 · ➖ 손대지 않음
+     verified: { 행: true }                         ✅ 지난달 원본으로 지난달 완료본을 재현해 일치 확인
+     opt:      { checkSheet, noYellow }             엑셀에 점검 시트 넣기 · 노란 표시 끄기
+     ruleList: [ { d:'반영일', t:'룰' } ]             화면 맨 아래 '적용 룰' 목록 (번호는 순서대로)
+     afterBuild(wb, ctx)                            엑셀 만들 때 업체 전용 처리
+   } */
 function engineOf(vkey){ return (window.SETTLE_ENGINES && window.SETTLE_ENGINES[vkey]) || null; }
+/* 엔진 설정을 기존 계산에서 쓰던 모양 { items:{행:{mode}}, sheets:{시트키:{mode}} } 으로 */
+function cfgOf(vkey){
+  var e = engineOf(vkey) || {}, R = { items: {}, sheets: {} };
+  Object.keys(e.items || {}).forEach(function(r){ R.items[r] = { mode: e.items[r] }; });
+  Object.keys(e.sheets || {}).forEach(function(n){ R.sheets[sKey(n)] = { mode: e.sheets[n] }; });
+  return R;
+}
+
+/* ═══ 정확도 ═══
+   항목 단계: ⬜ 미반영 0 · ⚙️ 자동 계산 80% · 📌 고정 / ✏️ 매달 입력 100% · ✅ 지난달과 일치 100%
+   항목은 지난달 금액 비중으로 가중, 데이터 시트 준비도 20% 반영. */
+var LV = {
+  none:   { v: 0,   ic: '⬜', t: '미반영',        c: '#3a4255' },
+  auto:   { v: 0.8, ic: '⚙️', t: '자동 계산',      c: '#60a5fa' },
+  fixed:  { v: 1,   ic: '📌', t: '지난달 그대로',   c: '#2dd4bf' },
+  manual: { v: 1,   ic: '✏️', t: '매달 입력',      c: '#2dd4bf' },
+  ok:     { v: 1,   ic: '✅', t: '지난달과 일치',   c: '#4ade80' },
+  copy:   { v: 1,   ic: '📋', t: '이번 달 원본',    c: '#2dd4bf' },
+  skip:   { v: 1,   ic: '➖', t: '손대지 않음',     c: '#2dd4bf' }
+};
 function itemLevel(it, rr, eng){
   if (eng && eng.verified && eng.verified[it.r]) return 'ok';
-  if (rr && (rr.mode === 'fixed' || rr.mode === 'manual')) return rr.mode;   /* 직접 정한 고정·입력이 우선 (자동 처리보다 낮게 떨어지지 않게) */
-  if (eng && eng.auto && eng.auto[it.r]) return 'auto';
-  if (rr && rr.text) return 'text';
+  if (rr && (rr.mode === 'fixed' || rr.mode === 'manual')) return rr.mode;
+  if ((rr && rr.mode === 'auto') || (eng && eng.auto && eng.auto[it.r])) return 'auto';
   return 'none';
 }
-/* 이 항목에 걸린 자동 처리 설명 (화면 표시) */
-function engineNote(r){ var e = engineOf(VW.vkey); if (!e || !e.rules || !e.rules[r]) return '';
-  return '<div class="engnote">⚙️ 자동 적용 중<ol>' + e.rules[r].map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ol></div>'; }
-function sheetLevel(s, rr){
-  if (rr && rr.mode === 'skip') return 'skip';
-  if (rr && rr.mode === 'copy') return 'copy';
-  if (rr && rr.text) return 'text';
-  return 'none';
-}
+function sheetLevel(s, rr){ return rr && (rr.mode === 'skip' || rr.mode === 'copy') ? rr.mode : 'none'; }
 function scoreOf(A, R, vkey){
   R = R || {}; var eng = engineOf(vkey);
   var items = A.items.filter(function(i){ return !i.zero; });
@@ -148,30 +142,22 @@ function scoreOf(A, R, vkey){
 }
 function pctColor(p){ return p >= 90 ? '#4ade80' : p >= 60 ? '#60a5fa' : p >= 30 ? '#fbbf24' : '#f87171'; }
 function scoreCardHtml(S, A){
-  var order = ['ok', 'fixed', 'manual', 'auto', 'text', 'none'];
+  var order = ['ok', 'fixed', 'manual', 'auto', 'none'];
   var bar = order.filter(function(k){ return S.by[k]; }).map(function(k){
     return '<i style="width:' + (S.by[k] * 100).toFixed(2) + '%;background:' + LV[k].c + '" title="' + LV[k].t + ' ' + Math.round(S.by[k] * 100) + '%"></i>'; }).join('');
   var legend = order.filter(function(k){ return S.by[k]; }).map(function(k){
     return '<span><i style="background:' + LV[k].c + '"></i>' + LV[k].ic + ' ' + LV[k].t + ' ' + Math.round(S.by[k] * 100) + '%</span>'; }).join('');
   var next = S.todo.slice(0, 3).map(function(i){ return '<b>' + esc(i.name) + '</b> (' + Math.round(i._w * 100) + '%)'; }).join(', ');
   return '<div class="sc-top"><div class="sc-pct" style="color:' + pctColor(S.pct) + '">' + S.pct + '<small>%</small></div>'
-    + '<div class="sc-main"><div class="sc-t">정확도 <span class="dim">— 항목은 지난달 금액 비중으로 가중' + (S.nSheets ? ' · 데이터 시트 20% 반영' : '') + '</span></div>'
+    + '<div class="sc-main"><div class="sc-t">정확도 <span class="dim">— 코드에 반영된 정도 · 항목은 지난달 금액 비중으로 가중' + (S.nSheets ? ' · 데이터 시트 20%' : '') + '</span></div>'
     + '<div class="sc-bar">' + bar + '</div><div class="sc-leg">' + legend + '</div>'
     + '<div class="sm">항목 ' + Math.round(S.items * 100) + '%' + (S.nSheets ? ' · 데이터 시트 ' + Math.round(S.sheets * 100) + '%' : '')
     + ' · 지난달 소계 ' + won(A.totals.sub || (A.totals.total ? A.totals.total / 1.1 : null)) + '원 · 합계 ' + won(A.totals.total) + '원</div>'
-    + (next ? '<div class="sm" style="margin-top:.3rem">다음으로 큰 것: ' + next + '</div>' : '<div class="sm" style="margin-top:.3rem;color:var(--g)">모든 항목의 룰이 정해졌습니다</div>')
-    + '<div class="sc-help dim">⬜ 없음 0 · ✍️ 설명만 50% · ⚙️ 자동 계산 80% · 📌 고정값 / ✏️ 매번 입력 100% · ✅ 지난달과 일치 100%</div></div></div>';
+    + (next ? '<div class="sm" style="margin-top:.3rem">아직 미반영 중 큰 것: ' + next + '</div>' : '<div class="sm" style="margin-top:.3rem;color:var(--g)">모든 항목이 반영되었습니다</div>')
+    + '<div class="sc-help dim">⬜ 미반영 0 · ⚙️ 자동 계산 80% · 📌 지난달 그대로 / ✏️ 매달 입력 100% · ✅ 지난달과 일치 100% — 반영은 대화창에서 요청</div></div></div>';
 }
-/* 룰 칸에 입력 중일 때는 화면 전체를 다시 그리지 않고 점수·상태만 고친다 */
-function refreshScore(){
-  if (!VW || !VW.A) return;
-  var v = VENDORS[VW.vkey] || {}, S = scoreOf(VW.A, v.rules, VW.vkey), el = $('scoreCard');
-  if (el) el.innerHTML = scoreCardHtml(S, VW.A);
-  VW.A.items.forEach(function(it){ var c = $('lv_i_' + it.r); if (c && it._lv) c.outerHTML = lvChip('i', it.r, it._lv); });
-  VW.A.sheets.forEach(function(s){ var c = $('lv_s_' + sKey(s.name)); if (c && s._lv) c.outerHTML = lvChip('s', sKey(s.name), s._lv); });
-  saveScore(S.pct);
-}
-function lvChip(kind, key, k){ return '<span class="lvchip" id="lv_' + kind + '_' + esc(key) + '" style="border-color:' + LV[k].c + '">' + LV[k].ic + ' ' + LV[k].t + '</span>'; }
+function refreshScore(){ if (VW && VW.A) renderWork(); }
+function lvChip(kind, key, k){ return '<span class="lvchip" style="border-color:' + LV[k].c + '">' + LV[k].ic + ' ' + LV[k].t + '</span>'; }
 function saveScore(pct){
   var v = VENDORS[VW.vkey] || {}, sig = VW.vkey + '|' + YM + '|' + pct;
   if (VW._savedScore === sig) return;            /* 저장 → 다시 그림 → 또 저장 되풀이 막기 */
@@ -179,20 +165,17 @@ function saveScore(pct){
   if (v.score && v.score.pct === pct && v.score.ym === YM) return;
   db.ref('settlement/vendors/' + VW.vkey + '/score').set({ pct: pct, ym: YM, at: firebase.database.ServerValue.TIMESTAMP });
 }
-/* 빠른 지정: 항목 고정값/매번 입력, 시트 원본 그대로/안 씀 — 같은 걸 다시 누르면 해제 */
-function setMode(kind, key, name, mode){
-  if (!VW) return;
-  var cur = ((((VENDORS[VW.vkey] || {}).rules || {})[kind] || {})[key] || {}).mode;
-  db.ref('settlement/vendors/' + VW.vkey + '/rules/' + kind + '/' + key).update({ name: name, mode: cur === mode ? null : mode, at: firebase.database.ServerValue.TIMESTAMP });
-}
-function modeBtns(kind, key, name, cur, list){
-  return '<div class="mbtns">' + list.map(function(m){
-    return '<button class="mb' + (cur === m ? ' on' : '') + '" data-n="' + esc(name) + '" data-k="' + esc(key) + '" onclick="setMode(\'' + kind + '\',this.dataset.k,this.dataset.n,\'' + m + '\')">' + LV[m].ic + ' ' + LV[m].t + '</button>'; }).join('') + '</div>';
+/* 화면 맨 아래 — 이 업체에 반영된 룰 (Claude 가 settle_engines.js 에 적어 둔 것) */
+function ruleListHtml(){
+  var e = engineOf(VW.vkey), L = (e && e.ruleList) || [];
+  return '<div class="card-h"><span class="card-t">📜 ' + esc(VW.name) + ' 적용 룰</span><span class="card-s">대화창에서 요청해 코드에 반영된 룰 · 이 업체는 이대로 고정해서 움직입니다</span></div>'
+    + (L.length ? '<ol class="rulelist">' + L.map(function(x){ return '<li>' + esc(x.t) + (x.d ? ' <span class="dim">(' + esc(x.d) + ')</span>' : '') + '</li>'; }).join('') + '</ol>'
+      : '<div class="empty-s">아직 반영된 룰이 없습니다. 대화창에서 "' + esc(VW.name) + ' 룰: …" 처럼 요청하시면 여기에 1, 2, 3… 으로 적힙니다.</div>');
 }
 
 function renderWork(){
   var box = $('tabVendors'); if (!box || !VW) return;
-  var v = VENDORS[VW.vkey] || {}, R = v.rules || {}, A = VW.A;
+  var R = cfgOf(VW.vkey), A = VW.A;
   var head = '<div class="bar"><button class="btn" onclick="closeWork()">← 업체 목록</button>'
     + '<span class="bar-t">' + esc(VW.name) + ' · ' + esc(ymLabel(YM)) + ' 정산 작성</span>'
     + '<span class="sec-note">표본: ' + esc(ymLabel(VW.ym)) + ' ' + esc(VW.meta.name) + '</span></div>';
@@ -202,36 +185,31 @@ function renderWork(){
   var items = (VW.zero ? A.items : A.items.filter(function(i){ return !i.zero; })).slice();
   if (VW.sortW) items.sort(function(a, b){ return (b._w || 0) - (a._w || 0); });
   var itemRows = items.map(function(it){
-    var rr = (R.items || {})[it.r], k = it._lv || 'none';
+    var k = it._lv || 'none';
     return '<tr' + (it.zero ? ' class="dimrow"' : '') + '><td class="dim">' + it.r + '</td>'
-      + '<td><b>' + esc(it.name) + '</b>' + (it.size ? '<div class="dim">' + esc(it.size) + '</div>' : '') + (it.date ? '<div class="dim">' + esc(it.date) + '</div>' : '')
-      + (it.zero ? '' : '<div style="margin-top:.3rem">' + lvChip('i', it.r, k) + '</div>') + '</td>'
+      + '<td><b>' + esc(it.name) + '</b>' + (it.size ? '<div class="dim">' + esc(it.size) + '</div>' : '') + (it.date ? '<div class="dim">' + esc(it.date) + '</div>' : '') + '</td>'
+      + '<td>' + (it.zero ? '' : lvChip('i', it.r, k)) + '</td>'
       + '<td class="n">' + won(it.qty.v) + '</td><td class="n">' + won(it.price.v) + '</td><td class="n">' + won(it.amt.v) + '</td>'
       + '<td class="n">' + (it.zero ? '' : '<div class="wbar"><i style="width:' + Math.max(2, Math.round((it._w || 0) * 100)) + '%"></i></div>' + (Math.round((it._w || 0) * 1000) / 10) + '%') + '</td>'
-      + '<td class="src"><span class="srck ' + it.qty.src.kind + '">' + esc(it.qty.src.text) + '</span>' + (it.note ? '<div class="dim">' + esc(it.note) + '</div>' : '') + '</td>'
-      + '<td>' + (it.zero ? '' : modeBtns('items', String(it.r), it.name, rr && rr.mode, ['fixed', 'manual'])) + ruleBox('items', String(it.r), it.name, rr && rr.text) + engineNote(it.r) + '</td></tr>';
+      + '<td class="src"><span class="srck ' + it.qty.src.kind + '">' + esc(it.qty.src.text) + '</span>' + (it.note ? '<div class="dim">' + esc(it.note) + '</div>' : '') + '</td></tr>';
   }).join('');
   var sheetRows = A.sheets.map(function(s){
-    var rr = (R.sheets || {})[sKey(s.name)], k = s._lv;
-    return '<tr><td><b>' + esc(s.name) + '</b><div class="dim">' + s.rows.toLocaleString() + '행</div>' + (k ? '<div style="margin-top:.3rem">' + lvChip('s', sKey(s.name), k) + '</div>' : '') + '</td>'
+    var k = s._lv;
+    return '<tr><td><b>' + esc(s.name) + '</b><div class="dim">' + s.rows.toLocaleString() + '행</div></td>'
+      + '<td>' + (k ? lvChip('s', sKey(s.name), k) : '<span class="dim">-</span>') + '</td>'
       + '<td>' + (s.kind ? esc(s.kind.label) : '<span class="dim">?</span>') + '<div class="dim" style="font-size:11px">' + esc(s.headers.slice(0, 8).join(' · ')) + '</div></td>'
       + '<td class="dim">' + (s.usedBy.length ? s.usedBy.map(function(x){ return x + '행'; }).join(', ') : '-') + '</td>'
-      + '<td>' + candidates(s.kind) + '</td>'
-      + '<td>' + modeBtns('sheets', sKey(s.name), s.name, rr && rr.mode, ['copy', 'skip']) + ruleBox('sheets', sKey(s.name), s.name, rr && rr.text) + '</td></tr>';
+      + '<td>' + candidates(s.kind) + '</td></tr>';
   }).join('');
   box.innerHTML = head
     + '<div class="card sc" id="scoreCard">' + scoreCardHtml(S, A) + '</div>'
-
-    + '<div class="card"><div class="card-h"><span class="card-t">① 거래명세표 항목</span><span class="card-s">지난달 수량이 어디서 왔는지 · 오른쪽에 이번 달 룰을 적으면 칸을 벗어날 때 저장</span>'
+    + '<div class="card" id="buildCard">' + buildCardHtml(A, R) + '</div>'
+    + '<div class="card"><div class="card-h"><span class="card-t">① 거래명세표 항목 (표본)</span><span class="card-s">지난달 수량이 어디서 왔는지 · 상태는 코드 반영 정도</span>'
     + '<label class="dim" style="margin-left:auto;font-size:12px"><input type="checkbox" ' + (VW.sortW ? 'checked' : '') + ' onchange="VW.sortW=this.checked;renderWork()"> 비중 큰 순</label>'
     + '<label class="dim" style="font-size:12px"><input type="checkbox" ' + (VW.zero ? 'checked' : '') + ' onchange="VW.zero=this.checked;renderWork()"> 0원 줄도 보기</label></div>'
-    + '<div style="overflow-x:auto"><table class="ftbl wk"><thead><tr><th>행</th><th>내역 · 상태</th><th style="text-align:right">수량</th><th style="text-align:right">단가</th><th style="text-align:right">금액</th><th style="text-align:right">비중</th><th>수량 출처 · 비고</th><th>이번 달 룰</th></tr></thead><tbody>' + itemRows + '</tbody></table></div></div>'
-
-    + '<div class="card"><div class="card-h"><span class="card-t">② 데이터 시트</span><span class="card-s">표본 안의 근거 시트 · 이번 달 파일함에서 짝이 될 원본</span></div>'
-    + (sheetRows ? '<div style="overflow-x:auto"><table class="ftbl wk"><thead><tr><th>시트</th><th>종류 · 제목줄</th><th>쓰는 항목</th><th>' + esc(ymLabel(YM)) + ' 원본</th><th>룰 (가져오는 방법·조건)</th></tr></thead><tbody>' + sheetRows + '</tbody></table></div>' : '<div class="empty-s">데이터 시트 없음</div>') + '</div>'
-
-    + '<div class="card"><div class="card-h"><span class="card-t">③ 업체 특이사항</span><span class="card-s">매달 확인할 것, 예외, 연락 사항 등</span></div>'
-    + '<textarea class="rule" data-k="memo" data-key="memo" data-name="memo" rows="3" placeholder="예: 매달 말일 재고표 함께 보냄 · 용차비는 Sheet1 금액 · 쿠팡 입고작업은 발주서 확정수량 기준" onblur="saveRule(this)">' + esc(R.memo || '') + '</textarea></div>';
-  box.innerHTML += '<div class="card" id="buildCard">' + buildCardHtml(A, R) + '</div>';
+    + '<div style="overflow-x:auto"><table class="ftbl wk"><thead><tr><th>행</th><th>내역</th><th>상태</th><th style="text-align:right">수량</th><th style="text-align:right">단가</th><th style="text-align:right">금액</th><th style="text-align:right">비중</th><th>수량 출처 · 비고</th></tr></thead><tbody>' + itemRows + '</tbody></table></div></div>'
+    + '<div class="card"><div class="card-h"><span class="card-t">② 데이터 시트 (표본)</span><span class="card-s">표본 안의 근거 시트 · 이번 달 파일함에서 짝이 될 원본</span></div>'
+    + (sheetRows ? '<div style="overflow-x:auto"><table class="ftbl wk"><thead><tr><th>시트</th><th>상태</th><th>종류 · 제목줄</th><th>쓰는 항목</th><th>' + esc(ymLabel(YM)) + ' 원본</th></tr></thead><tbody>' + sheetRows + '</tbody></table></div>' : '<div class="empty-s">데이터 시트 없음</div>') + '</div>'
+    + '<div class="card rulecard">' + ruleListHtml() + '</div>';
   saveScore(S.pct);
 }

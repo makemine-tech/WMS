@@ -22,7 +22,7 @@ var YEL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2B3' } };
 function lastDay(ym){ var y = +ym.slice(0, 4), m = +ym.slice(5, 7); return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
 function nsp(v){ return String(v == null ? '' : v).replace(/\s+/g, ''); }
 function runOf(){ return ((((VENDORS[VW.vkey] || {}).run) || {})[YM]) || {}; }
-function optOf(){ return (VENDORS[VW.vkey] || {}).opt || {}; }
+function optOf(){ var e = engineOf(VW.vkey); return (e && e.opt) || {}; }   /* 업체 설정(settle_engines.js)의 옵션 */
 function setOpt(k, v){ return db.ref('settlement/vendors/' + VW.vkey + '/opt/' + k).set(v ? true : null); }
 /* 마지막으로 만든 엑셀에서 무엇이 적용·변경됐는지 (화면) */
 function buildLogHtml(){
@@ -82,16 +82,11 @@ function buildCardHtml(A, R){
       + ' <span class="dim">비우면 지난달 값</span></td></tr>';
   }).join('');
   var yy = YM.slice(5, 7);
-  return '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이번 달 초안을 만듭니다 — 확인할 칸은 노란색, 맨 뒤 「점검」 시트에 목록</span></div>'
-    + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">바꿀 데이터 시트 (② 에서 📋 원본 그대로로 정한 시트 + 용차비)</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
-      : '<div class="sec-note">바꿀 데이터 시트가 아직 없습니다 — ② 에서 📋 원본 그대로를 누르면 여기 나옵니다.</div>')
-    + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매번 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
-    + (function(){ var eng = engineOf(VW.vkey); if (!eng || !eng.rules) return '';
-        var lines = []; Object.keys(eng.rules).forEach(function(r){ eng.rules[r].forEach(function(t){ lines.push(t); }); });
-        return '<div class="sec-note" style="margin:.7rem 0 .3rem">⚙️ 이 업체 자동 처리 (적어 주신 룰을 엑셀 처리로 옮긴 것)</div><ol class="englist">' + lines.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ol>'; })()
+  return '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
+    + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">이번 달 원본으로 바꿀 데이터 시트 — 쓸 파일 확인</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
+      : '<div class="sec-note">이번 달 원본으로 바꿀 데이터 시트가 정해지지 않았습니다 (대화창에서 요청하면 업체 설정에 넣습니다).</div>')
+    + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매달 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
     + '<div style="display:flex;gap:.6rem;align-items:center;margin-top:.8rem;flex-wrap:wrap"><button class="btn p" id="buildBtn" onclick="buildDraft()">📥 ' + yy + '월_거래내역서_' + esc(VW.name) + '.xlsx 내려받기</button>'
-    + '<label class="dim" style="font-size:12px"><input type="checkbox" ' + (optOf().checkSheet ? 'checked' : '') + ' onchange="setOpt(\'checkSheet\', this.checked)"> 엑셀에 점검 시트 넣기</label>'
-    + '<label class="dim" style="font-size:12px"><input type="checkbox" ' + (optOf().noYellow ? '' : 'checked') + ' onchange="setOpt(\'noYellow\', !this.checked)"> 확인할 칸 노란색</label>'
     + '<span class="sm dim" id="buildMsg"></span></div>'
     + '<div id="buildLog">' + buildLogHtml() + '</div>';
 }
@@ -194,7 +189,7 @@ function buildDraft(){
   if (!VW || !VW.A) return;
   var btn = $('buildBtn'), msg = function(t){ var e = $('buildMsg'); if (e) e.textContent = t; };
   btn.disabled = true;
-  var A = VW.A, v = VENDORS[VW.vkey] || {}, R = v.rules || {}, run = runOf(), eng = engineOf(VW.vkey), log = [], wb;
+  var A = VW.A, R = cfgOf(VW.vkey), run = runOf(), eng = engineOf(VW.vkey), log = [], wb;
   var yy = YM.slice(5, 7), dd = lastDay(YM);
   msg('표본 여는 중…');
   decryptBox(VW.meta).then(function(bytes){
