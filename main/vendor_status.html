@@ -1027,44 +1027,59 @@ function pgList(){
 function pgNames(){ var p=(_lastData&&_lastData.products)||{}; return Object.keys(p).map(function(k){ return String(p[k].name||''); }); }
 function pgMatch(g, name){ var n=String(name).toLowerCase(); return String(g.k||'').split(',').some(function(w){ w=w.trim().toLowerCase(); return w && n.indexOf(w)>=0; }); }
 function pgCat(list, name){ for(var i=0;i<list.length;i++) if(pgMatch(list[i],name)) return list[i].n; return '기타'; }
-/* 날짜별 상품 파렛트 → 분류 합계. days = [{d}] 오래된 순 */
-function pgByDay(daily, days, today){
+/* 날짜별 상품 파렛트 → 분류 합계. days = [{d}] 오래된 순
+   기준점(앵커) = 지금 재고 · 재고조사 마감(snapshots, 그때의 상품별 파렛트) · 일별 기록 pp
+   그날 끝(23:59) 에 가장 가까운 기준점에서 그 사이 입출고(txLogs, push 키의 시각)를 더하거나 되돌린다 */
+function pushKeyTs(k){ var C='-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz', t=0; for(var i=0;i<8;i++) t=t*64+C.indexOf(k.charAt(i)); return t; }
+function pgByDay(daily, days, today, snaps){
   var list=pgList(); if(!list.length) return null;
   var prods=(_lastData&&_lastData.products)||{}, keyOf=(window.WMSVendorProjection&&window.WMSVendorProjection.keyOf)||function(s){ return s; };
-  var cats=list.map(function(g){ return g.n; }), out={};
-  var sumCat=function(pp){ var o={}; cats.concat(['기타']).forEach(function(c){ o[c]=0; });
-    Object.keys(pp).forEach(function(k){ var nm=(prods[k]&&prods[k].name)||k, n=+pp[k]||0; if(n) o[pgCat(list,nm)]+=n; }); return o; };
-  /* 역산: 지금 재고에서 하루씩 거꾸로 */
-  var tx=_ptCtx&&_ptCtx.tx, delta={};
-  if(tx) tx.forEach(function(w){ if(!w) return; Object.keys(w).forEach(function(id){ var e=w[id]; if(!e||!e.date||!e.name) return; var k=keyOf(e.name); if(!prods[k]) return;
-    var dd=delta[e.date]||(delta[e.date]={}); dd[k]=(dd[k]||0)+(e.type==='in'?1:-1)*(+e.pallets||1); }); });
-  var state={}; Object.keys(prods).forEach(function(k){ state[k]=+prods[k].pallets||0; });
-  for(var i=days.length-1;i>=0;i--){
-    var d=days[i].d, rec=daily[d];
-    var src=(d===today)?'now':(rec&&rec.pp)?'rec':(tx?'calc':null);
-    var pp=(d===today)?state:(rec&&rec.pp)?rec.pp:(tx?state:null);
-    if(pp){ var c=sumCat(pp), tot=0; Object.keys(pp).forEach(function(k){ tot+=+pp[k]||0; });
-      out[d]={ c:c, src:src, tot:tot, diff:(src==='calc'&&rec&&rec.p!=null)?tot-(+rec.p||0):null }; }
-    if(rec&&rec.pp){ state=Object.assign({}, rec.pp); Object.keys(prods).forEach(function(k){ if(state[k]==null) state[k]=0; }); }   /* 정확한 기록이 있으면 그 값에서 다시 거꾸로 */
-    var dl=delta[d]; if(dl) Object.keys(dl).forEach(function(k){ state[k]=(state[k]||0)-dl[k]; });
-  }
-  return { list:list, cats:cats, out:out, hasEtc:Object.keys(out).some(function(d){ return out[d].c['기타']; }) };
+  var cats=list.map(function(g){ return g.n; }), out={}, nameOf=function(k){ return (prods[k]&&prods[k].name)||k; };
+  var sumCat=function(pp){ var o={}, tot=0; cats.concat(['기타']).forEach(function(c){ o[c]=0; });
+    Object.keys(pp).forEach(function(k){ var n=+pp[k]||0; if(n){ o[pgCat(list,nameOf(k))]+=n; tot+=n; } }); return { c:o, tot:tot }; };
+  var ppOf=function(P){ var o={}; Object.keys(P||{}).forEach(function(k){ var n=+(P[k]&&P[k].pallets!=null?P[k].pallets:P[k])||0; if(n) o[k]=n; }); return o; };
+  /* 기준점 */
+  var now=Date.now(), anchors=[{ ts:now, pp:ppOf(prods), t:'지금' }];
+  var snapRows=[];
+  Object.keys(snaps||{}).forEach(function(id){ var s=snaps[id]; if(s&&s.closedAt&&s.products){ var pp=ppOf(s.products); anchors.push({ ts:+s.closedAt, pp:pp, t:'재고조사 마감 '+(s.memo||ptMD(ptKst(s.closedAt))) });
+    snapRows.push({ d:ptKst(s.closedAt), ts:+s.closedAt, memo:s.memo||'재고조사 마감', c:sumCat(pp).c }); } });
+  Object.keys(daily).forEach(function(d){ var r=daily[d]; if(r&&r.pp&&r.t&&d!==today) anchors.push({ ts:+r.t, pp:ppOf(r.pp), t:'기록' }); });
+  /* 입출고 (시각순) */
+  var tx=_ptCtx&&_ptCtx.tx, ev=[];
+  if(tx) tx.forEach(function(w){ if(!w) return; Object.keys(w).forEach(function(id){ var e=w[id]; if(!e||!e.name) return; var k=keyOf(e.name); if(!prods[k]) return;
+    ev.push({ ts:pushKeyTs(id), k:k, n:(e.type==='in'?1:-1)*(+e.pallets||1) }); }); });
+  days.forEach(function(x){
+    var d=x.d, T=(d===today)?now:Date.parse(d+'T23:59:59.999+09:00');
+    /* 입출고 일지가 없으면(담당자 화면) 그날 안에 있는 기준점만 쓴다 */
+    var cand=anchors.filter(function(a){ return tx || ptKst(a.ts)===d || a.ts===now&&d===today; });
+    if(!cand.length) return;
+    var A=cand.reduce(function(m,a){ return Math.abs(a.ts-T)<Math.abs(m.ts-T)?a:m; });
+    var st=Object.assign({}, A.pp), lo=Math.min(A.ts,T), hi=Math.max(A.ts,T), sg=A.ts>T?-1:1;
+    ev.forEach(function(e){ if(e.ts>lo&&e.ts<=hi) st[e.k]=(st[e.k]||0)+sg*e.n; });
+    var r=sumCat(st), rec=daily[d], gap=Math.round(Math.abs(A.ts-T)/864e5);
+    out[d]={ c:r.c, tot:r.tot, src:(gap<1&&A.t==='지금')?'지금':A.t+(gap>=1?' 기준 '+gap+'일 '+(sg<0?'되돌림':'더함'):''),
+      diff:(rec&&rec.p!=null&&d!==today&&A.t!=='기록')?r.tot-(+rec.p||0):null };
+  });
+  return { list:list, cats:cats, out:out, snaps:snapRows, hasEtc:Object.keys(out).some(function(d){ return out[d].c['기타']; })||snapRows.some(function(s){ return s.c['기타']; }) };
 }
+function ptHM(ts){ var d=new Date(ts+9*3600e3).toISOString(); return ptMD(d.slice(0,10))+' '+d.slice(11,16); }
 function pgCell(v, adj){ return v==null?'<span class="dim">-</span>':nf(v)+(adj?'<span class="dim" style="font-weight:500;font-size:11px;"> +'+adj+'='+nf(v+adj)+'</span>':''); }
-function pgSectionHtml(PG, days){
+function pgSectionHtml(PG, days, snaps){
   if(!PG) return _canEdit?'<div class="pt-note">분류(예: 곡물·당쉼)를 정하면 분류별 파렛트를 볼 수 있습니다. <button class="pg-btn" onclick="pgEdit()">⚙ 분류 설정</button></div>':'';
   /* 기준일 = 기간 안의 각 월말 + 오늘 */
-  var pick=days.filter(function(x,i){ return i===days.length-1 || x.d.slice(0,7)!==days[i+1].d.slice(0,7); }).map(function(x){ return x.d; }).reverse();
+  var pk={}; days.forEach(function(x,i){ if(i===days.length-1) pk[x.d]='오늘'; else if(x.d.slice(0,7)!==days[i+1].d.slice(0,7)) pk[x.d]='월말'; });
+  var rows=Object.keys(pk).map(function(d){ return { d:d, r:PG.out[d], lab:pk[d] }; });
+  PG.snaps.forEach(function(s){ if(s.d>=days[0].d) rows.push({ d:s.d, r:{ c:s.c, src:'재고조사 마감 시점 값 그대로 ('+ptHM(s.ts)+')' }, lab:'🟡 '+s.memo, snap:true }); });
+  rows.sort(function(a,b){ return a.d<b.d?1:a.d>b.d?-1:(a.snap?1:-1); });
   var cols=PG.cats.concat(PG.hasEtc?['기타']:[]), adjOf={}; PG.list.forEach(function(g){ adjOf[g.n]=+g.adj||0; });
-  var srcT={ now:'지금', rec:'기록', calc:'입출고 역산' };
-  return '<div class="pg-sec"><div class="pg-hd"><b>📦 분류별 파렛트</b><span class="dim"> — 월말 기준'+(PG.list.some(function(g){ return +g.adj; })?' · 「+보정」은 부자재 등 창고관리 밖 파렛트':'')+(PG.list[0]._sug?' · <span style="color:var(--amber)">추천 분류(저장 전)</span>':'')+'</span>'
+  return '<div class="pg-sec"><div class="pg-hd"><b>📦 분류별 파렛트</b><span class="dim"> — 말일 마감 · 재고조사 마감 기준'+(PG.list.some(function(g){ return +g.adj; })?' · 「+보정」은 부자재 등 창고관리 밖 파렛트':'')+(PG.list[0]._sug?' · <span style="color:var(--amber)">추천 분류(저장 전)</span>':'')+'</span>'
     +(_canEdit?'<button class="pg-btn" onclick="pgEdit()">⚙ 분류 설정</button>':'')+'</div>'
     +'<div class="tbl-wrap"><table class="pt-tbl"><thead><tr><th class="l">기준일</th>'+cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+'<th class="l">출처</th></tr></thead><tbody>'
-    +pick.map(function(d){ var r=PG.out[d];
-      return '<tr><td class="l" style="white-space:nowrap">'+ptDW(d)+'</td>'+cols.map(function(c){ return '<td class="num">'+(r?pgCell(r.c[c], adjOf[c]):'<span class="dim">-</span>')+'</td>'; }).join('')
-        +'<td class="l dim" style="font-size:11.5px;">'+(r?srcT[r.src]+(r.diff?' · <span style="color:#FCA5A5">기록 총계와 '+(r.diff>0?'+':'')+nf(r.diff)+'팔 차이</span>':''):(_canEdit?'자료 없음':'창고앱 기록이 쌓이면 표시'))+'</td></tr>'; }).join('')
+    +rows.map(function(x){ var d=x.d, r=x.r;
+      return '<tr'+(x.snap?' style="background:rgba(251,191,36,.06)"':'')+'><td class="l" style="white-space:nowrap">'+ptDW(d)+' <span class="dim" style="font-size:11px">'+esc(x.snap?x.lab:(x.lab==='월말'?'말일 마감':''))+'</span></td>'+cols.map(function(c){ return '<td class="num">'+(r?pgCell(r.c[c], adjOf[c]):'<span class="dim">-</span>')+'</td>'; }).join('')
+        +'<td class="l dim" style="font-size:11.5px;">'+(r?esc(r.src)+(r.diff?' · <span style="color:#FCA5A5">기록 총계와 '+(r.diff>0?'+':'')+nf(r.diff)+'팔 차이</span>':''):(_canEdit?'자료 없음':'창고앱 기록이 쌓이면 표시'))+'</td></tr>'; }).join('')
     +'</tbody></table></div>'
-    +(PG.out[pick[pick.length-1]]&&PG.out[pick[pick.length-1]].src==='calc'?'<div class="pt-note">지난날은 지금 재고에서 그 뒤의 입고·출고(창고 입출고 일지)를 되돌려 계산한 값입니다. 일지에 없는 수정(위치 이동·직접 고침)은 반영되지 않으니, 기록된 총계와 차이가 있으면 그만큼 확인이 필요합니다. 앞으로는 창고앱이 날마다 상품별 파렛트를 남겨 정확한 「기록」 값으로 보입니다.</div>':'')
+    +(rows.some(function(x){ return x.r&&/되돌림|더함/.test(x.r.src); })?'<div class="pt-note">지난날은 그날에 가장 가까운 기준점(재고조사 마감·지금 재고·일별 기록)에서 그 사이 입고·출고(창고 입출고 일지)를 더하거나 되돌려 계산한 값입니다. 일지에 없는 수정(위치 이동·직접 고침)은 반영되지 않으니, 기록된 총계와 차이가 있으면 그만큼 확인이 필요합니다. 앞으로는 창고앱이 날마다 상품별 파렛트를 남겨 정확한 「기록」 값으로 보입니다.</div>':'')
     +'<div id="pgEditBox"></div></div>';
 }
 /* 분류 설정 (관리자) */
@@ -1167,7 +1182,7 @@ function renderPalTrend(daily, snaps, today, from){
     +'</tbody></table></div>';
 
   o.innerHTML='<div class="hist-card wide"><div class="hist-hd"><span>📈 총 파렛트 추이 — 최근 2개월</span><button class="hist-x" onclick="closeHist()">✕</button></div>'
-    +'<div class="hist-body">'+kpis+'<div class="pt-chart"><svg id="ptSvg"></svg></div>'+legend+note+pgSectionHtml(pgByDay(daily, days, today), days)+tbl+'</div></div>'
+    +'<div class="hist-body">'+kpis+'<div class="pt-chart"><svg id="ptSvg"></svg></div>'+legend+note+pgSectionHtml(pgByDay(daily, days, today, snaps), days, snaps)+tbl+'</div></div>'
     +'<div class="pt-tip" id="ptTip"></div>';
   drawPalTrend(document.getElementById('ptSvg'), days, snapByDay, avg);
 }
