@@ -54,7 +54,7 @@
     { key:'freight', cat:'common', multi:true, label:'화물 청구서 · 용차비 청구서', icon:'🚚',
       hint:'운송업체 월 청구서 — 올리면 지난 단가와 비교해 달라진 금액을 확인 항목으로 띄움',
       test:function(f){ return !!sheetWith(f, ['출발지','도착지','차종']); },
-      summary:function(f, wb){ var s = sheetNamed(f, '결제금액명세서') || sheetWith(f, ['출발지','도착지','차종']); return nf(s.rows) + '행 · ' + topCounts(wb, s, '업체명', 4); } },
+      summary:function(f, wb){ var p = freightSheet(f); if (!p) return ''; return (p.src === 'bill' ? p.s.name + '(업체 청구용)' : '⚠ Sheet1 없음 — ' + p.s.name + '(배차업체 지급액)') + ' 기준 · ' + topCounts(wb, p.s, '업체명', 4); } },
     { key:'cargo_io', cat:'vendor', label:'화물 입출고 엑셀 (참고용)', icon:'🏗️',
       hint:'예전 엑셀 기록 — 정산은 입출고 화물관리 페이지 데이터를 씁니다',
       test:function(f){ return !!sheetWith(f, ['업체명','파렛트수']) && !!(sheetWith(f, ['입출고-기타','업체명']) || sheetNamed(f, '입출고내역')); },
@@ -103,11 +103,23 @@
       summary:function(f){ return '이미지'; } }
   ];
 
-  /* 화물 청구서 행 읽기 — 결제금액명세서(없으면 출발지·도착지·차종 제목줄이 있는 시트)
-     NO 가 숫자인 줄이 한 건. NO 없이 수량·비고만 있는 줄은 바로 위 건의 추가 내용(예: 2층 1파렛트). */
+  /* 화물 청구서에서 읽을 시트 고르기 — 항상 화주(업체) 청구용 'Sheet1' 이 기준 (사용자 지시 2026-10-02).
+       결제금액명세서·월결제금액명세서 = 배차업체에 주는 실제 지급액(원가). Sheet1 = 각 업체에 청구할 금액(수수료 포함 가능).
+     1) 이름이 Sheet1  2) 결제금액명세서가 아닌 시트 중 출발지·도착지·차종 제목줄이 있는 것  3) 없을 때만 결제금액명세서(경고) */
+  function freightSheet(f){
+    var isCost = function(s){ return /결제금액명세서/.test(s.name); };
+    var s1 = sheetNamed(f, 'Sheet1');
+    if (s1 && s1.headers.has('출발지')) return { s: s1, src: 'bill' };
+    for (var i = 0; i < f.sheets.length; i++){ var x = f.sheets[i]; if (!isCost(x) && hasAll(x.headers, ['출발지','도착지','차종'])) return { s: x, src: 'bill' }; }
+    var c = sheetNamed(f, '결제금액명세서'); if (c && c.headers.has('출발지')) return { s: c, src: 'cost' };
+    var any = sheetWith(f, ['출발지','도착지','차종']); return any ? { s: any, src: 'cost' } : null;
+  }
+  /* 화물 청구서 행 읽기 → { sheet, src:'bill'|'cost', rows }
+     NO 열이 있으면 NO 가 숫자인 줄이 한 건, 없으면(Sheet1) 출발지·도착지가 있는 줄이 한 건.
+     그 외에 수량·비고만 있는 줄은 바로 위 건의 추가 내용(예: 2층 1파렛트). '계' 줄은 건너뜀. */
   function parseFreight(f, wb){
-    var s = sheetNamed(f, '결제금액명세서'); if (!s || !s.headers.has('출발지')) s = sheetWith(f, ['출발지','도착지','차종']);
-    if (!s) return [];
+    var pick = freightSheet(f); if (!pick) return { sheet: '', src: '', rows: [] };
+    var s = pick.s;
     var rows = XLSX.utils.sheet_to_json(wb.Sheets[s.name], { defval: '', range: s.hdr || 0, raw: true });
     var out = [], numOf = function(v){ var n = Number(String(v).replace(/[^\d.-]/g, '')); return isFinite(n) ? n : 0; };
     var dateOf = function(v){
@@ -116,7 +128,8 @@
     };
     rows.forEach(function(r){
       var no = r['NO.'] != null && r['NO.'] !== '' ? r['NO.'] : r['NO'];
-      var isRow = (no !== '' && no != null && isFinite(Number(no))) || (!('NO.' in r) && !('NO' in r) && (r['출발지'] || r['도착지']) && r['금액'] !== '');
+      var hasNo = ('NO.' in r) || ('NO' in r);
+      var isRow = hasNo ? (no !== '' && no != null && isFinite(Number(no))) : !!(r['출발지'] || r['도착지']);
       if (String(no).trim() === '계') return;
       if (isRow){
         out.push({ d: dateOf(r['일자']), from: String(r['출발지'] || '').trim(), to: String(r['도착지'] || '').trim(), car: String(r['차종'] || '').trim(),
@@ -128,7 +141,7 @@
         p.extra = (p.extra ? p.extra + ' / ' : '') + [r['수량'], r['운송품목'], r['비고']].filter(function(x){ return x !== '' && x != null; }).join(' ');
       }
     });
-    return out;
+    return { sheet: s.name, src: pick.src, rows: out };
   }
   /* 단가 비교 열쇠: 출발지→도착지·차종 (띄어쓰기·대소문자 무시) */
   function freightKey(r){ var n = function(x){ return String(x || '').replace(/\s+/g, '').toUpperCase(); }; return n(r.from) + '→' + n(r.to) + '·' + n(r.car); }

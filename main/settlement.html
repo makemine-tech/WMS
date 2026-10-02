@@ -305,8 +305,8 @@ function upload(file, ym, q){
     type = detect(P.f); t = typeOf(type);
     try { summary = t.summary ? t.summary(P.f, P.wb) : ''; } catch (e) { summary = ''; }
     if (!summary && P.f.sheets.length) summary = '시트 ' + P.f.sheets.map(function(s){ return s.name; }).slice(0, 4).join(' · ');
-    var frows = null;
-    if (type === 'freight'){ try { frows = SETTLE_FREIGHT.parse(P.f, P.wb); } catch (e) { frows = null; } }
+    var fr = null;
+    if (type === 'freight'){ try { fr = SETTLE_FREIGHT.parse(P.f, P.wb); } catch (e) { fr = null; } }
     P.wb = null;
     /* 공통 파일은 한 달에 하나 — 이미 있으면 교체할지 묻는다 (여러 개 쌓는 종류는 그냥 추가) */
     var old = (t.cat === 'common' && !t.multi) ? Object.keys(BOX).filter(function(k){ return BOX[k].type === type; }) : [];
@@ -321,7 +321,7 @@ function upload(file, ym, q){
         sheetKey: P.f.sheetKey || '', headKey: P.f.headKey || '',
         iv: iv, path: path, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' };
       return db.ref('settlement/box/' + ym + '/' + id).set(meta).then(function(){
-        if (frows && frows.length) return db.ref('settlement/freight/' + ym + '/' + id).set({ file: file.name, rows: frows });
+        if (fr && fr.rows.length) return db.ref('settlement/freight/' + ym + '/' + id).set({ file: file.name, sheet: fr.sheet, src: fr.src, rows: fr.rows });
       });
     }).then(function(){
       old.forEach(removeFile);
@@ -467,7 +467,8 @@ function cargoRow(count){
 }
 
 /* ═══ 화물 청구서 단가 확인 ═══
-   settlement/freight/{ym}/{fileId} = { file, rows:[{d,from,to,car,qty,item,amt,etc,tot,note,vendor,extra}], chk:{i:{st:'ok'|'fix', fix, memo, by, at}} }
+   settlement/freight/{ym}/{fileId} = { file, sheet, src:'bill'|'cost', rows:[{d,from,to,car,qty,item,amt,etc,tot,note,vendor,extra}], chk:{i:{st:'ok'|'fix', fix, memo, by, at}} }
+   항상 화주(업체) 청구용 Sheet1 을 쓴다 — 결제금액명세서는 배차업체 지급액(원가)이라 정산에 안 씀 (Sheet1 이 없을 때만 경고와 함께 사용).
    같은 구간(출발지→도착지·차종)에서 지난달까지 한 번도 낸 적 없는 금액이면 확인 항목 (야상 등으로 이미 냈던 금액은 통과).
    지난 기록이 없으면 같은 달 안에서 보통 금액과 다른 건을 띄운다. 합계금액이 비었거나 금액+기타와 다르면 확인 항목.
    '금액 수정'한 값(fix)이 정산에 쓰이고, 다음 달부터는 그 금액이 비교 기준이 된다. */
@@ -511,7 +512,8 @@ function freightBadge(fid){
   var F = (FREIGHT[YM] || {})[fid]; if (!F) return '<div class="sm dim">단가 확인 정보 없음 (다시 올리면 생김)</div>';
   var cs = frChecks(YM, fid), flag = cs.filter(function(x){ return x.why.length; }), left = flag.filter(function(x){ return !x.c; });
   var tot = cs.reduce(function(a, x){ return a + frFinal(x.r, x.c) + (+x.r.etc || 0); }, 0);
-  return '<div class="sm">' + cs.length + '건 · 정산 반영 합계 ' + tot.toLocaleString() + '원'
+  return '<div class="sm">' + (F.src === 'cost' ? '<span class="chk warn">⚠ Sheet1 없음 — ' + esc(F.sheet || '') + '(배차업체 지급액) 기준</span> ' : '<span class="dim">' + esc(F.sheet || 'Sheet1') + '(업체 청구용) 기준 · </span>')
+    + cs.length + '건 · 정산 반영 합계 ' + tot.toLocaleString() + '원'
     + (flag.length ? (left.length ? '<span class="chk warn">확인 필요 ' + left.length + '건</span>' : '<span class="chk okk">확인 완료 ' + flag.length + '건</span>') : '<span class="chk okk">달라진 금액 없음</span>')
     + ' <button class="btn" style="margin-left:.3rem" onclick="openFreight(\'' + fid + '\')">단가 확인 ▸</button></div>';
 }
@@ -538,7 +540,7 @@ function drawFreight(){
   m.innerHTML = '<div class="mbox"><div class="mhd">🚚 ' + esc(F.file) + ' — 단가 확인<span class="sp"></span>'
     + '<label class="dim" style="font-size:12px;font-weight:500"><input type="checkbox" ' + (FR_ALL ? 'checked' : '') + ' onchange="FR_ALL=this.checked;drawFreight()"> 전체 ' + cs.length + '건 보기</label>'
     + '<button class="btn" onclick="closeFreight()">닫기</button></div><div class="mbody">'
-    + '<div class="sec-note" style="margin-bottom:.6rem">같은 <b>출발지 → 도착지 · 차종</b>의 지난달까지 금액(없으면 이번 달 같은 구간)과 비교했습니다. '
+    + '<div class="sec-note" style="margin-bottom:.6rem">' + (F.src === 'cost' ? '<b style="color:var(--y)">⚠ 이 파일에 Sheet1(업체 청구용)이 없어 ' + esc(F.sheet || '') + '(배차업체 지급액)으로 읽었습니다.</b> ' : '<b>' + esc(F.sheet || 'Sheet1') + '</b>(업체 청구용) 금액 기준. ') + '같은 <b>출발지 → 도착지 · 차종</b>의 지난달까지 금액(없으면 이번 달 같은 구간)과 비교했습니다. '
     + '확인 필요 <b>' + left.length + '</b>건 / 걸린 건 ' + flag.length + '건. <b>맞음</b>은 그대로 정산, <b>금액 수정</b>은 고친 금액으로 정산하고 다음 달부터 비교 기준이 됩니다.</div>'
     + (list.length ? '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>일자</th><th>구간·차종</th><th>업체·비고</th><th style="text-align:right">금액</th><th>확인 내용</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>'
       : '<div class="empty-s">지난 금액과 달라진 건이 없습니다.</div>')
