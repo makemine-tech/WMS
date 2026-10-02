@@ -76,6 +76,37 @@
     return /셀시어스/.test(s) ? '셀' : /당쉼|오리진/.test(s) ? '오' : /곡물|Granola|서리태/.test(s) ? '곡' : null;
   }
 
+  /* ── 표 모양 (청구내역서·작업비정산서 제외) — 제목줄 연두색(8월 ROW데이터 색)·굵게·가운데, 내용 있는 칸 테두리 ── */
+  var HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFFCC' } };
+  var LINE = { style: 'thin', color: { argb: 'FF9E9E9E' } }, BORDER = { top: LINE, left: LINE, bottom: LINE, right: LINE };
+  function styleHead(row, maxC){ for (var c = 1; c <= maxC; c++){ var cl = row.getCell(c); cl.fill = HEAD_FILL; cl.border = BORDER; cl.font = { name: '맑은 고딕', size: 10, bold: true }; cl.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; } }
+  function boxAll(ws, r1, r2, maxC, c1){ for (var r = r1; r <= r2; r++){ var row = ws.getRow(r); for (var c = c1 || 1; c <= maxC; c++) row.getCell(c).border = BORDER; } }
+  function lastCol(ws, r){ var m = 0; ws.getRow(r).eachCell(function(c, n){ if (c.value != null && c.value !== '') m = Math.max(m, n); }); return m; }
+  function lastRow(ws, c1, c2){ var m = 0; ws.eachRow(function(row, r){ for (var c = c1; c <= c2; c++){ var v = row.getCell(c).value; if (v != null && v !== ''){ m = r; break; } } }); return m; }
+  function beautify(wb){
+    ['곡', '셀', '오'].forEach(function(b){
+      /* ROW데이터·작업상세: 1행 제목, 표 전체 테두리 */
+      [b + '_ROW데이터', b + '_작업상세'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return;
+        var mc = n.indexOf('작업상세') > 0 ? lastCol(ws, 2) || lastCol(ws, 1) : lastCol(ws, 1), lr = ws.rowCount;
+        if (n.indexOf('작업상세') > 0){ var hc = 0; ws.getRow(1).eachCell(function(c, k){ if (txt(c.value) === '소분포장') hc = k; }); mc = hc || mc; }
+        styleHead(ws.getRow(1), mc); ws.getRow(1).height = n.indexOf('작업상세') > 0 ? 42 : 20; boxAll(ws, 2, lr, mc);
+        if (n.indexOf('ROW') > 0){ ws.getColumn(1).numFmt = 'yyyy-mm-dd'; ws.getColumn(1).width = 11; }
+        /* 작업상세 오른쪽 요약표 */
+        if (n.indexOf('작업상세') > 0){ var sc = mc + 2; styleHead(ws.getRow(1), 0); for (var c = sc; c <= sc + 3; c++){ var cl = ws.getRow(1).getCell(c); cl.fill = HEAD_FILL; cl.font = { name: '맑은 고딕', size: 10, bold: true }; cl.alignment = { horizontal: 'center', vertical: 'middle' }; } }
+      });
+      /* 보관비: 3~5행 제목, 날짜 표·합계 테두리, 오른쪽 화물 목록 */
+      var ws = wb.getWorksheet(b + '_보관비'); if (!ws) return;
+      var mc2 = b === '곡' ? 10 : 9, sumR = 0; ws.eachRow(function(row, r){ if (txt(row.getCell(1).value) === '합계') sumR = r; });
+      for (var r = 3; r <= 5; r++) styleHead(ws.getRow(r), mc2);
+      boxAll(ws, 6, sumR || 37, mc2);
+      if (sumR){ for (var c = 1; c <= mc2; c++){ var cl = ws.getRow(sumR).getCell(c); cl.fill = HEAD_FILL; cl.font = { name: '맑은 고딕', size: 10, bold: true }; } }
+      var lr2 = lastRow(ws, 12, 16);
+      if (lr2 >= 1 && txt(ws.getCell('L1').value)){ for (var c3 = 12; c3 <= 16; c3++){ var h = ws.getRow(1).getCell(c3); h.fill = HEAD_FILL; h.border = BORDER; h.font = { name: '맑은 고딕', size: 10, bold: true }; h.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; } boxAll(ws, 2, lr2, 16, 12); }
+    });
+    ['기타작업내역', '택배착불및기타비용', '오포장'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return;
+      var mc = lastCol(ws, 1), lr = lastRow(ws, 1, mc); styleHead(ws.getRow(1), mc); ws.getRow(1).height = 22; if (lr > 1) boxAll(ws, 2, lr, mc); });
+  }
+
   E['포인트나인크루'] = {
     items: { 6: 'auto', 22: 'auto', 23: 'auto', 25: 'auto', 27: 'auto', 38: 'auto' },
     sheets: { '곡_ROW데이터': 'skip', '곡_작업상세': 'skip', '곡_보관비': 'skip', '셀_ROW데이터': 'skip', '셀_작업상세': 'skip', '셀_보관비': 'skip',
@@ -106,7 +137,8 @@
       var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
       var serial = function(d){ return Math.round(Date.UTC(Y, M - 1, d) / 864e5) + 25569; }, S0 = serial(1);
       var CHK = [];
-      var mark = function(ws, a, note, list){ var c = ws.getCell(a); c.fill = YEL; c.note = note; if (list !== false) CHK.push([ws.name, a, note]); };
+      /* 확인할 곳은 칸에 메모를 달지 않고 맨 뒤 「점검」 시트 목록에만 (대표님 요청 2026-10-03) */
+      var mark = function(ws, a, note, list){ if (list !== false) CHK.push([ws.name, a, note]); };
       if (!MC){ log.push(['확인 필요', YM + ' 시작·마감 파렛트(창고관리)와 착불 메모가 아직 없습니다 — 대화창에서 알려 주시면 넣습니다. 지난달 값으로 둡니다']); return; }
       var box = ctx.BOX || {}, ids = Object.keys(box);
       var rows = ids.filter(function(id){ return box[id].type === 'p9_row'; });
@@ -185,18 +217,27 @@
         /* 기타작업내역 */
         if (!etcId) return;
         return rd(etcId).then(function(xb){
-          var a = XLSX.utils.sheet_to_json(xb.Sheets['Sheet1'] || xb.Sheets[xb.SheetNames[0]], { header: 1, defval: '' });
+          /* 원본 줄 그대로(빈 줄 포함 — 병합 위치가 맞도록), 비고 = 원본 Q열 별도 메모만 (유통기한·재고차감 표시는 안 씀) */
+          var sh = xb.Sheets['Sheet1'] || xb.Sheets[xb.SheetNames[0]];
+          var a = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', blankrows: true, range: 0 });
+          var lastI = a.length - 1; while (lastI > 0 && !a[lastI].some(function(v){ return v !== ''; })) lastI--;
           var ws = fresh(wb, '기타작업내역');
-          ws.addRow(['발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode', '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '박스수', '파렛트수', '작업수량', '작업단가', '작업금액', '비고']).font = { bold: true };
+          ws.addRow(['발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode', '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '박스수', '파렛트수', '작업수량', '작업단가', '작업금액', '비고']);
           var sumM = 0, sumP = 0, n = 0, big = [];
-          a.slice(1).forEach(function(r){ if (!r.some(function(v){ return v !== ''; })) return; n++;
-            var R = ws.rowCount + 1, unit = +r[15] || 0, qty = unit ? (+r[11] || 0) : 0;
-            ws.addRow([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12] === '' ? null : r[12], qty, unit, { formula: 'N' + R + '*O' + R + '*1.1', result: qty * unit * 1.1 }, [r[13], r[14]].filter(Boolean).join(' / ')]);
+          for (var i = 1; i <= lastI; i++){ var r = a[i] || [], R = i + 1;
+            if (!r.some(function(v){ return v !== ''; })){ ws.addRow([]); continue; } n++;
+            var unit = +r[15] || 0, qty = unit ? (+r[11] || 0) : 0;
+            ws.addRow([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12] === '' ? null : r[12], qty || null, unit || null, { formula: 'N' + R + '*O' + R + '*1.1', result: qty * unit * 1.1 }, r[16] || null]);
+            if (typeof r[7] === 'number') ws.getCell('H' + R).numFmt = 'm"월" d"일"';
+            if (typeof r[8] === 'number') ws.getCell('I' + R).numFmt = 'yyyy-mm-dd hh:mm';
             sumM += +r[12] || 0; sumP += qty * unit * 1.1;
-            if (qty * unit >= 100000 || (unit && unit !== 300)){ ws.getCell('P' + R).fill = YEL; big.push(r[0] + ' ' + r[4] + ' ' + qty + '×' + unit); } });
+            if (qty * unit >= 100000 || (unit && unit !== 300)){ ws.getCell('P' + R).fill = YEL; big.push(r[0] + ' ' + r[4] + ' ' + qty + '×' + unit); } }
+          /* 원본 병합(파렛트수 등) 그대로 */
+          (sh['!merges'] || []).forEach(function(m){ if (m.e.r <= lastI && m.s.r >= 1) try { ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1); ws.getCell(m.s.r + 1, m.s.c + 1).alignment = { vertical: 'middle', horizontal: 'center' }; } catch (e) {} });
           var F = ws.rowCount + 1;
           ws.getCell('A' + F).value = '합계'; ws.getCell('M' + F).value = { formula: 'SUM(M2:M' + (F - 1) + ')', result: sumM }; ws.getCell('P' + F).value = { formula: 'SUM(P2:P' + (F - 1) + ')', result: sumP };
-          ws.getRow(F).font = { bold: true }; ws.getColumn('P').numFmt = '#,##0';
+          ws.getRow(F).font = { bold: true }; ws.getColumn('P').numFmt = '#,##0'; ws.getColumn('O').numFmt = '#,##0';
+          [14, 8, 8, 12, 46, 16, 16, 11, 16, 9, 9, 8, 9, 9, 9, 12, 24].forEach(function(w, i){ ws.getColumn(i + 1).width = w; });
           mark(ws, 'N1', '작업수량 = 박스수, 작업단가 = 원본 「작업비」 열, 작업금액 = 수량×단가×1.1 (0930 형식)');
           mark(ws, 'A' + F, '원본에 없는 별도 출고는 이 위에 줄을 추가 — 합계 수식 범위 안에');
           if (big.length) mark(ws, 'P1', '노란 작업금액 = 10만원↑ 또는 단가가 300이 아닌 줄 ' + big.length + '줄: ' + big.slice(0, 8).join(' · ') + (big.length > 8 ? ' …' : ''));
@@ -288,11 +329,13 @@
         mark(st, 'G22', '작업비 = 새 포장 기준 (작업상세 요약표 → 작업비정산서)');
         mark(st, 'F23', '파렛트수 = 기타작업내역 합계 — 별도 출고 줄 추가 시 같이 늘어남');
         mark(st, 'G38', '착불·기타비용 = 대표님 메모만');
+        beautify(wb);
         var ck = wb.getWorksheet('점검(확정 전 삭제)'); if (ck) wb.removeWorksheet(ck.id);
         ck = wb.addWorksheet('점검(확정 전 삭제)');
-        ck.columns = [{ header: '시트', width: 16 }, { header: '칸', width: 8 }, { header: '확인할 내용 (노란 칸·메모)', width: 120 }]; ck.getRow(1).font = { bold: true };
+        ck.columns = [{ header: '시트', width: 16 }, { header: '칸', width: 8 }, { header: '확인할 내용', width: 120 }]; styleHead(ck.getRow(1), 3);
         CHK.forEach(function(x){ var r = ck.addRow(x); r.getCell(3).alignment = { wrapText: true, vertical: 'top' }; r.getCell(1).value = { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }; r.getCell(1).font = { color: { argb: 'FF2563EB' }, underline: true }; });
-        ck.addRow([]); ck.addRow(['', '', '확인이 끝나면 이 시트를 지우고 노란색을 풀어 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.']);
+        boxAll(ck, 2, ck.rowCount, 3);
+        ck.addRow([]); ck.addRow(['', '', '노란 칸 = 드물거나 큰 금액이라 한 번 볼 곳. 확인이 끝나면 이 시트를 지우고 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.']);
         log.push(['자동 적용', '청구내역서 포함가 ' + won(sum) + ' (공급가 ' + won(sum / 1.1) + ') · 점검 표시 ' + CHK.length + '곳']);
       });
     }
