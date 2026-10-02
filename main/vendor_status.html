@@ -169,6 +169,13 @@ tfoot td.l{text-align:left;letter-spacing:.04em;}
 .pt-tbl td,.pt-tbl th{padding:8px 12px;font-size:12.5px;}
 .pt-tbl th{white-space:nowrap;}
 .pt-tbl td.num{white-space:nowrap;}
+.pg-sec{margin:4px 0 16px;}
+.pg-hd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px 2px;font-size:13px;}
+.pg-hd .dim{font-size:11.5px;}
+.pg-btn{margin-left:auto;background:rgba(255,255,255,.05);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;}
+.pg-btn.p{margin-left:0;background:var(--accent);border-color:var(--accent);color:#fff;}
+.pg-edit{margin-top:10px;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:11px;padding:12px;}
+.pg-in{background:#0B1220;border:1px solid var(--bd);color:var(--tx);border-radius:6px;padding:5px 7px;font-size:12.5px;}
 .pt-tbl td.dim{color:var(--sub);font-weight:500;}
 .pt-up{color:#F87171;} .pt-down{color:#60A5FA;}
 @media (max-width:560px){ .pt-kpis{grid-template-columns:repeat(2,1fr);} }
@@ -998,16 +1005,108 @@ function ptAdd(d,n){ var x=new Date(d+'T00:00:00Z'); x.setUTCDate(x.getUTCDate()
 function ptMD(d){ return (+d.slice(5,7))+'/'+(+d.slice(8,10)); }
 function ptDW(d){ return ptMD(d)+' ('+'일월화수목금토'.charAt(new Date(d+'T00:00:00Z').getUTCDay())+')'; }
 
+/* ── 분류별 파렛트 (예: 곡물·당쉼·셀시어스) ─────────────────────
+   분류 = 상품명에 들어 있는 낱말로 묶음. 설정: vendorStatus/{gid}/{vid}/palGroups = {list:[{n:이름, k:'낱말,낱말', adj:보정파렛트}]}
+   보정 = 창고관리에 없는 부자재 파렛트 등 (정산용 — 표에 「+보정」 값도 같이 보여 줌)
+   날짜별 상품 파렛트:
+     · daily/{날짜}.pp 가 있으면 그 기록(창고앱이 남긴 정확한 값)
+     · 없으면(지난날) 관리자 미리보기에서 지금 재고 − 그 뒤 입고 + 그 뒤 출고 (txLogs 역산) — 기록된 총계와 차이를 같이 표시 */
+var _pgSaved=null, _ptCtx=null, _ptLast=null;
+var PG_SUGGEST=[
+  { n:'곡물', k:'곡물,두유,콩물,서리태,21곡,말차,맷돌,비움,카무트,그래놀라,granola', adj:20 },
+  { n:'셀시어스', k:'셀시어스,베리,키위', adj:6 },          /* 「셀시어스OTG」가 당쉼의 OTG 에 먼저 걸리지 않게 당쉼보다 위 */
+  { n:'당쉼', k:'당쉼,오리진,OTG,결명자,검은콩,스파클링', adj:10 }
+];
+function pushKeyAt(ts){ var C='-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz', s=''; ts=Math.max(0,Math.floor(ts)); for(var i=0;i<8;i++){ s=C.charAt(ts%64)+s; ts=Math.floor(ts/64); } return s; }
+function pgList(){
+  if(_pgSaved && _pgSaved.list) return _pgSaved.list.filter(function(g){ return g && g.n; });
+  /* 저장된 분류가 없으면 상품명이 2개 이상 추천 분류에 걸릴 때만 추천값을 쓴다 */
+  var names=pgNames(), hit=PG_SUGGEST.filter(function(g){ return names.some(function(n){ return pgMatch(g,n); }); });
+  return hit.length>=2 ? hit.map(function(g){ return Object.assign({_sug:true}, g); }) : [];
+}
+function pgNames(){ var p=(_lastData&&_lastData.products)||{}; return Object.keys(p).map(function(k){ return String(p[k].name||''); }); }
+function pgMatch(g, name){ var n=String(name).toLowerCase(); return String(g.k||'').split(',').some(function(w){ w=w.trim().toLowerCase(); return w && n.indexOf(w)>=0; }); }
+function pgCat(list, name){ for(var i=0;i<list.length;i++) if(pgMatch(list[i],name)) return list[i].n; return '기타'; }
+/* 날짜별 상품 파렛트 → 분류 합계. days = [{d}] 오래된 순 */
+function pgByDay(daily, days, today){
+  var list=pgList(); if(!list.length) return null;
+  var prods=(_lastData&&_lastData.products)||{}, keyOf=(window.WMSVendorProjection&&window.WMSVendorProjection.keyOf)||function(s){ return s; };
+  var cats=list.map(function(g){ return g.n; }), out={};
+  var sumCat=function(pp){ var o={}; cats.concat(['기타']).forEach(function(c){ o[c]=0; });
+    Object.keys(pp).forEach(function(k){ var nm=(prods[k]&&prods[k].name)||k, n=+pp[k]||0; if(n) o[pgCat(list,nm)]+=n; }); return o; };
+  /* 역산: 지금 재고에서 하루씩 거꾸로 */
+  var tx=_ptCtx&&_ptCtx.tx, delta={};
+  if(tx) tx.forEach(function(w){ if(!w) return; Object.keys(w).forEach(function(id){ var e=w[id]; if(!e||!e.date||!e.name) return; var k=keyOf(e.name); if(!prods[k]) return;
+    var dd=delta[e.date]||(delta[e.date]={}); dd[k]=(dd[k]||0)+(e.type==='in'?1:-1)*(+e.pallets||1); }); });
+  var state={}; Object.keys(prods).forEach(function(k){ state[k]=+prods[k].pallets||0; });
+  for(var i=days.length-1;i>=0;i--){
+    var d=days[i].d, rec=daily[d];
+    var src=(d===today)?'now':(rec&&rec.pp)?'rec':(tx?'calc':null);
+    var pp=(d===today)?state:(rec&&rec.pp)?rec.pp:(tx?state:null);
+    if(pp){ var c=sumCat(pp), tot=0; Object.keys(pp).forEach(function(k){ tot+=+pp[k]||0; });
+      out[d]={ c:c, src:src, tot:tot, diff:(src==='calc'&&rec&&rec.p!=null)?tot-(+rec.p||0):null }; }
+    if(rec&&rec.pp){ state=Object.assign({}, rec.pp); Object.keys(prods).forEach(function(k){ if(state[k]==null) state[k]=0; }); }   /* 정확한 기록이 있으면 그 값에서 다시 거꾸로 */
+    var dl=delta[d]; if(dl) Object.keys(dl).forEach(function(k){ state[k]=(state[k]||0)-dl[k]; });
+  }
+  return { list:list, cats:cats, out:out, hasEtc:Object.keys(out).some(function(d){ return out[d].c['기타']; }) };
+}
+function pgCell(v, adj){ return v==null?'<span class="dim">-</span>':nf(v)+(adj?'<span class="dim" style="font-weight:500;font-size:11px;"> +'+adj+'='+nf(v+adj)+'</span>':''); }
+function pgSectionHtml(PG, days){
+  if(!PG) return _canEdit?'<div class="pt-note">분류(예: 곡물·당쉼)를 정하면 분류별 파렛트를 볼 수 있습니다. <button class="pg-btn" onclick="pgEdit()">⚙ 분류 설정</button></div>':'';
+  /* 기준일 = 기간 안의 각 월말 + 오늘 */
+  var pick=days.filter(function(x,i){ return i===days.length-1 || x.d.slice(0,7)!==days[i+1].d.slice(0,7); }).map(function(x){ return x.d; }).reverse();
+  var cols=PG.cats.concat(PG.hasEtc?['기타']:[]), adjOf={}; PG.list.forEach(function(g){ adjOf[g.n]=+g.adj||0; });
+  var srcT={ now:'지금', rec:'기록', calc:'입출고 역산' };
+  return '<div class="pg-sec"><div class="pg-hd"><b>📦 분류별 파렛트</b><span class="dim"> — 월말 기준'+(PG.list.some(function(g){ return +g.adj; })?' · 「+보정」은 부자재 등 창고관리 밖 파렛트':'')+(PG.list[0]._sug?' · <span style="color:var(--amber)">추천 분류(저장 전)</span>':'')+'</span>'
+    +(_canEdit?'<button class="pg-btn" onclick="pgEdit()">⚙ 분류 설정</button>':'')+'</div>'
+    +'<div class="tbl-wrap"><table class="pt-tbl"><thead><tr><th class="l">기준일</th>'+cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+'<th class="l">출처</th></tr></thead><tbody>'
+    +pick.map(function(d){ var r=PG.out[d];
+      return '<tr><td class="l" style="white-space:nowrap">'+ptDW(d)+'</td>'+cols.map(function(c){ return '<td class="num">'+(r?pgCell(r.c[c], adjOf[c]):'<span class="dim">-</span>')+'</td>'; }).join('')
+        +'<td class="l dim" style="font-size:11.5px;">'+(r?srcT[r.src]+(r.diff?' · <span style="color:#FCA5A5">기록 총계와 '+(r.diff>0?'+':'')+nf(r.diff)+'팔 차이</span>':''):(_canEdit?'자료 없음':'창고앱 기록이 쌓이면 표시'))+'</td></tr>'; }).join('')
+    +'</tbody></table></div>'
+    +(PG.out[pick[pick.length-1]]&&PG.out[pick[pick.length-1]].src==='calc'?'<div class="pt-note">지난날은 지금 재고에서 그 뒤의 입고·출고(창고 입출고 일지)를 되돌려 계산한 값입니다. 일지에 없는 수정(위치 이동·직접 고침)은 반영되지 않으니, 기록된 총계와 차이가 있으면 그만큼 확인이 필요합니다. 앞으로는 창고앱이 날마다 상품별 파렛트를 남겨 정확한 「기록」 값으로 보입니다.</div>':'')
+    +'<div id="pgEditBox"></div></div>';
+}
+/* 분류 설정 (관리자) */
+function pgEdit(){
+  var box=document.getElementById('pgEditBox'); if(!box) return;
+  var list=pgList().map(function(g){ return { n:g.n, k:g.k, adj:+g.adj||0 }; }); if(!list.length) list=PG_SUGGEST.map(function(g){ return Object.assign({}, g); });
+  var names=pgNames(), etc=names.filter(function(n){ return pgCat(list,n)==='기타'; });
+  box.innerHTML='<div class="pg-edit"><div class="pg-hd"><b>⚙ 분류 설정</b><span class="dim"> — 상품명에 낱말이 들어 있으면 그 분류 (위에서부터 먼저 맞는 것)</span></div>'
+    +'<table class="pt-tbl" style="width:100%"><thead><tr><th class="l">분류</th><th class="l">낱말 (쉼표로 구분)</th><th>보정 파렛트</th></tr></thead><tbody id="pgRows">'
+    +list.concat([{n:'',k:'',adj:0}]).map(function(g){ return '<tr><td><input class="pg-in" style="width:90px" value="'+esc(g.n)+'"></td><td><input class="pg-in" style="width:100%" value="'+esc(g.k)+'"></td><td><input class="pg-in" type="number" style="width:70px" value="'+(g.adj||0)+'"></td></tr>'; }).join('')
+    +'</tbody></table>'
+    +'<div class="pt-note" style="margin-top:8px">어느 분류에도 안 걸리는 상품 '+etc.length+'개'+(etc.length?': '+etc.slice(0,30).map(esc).join(', ')+(etc.length>30?' …':''):'')+'</div>'
+    +'<div style="display:flex;gap:8px;"><button class="pg-btn p" onclick="pgSave()">저장</button><button class="pg-btn" onclick="document.getElementById(\'pgEditBox\').innerHTML=\'\'">닫기</button></div></div>';
+}
+function pgSave(){
+  var i=_lastInfo||{}, rows=document.querySelectorAll('#pgRows tr'), list=[];
+  rows.forEach(function(tr){ var v=tr.querySelectorAll('input'); var n=v[0].value.trim(), k=v[1].value.trim(); if(n&&k) list.push({ n:n, k:k, adj:+v[2].value||0 }); });
+  db.ref('vendorStatus/'+i.gid+'/'+i.vendorId+'/palGroups').set(list.length?{ list:list, at:Date.now() }:null).then(function(){
+    _pgSaved=list.length?{ list:list }:null; if(_ptLast) renderPalTrend.apply(null, _ptLast);
+  }).catch(function(e){ alert('저장 실패: '+(e&&e.message)); });
+}
+window.pgEdit=pgEdit; window.pgSave=pgSave;
+
 function openPalTrend(){
   var i=_lastInfo||{}; if(!i.gid||!i.vendorId) return;
   var o=ensureHistOverlay();
   o.innerHTML='<div class="hist-card wide"><div class="hist-hd"><span>📈 총 파렛트 추이</span><button class="hist-x" onclick="closeHist()">✕</button></div>'
     +'<div class="hist-body"><div class="hist-empty">불러오는 중…</div></div></div>';
   var today=ptKst(), from=ptAdd(today,-(PT_DAYS-1)), base='vendorStatus/'+i.gid+'/'+i.vendorId;
+  /* 관리자 미리보기면 입출고 일지(txLogs)도 읽어 기록 없는 지난날의 상품별 파렛트를 역산한다 */
+  var fromTs=Date.parse(ptAdd(from,-1)+'T00:00:00+09:00');
+  var txP=(i._admin && _whList.length) ? Promise.all(_whList.map(function(w){
+      return db.ref('txLogs/'+w.id).orderByKey().startAt(pushKeyAt(fromTs)).get().then(function(s){ return s.val()||{}; }).catch(function(){ return null; }); }))
+    : Promise.resolve(null);
   Promise.all([
     db.ref(base+'/daily').orderByKey().endAt(today).limitToLast(400).get(),
-    db.ref(base+'/snapshots').get()
+    db.ref(base+'/snapshots').get(),
+    db.ref(base+'/palGroups').get().catch(function(){ return null; }),
+    txP
   ]).then(function(r){
+    _pgSaved=r[2]&&r[2].val()||null;
+    _ptCtx={ tx:r[3] };
     renderPalTrend(r[0].val()||{}, r[1].val()||{}, today, from);
   }).catch(function(e){
     o.querySelector('.hist-body').innerHTML='<div class="hist-empty">불러오지 못했습니다: '+esc(e&&e.message)+'</div>';
@@ -1017,6 +1116,7 @@ window.openPalTrend=openPalTrend;
 
 function renderPalTrend(daily, snaps, today, from){
   var o=document.getElementById('histOverlay'); if(!o) return;
+  _ptLast=[daily, snaps, today, from];
   /* 오늘은 지금 화면 값(가장 최신)으로 */
   daily=Object.assign({}, daily); daily[today]={ p:_curPal, t:Date.now() };
   var keys=Object.keys(daily).sort();
@@ -1067,7 +1167,7 @@ function renderPalTrend(daily, snaps, today, from){
     +'</tbody></table></div>';
 
   o.innerHTML='<div class="hist-card wide"><div class="hist-hd"><span>📈 총 파렛트 추이 — 최근 2개월</span><button class="hist-x" onclick="closeHist()">✕</button></div>'
-    +'<div class="hist-body">'+kpis+'<div class="pt-chart"><svg id="ptSvg"></svg></div>'+legend+note+tbl+'</div></div>'
+    +'<div class="hist-body">'+kpis+'<div class="pt-chart"><svg id="ptSvg"></svg></div>'+legend+note+pgSectionHtml(pgByDay(daily, days, today), days)+tbl+'</div></div>'
     +'<div class="pt-tip" id="ptTip"></div>';
   drawPalTrend(document.getElementById('ptSvg'), days, snapByDay, avg);
 }

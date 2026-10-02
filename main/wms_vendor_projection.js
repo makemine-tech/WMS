@@ -13,7 +13,7 @@
 
    경로: vendorStatus/{gid}/{vendorId}/products/{productKey} = {name,totalQty,pallets}
          vendorStatus/{gid}/{vendorId}/updatedAt = ts
-         vendorStatus/{gid}/{vendorId}/daily/{YYYY-MM-DD} = {p:총파렛트, q:총수량, t:ts}  (한국 날짜, 그날 마지막 값)
+         vendorStatus/{gid}/{vendorId}/daily/{YYYY-MM-DD} = {p:총파렛트, q:총수량, t:ts, pp:{상품키:파렛트}}  (한국 날짜, 그날 마지막 값)
 ============================================================ */
 (function(){
   'use strict';
@@ -76,13 +76,13 @@
       var updates={}, now=Date.now();
       var day=new Date(now+9*3600e3).toISOString().slice(0,10);   /* 한국 날짜 */
       vids.forEach(function(v){
-        var prods = byV[v], pal=0, qty=0;
-        Object.keys(prods).forEach(function(k){ pal+=(+prods[k].pallets||0); qty+=(+prods[k].totalQty||0); });
+        var prods = byV[v], pal=0, qty=0, pp={};
+        Object.keys(prods).forEach(function(k){ var n=+prods[k].pallets||0; pal+=n; qty+=(+prods[k].totalQty||0); if(n) pp[k]=n; });
         updates['vendorStatus/'+gid+'/'+v+'/products']  = Object.keys(prods).length ? prods : null;
         updates['vendorStatus/'+gid+'/'+v+'/updatedAt'] = now;
         /* 일별 파렛트 기록 — 그날 마지막 반영값으로 덮어쓴다 (파렛트 추이 그래프·30일 평균용).
            재고는 창고앱에서만 바뀌므로, 기록이 없는 날은 직전 기록과 같다고 본다 */
-        updates['vendorStatus/'+gid+'/'+v+'/daily/'+day] = { p:pal, q:qty, t:now };
+        updates['vendorStatus/'+gid+'/'+v+'/daily/'+day] = { p:pal, q:qty, t:now, pp:pp };   /* pp = 상품별 파렛트 (분류별 추이용) */
       });
       db.ref().update(updates).catch(function(e){ console.warn('[VendorProjection] 쓰기 실패', e); });
     }).catch(function(e){ console.warn('[VendorProjection] 설정 읽기 실패', e); });
