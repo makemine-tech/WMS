@@ -17,6 +17,10 @@
      WMS2FA.lockNow()            — 지금 잠그기
      <span data-2fa-timer></span> — 남은 자동잠금 시간이 표시된다
 
+   remember: true (임시, 정산관리 제작 기간) — 한 번 풀면 이 브라우저에 키를 꺼낼 수 없는 형태로 IndexedDB 에 보관해
+     새로고침해도 다시 묻지 않고, 무사용 자동잠금도 끔. 「지금 잠그기」를 누르면 보관한 키도 지움.
+     다시 켜려면 guard() 에서 remember 를 빼면 됨.
+
    WMS2FA.encrypt(aad, bytes) / WMS2FA.decrypt(aad, iv, bytes) — 잠금 해제 동안 같은 DEK 로
      AES-GCM 암·복호화 (정산 파일함이 원본 파일을 서버에 암호문으로만 올릴 때 사용).
      aad 에 저장 경로를 넣어 다른 위치의 암호문을 끼워 넣는 것을 막는다.
@@ -106,12 +110,11 @@
     }).then(function(buf){
       var raw = new Uint8Array(buf);
       return crypto.subtle.importKey('raw', raw, { name:'AES-GCM' }, false, ['encrypt','decrypt'])
-        .then(function(k){ raw.fill(0); DEK = k; });   /* 원본 바이트는 지우고 꺼낼 수 없는 키만 남긴다 */
+        .then(function(k){ raw.fill(0); DEK = k; if (opt.remember) return keyPut(k); });   /* 원본 바이트는 지우고 꺼낼 수 없는 키만 남긴다 */
     }).then(function(){
       el('w2faPw').value = ''; msg('', '');
       pref('lock').set({ fails: 0 }); audit(opt.page + '-unlock');
-      root.classList.add('hide'); unlocked = true; lastAct = Date.now(); startTimer();
-      try { opt.onUnlock && opt.onUnlock(); } catch (e) { console.error(e); }
+      opened();
     }).catch(function(e){
       if (e && e.bad){
         return pref('lock').transaction(function(cur){
@@ -126,10 +129,23 @@
     }).then(function(){ el('w2faBtn').disabled = false; });
   }
 
+  /* ── 기억하기(remember): 꺼낼 수 없는 CryptoKey 를 IndexedDB 에 그대로 보관 ── */
+  function idb(){ return new Promise(function(ok, no){ var r = indexedDB.open('wms2fa', 1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore('k'); }; r.onsuccess = function(){ ok(r.result); }; r.onerror = function(){ no(r.error); }; }); }
+  function kid(){ var u = user(); return 'dek:' + ((u && u.uid) || ''); }
+  function keyPut(k){ return idb().then(function(d){ return new Promise(function(ok){ var t = d.transaction('k', 'readwrite'); t.objectStore('k').put(k, kid()); t.oncomplete = ok; t.onerror = ok; }); }).catch(function(){}); }
+  function keyGet(){ return idb().then(function(d){ return new Promise(function(ok){ var q = d.transaction('k').objectStore('k').get(kid()); q.onsuccess = function(){ ok(q.result || null); }; q.onerror = function(){ ok(null); }; }); }).catch(function(){ return null; }); }
+  function keyDel(){ return idb().then(function(d){ d.transaction('k', 'readwrite').objectStore('k').delete(kid()); }).catch(function(){}); }
+  function opened(){
+    root.classList.add('hide'); unlocked = true; lastAct = Date.now(); startTimer();
+    try { opt.onUnlock && opt.onUnlock(); } catch (e) { console.error(e); }
+  }
+
   /* ── 무사용 자동잠금 ── */
   ['mousemove','keydown','click','touchstart','scroll'].forEach(function(ev){ window.addEventListener(ev, function(){ lastAct = Date.now(); }, { passive: true }); });
   function startTimer(){
     clearInterval(tick);
+    if (opt.remember){ document.querySelectorAll('[data-2fa-timer]').forEach(function(x){ x.textContent = '꺼짐(임시)'; }); return; }
     tick = setInterval(function(){
       var left = (opt.autoLockMin || 10) * 60000 - (Date.now() - lastAct);
       if (left <= 0){ lockNow('무사용 자동잠금'); return; }
@@ -139,7 +155,7 @@
   }
   function lockNow(why){
     if (!opt) return;
-    clearInterval(tick); unlocked = false; DEK = null;
+    clearInterval(tick); unlocked = false; DEK = null; if (opt.remember && !why) keyDel();
     try { opt.onLock && opt.onLock(); } catch (e) { console.error(e); }
     ask(); msg('wa', why ? why + ' — 다시 인증하세요' : '');
   }
@@ -152,7 +168,13 @@
       var t0 = Date.now();
       (function wait(){
         var A = window.WMSAccess;
-        if (A && A.ready && A.level >= 3) { ask(); return; }
+        if (A && A.ready && A.level >= 3){
+          if (!opt.remember){ ask(); return; }
+          keyGet().then(function(k){ if (!k){ ask(); return; }
+            /* 보관한 키가 지금 vault 와 맞는지 확인할 방법이 없으니 그대로 쓰고, 복호화가 실패하면 그때 다시 묻는다 */
+            DEK = k; audit(opt.page + '-unlock-remembered'); opened(); });
+          return;
+        }
         if (Date.now() - t0 < 30000) setTimeout(wait, 150);
       })();
     };
