@@ -76,36 +76,115 @@
     return /셀시어스/.test(s) ? '셀' : /당쉼|오리진/.test(s) ? '오' : /곡물|Granola|서리태/.test(s) ? '곡' : null;
   }
 
-  /* ── 표 모양 (청구내역서·작업비정산서 제외) — 제목줄 연두색(8월 ROW데이터 색)·굵게·가운데, 내용 있는 칸 테두리 ── */
-  var HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFFCC' } };
-  var LINE = { style: 'thin', color: { argb: 'FF9E9E9E' } }, BORDER = { top: LINE, left: LINE, bottom: LINE, right: LINE };
-  function styleHead(row, maxC){ for (var c = 1; c <= maxC; c++){ var cl = row.getCell(c); cl.fill = HEAD_FILL; cl.border = BORDER; cl.font = { name: '맑은 고딕', size: 10, bold: true }; cl.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; } }
+  /* ── 표 모양 (2026-10-03 대표님 요청: 전체 디자인 정리) ──
+     글꼴 맑은 고딕 10 · 제목줄 진한 남색 + 흰 글씨 · 합계줄 연한 남색 + 굵게 · 연회색 가는 테두리 · 눈금선 끔
+     숫자 천 단위 쉼표(번호류 제외) · 열 너비 내용 맞춤 · 제목줄 고정 + 필터 · 시트 탭 색(곡 초록·셀 주황·오 보라) */
+  var C_HEAD = 'FF1F3A5F', C_TOT = 'FFE7EDF6', C_LINE = 'FFD0D7E2', C_TXT = 'FF262626';
+  var HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: C_HEAD } }, TOT_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: C_TOT } };
+  var LINE = { style: 'thin', color: { argb: C_LINE } }, BORDER = { top: LINE, left: LINE, bottom: LINE, right: LINE };
+  var TOT_BORDER = { top: { style: 'medium', color: { argb: C_HEAD } }, left: LINE, bottom: { style: 'medium', color: { argb: C_HEAD } }, right: LINE };
+  var F_BODY = { name: '맑은 고딕', size: 10, color: { argb: C_TXT } }, F_HEAD = { name: '맑은 고딕', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  var F_TOT = { name: '맑은 고딕', size: 10, bold: true, color: { argb: C_HEAD } }, F_TITLE = { name: '맑은 고딕', size: 14, bold: true, color: { argb: C_HEAD } };
+  var A_HEAD = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  var A_L = { horizontal: 'left', vertical: 'middle' }, A_R = { horizontal: 'right', vertical: 'middle' }, A_C = { horizontal: 'center', vertical: 'middle' };
+  var TAB = { 곡: 'FF548235', 셀: 'FFC55A11', 오: 'FF7030A0' }, TAB_ETC = 'FF595959';
+  var ID_COL = /번호|코드|Barcode|ID|우편|전화/;
+  function styleHead(row, maxC, c1){ for (var c = c1 || 1; c <= maxC; c++){ var cl = row.getCell(c); cl.fill = HEAD_FILL; cl.border = BORDER; cl.font = F_HEAD; cl.alignment = A_HEAD; } }
+  function styleTot(row, maxC, c1){ for (var c = c1 || 1; c <= maxC; c++){ var cl = row.getCell(c); cl.fill = TOT_FILL; cl.border = TOT_BORDER; cl.font = F_TOT; } }
   function boxAll(ws, r1, r2, maxC, c1){ for (var r = r1; r <= r2; r++){ var row = ws.getRow(r); for (var c = c1 || 1; c <= maxC; c++) row.getCell(c).border = BORDER; } }
   function lastCol(ws, r){ var m = 0; ws.getRow(r).eachCell(function(c, n){ if (c.value != null && c.value !== '') m = Math.max(m, n); }); return m; }
   function lastRow(ws, c1, c2){ var m = 0; ws.eachRow(function(row, r){ for (var c = c1; c <= c2; c++){ var v = row.getCell(c).value; if (v != null && v !== ''){ m = r; break; } } }); return m; }
+  function valOf(v){ if (!v || typeof v !== 'object' || v instanceof Date) return v; if ('result' in v || v.formula || v.sharedFormula) return v.result; if (v.richText) return txt(v); if (v.text != null) return v.text; return v; }
+  function dispLen(v){ v = valOf(v); if (v == null) return 0; if (v instanceof Date) return 10; if (typeof v === 'number') return Math.round(v).toLocaleString('en-US').length + 1;
+    var s = String(v), n = 0; for (var i = 0; i < s.length; i++) n += s.charCodeAt(i) > 0x2E80 ? 1.8 : 1; return n; }
+  function isDateFmt(f){ return /(^|[^"])(yy|mm|dd|m"|d")/.test(f || '') || /[md]"[월일]"/.test(f || ''); }
+  /* 표 한 개 본문(머리줄 hr, 몸통 r1~r2, 열 c1~c2): 글꼴·정렬·숫자 서식·테두리 — 노란 칸 등 채우기는 그대로 둠 */
+  function body(ws, hr, r1, r2, c1, c2){
+    var kind = {};
+    for (var c = c1; c <= c2; c++) kind[c] = ID_COL.test(txt(ws.getRow(hr).getCell(c).value)) ? 'id' : '';
+    for (var r = r1; r <= r2; r++){ var row = ws.getRow(r);
+      for (var k = c1; k <= c2; k++){ var cl = row.getCell(k), v = valOf(cl.value), f = cl.numFmt || '';
+        var yel = cl.fill && cl.fill.fgColor && cl.fill.fgColor.argb === 'FFFFF2B3';
+        cl.style = { numFmt: f || undefined, font: F_BODY, border: BORDER, fill: yel ? YEL : undefined, alignment: cl.alignment };
+        if (cl.isMerged && cl.master !== cl) continue;
+        if (v instanceof Date || (typeof v === 'number' && isDateFmt(f))){ cl.alignment = A_C; continue; }
+        if (typeof v === 'number'){
+          if (kind[k] === 'id'){ cl.numFmt = '0'; cl.alignment = A_C; }
+          else { if (!f || f === 'General' || /\$|_\(|0_\)|_-|0_ /.test(f)) cl.numFmt = '#,##0'; cl.alignment = A_R; }
+        } else if (v != null && v !== '') cl.alignment = cl.alignment && cl.alignment.horizontal === 'center' ? A_C : A_L;
+      } }
+  }
+  function fitCols(ws, r1, r2, c1, c2, min, max){
+    var stop = Math.min(r2, r1 + 600);
+    for (var c = c1; c <= c2; c++){ var w = 0; for (var r = r1; r <= stop; r++){ var cl = ws.getRow(r).getCell(c); if (cl.isMerged && cl.master !== cl) continue; w = Math.max(w, dispLen(cl.value)); }
+      ws.getColumn(c).width = Math.max(min || 6, Math.min(max || 40, Math.ceil(w + 2))); }
+  }
+  function look(ws, tab, frz){ ws.properties.tabColor = { argb: tab };
+    ws.views = [frz ? { state: 'frozen', xSplit: frz[0], ySplit: frz[1], topLeftCell: ws.getColumn(frz[0] + 1).letter + (frz[1] + 1), activeCell: 'A1', showGridLines: false, zoomScale: 100 }
+                    : { state: 'normal', activeCell: 'A1', topLeftCell: 'A1', showGridLines: false, zoomScale: 100 }]; }
+  /* 엑셀에서 읽은 칸들은 서식 객체를 같이 쓰는 경우가 있어(한 칸을 칠하면 다른 칸도 바뀜) 칸마다 따로 복사 */
+  function unshare(wb){ wb.eachSheet(function(ws){ ws.eachRow(function(row){ row.eachCell({ includeEmpty: true }, function(cl){ if (cl.style) cl.style = JSON.parse(JSON.stringify(cl.style)); }); }); }); }
   function beautify(wb){
     ['곡', '셀', '오'].forEach(function(b){
-      /* ROW데이터·작업상세: 1행 제목, 표 전체 테두리 */
-      [b + '_ROW데이터', b + '_작업상세'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return;
-        var mc = n.indexOf('작업상세') > 0 ? lastCol(ws, 2) || lastCol(ws, 1) : lastCol(ws, 1), lr = ws.rowCount;
-        if (n.indexOf('작업상세') > 0){ var hc = 0; ws.getRow(1).eachCell(function(c, k){ if (txt(c.value) === '소분포장') hc = k; }); mc = hc || mc; }
-        styleHead(ws.getRow(1), mc); ws.getRow(1).height = n.indexOf('작업상세') > 0 ? 42 : 20; boxAll(ws, 2, lr, mc);
-        if (n.indexOf('ROW') > 0){ ws.getColumn(1).numFmt = 'yyyy-mm-dd'; ws.getColumn(1).width = 11; }
-        /* 작업상세 오른쪽 요약표 */
-        if (n.indexOf('작업상세') > 0){ var sc = mc + 2; styleHead(ws.getRow(1), 0); for (var c = sc; c <= sc + 3; c++){ var cl = ws.getRow(1).getCell(c); cl.fill = HEAD_FILL; cl.font = { name: '맑은 고딕', size: 10, bold: true }; cl.alignment = { horizontal: 'center', vertical: 'middle' }; } }
-      });
-      /* 보관비: 3~5행 제목, 날짜 표·합계 테두리, 오른쪽 화물 목록 */
-      var ws = wb.getWorksheet(b + '_보관비'); if (!ws) return;
-      var mc2 = b === '곡' ? 10 : 9, sumR = 0; ws.eachRow(function(row, r){ if (txt(row.getCell(1).value) === '합계') sumR = r; });
-      for (var r = 3; r <= 5; r++) styleHead(ws.getRow(r), mc2);
-      boxAll(ws, 6, sumR || 37, mc2);
-      if (sumR){ for (var c = 1; c <= mc2; c++){ var cl = ws.getRow(sumR).getCell(c); cl.fill = HEAD_FILL; cl.font = { name: '맑은 고딕', size: 10, bold: true }; } }
-      var lr2 = lastRow(ws, 12, 16);
-      if (lr2 >= 1 && txt(ws.getCell('L1').value)){ for (var c3 = 12; c3 <= 16; c3++){ var h = ws.getRow(1).getCell(c3); h.fill = HEAD_FILL; h.border = BORDER; h.font = { name: '맑은 고딕', size: 10, bold: true }; h.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; } boxAll(ws, 2, lr2, 16, 12); }
+      /* ROW데이터: 원본 그대로 · 머리줄 고정 + 필터 */
+      var ws = wb.getWorksheet(b + '_ROW데이터');
+      if (ws){ var mc = lastCol(ws, 1), lr = ws.rowCount;
+        styleHead(ws.getRow(1), mc); ws.getRow(1).height = 24; ws.getColumn(1).numFmt = 'yyyy-mm-dd'; body(ws, 1, 2, lr, 1, mc);
+        fitCols(ws, 1, lr, 1, mc, 7, 42); ws.getColumn(1).width = 12;
+        ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: mc } }; look(ws, TAB[b], [0, 1]); }
+      /* 작업상세: 송장×상품 표 + 오른쪽 요약표 */
+      ws = wb.getWorksheet(b + '_작업상세');
+      if (ws){ var hc = 0, sc = 0; ws.getRow(1).eachCell(function(c, k){ var t = txt(c.value); if (t === '소분포장') hc = k; if (t === '포장비 구분') sc = k; });
+        var lr2 = ws.rowCount, mc2 = hc || lastCol(ws, 1);
+        styleHead(ws.getRow(1), mc2); ws.getRow(1).height = 66; body(ws, 1, 2, lr2, 1, mc2);
+        ws.getColumn(1).width = 16; ws.getColumn(2).width = 9; for (var c = 3; c <= mc2 - 4; c++) ws.getColumn(c).width = 11;
+        ws.getColumn(mc2 - 3).width = 8; ws.getColumn(mc2 - 2).width = 18; ws.getColumn(mc2 - 1).width = 9; ws.getColumn(mc2).width = 9;
+        for (var r = 2; r <= lr2; r++){ var row = ws.getRow(r); row.getCell(1).alignment = A_C; for (var c3 = 3; c3 <= mc2 - 3; c3++) row.getCell(c3).alignment = A_C; row.getCell(mc2 - 2).alignment = A_C; row.getCell(mc2).alignment = A_C; }
+        ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: mc2 } };
+        if (sc){ var sr = 1; while (txt(valOf(ws.getRow(sr + 1).getCell(sc).value))) sr++;
+          ws.getColumn(sc - 1).width = 3; styleHead(ws.getRow(1), sc + 3, sc); body(ws, 1, 2, sr, sc, sc + 3); styleTot(ws.getRow(sr), sc + 3, sc);
+          ws.getColumn(sc).width = 22; ws.getColumn(sc + 1).width = 10; ws.getColumn(sc + 2).width = 8; ws.getColumn(sc + 3).width = 14; }
+        look(ws, TAB[b], [2, 1]); }
+      /* 보관비: 1~2행 제목, 3~5행 머리, 날짜 표, 합계줄, 오른쪽 화물 목록 */
+      ws = wb.getWorksheet(b + '_보관비');
+      if (ws){ var w = b === '곡' ? 10 : 9, sumR = 0; ws.eachRow(function(row, r){ if (txt(row.getCell(1).value) === '합계') sumR = r; });
+        var t = ws.getCell('A1'); t.font = F_TITLE; t.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 }; t.fill = NOFILL; t.border = {};
+        for (var r2 = 3; r2 <= 5; r2++){ styleHead(ws.getRow(r2), w); ws.getRow(r2).height = 20; } ws.getRow(1).height = 32; ws.getRow(2).height = 16;
+        body(ws, 5, 6, (sumR || 37) - 1, 1, w);
+        ws.getCell('B6').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }; if (b === '곡') ws.getCell('C6').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }; ws.getRow(6).height = 30;
+        if (sumR){ body(ws, 5, sumR, sumR, 1, w); styleTot(ws.getRow(sumR), w); ws.getCell('A' + sumR).alignment = A_C;
+          var nt = ws.getCell('A' + (sumR + 1)); nt.font = { name: '맑은 고딕', size: 9, italic: true, color: { argb: 'FF7F7F7F' } }; nt.fill = NOFILL; nt.border = {}; nt.alignment = { horizontal: 'left', vertical: 'middle' };
+          for (var r8 = sumR + 1; r8 <= sumR + 3; r8++) for (var c5 = 1; c5 <= w; c5++){ var z = ws.getRow(r8).getCell(c5); if (r8 > sumR + 1 || c5 > 1) z.style = {}; } }
+        for (var r3 = 6; r3 <= (sumR || 37); r3++) ws.getCell('A' + r3).alignment = A_C;
+        ws.getColumn(1).width = 10; ws.getColumn(2).width = b === '곡' ? 20 : 34; if (b === '곡') ws.getColumn(3).width = 14;
+        for (var c4 = b === '곡' ? 4 : 3; c4 <= w; c4++) ws.getColumn(c4).width = 11;
+        var lr3 = lastRow(ws, 12, 16);
+        if (lr3 >= 1 && txt(ws.getCell('L1').value)){ ws.getColumn(11).width = 3; styleHead(ws.getRow(1), 16, 12); body(ws, 1, 2, lr3, 12, 16);
+          [8, 10, 30, 9, 9].forEach(function(x, i){ ws.getColumn(12 + i).width = x; }); for (var r4 = 2; r4 <= lr3; r4++){ ws.getCell('L' + r4).alignment = A_C; ws.getCell('M' + r4).alignment = A_C; } }
+        look(ws, TAB[b], [0, 5]); }
     });
+    /* 기타작업내역 · 착불 · 오포장 */
     ['기타작업내역', '택배착불및기타비용', '오포장'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return;
-      var mc = lastCol(ws, 1), lr = lastRow(ws, 1, mc); styleHead(ws.getRow(1), mc); ws.getRow(1).height = 22; if (lr > 1) boxAll(ws, 2, lr, mc); });
+      var mc = lastCol(ws, 1), lr = Math.max(2, lastRow(ws, 1, mc)); styleHead(ws.getRow(1), mc); ws.getRow(1).height = 24;
+      body(ws, 1, 2, lr, 1, mc);
+      var tr = 0; for (var r = 2; r <= lr; r++) if (txt(ws.getRow(r).getCell(1).value) === '합계') tr = r;
+      if (n === '택배착불및기타비용' && lr > 2){ tr = lr; ws.getCell('A' + tr).value = '합계'; }
+      if (tr){ styleTot(ws.getRow(tr), mc); ws.getCell('A' + tr).alignment = A_C; }
+      if (n === '기타작업내역'){ [14, 9, 9, 11, 40, 15, 12, 11, 16, 9, 9, 8, 9, 9, 9, 12, 26].forEach(function(x, i){ ws.getColumn(i + 1).width = x; });
+        for (var r5 = 2; r5 < (tr || lr + 1); r5++) ['A', 'B', 'C', 'D', 'F', 'G', 'H', 'I', 'M'].forEach(function(c){ var cl = ws.getCell(c + r5); if (!(cl.isMerged && cl.master !== cl)) cl.alignment = A_C; });
+        ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: mc } }; }
+      else if (n === '택배착불및기타비용'){ [11, 70, 8, 12, 14].forEach(function(x, i){ ws.getColumn(i + 1).width = x; });
+        for (var r6 = 2; r6 <= (tr || lr); r6++){ ws.getCell('A' + r6).alignment = A_C; if (r6 < tr) ws.getCell('B' + r6).alignment = A_L; ws.getCell('C' + r6).alignment = A_C; ws.getCell('D' + r6).numFmt = '#,##0'; ws.getCell('E' + r6).numFmt = '#,##0'; } }
+      else fitCols(ws, 1, lr, 1, mc, 9, 40);
+      look(ws, TAB_ETC, [0, 1]);
+    });
+    /* 청구내역서·작업비정산서: 양식은 그대로, 글꼴(굴림·Calibri → 맑은 고딕)·탭 색·화면만 */
+    ['청구내역서', '작업비정산서'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return;
+      ws.eachRow(function(row){ row.eachCell(function(cl){ var f = cl.font; if (f && /굴림|Calibri|돋움|Arial/.test(f.name || '')) cl.font = Object.assign({}, f, { name: '맑은 고딕' }); }); });
+      if (n === '작업비정산서') for (var r7 = 9; r7 <= 22; r7++) ws.getRow(r7).eachCell(function(cl){ var v = valOf(cl.value); if (typeof v === 'number' && (!cl.numFmt || cl.numFmt === 'General')) cl.numFmt = '#,##0'; });
+      look(ws, C_HEAD); });
   }
+
 
   E['포인트나인크루'] = {
     items: { 6: 'auto', 22: 'auto', 23: 'auto', 25: 'auto', 27: 'auto', 38: 'auto' },
@@ -131,6 +210,7 @@
       { d: '2026-10-03', t: '청구내역서 재고보관비 = 곡·셀·오 보관비 합계 줄 (8월 파일은 셀시어스가 8/31 하루치를 가리켰음)' },
       { d: '2026-10-03', t: '착불·기타비용 = 대표님 메모 (건수 × 건당 × 1.1)' },
       { d: '2026-10-03', t: '착불 시트에 이벗 전체주문목록 고객사 메이크창고 · 판매처 로켓쉽먼트_다이렉트 · 상품명 그래놀라 송장을 송장별 한 줄(날짜=등록일, 건수 1)로 추가 — 비용은 수량 따라 달라 대표님이 엑셀에서 직접 입력(노란 칸)' },
+      { d: '2026-10-03', t: '엑셀 디자인: 글꼴 맑은 고딕 10, 제목줄 남색·흰 글씨, 합계줄 연한 남색·굵게, 연회색 테두리, 눈금선 끔, 숫자 천 단위 쉼표(번호류 제외), 열 너비 맞춤, 제목줄 고정·필터, 시트 탭 색(곡 초록·셀 주황·오 보라·청구 남색·점검 빨강) — 청구내역서·작업비정산서 양식은 그대로' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -138,6 +218,7 @@
       var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
       var serial = function(d){ return Math.round(Date.UTC(Y, M - 1, d) / 864e5) + 25569; }, S0 = serial(1);
       var CHK = [];
+      unshare(wb);
       /* 확인할 곳은 칸에 메모를 달지 않고 맨 뒤 「점검」 시트 목록에만 (대표님 요청 2026-10-03) */
       var mark = function(ws, a, note, list){ if (list !== false) CHK.push([ws.name, a, note]); };
       if (!MC){ log.push(['확인 필요', YM + ' 시작·마감 파렛트(창고관리)와 착불 메모가 아직 없습니다 — 대화창에서 알려 주시면 넣습니다. 지난달 값으로 둡니다']); return; }
@@ -353,10 +434,13 @@
         beautify(wb);
         var ck = wb.getWorksheet('점검(확정 전 삭제)'); if (ck) wb.removeWorksheet(ck.id);
         ck = wb.addWorksheet('점검(확정 전 삭제)');
-        ck.columns = [{ header: '시트', width: 16 }, { header: '칸', width: 8 }, { header: '확인할 내용', width: 120 }]; styleHead(ck.getRow(1), 3);
-        CHK.forEach(function(x){ var r = ck.addRow(x); r.getCell(3).alignment = { wrapText: true, vertical: 'top' }; r.getCell(1).value = { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }; r.getCell(1).font = { color: { argb: 'FF2563EB' }, underline: true }; });
-        boxAll(ck, 2, ck.rowCount, 3);
-        ck.addRow([]); ck.addRow(['', '', '노란 칸 = 드물거나 큰 금액이라 한 번 볼 곳. 확인이 끝나면 이 시트를 지우고 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.']);
+        ck.columns = [{ header: '시트', width: 20 }, { header: '칸', width: 10 }, { header: '확인할 내용', width: 110 }]; styleHead(ck.getRow(1), 3); ck.getRow(1).height = 24;
+        CHK.forEach(function(x){ var r = ck.addRow(x); r.getCell(1).value = { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }; });
+        body(ck, 1, 2, ck.rowCount, 1, 3);
+        for (var cr = 2; cr <= ck.rowCount; cr++){ ck.getCell('A' + cr).font = { name: '맑은 고딕', size: 10, color: { argb: 'FF1F5FBF' }, underline: true }; ck.getCell('B' + cr).alignment = A_C; ck.getCell('C' + cr).alignment = { wrapText: true, vertical: 'middle' }; }
+        ck.addRow([]); var nr = ck.addRow(['', '', '노란 칸 = 드물거나 큰 금액이라 한 번 볼 곳. 확인이 끝나면 이 시트를 지우고 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.']);
+        nr.getCell(3).font = { name: '맑은 고딕', size: 9, italic: true, color: { argb: 'FF7F7F7F' } };
+        look(ck, 'FFC00000', [0, 1]);
         log.push(['자동 적용', '청구내역서 포함가 ' + won(sum) + ' (공급가 ' + won(sum / 1.1) + ') · 점검 표시 ' + CHK.length + '곳']);
       });
     }
