@@ -98,6 +98,25 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .empty-s{color:var(--mu);font-size:12.5px;padding:.8rem .2rem}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2937;border:1px solid var(--br);color:var(--tx);border-radius:10px;padding:.6rem 1rem;font-size:13px;z-index:100;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.on{opacity:1}
+.chk{display:inline-block;font-size:11px;font-weight:800;border-radius:999px;padding:.12rem .55rem;margin-left:.35rem}
+.chk.warn{background:rgba(251,191,36,.15);color:var(--y);border:1px solid rgba(251,191,36,.4)}
+.chk.okk{background:rgba(74,222,128,.12);color:var(--g);border:1px solid rgba(74,222,128,.35)}
+.opt{color:var(--y)}
+.modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:28px 12px;overflow-y:auto}
+.mbox{width:100%;max-width:1000px;background:var(--s1);border:1px solid var(--br);border-radius:14px;overflow:hidden}
+.mhd{display:flex;align-items:center;gap:.6rem;padding:.85rem 1rem;border-bottom:1px solid var(--br);font-weight:800}
+.mhd .sp{flex:1}
+.mbody{padding:.8rem 1rem 1.1rem;max-height:calc(100vh - 140px);overflow:auto}
+.ftbl{width:100%;min-width:780px;border-collapse:collapse;font-size:12.5px}
+.ftbl th{text-align:left;color:var(--mu);font-size:11px;font-weight:700;padding:.4rem .45rem;border-bottom:1px solid var(--br);white-space:nowrap}
+.ftbl td{padding:.45rem .45rem;border-bottom:1px solid #1d2230;vertical-align:top}
+.ftbl td.n{text-align:right;font-family:var(--mo);white-space:nowrap}
+.ftbl tr.flag td{background:rgba(251,191,36,.05)}
+.ftbl tr.done td{opacity:.7}
+.why{font-size:11.5px;color:var(--y);line-height:1.5}
+.why.g{color:var(--g)}
+.dim{color:var(--mu)}
+.strike{text-decoration:line-through;color:var(--mu)}
 .soon{background:var(--s1);border:1px dashed var(--br);border-radius:14px;padding:2.2rem 1.2rem;text-align:center;color:var(--mu);line-height:1.9}
 .soon b{color:var(--tx)}
 
@@ -286,9 +305,11 @@ function upload(file, ym, q){
     type = detect(P.f); t = typeOf(type);
     try { summary = t.summary ? t.summary(P.f, P.wb) : ''; } catch (e) { summary = ''; }
     if (!summary && P.f.sheets.length) summary = '시트 ' + P.f.sheets.map(function(s){ return s.name; }).slice(0, 4).join(' · ');
+    var frows = null;
+    if (type === 'freight'){ try { frows = SETTLE_FREIGHT.parse(P.f, P.wb); } catch (e) { frows = null; } }
     P.wb = null;
-    /* 공통 파일은 한 달에 하나 — 이미 있으면 교체할지 묻는다 */
-    var old = t.cat === 'common' ? Object.keys(BOX).filter(function(k){ return BOX[k].type === type; }) : [];
+    /* 공통 파일은 한 달에 하나 — 이미 있으면 교체할지 묻는다 (여러 개 쌓는 종류는 그냥 추가) */
+    var old = (t.cat === 'common' && !t.multi) ? Object.keys(BOX).filter(function(k){ return BOX[k].type === type; }) : [];
     if (old.length && !confirm('[' + t.label + '] 이 이미 있습니다.\n\n기존: ' + BOX[old[0]].name + '\n새 파일: ' + file.name + '\n\n새 파일로 교체할까요? (취소하면 둘 다 보관)')) old = [];
     qset(q, '암호화 중…', '', .1);
     return WMS2FA.encrypt(path, buf).then(function(enc){
@@ -299,7 +320,9 @@ function upload(file, ym, q){
         sheets: P.f.sheets.map(function(s){ return { n: s.name, r: s.rows }; }).slice(0, 40),
         sheetKey: P.f.sheetKey || '', headKey: P.f.headKey || '',
         iv: iv, path: path, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' };
-      return db.ref('settlement/box/' + ym + '/' + id).set(meta);
+      return db.ref('settlement/box/' + ym + '/' + id).set(meta).then(function(){
+        if (frows && frows.length) return db.ref('settlement/freight/' + ym + '/' + id).set({ file: file.name, rows: frows });
+      });
     }).then(function(){
       old.forEach(removeFile);
       qset(q, (t.icon || '') + ' ' + t.label, type === 'unknown' ? 'er' : 'ok', 1);
@@ -312,7 +335,8 @@ function upload(file, ym, q){
 
 function removeFile(id){
   var m = BOX[id]; if (!m) return Promise.resolve();
-  return st.ref(m.path).delete().catch(function(){}).then(function(){ return db.ref('settlement/box/' + YM + '/' + id).remove(); });
+  var u = {}; u['box/' + YM + '/' + id] = null; u['freight/' + YM + '/' + id] = null;
+  return st.ref(m.path).delete().catch(function(){}).then(function(){ return db.ref('settlement').update(u); });
 }
 function delFile(id){
   var m = BOX[id]; if (!m) return;
@@ -346,7 +370,7 @@ function setType(id, key){
       ups['sigs/' + sid] = { type: k, sheetKey: m.sheetKey, headKey: m.headKey || '', from: m.name.slice(0, 80), at: firebase.database.ServerValue.TIMESTAMP };
     }
     return db.ref('settlement').update(ups);
-  }).then(function(){ toast(m.sheetKey ? '바꿨습니다 — 다음부터 이런 파일은 자동으로 이 종류' : '바꿨습니다'); })
+  }).then(function(){ toast((m.sheetKey ? '바꿨습니다 — 다음부터 이런 파일은 자동으로 이 종류' : '바꿨습니다') + (key === 'freight' ? ' · 단가 확인은 파일을 다시 올리면 됩니다' : '')); })
     .catch(function(e){ alert('저장 실패: ' + ((e && e.message) || e)); });
 }
 
@@ -371,19 +395,28 @@ function actions(id, m){
 }
 function render(){
   var ids = Object.keys(BOX).sort(function(a, b){ return (BOX[b].at || 0) - (BOX[a].at || 0); });
-  var commonTypes = allTypes().filter(function(t){ return t.cat === 'common'; });
-  var done = 0;
+  /* 공통 = 이벗 주문목록(여러 개) → 박스앤캔 택배비(선택) → 화물 입출고(화물관리 페이지) → 화물 청구서(여러 개·단가 확인) + 직접 만든 공통 종류 */
+  var commonTypes = ['ebut_orders','bnc_courier','@cargo','freight'].map(function(k){ return k === '@cargo' ? { key:'@cargo' } : typeOf(k); })
+    .concat(allTypes().filter(function(t){ return t.custom && t.cat === 'common'; }));
+  var done = 0, need = 0;
   $('commonList').innerHTML = commonTypes.map(function(t){
+    if (t.key === '@cargo') return cargoRow(function(ok){ need++; if (ok) done++; });
     var mine = ids.filter(function(id){ return BOX[id].type === t.key; });
-    if (mine.length) done++;
-    var head = '<div class="ck">' + (mine.length ? '✅' : '⬜') + '</div><div class="lb">' + esc((t.icon || '') + ' ' + t.label) + '<small>' + esc(t.hint || '') + '</small></div>';
-    if (!mine.length) return '<div class="row">' + head + '<div class="fi"><span class="miss">아직 없음</span></div><div class="ac"></div></div>';
+    if (!t.optional) need++;
+    if (mine.length && !t.optional) done++;
+    var mark = mine.length ? '✅' : (t.optional ? '⏳' : '⬜');
+    var head = '<div class="ck">' + mark + '</div><div class="lb">' + esc((t.icon || '') + ' ' + t.label)
+      + (t.optional ? ' <span class="pill opt">선택</span>' : '') + (t.multi ? ' <span class="pill">여러 개</span>' : '')
+      + '<small>' + esc(t.hint || '') + '</small></div>';
+    if (!mine.length) return '<div class="row">' + head + '<div class="fi"><span class="miss">' + (t.optional ? '아직 안 옴 — 없어도 정산 진행 가능' : '아직 없음') + '</span></div><div class="ac"></div></div>';
     return mine.map(function(id, i){
+      var extra = t.key === 'freight' ? freightBadge(id) : '';
       return '<div class="row">' + (i === 0 ? head : '<div class="ck"></div><div class="lb"></div>')
-        + '<div class="fi">' + fileCell(id, BOX[id]) + (mine.length > 1 ? '<span class="pill">같은 종류 ' + mine.length + '개</span>' : '') + '</div>'
+        + '<div class="fi">' + fileCell(id, BOX[id]) + extra + '</div>'
         + '<div class="ac">' + actions(id, BOX[id]) + '</div></div>';
     }).join('');
   }).join('');
+  var commonTypes_n = need;
 
   var others = ids.filter(function(id){ return typeOf(BOX[id].type).cat !== 'common'; });
   others.sort(function(a, b){ return (BOX[a].type === 'unknown' ? 0 : 1) - (BOX[b].type === 'unknown' ? 0 : 1); });
@@ -393,7 +426,137 @@ function render(){
       + '<div class="lb">' + esc(t.label) + '</div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>';
   }).join('') : '<div class="empty-s">아직 없습니다.</div>';
 
-  $('ymNote').textContent = '공통 파일 ' + done + ' / ' + commonTypes.length + ' · 전체 ' + ids.length + '개';
+  $('ymNote').textContent = '공통 ' + done + ' / ' + commonTypes_n + ' (택배비 제외) · 파일 ' + ids.length + '개';
+}
+
+/* ═══ 화물 입출고 — 입출고 화물관리(cargo_log.html) 기록을 그 달 것만 가져온다 ═══
+   wms_sync/groups/{gid}/cargo/logs  {date, kind(parcel 택배출고|in 입고|out 출고|ret 반품양품화|etc), vendor, aj, etc, box, work}
+   파렛트 = aj(아주) + etc(우체국·기타) */
+var GID = null, CARGO = null, offCargo = null;
+var CKIND = { parcel:'택배출고', in:'입고', out:'출고', ret:'반품양품화', etc:'기타' };
+function loadCargo(ym){
+  if (offCargo){ offCargo(); offCargo = null; } CARGO = null;
+  var go = function(){
+    if (!GID){ CARGO = { err: '작업 그룹을 찾지 못했습니다' }; render(); return; }
+    var q = db.ref('wms_sync/groups/' + GID + '/cargo/logs').orderByChild('date').startAt(ym + '-01').endAt(ym + '-31');
+    var cb = function(s){ var a = []; s.forEach(function(c){ a.push(c.val()); }); CARGO = { rows: a }; render(); };
+    q.on('value', cb, function(e){ CARGO = { err: (e && e.code) || '읽기 실패' }; render(); });
+    offCargo = function(){ q.off('value', cb); };
+  };
+  if (GID) go();
+  else db.ref('groups').get().then(function(s){ var ks = Object.keys(s.val() || {}); GID = ks.indexOf('makechango') >= 0 ? 'makechango' : ks[0] || null; go(); })
+    .catch(function(){ CARGO = { err: '그룹 목록을 못 읽었습니다' }; render(); });
+}
+function cargoRow(count){
+  var head = function(mark){ return '<div class="ck">' + mark + '</div><div class="lb">🏗️ 화물 입출고 내역 <span class="pill">화물관리 페이지</span>'
+    + '<small>입출고 화물관리에 기록한 이 달 내용을 그대로 씁니다 (올릴 파일 없음)</small></div>'; };
+  var link = '<a class="btn" href="/cargo_log.html" target="_blank" rel="noopener">화물관리 열기</a>';
+  if (!CARGO){ count(false); return '<div class="row">' + head('⏳') + '<div class="fi"><span class="miss">불러오는 중…</span></div><div class="ac">' + link + '</div></div>'; }
+  if (CARGO.err){ count(false); return '<div class="row">' + head('⚠️') + '<div class="fi"><span class="miss">' + esc(CARGO.err) + '</span></div><div class="ac">' + link + '</div></div>'; }
+  var a = CARGO.rows; count(a.length > 0);
+  if (!a.length) return '<div class="row">' + head('⬜') + '<div class="fi"><span class="miss">' + esc(ymLabel(YM)) + ' 기록이 없습니다</span></div><div class="ac">' + link + '</div></div>';
+  var byK = {}, byV = {}, plt = 0, days = {};
+  a.forEach(function(r){ var p = (+r.aj || 0) + (+r.etc || 0); plt += p; days[r.date] = 1;
+    byK[r.kind] = (byK[r.kind] || 0) + p;
+    String(r.vendor || '').split(',').forEach(function(v){ v = v.trim(); if (v) byV[v] = (byV[v] || 0) + 1; }); });
+  var kinds = Object.keys(byK).map(function(k){ return (CKIND[k] || k) + ' ' + byK[k].toLocaleString() + '팔'; }).join(' · ');
+  var vs = Object.keys(byV).sort(function(x, y){ return byV[y] - byV[x]; });
+  return '<div class="row">' + head('✅') + '<div class="fi"><div class="fn">' + esc(ymLabel(YM)) + ' 기록 ' + a.length + '건 · ' + Object.keys(days).length + '일</div>'
+    + '<div class="sm">' + esc(kinds) + '<br>' + esc(vs.slice(0, 6).map(function(v){ return v + ' ' + byV[v]; }).join(' · ') + (vs.length > 6 ? ' 외 ' + (vs.length - 6) + '곳' : '')) + '</div></div>'
+    + '<div class="ac">' + link + '</div></div>';
+}
+
+/* ═══ 화물 청구서 단가 확인 ═══
+   settlement/freight/{ym}/{fileId} = { file, rows:[{d,from,to,car,qty,item,amt,etc,tot,note,vendor,extra}], chk:{i:{st:'ok'|'fix', fix, memo, by, at}} }
+   같은 구간(출발지→도착지·차종)에서 지난달까지 한 번도 낸 적 없는 금액이면 확인 항목 (야상 등으로 이미 냈던 금액은 통과).
+   지난 기록이 없으면 같은 달 안에서 보통 금액과 다른 건을 띄운다. 합계금액이 비었거나 금액+기타와 다르면 확인 항목.
+   '금액 수정'한 값(fix)이 정산에 쓰이고, 다음 달부터는 그 금액이 비교 기준이 된다. */
+var FREIGHT = {};
+function frFinal(r, c){ return c && c.st === 'fix' && c.fix != null ? +c.fix : +r.amt || 0; }
+function frHistory(ym){   /* ym 이전 달들의 구간별 금액 목록 */
+  var h = {};
+  Object.keys(FREIGHT).forEach(function(m){ if (m >= ym) return;
+    Object.keys(FREIGHT[m] || {}).forEach(function(fid){ var F = FREIGHT[m][fid] || {}, ch = F.chk || {};
+      (F.rows || []).forEach(function(r, i){ var k = SETTLE_FREIGHT.key(r); (h[k] = h[k] || []).push({ v: frFinal(r, ch[i]), m: m }); }); }); });
+  return h;
+}
+function mode(arr){ var c = {}, best = null; arr.forEach(function(v){ c[v] = (c[v] || 0) + 1; if (best == null || c[v] > c[best] || (c[v] === c[best] && +v < +best)) best = v; }); return best == null ? null : { v: +best, n: c[best], all: c }; }
+function frChecks(ym, fid){
+  var F = (FREIGHT[ym] || {})[fid]; if (!F) return [];
+  var hist = frHistory(ym), same = {};
+  Object.keys(FREIGHT[ym] || {}).forEach(function(f2){ ((FREIGHT[ym][f2] || {}).rows || []).forEach(function(r){ var k = SETTLE_FREIGHT.key(r); (same[k] = same[k] || []).push(+r.amt || 0); }); });
+  return (F.rows || []).map(function(r, i){
+    var k = SETTLE_FREIGHT.key(r), why = [], ref = null;
+    var amt = +r.amt || 0;
+    if (hist[k] && hist[k].length){
+      ref = mode(hist[k].map(function(x){ return x.v; }));
+      if (!ref.all[amt]){   /* 이 구간에서 처음 보는 금액 — 가장 가까운 지난 금액과 비교 */
+        var seen = Object.keys(ref.all).map(Number).sort(function(a, b){ return Math.abs(a - amt) - Math.abs(b - amt); });
+        var d = amt - seen[0];
+        why.push((d > 0 ? '▲ ' : '▼ ') + Math.abs(d).toLocaleString() + '원 ' + (d > 0 ? '비쌈' : '쌈') + ' — 지난달까지 이 구간 금액: '
+          + Object.keys(ref.all).map(Number).sort(function(a, b){ return a - b; }).map(function(v){ return v.toLocaleString() + '원(' + ref.all[v] + '회)'; }).join(', '));
+      }
+    } else if (same[k] && same[k].length > 1){
+      ref = mode(same[k]);
+      if (amt !== ref.v){ var d2 = amt - ref.v;
+        why.push((d2 > 0 ? '▲ ' : '▼ ') + Math.abs(d2).toLocaleString() + '원 ' + (d2 > 0 ? '비쌈' : '쌈') + ' — 지난 기록 없음 · 이번 달 같은 구간 보통 ' + ref.v.toLocaleString() + '원 (' + ref.n + '회)'); }
+    }
+    var sum = (+r.amt || 0) + (+r.etc || 0);
+    if (r.tot == null) why.push('합계금액이 비어 있음 — 금액+기타 = ' + sum.toLocaleString() + '원');
+    else if (+r.tot !== sum) why.push('합계금액 ' + (+r.tot).toLocaleString() + '원 ≠ 금액+기타 ' + sum.toLocaleString() + '원');
+    return { i: i, r: r, why: why, isNew: !hist[k] && !(same[k] && same[k].length > 1), c: (F.chk || {})[i] || null };
+  });
+}
+function freightBadge(fid){
+  var F = (FREIGHT[YM] || {})[fid]; if (!F) return '<div class="sm dim">단가 확인 정보 없음 (다시 올리면 생김)</div>';
+  var cs = frChecks(YM, fid), flag = cs.filter(function(x){ return x.why.length; }), left = flag.filter(function(x){ return !x.c; });
+  var tot = cs.reduce(function(a, x){ return a + frFinal(x.r, x.c) + (+x.r.etc || 0); }, 0);
+  return '<div class="sm">' + cs.length + '건 · 정산 반영 합계 ' + tot.toLocaleString() + '원'
+    + (flag.length ? (left.length ? '<span class="chk warn">확인 필요 ' + left.length + '건</span>' : '<span class="chk okk">확인 완료 ' + flag.length + '건</span>') : '<span class="chk okk">달라진 금액 없음</span>')
+    + ' <button class="btn" style="margin-left:.3rem" onclick="openFreight(\'' + fid + '\')">단가 확인 ▸</button></div>';
+}
+var FR_OPEN = null, FR_ALL = false;
+function openFreight(fid){ FR_OPEN = fid; FR_ALL = false; drawFreight(); }
+function closeFreight(){ FR_OPEN = null; var m = $('frModal'); if (m) m.remove(); }
+function drawFreight(){
+  if (!FR_OPEN) return;
+  var F = (FREIGHT[YM] || {})[FR_OPEN]; if (!F){ closeFreight(); return; }
+  var cs = frChecks(YM, FR_OPEN), flag = cs.filter(function(x){ return x.why.length; }), left = flag.filter(function(x){ return !x.c; });
+  var list = FR_ALL ? cs : flag;
+  var m = $('frModal'); if (!m){ m = document.createElement('div'); m.id = 'frModal'; m.className = 'modal'; m.onclick = function(e){ if (e.target === m) closeFreight(); }; document.body.appendChild(m); }
+  var rowsHtml = list.map(function(x){
+    var r = x.r, c = x.c, fin = frFinal(r, c);
+    var state = c ? (c.st === 'fix' ? '<div class="why g">✎ ' + fin.toLocaleString() + '원으로 수정' + (c.memo ? ' · ' + esc(c.memo) : '') + '</div>' : '<div class="why g">✔ 이대로 맞음</div>') : '';
+    return '<tr class="' + (x.why.length ? 'flag' : '') + (c ? ' done' : '') + '">'
+      + '<td class="dim">' + esc(r.d.slice(5)) + '</td>'
+      + '<td>' + esc(r.from) + ' → ' + esc(r.to) + '<div class="dim">' + esc(r.car) + ' · ' + esc(r.qty) + ' ' + esc(r.item) + (r.extra ? ' / ' + esc(r.extra) : '') + '</div></td>'
+      + '<td>' + esc(r.vendor) + '<div class="dim">' + esc(r.note) + '</div></td>'
+      + '<td class="n">' + (c && c.st === 'fix' ? '<span class="strike">' + (+r.amt).toLocaleString() + '</span><br>' + fin.toLocaleString() : (+r.amt).toLocaleString()) + (r.etc ? '<div class="dim">+기타 ' + (+r.etc).toLocaleString() + '</div>' : '') + '</td>'
+      + '<td>' + x.why.map(function(w){ return '<div class="why">' + esc(w) + '</div>'; }).join('') + (x.isNew && !x.why.length ? '<div class="dim" style="font-size:11.5px">처음 보는 구간</div>' : '') + state + '</td>'
+      + '<td style="white-space:nowrap">' + (x.why.length || c ? '<button class="btn" onclick="frMark(' + x.i + ',\'ok\')">맞음</button> <button class="btn" onclick="frMark(' + x.i + ',\'fix\')">금액 수정</button>' + (c ? ' <button class="btn r" onclick="frMark(' + x.i + ',\'undo\')">되돌리기</button>' : '') : '') + '</td></tr>';
+  }).join('');
+  m.innerHTML = '<div class="mbox"><div class="mhd">🚚 ' + esc(F.file) + ' — 단가 확인<span class="sp"></span>'
+    + '<label class="dim" style="font-size:12px;font-weight:500"><input type="checkbox" ' + (FR_ALL ? 'checked' : '') + ' onchange="FR_ALL=this.checked;drawFreight()"> 전체 ' + cs.length + '건 보기</label>'
+    + '<button class="btn" onclick="closeFreight()">닫기</button></div><div class="mbody">'
+    + '<div class="sec-note" style="margin-bottom:.6rem">같은 <b>출발지 → 도착지 · 차종</b>의 지난달까지 금액(없으면 이번 달 같은 구간)과 비교했습니다. '
+    + '확인 필요 <b>' + left.length + '</b>건 / 걸린 건 ' + flag.length + '건. <b>맞음</b>은 그대로 정산, <b>금액 수정</b>은 고친 금액으로 정산하고 다음 달부터 비교 기준이 됩니다.</div>'
+    + (list.length ? '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>일자</th><th>구간·차종</th><th>업체·비고</th><th style="text-align:right">금액</th><th>확인 내용</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>'
+      : '<div class="empty-s">지난 금액과 달라진 건이 없습니다.</div>')
+    + '</div></div>';
+}
+function frMark(i, act){
+  var path = 'settlement/freight/' + YM + '/' + FR_OPEN + '/chk/' + i;
+  if (act === 'undo') return db.ref(path).remove();
+  var F = FREIGHT[YM][FR_OPEN], r = F.rows[i];
+  var rec = { st: act, by: (me && me.email) || '', at: firebase.database.ServerValue.TIMESTAMP };
+  if (act === 'fix'){
+    var v = prompt(r.from + ' → ' + r.to + ' · ' + r.car + '\n청구 금액 ' + (+r.amt).toLocaleString() + '원\n\n정산에 쓸 금액을 입력하세요 (기타 금액 제외)', String(r.amt));
+    if (v == null) return;
+    var n = Number(String(v).replace(/[^0-9.-]/g, '')); if (!isFinite(n) || String(v).trim() === ''){ alert('숫자로 입력하세요'); return; }
+    var memo = prompt('수정 사유 (선택) — 예: 운송사와 340,000원으로 합의', '') || '';
+    rec.fix = n; rec.memo = memo.slice(0, 80);
+  }
+  db.ref(path).set(rec);
 }
 
 /* ── 정산월 ── */
@@ -405,6 +568,7 @@ function setYM(ym){
   var cb = function(s){ BOX = s.val() || {}; render(); };
   ref.on('value', cb, function(e){ toast('목록을 못 읽었습니다: ' + (e && e.code)); });
   offBox = function(){ ref.off('value', cb); };
+  loadCargo(ym);
 }
 function defaultYM(){   /* 매달 초에는 지난달 정산 — 20일까지는 지난달, 그 뒤는 이번 달 */
   var d = new Date(Date.now() + 9 * 3600e3), y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
@@ -419,6 +583,7 @@ function start(){
   db = firebase.database(); st = firebase.storage(); me = firebase.auth().currentUser;
   db.ref('settlement/sigs').on('value', function(s){ SIGS = s.val() || {}; });
   db.ref('settlement/types').on('value', function(s){ CTYPES = s.val() || {}; render(); });
+  db.ref('settlement/freight').on('value', function(s){ FREIGHT = s.val() || {}; render(); drawFreight(); });
   $('ym').addEventListener('change', function(){ if ($('ym').value) setYM($('ym').value); });
   var drop = $('drop'), fin = $('fileIn');
   drop.addEventListener('click', function(){ fin.click(); });
@@ -440,6 +605,7 @@ WMS2FA.guard({
   onLock: function(){
     document.getElementById('app').classList.add('hide');
     if (offBox){ offBox(); offBox = null; } BOX = {};
+    if (offCargo){ offCargo(); offCargo = null; } CARGO = null; closeFreight();
   }
 });
 </script>
