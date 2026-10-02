@@ -259,11 +259,14 @@ function makeDraft(msg){
     }, Promise.resolve());
   }).then(function(){
     /* 업체별 자동 처리 (settle_engines.js) */
-    if (eng && eng.afterBuild){
-      msg('업체 룰 적용 중…');
-      try { eng.afterBuild(wb, { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won }); }
-      catch (e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); }
-    }
+    if (!(eng && eng.afterBuild)) return;
+    msg('업체 룰 적용 중…');
+    /* afterBuild 는 Promise 를 돌려줘도 된다 — 이번 달 파일함(BOX)·원본 읽기(readBox → SheetJS 통합문서)·화면 메시지(msg) 제공 */
+    var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: BOX, msg: msg,
+      readBox: function(m){ return decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); } };
+    return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
+      .catch(function(e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); });
+  }).then(function(){
     /* 그대로 둔 시트 */
     A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode;
       if (m !== 'copy' && m !== 'skip' && !(s.kind && s.kind.key === 'freight') && (s.rows > 0 || s.usedBy.length)) log.push(['확인 필요', '시트 「' + s.name + '」 — 지난달 내용 그대로 (룰을 정하면 바뀜)' + (s.usedBy.length ? ' · ' + s.usedBy.join(',') + '행이 참조' : '')]); });
