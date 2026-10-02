@@ -23,6 +23,14 @@ service firebase.storage {
                    && request.resource.size < 200 * 1024 * 1024;   // 세트 하나당 200MB 이내
       allow delete: if request.auth != null;
     }
+    // 정산 파일함(settlement.html) — 원본 엑셀을 2차 비밀번호 키로 암호화한 암호문만 올라온다.
+    // Storage 규칙은 DB 의 superadmins 를 못 읽으므로 슈퍼관리자 uid 를 직접 적는다.
+    // (슈퍼관리자가 바뀌면 여기와 DB superadmins 를 함께 고칠 것)
+    match /settlement/{ym}/{fileName} {
+      allow read, delete: if request.auth != null && request.auth.uid in ['W0qRl4dKWge735goslFl4f2B5Sv2'];
+      allow write: if request.auth != null && request.auth.uid in ['W0qRl4dKWge735goslFl4f2B5Sv2']
+                   && request.resource.size < 300 * 1024 * 1024;   // 파일당 300MB 이내
+    }
     // 그 외 경로는 모두 차단
     match /{allPaths=**} {
       allow read, write: if false;

@@ -2,7 +2,8 @@
    WMS 2차 인증 — 슈퍼관리자 숨김 메뉴 공용 (사이트 통계·정산관리 …)
 
    급여관리(payroll.html)와 **같은 2차 비밀번호**를 쓴다.
-   payroll/vault 의 감싼 키(wrapPw)를 비밀번호로 풀어 보아 맞는지만 확인하고, 풀린 키는 바로 지운다.
+   payroll/vault 의 감싼 키(wrapPw)를 비밀번호로 풀어 맞는지 확인한다. 풀린 데이터 키(DEK)는
+   꺼낼 수 없는 형태(non-extractable)로 메모리에만 두고, 잠그면 즉시 버린다.
    실패 잠금(payroll/lock: 5회 틀리면 15분)과 감사기록(payroll/audit)도 급여관리와 공유한다.
    비밀번호 분실 복구·변경은 급여관리 화면에서 한다.
 
@@ -16,13 +17,15 @@
      WMS2FA.lockNow()            — 지금 잠그기
      <span data-2fa-timer></span> — 남은 자동잠금 시간이 표시된다
 
-   화면 잠금이다 — 데이터 자체를 이 비밀번호로 암호화하는 것은 급여관리뿐이다.
+   WMS2FA.encrypt(aad, bytes) / WMS2FA.decrypt(aad, iv, bytes) — 잠금 해제 동안 같은 DEK 로
+     AES-GCM 암·복호화 (정산 파일함이 원본 파일을 서버에 암호문으로만 올릴 때 사용).
+     aad 에 저장 경로를 넣어 다른 위치의 암호문을 끼워 넣는 것을 막는다.
 ============================================================ */
 (function(){
   'use strict';
   var ITER = 600000, MAX_FAILS = 5, LOCK_MIN = 15;
   var TE = new TextEncoder();
-  var opt = null, unlocked = false, lastAct = Date.now(), tick = null, root = null;
+  var opt = null, unlocked = false, DEK = null, lastAct = Date.now(), tick = null, root = null;
 
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function ub64(s){ var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
@@ -101,7 +104,10 @@
       return crypto.subtle.decrypt({ name:'AES-GCM', iv: ub64(vault.wrapPw.iv), additionalData: TE.encode('payroll-dek') }, kek, ub64(vault.wrapPw.ct))
         .catch(function(){ throw { bad: true }; });
     }).then(function(buf){
-      new Uint8Array(buf).fill(0);                 /* 확인만 하고 키는 버린다 */
+      var raw = new Uint8Array(buf);
+      return crypto.subtle.importKey('raw', raw, { name:'AES-GCM' }, false, ['encrypt','decrypt'])
+        .then(function(k){ raw.fill(0); DEK = k; });   /* 원본 바이트는 지우고 꺼낼 수 없는 키만 남긴다 */
+    }).then(function(){
       el('w2faPw').value = ''; msg('', '');
       pref('lock').set({ fails: 0 }); audit(opt.page + '-unlock');
       root.classList.add('hide'); unlocked = true; lastAct = Date.now(); startTimer();
@@ -133,7 +139,7 @@
   }
   function lockNow(why){
     if (!opt) return;
-    clearInterval(tick); unlocked = false;
+    clearInterval(tick); unlocked = false; DEK = null;
     try { opt.onLock && opt.onLock(); } catch (e) { console.error(e); }
     ask(); msg('wa', why ? why + ' — 다시 인증하세요' : '');
   }
@@ -153,5 +159,19 @@
     if (document.body) go(); else document.addEventListener('DOMContentLoaded', go);
   }
 
-  window.WMS2FA = { guard: guard, lockNow: function(){ lockNow(''); }, isUnlocked: function(){ return unlocked; } };
+  function b64(u8){ var s = ''; u8 = new Uint8Array(u8); for (var i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+  function encrypt(aad, bytes){
+    if (!DEK) return Promise.reject(new Error('잠겨 있습니다 — 2차 인증 후 다시 시도하세요'));
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    return crypto.subtle.encrypt({ name:'AES-GCM', iv: iv, additionalData: TE.encode(aad) }, DEK, bytes)
+      .then(function(ct){ return { iv: b64(iv), data: new Uint8Array(ct) }; });
+  }
+  function decrypt(aad, iv, bytes){
+    if (!DEK) return Promise.reject(new Error('잠겨 있습니다 — 2차 인증 후 다시 시도하세요'));
+    return crypto.subtle.decrypt({ name:'AES-GCM', iv: ub64(iv), additionalData: TE.encode(aad) }, DEK, bytes)
+      .then(function(pt){ return new Uint8Array(pt); });
+  }
+
+  window.WMS2FA = { guard: guard, lockNow: function(){ lockNow(''); }, isUnlocked: function(){ return unlocked; },
+    encrypt: encrypt, decrypt: decrypt };
 })();

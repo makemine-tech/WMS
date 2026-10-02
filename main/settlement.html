@@ -11,12 +11,15 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="/wms_access.js" data-page="settlement" data-floor="3"></script>
-<!-- 2차 인증: 급여관리와 같은 2차 비밀번호 -->
+<!-- 2차 인증: 급여관리와 같은 2차 비밀번호 (파일 암호화 키도 여기서) -->
 <script src="/wms_2fa.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="/settle_types.js"></script>
 <style>
 :root{
-  --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8;
+  --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
   --g:#4ade80; --y:#fbbf24; --b:#60a5fa; --r:#f87171;
   --mo:'Space Mono',monospace;
   color-scheme:dark;
@@ -24,6 +27,8 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-size:14px}
 a{color:var(--b)}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.4rem .55rem}
 .hide{display:none!important}
 
 /* ── 관문 화면 ── */
@@ -35,17 +40,72 @@ a{color:var(--b)}
 
 /* ── 앱 ── */
 .top{position:sticky;top:0;z-index:20;background:rgba(11,13,18,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--br)}
-.top-in{max-width:1100px;margin:0 auto;padding:.8rem 1rem;display:flex;align-items:center;gap:.8rem}
+.top-in{max-width:1100px;margin:0 auto;padding:.8rem 1rem;display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
 .top-t{font-size:17px;font-weight:900}
 .top-e{font-family:var(--mo);font-size:11px;color:var(--mu);letter-spacing:.12em}
 .top-sp{flex:1}
 .top a{font-size:12.5px;color:var(--mu);text-decoration:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
 .lock-timer{font-family:var(--mo);font-size:11.5px;color:var(--mu);border:1px solid var(--br);border-radius:7px;padding:.35rem .6rem}
-.lock-btn{font-size:12.5px;color:var(--y);background:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem;cursor:pointer;font-family:inherit}
-.wrap{max-width:1100px;margin:0 auto;padding:1.4rem 1rem 3rem}
-.empty{background:var(--s1);border:1px dashed var(--br);border-radius:14px;padding:2.4rem 1.2rem;text-align:center;color:var(--mu);line-height:1.9}
-.empty b{color:var(--tx)}
-.empty .ic{font-size:38px;margin-bottom:.6rem}
+.lock-btn{font-size:12.5px;color:var(--y);background:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
+.wrap{max-width:1100px;margin:0 auto;padding:1.1rem 1rem 3rem}
+
+.tabs{display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--br)}
+.tab{background:none;border:none;color:var(--mu);font-size:14px;font-weight:700;padding:.6rem .9rem;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--tx);border-bottom-color:var(--b)}
+.tab:disabled{opacity:.45;cursor:not-allowed}
+
+.bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem}
+.bar-t{font-size:15px;font-weight:800}
+.bar .sp{flex:1}
+.sec-note{font-size:12px;color:var(--mu);line-height:1.7}
+
+.drop{border:2px dashed var(--br);border-radius:14px;background:var(--s1);padding:1.6rem 1rem;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;margin-bottom:1rem}
+.drop:hover,.drop.over{border-color:var(--b);background:rgba(96,165,250,.06)}
+.drop .ic{font-size:30px;margin-bottom:.3rem}
+.drop b{font-size:15px}
+.drop .s{font-size:12px;color:var(--mu);margin-top:.35rem;line-height:1.7}
+
+.queue{margin-bottom:1rem}
+.q-item{display:flex;align-items:center;gap:.6rem;background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:.55rem .8rem;margin-bottom:.4rem;font-size:12.5px}
+.q-item .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-item .st{color:var(--mu);white-space:nowrap}
+.q-item .st.ok{color:var(--g)} .q-item .st.er{color:var(--r)}
+.q-prog{width:90px;height:5px;border-radius:3px;background:var(--s3);overflow:hidden}
+.q-prog i{display:block;height:100%;width:0;background:var(--b);transition:width .2s}
+
+.card{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.9rem 1rem;margin-bottom:1rem}
+.card-h{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.7rem;flex-wrap:wrap}
+.card-t{font-size:14px;font-weight:800}
+.card-s{font-size:11.5px;color:var(--mu)}
+
+.row{display:grid;grid-template-columns:26px minmax(150px,220px) 1fr auto;gap:.7rem;align-items:center;padding:.6rem .2rem;border-top:1px solid #1d2230}
+.row:first-of-type{border-top:none}
+.row .ck{font-size:16px;text-align:center}
+.row .lb{font-weight:700;font-size:13px}
+.row .lb small{display:block;font-weight:500;font-size:11px;color:var(--mu);margin-top:2px;line-height:1.5}
+.row .fi{min-width:0;font-size:12.5px}
+.row .fi .fn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .fi .sm{color:var(--mu);font-size:11.5px;margin-top:2px;line-height:1.5}
+.row .fi .miss{color:var(--mu2)}
+.row .ac{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.row.unk{background:rgba(251,191,36,.05);border-radius:8px}
+.btn{background:var(--s3);border:1px solid var(--br);color:var(--tx);border-radius:7px;padding:.32rem .65rem;font-size:12px;font-weight:700;white-space:nowrap}
+.btn:hover{border-color:var(--mu)}
+.btn.r{color:var(--r);background:none}
+.btn.p{background:var(--b);border-color:var(--b);color:#0b0d12}
+.pill{display:inline-block;font-size:10.5px;font-weight:700;border-radius:999px;padding:.1rem .5rem;border:1px solid var(--br);color:var(--mu);margin-left:.3rem}
+.tsel{max-width:210px;font-size:12px;padding:.3rem .4rem}
+.empty-s{color:var(--mu);font-size:12.5px;padding:.8rem .2rem}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2937;border:1px solid var(--br);color:var(--tx);border-radius:10px;padding:.6rem 1rem;font-size:13px;z-index:100;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+.soon{background:var(--s1);border:1px dashed var(--br);border-radius:14px;padding:2.2rem 1.2rem;text-align:center;color:var(--mu);line-height:1.9}
+.soon b{color:var(--tx)}
+
+@media (max-width:760px){
+  .row{grid-template-columns:24px 1fr;}
+  .row .fi,.row .ac{grid-column:2}
+  .row .ac{justify-content:flex-start}
+}
 </style>
 </head>
 <body>
@@ -72,24 +132,314 @@ a{color:var(--b)}
   </div></div>
 
   <div class="wrap">
-    <div class="empty">
-      <div class="ic">🧾</div>
-      <b>업체별 정산 메뉴는 정산을 진행하면서 하나씩 추가됩니다.</b><br>
-      업체를 고르면 필요한 파일을 일문일답으로 올리고, 점검한 뒤 거래내역서 엑셀을 받는 방식입니다.
+    <div class="tabs">
+      <button class="tab on" data-tab="box">📂 파일함</button>
+      <button class="tab" data-tab="vendors" disabled title="다음 단계에서 만듭니다">🏢 업체 정산 (준비 중)</button>
+    </div>
+
+    <!-- ═══ 파일함 ═══ -->
+    <div id="tabBox">
+      <div class="bar">
+        <span class="bar-t">정산월</span>
+        <input type="month" id="ym">
+        <span class="sec-note" id="ymNote"></span>
+        <span class="sp"></span>
+      </div>
+
+      <div class="drop" id="drop">
+        <div class="ic">📥</div>
+        <b>파일을 여기로 끌어다 놓거나 눌러서 고르세요</b>
+        <div class="s">공통 파일·업체용 파일 상관없이 한꺼번에 넣으면 됩니다. 파일 내용을 보고 종류를 자동으로 알아봅니다.<br>
+          원본은 <b>2차 비밀번호 키로 암호화</b>되어 서버에 저장됩니다 — 서버에는 암호문만 남습니다.</div>
+        <input type="file" id="fileIn" multiple class="hide">
+      </div>
+      <div class="queue" id="queue"></div>
+
+      <div class="card">
+        <div class="card-h"><span class="card-t">공통 파일 체크리스트</span><span class="card-s">매달 한 개씩 필요한 파일 · 같은 종류를 다시 올리면 새 파일로 교체</span></div>
+        <div id="commonList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span class="card-t">업체용 · 기타 파일</span><span class="card-s">업체 정산 때 쓰는 파일 · 종류가 틀렸거나 ❓이면 오른쪽에서 고르세요 (다음 달부터 자동 인식)</span></div>
+        <div id="vendorList"></div>
+      </div>
+    </div>
+
+    <!-- ═══ 업체 정산 (다음 단계) ═══ -->
+    <div id="tabVendors" class="hide">
+      <div class="soon"><b>업체 등록 · 정산표본 · 일문일답 작성</b>은 다음 단계에서 만듭니다.</div>
     </div>
   </div>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
+/* ============================================================
+   정산관리 — 1단계: 정산월 파일함
+
+   흐름: 파일 선택/끌어놓기 → 브라우저에서 엑셀 열어 종류 판별(settle_types.js + 배운 규칙)
+        → 2차 비밀번호 키(WMS2FA)로 AES-GCM 암호화 → Storage settlement/{ym}/{id} 업로드
+        → DB settlement/box/{ym}/{id} 에 목록 정보(이름·종류·요약·iv)
+   내려받기: Storage 에서 암호문 → 복호화 → 원래 파일 이름으로 저장.
+   배운 규칙: settlement/sigs/{id} = {type, sheetKey, headKey}  — '종류 지정'을 하면 같은 모양의 파일을 다음부터 자동 인식
+   사용자 종류: settlement/types/{key} = {label, cat}
+   요약(summary)에는 건수·업체명만 — 고객 이름·주소 같은 개인정보는 목록에 남기지 않는다.
+============================================================ */
+var db, st, me;
+var YM = '', BOX = {}, SIGS = {}, CTYPES = {}, offBox = null;
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function toast(m){ var t = $('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(function(){ t.classList.remove('on'); }, 2600); }
+function fsize(n){ return n > 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB'; }
+function ftime(t){ if (!t) return ''; var d = new Date(t + 9 * 3600e3).toISOString(); return d.slice(5, 10).replace('-', '/') + ' ' + d.slice(11, 16); }
+function newId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function ymLabel(ym){ return ym ? ym.slice(0, 4) + '년 ' + (+ym.slice(5, 7)) + '월분' : ''; }
+
+/* 종류 목록 = 기본 종류 + 사용자가 만든 종류 */
+function typeOf(key){
+  if (key === 'unknown') return { key:'unknown', cat:'vendor', label:'❓ 종류 모름', icon:'❓' };
+  var t = SETTLE_TYPE(key); if (t) return t;
+  var c = CTYPES[key]; if (c) return { key:key, cat:c.cat || 'vendor', label:c.label, icon:'🏷️', hint:'직접 지정한 종류', custom:true };
+  return { key:key, cat:'vendor', label:key, icon:'📎' };
+}
+function allTypes(){
+  var out = SETTLE_TYPES.slice();
+  Object.keys(CTYPES).forEach(function(k){ out.push(typeOf(k)); });
+  return out;
+}
+
+/* ── 엑셀 열어서 모양 파악 ── */
+function profile(name, buf){
+  var ext = (name.split('.').pop() || '').toLowerCase();
+  var f = { ext: ext, name: name, sheets: [], allHeaders: new Set() }, wb = null;
+  if (/^(xlsx|xls|xlsm|xlsb|csv)$/.test(ext)){
+    wb = XLSX.read(buf, { type: 'array', dense: true });
+    wb.SheetNames.forEach(function(n){
+      var ws = wb.Sheets[n]; if (!ws || !ws['!ref']) { f.sheets.push({ name:n, headers:new Set(), hdr:0, rows:0 }); return; }
+      var rng = XLSX.utils.decode_range(ws['!ref']);
+      var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: true });
+      var best = [], bi = 0;
+      for (var i = 0; i < Math.min(aoa.length, 12); i++){
+        var r = aoa[i].filter(function(v){ return typeof v === 'string' && v.trim(); });
+        if (r.length > best.length){ best = r; bi = i; }
+      }
+      var h = new Set(best.map(function(v){ return v.trim(); })); h.forEach(function(x){ f.allHeaders.add(x); });
+      var last = aoa.length - 1; while (last > bi && !aoa[last].some(function(v){ return v !== '' && v != null; })) last--;
+      f.sheets.push({ name: n, headers: h, hdr: rng.s.r + bi, rows: Math.max(0, last - bi) });
+    });
+  }
+  f.sheetKey = f.sheets.map(function(s){ return s.name; }).sort().join('|');
+  f.headKey = f.sheets.length ? Array.from(f.sheets[0].headers).sort().slice(0, 24).join('|') : '';
+  return { f: f, wb: wb };
+}
+/* 배운 규칙 먼저(사용자가 가르친 게 우선) → 기본 규칙 → 모름 */
+function detect(f){
+  var ks = Object.keys(SIGS);
+  for (var i = 0; i < ks.length; i++){
+    var g = SIGS[ks[i]];
+    if (g.sheetKey === f.sheetKey && (!g.headKey || g.headKey === f.headKey)) return g.type;
+  }
+  for (var j = 0; j < SETTLE_TYPES.length; j++){
+    try { if (SETTLE_TYPES[j].test(f)) return SETTLE_TYPES[j].key; } catch (e) {}
+  }
+  return 'unknown';
+}
+
+/* ── Storage ── */
+function putBytes(path, bytes, onProg){
+  return new Promise(function(res, rej){
+    var task = st.ref(path).put(new Blob([bytes], { type: 'application/octet-stream' }), { contentType: 'application/octet-stream' });
+    task.on('state_changed', function(s){ if (onProg && s.totalBytes) onProg(s.bytesTransferred / s.totalBytes); }, rej, function(){ res(); });
+  });
+}
+function getBytes(path){
+  var ref = st.ref(path);
+  var viaUrl = function(){ return ref.getDownloadURL().then(function(u){ return fetch(u); }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.arrayBuffer(); }); };
+  if (typeof ref.getBlob === 'function') return ref.getBlob().then(function(b){ return b.arrayBuffer(); }).catch(viaUrl);
+  return viaUrl();
+}
+
+/* ── 올리기 ── */
+var queue = Promise.resolve();
+function addFiles(list){
+  if (!YM){ toast('정산월을 먼저 고르세요'); return; }
+  Array.prototype.forEach.call(list, function(file){
+    var q = document.createElement('div'); q.className = 'q-item';
+    q.innerHTML = '<span class="nm">' + esc(file.name) + '</span><span class="q-prog"><i></i></span><span class="st">대기</span>';
+    $('queue').appendChild(q);
+    var ym = YM;
+    queue = queue.then(function(){ return upload(file, ym, q); }).catch(function(){});
+  });
+}
+function qset(q, txt, cls, p){ var s = q.querySelector('.st'); s.textContent = txt; s.className = 'st ' + (cls || ''); if (p != null) q.querySelector('.q-prog i').style.width = Math.round(p * 100) + '%'; }
+
+function upload(file, ym, q){
+  qset(q, '읽는 중…', '', 0);
+  var buf, P, type, t, summary = '', id = newId(), path = 'settlement/' + ym + '/' + id;
+  return file.arrayBuffer().then(function(b){
+    buf = b; qset(q, '종류 확인 중…', '', .05);
+    return new Promise(function(r){ setTimeout(r, 30); });      /* 화면 갱신 먼저 (큰 엑셀은 몇 초 걸림) */
+  }).then(function(){
+    try { P = profile(file.name, buf); } catch (e) { P = { f: { ext:'', name:file.name, sheets:[], sheetKey:'', headKey:'' }, wb:null }; }
+    type = detect(P.f); t = typeOf(type);
+    try { summary = t.summary ? t.summary(P.f, P.wb) : ''; } catch (e) { summary = ''; }
+    if (!summary && P.f.sheets.length) summary = '시트 ' + P.f.sheets.map(function(s){ return s.name; }).slice(0, 4).join(' · ');
+    P.wb = null;
+    /* 공통 파일은 한 달에 하나 — 이미 있으면 교체할지 묻는다 */
+    var old = t.cat === 'common' ? Object.keys(BOX).filter(function(k){ return BOX[k].type === type; }) : [];
+    if (old.length && !confirm('[' + t.label + '] 이 이미 있습니다.\n\n기존: ' + BOX[old[0]].name + '\n새 파일: ' + file.name + '\n\n새 파일로 교체할까요? (취소하면 둘 다 보관)')) old = [];
+    qset(q, '암호화 중…', '', .1);
+    return WMS2FA.encrypt(path, buf).then(function(enc){
+      qset(q, '올리는 중…', '', .15);
+      return putBytes(path, enc.data, function(p){ qset(q, '올리는 중 ' + Math.round(p * 100) + '%', '', .15 + p * .8); }).then(function(){ return enc.iv; });
+    }).then(function(iv){
+      var meta = { name: file.name, size: file.size, ext: P.f.ext, type: type, summary: String(summary).slice(0, 300),
+        sheets: P.f.sheets.map(function(s){ return { n: s.name, r: s.rows }; }).slice(0, 40),
+        sheetKey: P.f.sheetKey || '', headKey: P.f.headKey || '',
+        iv: iv, path: path, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' };
+      return db.ref('settlement/box/' + ym + '/' + id).set(meta);
+    }).then(function(){
+      old.forEach(removeFile);
+      qset(q, (t.icon || '') + ' ' + t.label, type === 'unknown' ? 'er' : 'ok', 1);
+      setTimeout(function(){ q.remove(); }, 4000);
+    });
+  }).catch(function(e){
+    qset(q, '실패: ' + ((e && (e.code || e.message)) || e), 'er');
+  });
+}
+
+function removeFile(id){
+  var m = BOX[id]; if (!m) return Promise.resolve();
+  return st.ref(m.path).delete().catch(function(){}).then(function(){ return db.ref('settlement/box/' + YM + '/' + id).remove(); });
+}
+function delFile(id){
+  var m = BOX[id]; if (!m) return;
+  if (!confirm('이 파일을 파일함에서 지울까요?\n\n' + m.name + '\n\n되돌릴 수 없습니다.')) return;
+  removeFile(id).then(function(){ toast('지웠습니다'); });
+}
+function downFile(id){
+  var m = BOX[id]; if (!m) return;
+  toast('내려받는 중…');
+  getBytes(m.path).then(function(ab){ return WMS2FA.decrypt(m.path, m.iv, ab); }).then(function(bytes){
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes])); a.download = m.name;
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }).catch(function(e){ alert('내려받기 실패: ' + ((e && (e.code || e.message)) || e)); });
+}
+
+/* 종류 바꾸기 → 같은 모양의 파일은 다음부터 이 종류로 (배운 규칙 저장) */
+function setType(id, key){
+  var m = BOX[id]; if (!m) return;
+  var p = Promise.resolve(key);
+  if (key === '__new'){
+    var label = prompt('새 종류 이름을 적어 주세요\n(예: LK 임대료 거래내역서, 스타 쿠팡 발주서)', '');
+    if (!label || !label.trim()){ render(); return; }
+    var common = confirm('[' + label.trim() + '] 은 매달 공통으로 한 개씩 필요한 파일인가요?\n\n확인 = 공통 파일 (체크리스트에 표시)\n취소 = 업체용·기타 파일');
+    var nk = 'c_' + newId();
+    p = db.ref('settlement/types/' + nk).set({ label: label.trim().slice(0, 40), cat: common ? 'common' : 'vendor', at: firebase.database.ServerValue.TIMESTAMP }).then(function(){ return nk; });
+  }
+  p.then(function(k){
+    var ups = {}; ups['box/' + YM + '/' + id + '/type'] = k;
+    if (m.sheetKey){   /* 엑셀이면 모양을 배운다 (PDF·이미지는 모양이 없어 배우지 않음) */
+      var sid = Object.keys(SIGS).filter(function(s){ return SIGS[s].sheetKey === m.sheetKey && SIGS[s].headKey === m.headKey; })[0] || newId();
+      ups['sigs/' + sid] = { type: k, sheetKey: m.sheetKey, headKey: m.headKey || '', from: m.name.slice(0, 80), at: firebase.database.ServerValue.TIMESTAMP };
+    }
+    return db.ref('settlement').update(ups);
+  }).then(function(){ toast(m.sheetKey ? '바꿨습니다 — 다음부터 이런 파일은 자동으로 이 종류' : '바꿨습니다'); })
+    .catch(function(e){ alert('저장 실패: ' + ((e && e.message) || e)); });
+}
+
+/* ── 그리기 ── */
+function typeSelect(id, cur){
+  var ts = allTypes();
+  var opt = function(t){ return '<option value="' + t.key + '"' + (t.key === cur ? ' selected' : '') + '>' + esc((t.icon ? t.icon + ' ' : '') + t.label) + '</option>'; };
+  return '<select class="tsel" onchange="setType(\'' + id + '\', this.value)">'
+    + (cur === 'unknown' ? '<option value="unknown" selected>❓ 종류를 골라 주세요</option>' : '')
+    + '<optgroup label="공통">' + ts.filter(function(t){ return t.cat === 'common'; }).map(opt).join('') + '</optgroup>'
+    + '<optgroup label="업체용·기타">' + ts.filter(function(t){ return t.cat !== 'common'; }).map(opt).join('') + '</optgroup>'
+    + '<option value="__new">＋ 새 종류 만들기…</option></select>';
+}
+function fileCell(id, m){
+  return '<div class="fn" title="' + esc(m.name) + '">' + esc(m.name) + '</div>'
+    + '<div class="sm">' + esc(m.summary || '') + ' · ' + fsize(m.size || 0) + ' · ' + ftime(m.at) + '</div>';
+}
+function actions(id, m){
+  return '<button class="btn" onclick="downFile(\'' + id + '\')">내려받기</button>'
+    + typeSelect(id, m.type)
+    + '<button class="btn r" onclick="delFile(\'' + id + '\')">삭제</button>';
+}
+function render(){
+  var ids = Object.keys(BOX).sort(function(a, b){ return (BOX[b].at || 0) - (BOX[a].at || 0); });
+  var commonTypes = allTypes().filter(function(t){ return t.cat === 'common'; });
+  var done = 0;
+  $('commonList').innerHTML = commonTypes.map(function(t){
+    var mine = ids.filter(function(id){ return BOX[id].type === t.key; });
+    if (mine.length) done++;
+    var head = '<div class="ck">' + (mine.length ? '✅' : '⬜') + '</div><div class="lb">' + esc((t.icon || '') + ' ' + t.label) + '<small>' + esc(t.hint || '') + '</small></div>';
+    if (!mine.length) return '<div class="row">' + head + '<div class="fi"><span class="miss">아직 없음</span></div><div class="ac"></div></div>';
+    return mine.map(function(id, i){
+      return '<div class="row">' + (i === 0 ? head : '<div class="ck"></div><div class="lb"></div>')
+        + '<div class="fi">' + fileCell(id, BOX[id]) + (mine.length > 1 ? '<span class="pill">같은 종류 ' + mine.length + '개</span>' : '') + '</div>'
+        + '<div class="ac">' + actions(id, BOX[id]) + '</div></div>';
+    }).join('');
+  }).join('');
+
+  var others = ids.filter(function(id){ return typeOf(BOX[id].type).cat !== 'common'; });
+  others.sort(function(a, b){ return (BOX[a].type === 'unknown' ? 0 : 1) - (BOX[b].type === 'unknown' ? 0 : 1); });
+  $('vendorList').innerHTML = others.length ? others.map(function(id){
+    var m = BOX[id], t = typeOf(m.type);
+    return '<div class="row' + (m.type === 'unknown' ? ' unk' : '') + '"><div class="ck">' + (t.icon || '📎') + '</div>'
+      + '<div class="lb">' + esc(t.label) + '</div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>';
+  }).join('') : '<div class="empty-s">아직 없습니다.</div>';
+
+  $('ymNote').textContent = '공통 파일 ' + done + ' / ' + commonTypes.length + ' · 전체 ' + ids.length + '개';
+}
+
+/* ── 정산월 ── */
+function setYM(ym){
+  YM = ym; $('ym').value = ym;
+  if (offBox) offBox();
+  BOX = {}; render();
+  var ref = db.ref('settlement/box/' + ym);
+  var cb = function(s){ BOX = s.val() || {}; render(); };
+  ref.on('value', cb, function(e){ toast('목록을 못 읽었습니다: ' + (e && e.code)); });
+  offBox = function(){ ref.off('value', cb); };
+}
+function defaultYM(){   /* 매달 초에는 지난달 정산 — 20일까지는 지난달, 그 뒤는 이번 달 */
+  var d = new Date(Date.now() + 9 * 3600e3), y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
+  if (d.getUTCDate() <= 20){ m--; if (!m){ m = 12; y--; } }
+  return y + '-' + String(m).padStart(2, '0');
+}
+
+var _started = false;
+function start(){
+  if (_started){ setYM(YM || defaultYM()); return; }
+  _started = true;
+  db = firebase.database(); st = firebase.storage(); me = firebase.auth().currentUser;
+  db.ref('settlement/sigs').on('value', function(s){ SIGS = s.val() || {}; });
+  db.ref('settlement/types').on('value', function(s){ CTYPES = s.val() || {}; render(); });
+  $('ym').addEventListener('change', function(){ if ($('ym').value) setYM($('ym').value); });
+  var drop = $('drop'), fin = $('fileIn');
+  drop.addEventListener('click', function(){ fin.click(); });
+  fin.addEventListener('change', function(){ addFiles(fin.files); fin.value = ''; });
+  ['dragenter','dragover'].forEach(function(ev){ document.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave','drop'].forEach(function(ev){ document.addEventListener(ev, function(e){ e.preventDefault(); if (ev === 'drop' || e.target === document.documentElement) drop.classList.remove('over'); }); });
+  document.addEventListener('drop', function(e){ if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  setYM(defaultYM());
+}
+
 /* 1차 wms_access.js(슈퍼관리자) → 2차 비밀번호(wms_2fa.js) 를 통과하면 본문을 연다 */
 WMS2FA.guard({
   page: 'settlement', title: '정산관리', icon: '🧾',
   onUnlock: function(){
     document.getElementById('gate').classList.add('hide');
     document.getElementById('app').classList.remove('hide');
+    start();
   },
   onLock: function(){
     document.getElementById('app').classList.add('hide');
+    if (offBox){ offBox(); offBox = null; } BOX = {};
   }
 });
 </script>
