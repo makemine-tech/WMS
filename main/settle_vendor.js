@@ -229,5 +229,6 @@ function renderWork(){
 
     + '<div class="card"><div class="card-h"><span class="card-t">③ 업체 특이사항</span><span class="card-s">매달 확인할 것, 예외, 연락 사항 등</span></div>'
     + '<textarea class="rule" data-k="memo" data-key="memo" data-name="memo" rows="3" placeholder="예: 매달 말일 재고표 함께 보냄 · 용차비는 Sheet1 금액 · 쿠팡 입고작업은 발주서 확정수량 기준" onblur="saveRule(this)">' + esc(R.memo || '') + '</textarea></div>';
+  box.innerHTML += '<div class="card" id="buildCard">' + buildCardHtml(A, R) + '</div>';
   saveScore(S.pct);
 }
