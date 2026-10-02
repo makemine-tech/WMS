@@ -13,6 +13,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="/wms_access.js" data-page="site_stats" data-floor="3"></script>
 <script src="/wms_pages.js"></script>
+<!-- 2차 인증: 급여관리와 같은 2차 비밀번호 -->
+<script src="/wms_2fa.js"></script>
 <style>
 :root{
   --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
@@ -31,14 +33,8 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .gate-ic{font-size:40px;margin-bottom:10px}
 .gate-t{font-size:19px;font-weight:900;margin-bottom:6px}
 .gate-s{font-size:12.5px;color:var(--mu);line-height:1.75}
-.gate-box input{width:100%;font-size:16px;padding:.7rem .8rem;margin:16px 0 10px;text-align:center;letter-spacing:.08em}
-.gate-msg{font-size:12.5px;min-height:1.4em;margin:4px 0 10px;line-height:1.6}
-.gate-msg.er{color:var(--r)} .gate-msg.ok{color:var(--g)} .gate-msg.wa{color:var(--y)}
-.gate-btn{width:100%;border:none;border-radius:8px;padding:.75rem;font-size:15px;font-weight:700;background:var(--b);color:#0b0d12}
-.gate-btn:disabled{opacity:.45;cursor:not-allowed}
-.gate-link{display:inline-block;background:none;border:none;color:var(--mu);font-size:12px;text-decoration:underline;margin-top:12px}
 .lock-timer{font-family:var(--mo);font-size:11.5px;color:var(--mu);border:1px solid var(--br);border-radius:7px;padding:.35rem .6rem}
-.lock-btn{font-size:12.5px;color:var(--y);background:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
+.lock-btn{font-size:12.5px;color:var(--y);background:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem;cursor:pointer}
 
 .top{position:sticky;top:0;z-index:20;background:rgba(11,13,18,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--br)}
 .top-in{max-width:1280px;margin:0 auto;padding:.7rem 1rem;display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
@@ -101,29 +97,9 @@ tr.sel td{background:rgba(96,165,250,.12)}
 
 <div id="gate" class="gate">
   <div class="gate-box">
-    <div id="gLoading">
-      <div class="gate-ic">📊</div>
-      <div class="gate-t">사이트 통계</div>
-      <div class="gate-s" id="gLoadingMsg">슈퍼관리자 권한을 확인하는 중…</div>
-    </div>
-    <!-- 2차 인증 — 급여관리와 같은 2차 비밀번호 -->
-    <div id="gUnlock" class="hide">
-      <div class="gate-ic">🔒</div>
-      <div class="gate-t">2차 인증</div>
-      <div class="gate-s" id="uWho">사이트 통계는 2차 비밀번호가 필요합니다.<br>급여관리와 같은 비밀번호입니다.</div>
-      <input id="uPw" type="password" placeholder="2차 비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUnlock()">
-      <div class="gate-msg" id="uMsg"></div>
-      <button class="gate-btn" id="uBtn" onclick="doUnlock()">잠금 해제</button>
-      <a class="gate-link" href="/payroll.html">2차 비밀번호를 잊었어요 (급여관리에서 복구코드로 재설정)</a><br>
-      <a class="gate-link" href="/index.html">홈으로</a>
-    </div>
-    <!-- 2차 비밀번호가 아직 없음 -->
-    <div id="gNoVault" class="hide">
-      <div class="gate-ic">🛡️</div>
-      <div class="gate-t">2차 비밀번호 설정 필요</div>
-      <div class="gate-s">사이트 통계는 급여관리의 2차 비밀번호를 함께 씁니다.<br>급여관리에서 먼저 2차 비밀번호를 설정해 주세요.</div>
-      <a class="gate-link" href="/payroll.html">급여관리로 가기</a>
-    </div>
+    <div class="gate-ic">📊</div>
+    <div class="gate-t">사이트 통계</div>
+    <div class="gate-s">권한을 확인하는 중…</div>
   </div>
 </div>
 
@@ -134,8 +110,8 @@ tr.sel td{background:rgba(96,165,250,.12)}
       <div class="top-e">SITE ANALYTICS</div>
     </div>
     <div class="top-sp"></div>
-    <span class="lock-timer" title="사용하지 않으면 자동으로 잠깁니다">🔓 자동잠금 <span id="lockTimer"></span></span>
-    <button class="lock-btn" onclick="lockNow()">지금 잠그기</button>
+    <span class="lock-timer" title="사용하지 않으면 자동으로 잠깁니다">🔓 자동잠금 <span data-2fa-timer></span></span>
+    <button class="lock-btn" onclick="WMS2FA.lockNow()">지금 잠그기</button>
     <a href="/wms_admin.html">관리도구</a>
     <a href="/index.html">홈으로</a>
   </div></div>
@@ -435,99 +411,15 @@ function start(){
   db.ref('superadmins').get().then(function(s){ SUPERS = s.val() || {}; }).catch(function(){}).then(function(){ setRange(7); });
 }
 
-/* ─────────── 2차 인증 ───────────
-   급여관리(payroll.html)와 같은 2차 비밀번호를 쓴다.
-   payroll/vault 의 감싼 키(wrapPw)를 비밀번호로 풀어 보아 맞는지만 확인하고, 풀린 키는 바로 지운다.
-   실패 횟수 잠금(payroll/lock)도 급여관리와 공유 — 5회 틀리면 15분 잠김.
-   통계 화면은 메모리에만 있고, 잠그면(수동·무사용 10분) 화면을 비운다. 새로고침하면 다시 묻는다. */
-var ITER = 600000, MAX_FAILS = 5, LOCK_MIN = 15, AUTO_LOCK_MIN = 10;
-var TE = new TextEncoder();
-function ub64(s){ var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
-function pref(p){ return firebase.database().ref('payroll/' + p); }
-function gshow(id){
-  ['gLoading','gUnlock','gNoVault'].forEach(function(k){ $(k).classList.toggle('hide', k !== id); });
-  $('gate').classList.remove('hide'); $('app').classList.add('hide');
-  if (id === 'gUnlock') setTimeout(function(){ $('uPw').focus(); }, 30);
-}
-function gmsg(cls, t){ var e = $('uMsg'); e.className = 'gate-msg ' + (cls || ''); e.textContent = t || ''; }
-function audit(ev){
-  try { var u = firebase.auth().currentUser;
-    pref('audit').push({ ev: ev, page: 'site_stats', t: firebase.database.ServerValue.TIMESTAMP, uid: u && u.uid, email: (u && u.email) || '' }); } catch (e) {}
-}
-function askSecond(){
-  if (!window.crypto || !crypto.subtle){ $('gLoadingMsg').textContent = '이 브라우저는 암호화 기능(HTTPS)을 지원하지 않습니다.'; return; }
-  $('gLoadingMsg').textContent = '2차 인증을 준비하는 중…';
-  pref('vault').get().then(function(v){
-    if (!v.exists()) { gshow('gNoVault'); return; }
-    var u = firebase.auth().currentUser;
-    $('uWho').innerHTML = esc((u && u.email) || '') + '<br>사이트 통계는 2차 비밀번호가 필요합니다. (급여관리와 같은 비밀번호)';
-    gshow('gUnlock');
-  }).catch(function(e){ $('gLoadingMsg').textContent = '확인 실패: ' + ((e && (e.code || e.message)) || e); });
-}
-function doUnlock(){
-  var pw = $('uPw').value;
-  if (!pw){ gmsg('er', '비밀번호를 입력하세요'); return; }
-  $('uBtn').disabled = true; gmsg('wa', '확인 중…');
-  var vault;
-  Promise.all([pref('vault').get(), pref('lock').get()]).then(function(r){
-    vault = r[0].val(); var lk = r[1].val() || {};
-    if (!vault) throw { message: '2차 비밀번호가 설정되어 있지 않습니다.' };
-    if (lk.until && lk.until > Date.now()) throw { message: '연속 실패로 잠겼습니다. ' + Math.ceil((lk.until - Date.now()) / 60000) + '분 뒤 다시 시도하세요.' };
-    return crypto.subtle.importKey('raw', TE.encode(pw), 'PBKDF2', false, ['deriveKey']).then(function(base){
-      return crypto.subtle.deriveKey({ name:'PBKDF2', salt: ub64(vault.salt), iterations: vault.iter || ITER, hash:'SHA-256' }, base, { name:'AES-GCM', length:256 }, false, ['decrypt']);
-    });
-  }).then(function(kek){
-    return crypto.subtle.decrypt({ name:'AES-GCM', iv: ub64(vault.wrapPw.iv), additionalData: TE.encode('payroll-dek') }, kek, ub64(vault.wrapPw.ct))
-      .catch(function(){ throw { bad: true }; });
-  }).then(function(buf){
-    new Uint8Array(buf).fill(0);                 /* 확인만 하고 키는 버린다 */
-    $('uPw').value = ''; gmsg('', '');
-    pref('lock').set({ fails: 0 }); audit('stats-unlock');
-    $('gate').classList.add('hide'); $('app').classList.remove('hide');
-    lastAct = Date.now(); startLockTimer(); start();
-  }).catch(function(e){
-    if (e && e.bad){
-      return pref('lock').transaction(function(cur){
-        cur = cur || {}; var f = (cur.fails || 0) + 1;
-        return f >= MAX_FAILS ? { fails: 0, until: Date.now() + LOCK_MIN * 60000 } : { fails: f };
-      }).then(function(r){
-        var v = r.snapshot.val() || {}; audit('stats-unlock-fail');
-        gmsg('er', v.until ? ('5회 틀려서 ' + LOCK_MIN + '분간 잠겼습니다.') : ('비밀번호가 틀렸습니다 (' + v.fails + '/' + MAX_FAILS + ')'));
-      });
-    }
-    gmsg('er', (e && e.message) || String(e));
-  }).then(function(){ $('uBtn').disabled = false; });
-}
-window.doUnlock = doUnlock;
-
-/* 무사용 자동잠금 */
-var lastAct = Date.now(), lockTick = null;
-['mousemove','keydown','click','touchstart','scroll'].forEach(function(ev){ window.addEventListener(ev, function(){ lastAct = Date.now(); }, { passive: true }); });
-function startLockTimer(){
-  clearInterval(lockTick);
-  lockTick = setInterval(function(){
-    var left = AUTO_LOCK_MIN * 60000 - (Date.now() - lastAct);
-    if (left <= 0){ lockNow('무사용 자동잠금'); return; }
-    $('lockTimer').textContent = Math.floor(left / 60000) + ':' + String(Math.floor(left % 60000 / 1000)).padStart(2, '0');
-  }, 1000);
-}
-function lockNow(why){
-  clearInterval(lockTick);
-  S.raw = null; $('body').innerHTML = ''; $('note').textContent = ''; $('tip').classList.add('hide');
-  gmsg('wa', why ? why + ' — 다시 인증하세요' : '');
-  gshow('gUnlock');
-}
-window.lockNow = lockNow;
-
-/* wms_access.js 가 슈퍼관리자로 확인해 주면 2차 인증으로 넘어간다 */
-(function(){
-  var t0 = Date.now();
-  (function wait(){
-    var A = window.WMSAccess;
-    if (A && A.ready && A.level >= 3) { askSecond(); return; }
-    if (Date.now() - t0 < 30000) setTimeout(wait, 150);
-  })();
-})();
+/* 1차 wms_access.js(슈퍼관리자) → 2차 비밀번호(wms_2fa.js) 를 통과하면 본문을 연다 */
+WMS2FA.guard({
+  page: 'site_stats', title: '사이트 통계', icon: '📊',
+  onUnlock: function(){ $('gate').classList.add('hide'); $('app').classList.remove('hide'); start(); },
+  onLock: function(){
+    S.raw = null; $('body').innerHTML = ''; $('note').textContent = ''; $('tip').classList.add('hide');
+    $('app').classList.add('hide');
+  }
+});
 </script>
 </body>
 </html>

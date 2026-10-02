@@ -12,6 +12,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="/wms_access.js" data-page="settlement" data-floor="3"></script>
+<!-- 2차 인증: 급여관리와 같은 2차 비밀번호 -->
+<script src="/wms_2fa.js"></script>
 <style>
 :root{
   --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8;
@@ -38,6 +40,8 @@ a{color:var(--b)}
 .top-e{font-family:var(--mo);font-size:11px;color:var(--mu);letter-spacing:.12em}
 .top-sp{flex:1}
 .top a{font-size:12.5px;color:var(--mu);text-decoration:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
+.lock-timer{font-family:var(--mo);font-size:11.5px;color:var(--mu);border:1px solid var(--br);border-radius:7px;padding:.35rem .6rem}
+.lock-btn{font-size:12.5px;color:var(--y);background:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem;cursor:pointer;font-family:inherit}
 .wrap{max-width:1100px;margin:0 auto;padding:1.4rem 1rem 3rem}
 .empty{background:var(--s1);border:1px dashed var(--br);border-radius:14px;padding:2.4rem 1.2rem;text-align:center;color:var(--mu);line-height:1.9}
 .empty b{color:var(--tx)}
@@ -51,7 +55,7 @@ a{color:var(--b)}
   <div class="gate-box">
     <div class="gate-ic">🔐</div>
     <div class="gate-t">정산관리</div>
-    <div class="gate-s">슈퍼관리자 권한을 확인하는 중…</div>
+    <div class="gate-s">권한을 확인하는 중…</div>
   </div>
 </div>
 
@@ -62,6 +66,8 @@ a{color:var(--b)}
       <div class="top-e">3PL SETTLEMENT</div>
     </div>
     <div class="top-sp"></div>
+    <span class="lock-timer" title="사용하지 않으면 자동으로 잠깁니다">🔓 자동잠금 <span data-2fa-timer></span></span>
+    <button class="lock-btn" onclick="WMS2FA.lockNow()">지금 잠그기</button>
     <a href="/index.html">홈으로</a>
   </div></div>
 
@@ -75,19 +81,17 @@ a{color:var(--b)}
 </div>
 
 <script>
-/* wms_access.js 가 슈퍼관리자로 확인해 주면 본문을 연다 */
-(function(){
-  var t0 = Date.now();
-  (function wait(){
-    var A = window.WMSAccess;
-    if (A && A.ready && A.level >= 3) {
-      document.getElementById('gate').classList.add('hide');
-      document.getElementById('app').classList.remove('hide');
-      return;
-    }
-    if (Date.now() - t0 < 30000) setTimeout(wait, 150);
-  })();
-})();
+/* 1차 wms_access.js(슈퍼관리자) → 2차 비밀번호(wms_2fa.js) 를 통과하면 본문을 연다 */
+WMS2FA.guard({
+  page: 'settlement', title: '정산관리', icon: '🧾',
+  onUnlock: function(){
+    document.getElementById('gate').classList.add('hide');
+    document.getElementById('app').classList.remove('hide');
+  },
+  onLock: function(){
+    document.getElementById('app').classList.add('hide');
+  }
+});
 </script>
 </body>
 </html>
