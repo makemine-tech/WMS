@@ -19,7 +19,23 @@
 var FREIGHT = {};                       /* settlement/freight 전체 — settlement.html 이 채운다 */
 var FR_OPEN = null, FR_EXP = {}, FR_DRAFT = {};
 
-function frBase(v){ return String(v || '').replace(/\(.*$/, '').trim() || '(업체명 없음)'; }
+/* 업체 이름 = 괄호 앞, 띄어쓰기 없이. 청구서에 나온 다른 업체 이름으로 시작하면 그 업체
+   (포인트나인크루(곡물)·포인트나인크루곡물·포인트나인크루 당쉼 → 포인트나인크루) */
+var FR_BASES = null, FR_BASES_OF = null;
+function frRaw(v){ return String(v || '').replace(/\(.*$/, '').replace(/\s+/g, ''); }
+function frBases(){
+  if (FR_BASES_OF === FREIGHT && FR_BASES) return FR_BASES;
+  var s = {};
+  Object.keys(FREIGHT).forEach(function(m){ Object.keys(FREIGHT[m] || {}).forEach(function(fid){ var F = FREIGHT[m][fid] || {}, ch = F.chk || {};
+    (F.rows || []).forEach(function(r, i){ var b = frRaw(frVendor(r, ch[i])); if (b.length >= 2) s[b] = 1; }); }); });
+  FR_BASES = Object.keys(s).sort(function(a, b){ return a.length - b.length; }); FR_BASES_OF = FREIGHT;
+  return FR_BASES;
+}
+function frBase(v){
+  var b = frRaw(v); if (!b) return '(업체명 없음)';
+  var L = frBases(); for (var i = 0; i < L.length && L[i].length < b.length; i++) if (b.indexOf(L[i]) === 0) return L[i];
+  return b;
+}
 function frVendor(r, c){ return (c && c.vendor) || r.vendor || ''; }   /* 업체 지정한 건은 그 업체로 */
 function frFinal(r, c){ return c && c.st === 'fix' && c.fix != null ? +c.fix : +r.amt || 0; }
 function frWon(n){ return (+n || 0).toLocaleString('ko-KR'); }
