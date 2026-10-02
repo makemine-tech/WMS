@@ -118,8 +118,26 @@
      NO 열이 있으면 NO 가 숫자인 줄이 한 건, 없으면(Sheet1) 출발지·도착지가 있는 줄이 한 건.
      그 외에 수량·비고만 있는 줄은 바로 위 건의 추가 내용(예: 2층 1파렛트). '계' 줄은 건너뜀. */
   function parseFreight(f, wb){
-    var pick = freightSheet(f); if (!pick) return { sheet: '', src: '', rows: [] };
-    var s = pick.s;
+    var pick = freightSheet(f); if (!pick) return { sheet: '', src: '', rows: [], costOnly: [] };
+    var rows = readFreightRows(wb, pick.s), costOnly = [];
+    /* 원본(결제금액명세서 = 실제 지급액)과 짝 맞추기 — 날짜·구간·차종·수량이 같은 건끼리, 금액이 같은 것 먼저.
+       짝이 맞으면 r.cost = 원본 금액. 원본에만 있는 건(청구 안 한 회차 등)은 costOnly 로. */
+    var cs = pick.src === 'bill' ? sheetNamed(f, '결제금액명세서') : null;
+    if (cs && cs.headers.has('출발지')){
+      var cost = readFreightRows(wb, cs), pool = {}, used = {};
+      var K = function(r){ return r.d + '|' + freightKey(r) + '|' + r.qty; };
+      cost.forEach(function(c, i){ (pool[K(c)] = pool[K(c)] || []).push(i); });
+      rows.forEach(function(b){
+        var L = pool[K(b)] || [], j = null, x;
+        for (x = 0; x < L.length; x++) if (!used[L[x]] && cost[L[x]].amt === b.amt){ j = L[x]; break; }
+        if (j == null) for (x = 0; x < L.length; x++) if (!used[L[x]]){ j = L[x]; break; }
+        if (j != null){ used[j] = 1; b.cost = cost[j].amt; }
+      });
+      cost.forEach(function(c, i){ if (!used[i]) costOnly.push(c); });
+    }
+    return { sheet: pick.s.name, src: pick.src, rows: rows, costOnly: costOnly };
+  }
+  function readFreightRows(wb, s){
     var rows = XLSX.utils.sheet_to_json(wb.Sheets[s.name], { defval: '', range: s.hdr || 0, raw: true });
     var out = [], numOf = function(v){ var n = Number(String(v).replace(/[^\d.-]/g, '')); return isFinite(n) ? n : 0; };
     var dateOf = function(v){
@@ -141,7 +159,7 @@
         p.extra = (p.extra ? p.extra + ' / ' : '') + [r['수량'], r['운송품목'], r['비고']].filter(function(x){ return x !== '' && x != null; }).join(' ');
       }
     });
-    return { sheet: s.name, src: pick.src, rows: out };
+    return out;
   }
   /* 단가 비교 열쇠: 출발지→도착지·차종 (띄어쓰기·대소문자 무시) */
   function freightKey(r){ var n = function(x){ return String(x || '').replace(/\s+/g, '').toUpperCase(); }; return n(r.from) + '→' + n(r.to) + '·' + n(r.car); }

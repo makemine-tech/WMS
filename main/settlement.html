@@ -17,6 +17,7 @@
 <script src="/wms_2fa.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="/settle_types.js"></script>
+<script src="/settle_freight.js"></script>
 <style>
 :root{
   --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
@@ -117,6 +118,18 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .why.g{color:var(--g)}
 .dim{color:var(--mu)}
 .strike{text-decoration:line-through;color:var(--mu)}
+.fsec{margin-bottom:1.2rem}
+.fsec-t{font-size:13.5px;font-weight:800;margin-bottom:.55rem}
+.fsec-t .dim{font-weight:500;font-size:12px}
+.fgrp{border:1px solid rgba(251,191,36,.35);border-radius:10px;padding:.65rem .75rem;margin-bottom:.7rem;background:rgba(251,191,36,.03)}
+.fgrp.done{border-color:var(--br);background:none}
+.fgh{display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap;font-size:13px;margin-bottom:.45rem}
+.fgh .dim{font-size:12px}
+.fgf{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-top:.55rem;font-size:12px}
+.ftbl.g{min-width:0}
+.ftbl.g td{padding:.4rem .35rem}
+.famt{width:86px;text-align:right;font-family:var(--mo);font-size:12.5px;padding:.3rem .4rem}
+.famt.chg{border-color:var(--y);color:var(--y)}
 .soon{background:var(--s1);border:1px dashed var(--br);border-radius:14px;padding:2.2rem 1.2rem;text-align:center;color:var(--mu);line-height:1.9}
 .soon b{color:var(--tx)}
 
@@ -321,7 +334,7 @@ function upload(file, ym, q){
         sheetKey: P.f.sheetKey || '', headKey: P.f.headKey || '',
         iv: iv, path: path, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' };
       return db.ref('settlement/box/' + ym + '/' + id).set(meta).then(function(){
-        if (fr && fr.rows.length) return db.ref('settlement/freight/' + ym + '/' + id).set({ file: file.name, sheet: fr.sheet, src: fr.src, rows: fr.rows });
+        if (fr && fr.rows.length) return db.ref('settlement/freight/' + ym + '/' + id).set({ file: file.name, sheet: fr.sheet, src: fr.src, rows: fr.rows, costOnly: fr.costOnly || [] });
       });
     }).then(function(){
       old.forEach(removeFile);
@@ -466,100 +479,7 @@ function cargoRow(count){
     + '<div class="ac">' + link + '</div></div>';
 }
 
-/* ═══ 화물 청구서 단가 확인 ═══
-   settlement/freight/{ym}/{fileId} = { file, sheet, src:'bill'|'cost', rows:[{d,from,to,car,qty,item,amt,etc,tot,note,vendor,extra}], chk:{i:{st:'ok'|'fix', fix, memo, by, at}} }
-   항상 화주(업체) 청구용 Sheet1 을 쓴다 — 결제금액명세서는 배차업체 지급액(원가)이라 정산에 안 씀 (Sheet1 이 없을 때만 경고와 함께 사용).
-   같은 구간(출발지→도착지·차종)에서 지난달까지 한 번도 낸 적 없는 금액이면 확인 항목 (야상 등으로 이미 냈던 금액은 통과).
-   지난 기록이 없으면 같은 달 안에서 보통 금액과 다른 건을 띄운다. 합계금액이 비었거나 금액+기타와 다르면 확인 항목.
-   '금액 수정'한 값(fix)이 정산에 쓰이고, 다음 달부터는 그 금액이 비교 기준이 된다. */
-var FREIGHT = {};
-function frFinal(r, c){ return c && c.st === 'fix' && c.fix != null ? +c.fix : +r.amt || 0; }
-function frHistory(ym){   /* ym 이전 달들의 구간별 금액 목록 */
-  var h = {};
-  Object.keys(FREIGHT).forEach(function(m){ if (m >= ym) return;
-    Object.keys(FREIGHT[m] || {}).forEach(function(fid){ var F = FREIGHT[m][fid] || {}, ch = F.chk || {};
-      (F.rows || []).forEach(function(r, i){ var k = SETTLE_FREIGHT.key(r); (h[k] = h[k] || []).push({ v: frFinal(r, ch[i]), m: m }); }); }); });
-  return h;
-}
-function mode(arr){ var c = {}, best = null; arr.forEach(function(v){ c[v] = (c[v] || 0) + 1; if (best == null || c[v] > c[best] || (c[v] === c[best] && +v < +best)) best = v; }); return best == null ? null : { v: +best, n: c[best], all: c }; }
-function frChecks(ym, fid){
-  var F = (FREIGHT[ym] || {})[fid]; if (!F) return [];
-  var hist = frHistory(ym), same = {};
-  Object.keys(FREIGHT[ym] || {}).forEach(function(f2){ ((FREIGHT[ym][f2] || {}).rows || []).forEach(function(r){ var k = SETTLE_FREIGHT.key(r); (same[k] = same[k] || []).push(+r.amt || 0); }); });
-  return (F.rows || []).map(function(r, i){
-    var k = SETTLE_FREIGHT.key(r), why = [], ref = null;
-    var amt = +r.amt || 0;
-    if (hist[k] && hist[k].length){
-      ref = mode(hist[k].map(function(x){ return x.v; }));
-      if (!ref.all[amt]){   /* 이 구간에서 처음 보는 금액 — 가장 가까운 지난 금액과 비교 */
-        var seen = Object.keys(ref.all).map(Number).sort(function(a, b){ return Math.abs(a - amt) - Math.abs(b - amt); });
-        var d = amt - seen[0];
-        why.push((d > 0 ? '▲ ' : '▼ ') + Math.abs(d).toLocaleString() + '원 ' + (d > 0 ? '비쌈' : '쌈') + ' — 지난달까지 이 구간 금액: '
-          + Object.keys(ref.all).map(Number).sort(function(a, b){ return a - b; }).map(function(v){ return v.toLocaleString() + '원(' + ref.all[v] + '회)'; }).join(', '));
-      }
-    } else if (same[k] && same[k].length > 1){
-      ref = mode(same[k]);
-      if (amt !== ref.v){ var d2 = amt - ref.v;
-        why.push((d2 > 0 ? '▲ ' : '▼ ') + Math.abs(d2).toLocaleString() + '원 ' + (d2 > 0 ? '비쌈' : '쌈') + ' — 지난 기록 없음 · 이번 달 같은 구간 보통 ' + ref.v.toLocaleString() + '원 (' + ref.n + '회)'); }
-    }
-    var sum = (+r.amt || 0) + (+r.etc || 0);
-    if (r.tot == null) why.push('합계금액이 비어 있음 — 금액+기타 = ' + sum.toLocaleString() + '원');
-    else if (+r.tot !== sum) why.push('합계금액 ' + (+r.tot).toLocaleString() + '원 ≠ 금액+기타 ' + sum.toLocaleString() + '원');
-    return { i: i, r: r, why: why, isNew: !hist[k] && !(same[k] && same[k].length > 1), c: (F.chk || {})[i] || null };
-  });
-}
-function freightBadge(fid){
-  var F = (FREIGHT[YM] || {})[fid]; if (!F) return '<div class="sm dim">단가 확인 정보 없음 (다시 올리면 생김)</div>';
-  var cs = frChecks(YM, fid), flag = cs.filter(function(x){ return x.why.length; }), left = flag.filter(function(x){ return !x.c; });
-  var tot = cs.reduce(function(a, x){ return a + frFinal(x.r, x.c) + (+x.r.etc || 0); }, 0);
-  return '<div class="sm">' + (F.src === 'cost' ? '<span class="chk warn">⚠ Sheet1 없음 — ' + esc(F.sheet || '') + '(배차업체 지급액) 기준</span> ' : '<span class="dim">' + esc(F.sheet || 'Sheet1') + '(업체 청구용) 기준 · </span>')
-    + cs.length + '건 · 정산 반영 합계 ' + tot.toLocaleString() + '원'
-    + (flag.length ? (left.length ? '<span class="chk warn">확인 필요 ' + left.length + '건</span>' : '<span class="chk okk">확인 완료 ' + flag.length + '건</span>') : '<span class="chk okk">달라진 금액 없음</span>')
-    + ' <button class="btn" style="margin-left:.3rem" onclick="openFreight(\'' + fid + '\')">단가 확인 ▸</button></div>';
-}
-var FR_OPEN = null, FR_ALL = false;
-function openFreight(fid){ FR_OPEN = fid; FR_ALL = false; drawFreight(); }
-function closeFreight(){ FR_OPEN = null; var m = $('frModal'); if (m) m.remove(); }
-function drawFreight(){
-  if (!FR_OPEN) return;
-  var F = (FREIGHT[YM] || {})[FR_OPEN]; if (!F){ closeFreight(); return; }
-  var cs = frChecks(YM, FR_OPEN), flag = cs.filter(function(x){ return x.why.length; }), left = flag.filter(function(x){ return !x.c; });
-  var list = FR_ALL ? cs : flag;
-  var m = $('frModal'); if (!m){ m = document.createElement('div'); m.id = 'frModal'; m.className = 'modal'; m.onclick = function(e){ if (e.target === m) closeFreight(); }; document.body.appendChild(m); }
-  var rowsHtml = list.map(function(x){
-    var r = x.r, c = x.c, fin = frFinal(r, c);
-    var state = c ? (c.st === 'fix' ? '<div class="why g">✎ ' + fin.toLocaleString() + '원으로 수정' + (c.memo ? ' · ' + esc(c.memo) : '') + '</div>' : '<div class="why g">✔ 이대로 맞음</div>') : '';
-    return '<tr class="' + (x.why.length ? 'flag' : '') + (c ? ' done' : '') + '">'
-      + '<td class="dim">' + esc(r.d.slice(5)) + '</td>'
-      + '<td>' + esc(r.from) + ' → ' + esc(r.to) + '<div class="dim">' + esc(r.car) + ' · ' + esc(r.qty) + ' ' + esc(r.item) + (r.extra ? ' / ' + esc(r.extra) : '') + '</div></td>'
-      + '<td>' + esc(r.vendor) + '<div class="dim">' + esc(r.note) + '</div></td>'
-      + '<td class="n">' + (c && c.st === 'fix' ? '<span class="strike">' + (+r.amt).toLocaleString() + '</span><br>' + fin.toLocaleString() : (+r.amt).toLocaleString()) + (r.etc ? '<div class="dim">+기타 ' + (+r.etc).toLocaleString() + '</div>' : '') + '</td>'
-      + '<td>' + x.why.map(function(w){ return '<div class="why">' + esc(w) + '</div>'; }).join('') + (x.isNew && !x.why.length ? '<div class="dim" style="font-size:11.5px">처음 보는 구간</div>' : '') + state + '</td>'
-      + '<td style="white-space:nowrap">' + (x.why.length || c ? '<button class="btn" onclick="frMark(' + x.i + ',\'ok\')">맞음</button> <button class="btn" onclick="frMark(' + x.i + ',\'fix\')">금액 수정</button>' + (c ? ' <button class="btn r" onclick="frMark(' + x.i + ',\'undo\')">되돌리기</button>' : '') : '') + '</td></tr>';
-  }).join('');
-  m.innerHTML = '<div class="mbox"><div class="mhd">🚚 ' + esc(F.file) + ' — 단가 확인<span class="sp"></span>'
-    + '<label class="dim" style="font-size:12px;font-weight:500"><input type="checkbox" ' + (FR_ALL ? 'checked' : '') + ' onchange="FR_ALL=this.checked;drawFreight()"> 전체 ' + cs.length + '건 보기</label>'
-    + '<button class="btn" onclick="closeFreight()">닫기</button></div><div class="mbody">'
-    + '<div class="sec-note" style="margin-bottom:.6rem">' + (F.src === 'cost' ? '<b style="color:var(--y)">⚠ 이 파일에 Sheet1(업체 청구용)이 없어 ' + esc(F.sheet || '') + '(배차업체 지급액)으로 읽었습니다.</b> ' : '<b>' + esc(F.sheet || 'Sheet1') + '</b>(업체 청구용) 금액 기준. ') + '같은 <b>출발지 → 도착지 · 차종</b>의 지난달까지 금액(없으면 이번 달 같은 구간)과 비교했습니다. '
-    + '확인 필요 <b>' + left.length + '</b>건 / 걸린 건 ' + flag.length + '건. <b>맞음</b>은 그대로 정산, <b>금액 수정</b>은 고친 금액으로 정산하고 다음 달부터 비교 기준이 됩니다.</div>'
-    + (list.length ? '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>일자</th><th>구간·차종</th><th>업체·비고</th><th style="text-align:right">금액</th><th>확인 내용</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>'
-      : '<div class="empty-s">지난 금액과 달라진 건이 없습니다.</div>')
-    + '</div></div>';
-}
-function frMark(i, act){
-  var path = 'settlement/freight/' + YM + '/' + FR_OPEN + '/chk/' + i;
-  if (act === 'undo') return db.ref(path).remove();
-  var F = FREIGHT[YM][FR_OPEN], r = F.rows[i];
-  var rec = { st: act, by: (me && me.email) || '', at: firebase.database.ServerValue.TIMESTAMP };
-  if (act === 'fix'){
-    var v = prompt(r.from + ' → ' + r.to + ' · ' + r.car + '\n청구 금액 ' + (+r.amt).toLocaleString() + '원\n\n정산에 쓸 금액을 입력하세요 (기타 금액 제외)', String(r.amt));
-    if (v == null) return;
-    var n = Number(String(v).replace(/[^0-9.-]/g, '')); if (!isFinite(n) || String(v).trim() === ''){ alert('숫자로 입력하세요'); return; }
-    var memo = prompt('수정 사유 (선택) — 예: 운송사와 340,000원으로 합의', '') || '';
-    rec.fix = n; rec.memo = memo.slice(0, 80);
-  }
-  db.ref(path).set(rec);
-}
+/* 화물·용차비 청구서 확인(같은 업체·구간 금액 차이, 원본 대비)은 /settle_freight.js */
 
 /* ── 정산월 ── */
 function setYM(ym){
