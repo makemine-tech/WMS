@@ -18,6 +18,8 @@
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="/settle_types.js"></script>
 <script src="/settle_freight.js"></script>
+<script src="/settle_stmt.js"></script>
+<script src="/settle_vendor.js"></script>
 <style>
 :root{
   --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
@@ -130,6 +132,17 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .ftbl.g td{padding:.4rem .35rem}
 .famt{width:86px;text-align:right;font-family:var(--mo);font-size:12.5px;padding:.3rem .4rem}
 .famt.chg{border-color:var(--y);color:var(--y)}
+.ftbl.wk{min-width:980px}
+.ftbl.wk td{vertical-align:top}
+.ftbl.wk tr.dimrow td{opacity:.55}
+textarea.rule{width:100%;min-width:220px;font-family:inherit;font-size:12.5px;color:var(--tx);background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.4rem .5rem;resize:vertical;line-height:1.5}
+textarea.rule:focus{outline:none;border-color:var(--b)}
+textarea.rule.saved{border-color:var(--g)}
+td.src{max-width:300px;font-size:12px;line-height:1.5}
+.srck{display:inline-block;border-radius:6px;padding:.05rem .4rem;background:var(--s3)}
+.srck.pivot{background:rgba(96,165,250,.14);color:#93c5fd}
+.srck.ref{background:rgba(74,222,128,.12);color:#86efac}
+.srck.input{background:rgba(251,191,36,.12);color:#fcd34d}
 .soon{background:var(--s1);border:1px dashed var(--br);border-radius:14px;padding:2.2rem 1.2rem;text-align:center;color:var(--mu);line-height:1.9}
 .soon b{color:var(--tx)}
 
@@ -166,7 +179,7 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
   <div class="wrap">
     <div class="tabs">
       <button class="tab on" data-tab="box">📂 파일함</button>
-      <button class="tab" data-tab="vendors" disabled title="다음 단계에서 만듭니다">🏢 업체 정산 (준비 중)</button>
+      <button class="tab" data-tab="vendors">🏢 업체 정산</button>
     </div>
 
     <!-- ═══ 파일함 ═══ -->
@@ -199,9 +212,7 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
     </div>
 
     <!-- ═══ 업체 정산 (다음 단계) ═══ -->
-    <div id="tabVendors" class="hide">
-      <div class="soon"><b>업체 등록 · 정산표본 · 일문일답 작성</b>은 다음 단계에서 만듭니다.</div>
-    </div>
+    <div id="tabVendors" class="hide"></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -487,7 +498,7 @@ function setYM(ym){
   if (offBox) offBox();
   BOX = {}; render();
   var ref = db.ref('settlement/box/' + ym);
-  var cb = function(s){ BOX = s.val() || {}; render(); };
+  var cb = function(s){ BOX = s.val() || {}; render(); if (!$('tabVendors').classList.contains('hide') && !(document.activeElement && document.activeElement.classList.contains('rule'))) renderVendors(); };
   ref.on('value', cb, function(e){ toast('목록을 못 읽었습니다: ' + (e && e.code)); });
   offBox = function(){ ref.off('value', cb); };
   loadCargo(ym);
@@ -507,6 +518,15 @@ function start(){
   db.ref('settlement/types').on('value', function(s){ CTYPES = s.val() || {}; render(); });
   db.ref('settlement/freight').on('value', function(s){ FREIGHT = s.val() || {}; render(); drawFreight(); });
   $('ym').addEventListener('change', function(){ if ($('ym').value) setYM($('ym').value); });
+  document.querySelectorAll('.tab').forEach(function(b){ b.addEventListener('click', function(){
+    document.querySelectorAll('.tab').forEach(function(x){ x.classList.toggle('on', x === b); });
+    $('tabBox').classList.toggle('hide', b.dataset.tab !== 'box'); $('tabVendors').classList.toggle('hide', b.dataset.tab !== 'vendors');
+    if (b.dataset.tab === 'vendors') renderVendors();
+  }); });
+  /* 업체 탭: 모든 달 파일함(표본 찾기)·업체 룰 — 룰 입력 중이면 다시 그리지 않는다(커서 유지) */
+  var vtabRedraw = function(){ var a = document.activeElement; if ($('tabVendors').classList.contains('hide')) return; if (a && a.classList && a.classList.contains('rule')) return; renderVendors(); };
+  db.ref('settlement/box').on('value', function(s){ ALLBOX = s.val() || {}; vtabRedraw(); });
+  db.ref('settlement/vendors').on('value', function(s){ VENDORS = s.val() || {}; vtabRedraw(); });
   var drop = $('drop'), fin = $('fileIn');
   drop.addEventListener('click', function(){ fin.click(); });
   fin.addEventListener('change', function(){ addFiles(fin.files); fin.value = ''; });
@@ -528,6 +548,7 @@ WMS2FA.guard({
     document.getElementById('app').classList.add('hide');
     if (offBox){ offBox(); offBox = null; } BOX = {};
     if (offCargo){ offCargo(); offCargo = null; } CARGO = null; closeFreight();
+    VW = null; STMT_CACHE = {};
   }
 });
 </script>
