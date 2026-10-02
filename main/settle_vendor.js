@@ -116,11 +116,14 @@ var LV = {
 function engineOf(vkey){ return (window.SETTLE_ENGINES && window.SETTLE_ENGINES[vkey]) || null; }
 function itemLevel(it, rr, eng){
   if (eng && eng.verified && eng.verified[it.r]) return 'ok';
+  if (rr && (rr.mode === 'fixed' || rr.mode === 'manual')) return rr.mode;   /* 직접 정한 고정·입력이 우선 (자동 처리보다 낮게 떨어지지 않게) */
   if (eng && eng.auto && eng.auto[it.r]) return 'auto';
-  if (rr && (rr.mode === 'fixed' || rr.mode === 'manual')) return rr.mode;
   if (rr && rr.text) return 'text';
   return 'none';
 }
+/* 이 항목에 걸린 자동 처리 설명 (화면 표시) */
+function engineNote(r){ var e = engineOf(VW.vkey); if (!e || !e.rules || !e.rules[r]) return '';
+  return '<div class="engnote">⚙️ 자동 적용 중<ol>' + e.rules[r].map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ol></div>'; }
 function sheetLevel(s, rr){
   if (rr && rr.mode === 'skip') return 'skip';
   if (rr && rr.mode === 'copy') return 'copy';
@@ -206,7 +209,7 @@ function renderWork(){
       + '<td class="n">' + won(it.qty.v) + '</td><td class="n">' + won(it.price.v) + '</td><td class="n">' + won(it.amt.v) + '</td>'
       + '<td class="n">' + (it.zero ? '' : '<div class="wbar"><i style="width:' + Math.max(2, Math.round((it._w || 0) * 100)) + '%"></i></div>' + (Math.round((it._w || 0) * 1000) / 10) + '%') + '</td>'
       + '<td class="src"><span class="srck ' + it.qty.src.kind + '">' + esc(it.qty.src.text) + '</span>' + (it.note ? '<div class="dim">' + esc(it.note) + '</div>' : '') + '</td>'
-      + '<td>' + (it.zero ? '' : modeBtns('items', String(it.r), it.name, rr && rr.mode, ['fixed', 'manual'])) + ruleBox('items', String(it.r), it.name, rr && rr.text) + '</td></tr>';
+      + '<td>' + (it.zero ? '' : modeBtns('items', String(it.r), it.name, rr && rr.mode, ['fixed', 'manual'])) + ruleBox('items', String(it.r), it.name, rr && rr.text) + engineNote(it.r) + '</td></tr>';
   }).join('');
   var sheetRows = A.sheets.map(function(s){
     var rr = (R.sheets || {})[sKey(s.name)], k = s._lv;

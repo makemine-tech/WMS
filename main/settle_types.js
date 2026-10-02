@@ -131,7 +131,7 @@
         var L = pool[K(b)] || [], j = null, x;
         for (x = 0; x < L.length; x++) if (!used[L[x]] && cost[L[x]].amt === b.amt){ j = L[x]; break; }
         if (j == null) for (x = 0; x < L.length; x++) if (!used[L[x]]){ j = L[x]; break; }
-        if (j != null){ used[j] = 1; b.cost = cost[j].amt; }
+        if (j != null){ used[j] = 1; b.cost = cost[j].amt; if (cost[j].vendor) b.costVendor = cost[j].vendor; }
       });
       cost.forEach(function(c, i){ if (!used[i]) costOnly.push(c); });
     }

@@ -22,12 +22,23 @@ var YEL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2B3' } };
 function lastDay(ym){ var y = +ym.slice(0, 4), m = +ym.slice(5, 7); return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
 function nsp(v){ return String(v == null ? '' : v).replace(/\s+/g, ''); }
 function runOf(){ return ((((VENDORS[VW.vkey] || {}).run) || {})[YM]) || {}; }
+function optOf(){ return (VENDORS[VW.vkey] || {}).opt || {}; }
+function setOpt(k, v){ return db.ref('settlement/vendors/' + VW.vkey + '/opt/' + k).set(v ? true : null); }
+/* 마지막으로 만든 엑셀에서 무엇이 적용·변경됐는지 (화면) */
+function buildLogHtml(){
+  var L = VW && VW._lastLog; if (!L) return '';
+  var tag = { '확인 필요': 'warn', '자동 적용': 'okk' };
+  return '<div class="sec-note" style="margin:.8rem 0 .3rem"><b>방금 만든 ' + esc(L.name) + '</b> 에 적용된 내용</div>'
+    + '<table class="ftbl" style="min-width:0"><tbody>' + L.log.map(function(l){
+      return '<tr><td style="white-space:nowrap">' + (tag[l[0]] ? '<span class="chk ' + tag[l[0]] + '">' + esc(l[0]) + '</span>' : '<span class="dim">' + esc(l[0]) + '</span>') + '</td><td>' + esc(l[1]) + '</td></tr>'; }).join('')
+    + '</tbody></table>';
+}
 function setRun(path, val){ return db.ref('settlement/vendors/' + VW.vkey + '/run/' + YM + '/' + path).set(val == null || val === '' ? null : val); }
 
 /* 화물 청구서에서 이 업체로 보이는 업체명 후보 (괄호 앞 이름이 업체 이름에 들어 있거나 반대) */
 function freightVendors(){
   var names = {};
-  Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ ((FREIGHT[YM][fid] || {}).rows || []).forEach(function(r){ var b = frBase(r.vendor); if (b) names[b] = (names[b] || 0) + 1; }); });
+  Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var ch = (FREIGHT[YM][fid] || {}).chk || {}; ((FREIGHT[YM][fid] || {}).rows || []).forEach(function(r, i){ var b = frBase(frVendor(r, ch[i])); if (b) names[b] = (names[b] || 0) + 1; }); });
   return Object.keys(names).sort(function(a, b){ return names[b] - names[a]; });
 }
 function guessFreightVendor(){
@@ -75,8 +86,14 @@ function buildCardHtml(A, R){
     + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">바꿀 데이터 시트 (② 에서 📋 원본 그대로로 정한 시트 + 용차비)</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
       : '<div class="sec-note">바꿀 데이터 시트가 아직 없습니다 — ② 에서 📋 원본 그대로를 누르면 여기 나옵니다.</div>')
     + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매번 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
-    + '<div style="display:flex;gap:.6rem;align-items:center;margin-top:.8rem;flex-wrap:wrap"><button class="btn p" id="buildBtn" onclick="buildDraft()">📥 ' + yy + '월_거래내역서_' + esc(VW.name) + '.xlsx 초안 내려받기</button>'
-    + '<span class="sm dim" id="buildMsg"></span></div>';
+    + (function(){ var eng = engineOf(VW.vkey); if (!eng || !eng.rules) return '';
+        var lines = []; Object.keys(eng.rules).forEach(function(r){ eng.rules[r].forEach(function(t){ lines.push(t); }); });
+        return '<div class="sec-note" style="margin:.7rem 0 .3rem">⚙️ 이 업체 자동 처리 (적어 주신 룰을 엑셀 처리로 옮긴 것)</div><ol class="englist">' + lines.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ol>'; })()
+    + '<div style="display:flex;gap:.6rem;align-items:center;margin-top:.8rem;flex-wrap:wrap"><button class="btn p" id="buildBtn" onclick="buildDraft()">📥 ' + yy + '월_거래내역서_' + esc(VW.name) + '.xlsx 내려받기</button>'
+    + '<label class="dim" style="font-size:12px"><input type="checkbox" ' + (optOf().checkSheet ? 'checked' : '') + ' onchange="setOpt(\'checkSheet\', this.checked)"> 엑셀에 점검 시트 넣기</label>'
+    + '<label class="dim" style="font-size:12px"><input type="checkbox" ' + (optOf().noYellow ? '' : 'checked') + ' onchange="setOpt(\'noYellow\', !this.checked)"> 확인할 칸 노란색</label>'
+    + '<span class="sm dim" id="buildMsg"></span></div>'
+    + '<div id="buildLog">' + buildLogHtml() + '</div>';
 }
 
 /* ── 만들기 ── */
@@ -223,8 +240,8 @@ function buildDraft(){
         if (sel.indexOf('@freight:') === 0){
           var who = sel.slice(9), heads = ['일자','출발지','도착지','차종','수량','운송품목','금액','기타','합계금액','비고','업체명'], rows = [];
           Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
-            (F.rows || []).forEach(function(r, i){ if (frBase(r.vendor) !== who) return; var a = frFinal(r, ch[i]);
-              rows.push([r.d, r.from, r.to, r.car, r.qty === '' ? '' : (isFinite(+r.qty) ? +r.qty : r.qty), r.item, a, +r.etc || 0, a + (+r.etc || 0), [r.note, r.extra].filter(Boolean).join(' / '), r.vendor]); }); });
+            (F.rows || []).forEach(function(r, i){ var vnm = frVendor(r, ch[i]); if (frBase(vnm) !== who) return; var a = frFinal(r, ch[i]);
+              rows.push([r.d, r.from, r.to, r.car, r.qty === '' ? '' : (isFinite(+r.qty) ? +r.qty : r.qty), r.item, a, +r.etc || 0, a + (+r.etc || 0), [r.note, r.extra].filter(Boolean).join(' / '), vnm]); }); });
           rows.sort(function(a, b){ return String(a[0]).localeCompare(String(b[0])); });
           var rs = replaceSheet(wb, s.name, heads, rows);
           rs.warn.forEach(function(w){ log.push(['확인 필요', '시트 「' + s.name + '」 — ' + w]); }); if (rs.footer) log.push(['바꿈', '시트 「' + s.name + '」 합계 줄 ' + rs.footer + '행으로 옮기고 거래명세표 참조도 고침']);
@@ -247,17 +264,28 @@ function buildDraft(){
       });
     }, Promise.resolve());
   }).then(function(){
+    /* 업체별 자동 처리 (settle_engines.js) */
+    if (eng && eng.afterBuild){
+      msg('업체 룰 적용 중…');
+      try { eng.afterBuild(wb, { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won }); }
+      catch (e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); }
+    }
     /* 그대로 둔 시트 */
     A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode;
       if (m !== 'copy' && m !== 'skip' && !(s.kind && s.kind.key === 'freight') && (s.rows > 0 || s.usedBy.length)) log.push(['확인 필요', '시트 「' + s.name + '」 — 지난달 내용 그대로 (룰을 정하면 바뀜)' + (s.usedBy.length ? ' · ' + s.usedBy.join(',') + '행이 참조' : '')]); });
-    /* 4) 점검 시트 */
+    var order = { '확인 필요': 0, '자동 적용': 1, '입력': 2, '바꿈': 3, '자동 계산': 4, '수식': 5, '고정': 6, '안내': 7 };
+    log.sort(function(a, b){ return (order[a[0]] != null ? order[a[0]] : 9) - (order[b[0]] != null ? order[b[0]] : 9); });
     var ck = wb.getWorksheet('점검'); if (ck) wb.removeWorksheet(ck.id);
-    ck = wb.addWorksheet('점검');
-    ck.columns = [{ header: '구분', width: 12 }, { header: '내용', width: 110 }];
-    ck.getRow(1).font = { bold: true };
-    ck.addRow(['만든 때', new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') + ' · 표본 ' + VW.meta.name + ' · ' + ymLabel(YM)]);
-    var order = { '확인 필요': 0, '입력': 1, '바꿈': 2, '자동 계산': 3, '수식': 4, '고정': 5, '안내': 6 };
-    log.sort(function(a, b){ return (order[a[0]] || 9) - (order[b[0]] || 9); }).forEach(function(l){ var r = ck.addRow(l); if (l[0] === '확인 필요') r.getCell(1).fill = YEL; });
+    /* 4) 점검 시트 — 업체 옵션으로 켰을 때만 (기본은 화면에만 보여 줌) */
+    if (optOf().checkSheet){
+      ck = wb.addWorksheet('점검');
+      ck.columns = [{ header: '구분', width: 12 }, { header: '내용', width: 110 }];
+      ck.getRow(1).font = { bold: true };
+      ck.addRow(['만든 때', new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') + ' · 표본 ' + VW.meta.name + ' · ' + ymLabel(YM)]);
+      log.forEach(function(l){ var r = ck.addRow(l); if (l[0] === '확인 필요') r.getCell(1).fill = YEL; });
+    }
+    /* 노란 표시를 끈 업체는 지운다 */
+    if (optOf().noYellow) wb.eachSheet(function(ws){ ws.eachRow(function(row){ row.eachCell(function(c){ if (c.fill && c.fill.fgColor && c.fill.fgColor.argb === 'FFFFF2B3') c.fill = { type: 'pattern', pattern: 'none' }; }); }); });
     wb.calcProperties = wb.calcProperties || {}; wb.calcProperties.fullCalcOnLoad = true;
     msg('엑셀 쓰는 중…');
     return wb.xlsx.writeBuffer();
@@ -266,8 +294,9 @@ function buildDraft(){
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = name;
     document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
     var nCheck = log.filter(function(l){ return l[0] === '확인 필요'; }).length;
-    msg('✔ ' + name + ' — 확인 필요 ' + nCheck + '곳 (노란 칸·점검 시트)');
-    VW._lastLog = log;
+    VW._lastLog = { log: log, name: name, at: Date.now() };
+    msg('✔ ' + name + ' 내려받음 — 확인 필요 ' + nCheck + '곳');
+    var box = $('buildLog'); if (box) box.innerHTML = buildLogHtml();
   }).catch(function(e){ msg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e); })
     .then(function(){ btn.disabled = false; });
 }

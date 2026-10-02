@@ -20,6 +20,7 @@ var FREIGHT = {};                       /* settlement/freight 전체 — settlem
 var FR_OPEN = null, FR_EXP = {}, FR_DRAFT = {};
 
 function frBase(v){ return String(v || '').replace(/\(.*$/, '').trim() || '(업체명 없음)'; }
+function frVendor(r, c){ return (c && c.vendor) || r.vendor || ''; }   /* 업체 지정한 건은 그 업체로 */
 function frFinal(r, c){ return c && c.st === 'fix' && c.fix != null ? +c.fix : +r.amt || 0; }
 function frWon(n){ return (+n || 0).toLocaleString('ko-KR'); }
 function frDay(d){ var s = String(d || ''); if (s.length < 10) return s; return (+s.slice(5, 7)) + '/' + (+s.slice(8, 10)) + ' (' + '일월화수목금토'.charAt(new Date(s + 'T00:00:00Z').getUTCDay()) + ')'; }
@@ -68,7 +69,10 @@ function frAnalyze(ym, fid){
     var sum = amt + (+r.etc || 0);
     if (r.tot == null) why.push('합계금액이 비어 있음 — 금액+기타 = ' + frWon(sum) + '원');
     else if (+r.tot !== sum) why.push('합계금액 ' + frWon(r.tot) + '원 ≠ 금액+기타 ' + frWon(sum) + '원');
-    if (why.length) others.push({ i: i, why: why, done: !!chk[i] });
+    /* 업체명 빈칸 — 어느 업체 정산에도 안 들어간다 (원본 결제금액명세서의 업체명을 제안) */
+    var noVendor = !String(r.vendor || '').trim();
+    if (noVendor && !(chk[i] && chk[i].vendor)) why.push('업체명이 비어 있어 어느 업체 정산에도 안 들어갑니다' + (r.costVendor ? ' — 원본(결제금액명세서)에는 「' + r.costVendor + '」' : ''));
+    if (why.length || (noVendor && chk[i] && chk[i].vendor)) others.push({ i: i, why: why, done: !!chk[i], noVendor: noVendor });
   });
   var left = groups.filter(function(x){ return !x.done; }).length + others.filter(function(x){ return !x.done; }).length;
   var total = rows.reduce(function(a, r, i){ return a + frFinal(r, chk[i]) + (+r.etc || 0); }, 0);
@@ -129,10 +133,11 @@ function drawFreight(){
   /* ② 그 밖의 확인 */
   var othersHtml = A.others.map(function(x){
     var r = rows[x.i], c = chk[x.i], fin = frFinal(r, c);
-    var state = c ? (c.st === 'fix' ? '<div class="why g">✎ ' + frWon(fin) + '원으로 수정' + (c.memo ? ' · ' + esc(c.memo) : '') + '</div>' : '<div class="why g">✔ 이대로 맞음</div>') : '';
+    var state = c ? (c.vendor ? '<div class="why g">🏷 업체 「' + esc(c.vendor) + '」 로 지정</div>' : '')
+      + (c.st === 'fix' ? '<div class="why g">✎ ' + frWon(fin) + '원으로 수정' + (c.memo ? ' · ' + esc(c.memo) : '') + '</div>' : (c.vendor ? '' : '<div class="why g">✔ 이대로 맞음</div>')) : '';
     return '<tr class="' + (c ? 'done' : 'flag') + '"><td style="white-space:nowrap">' + frDay(r.d) + '</td>'
       + '<td>' + esc(r.from) + ' → ' + esc(r.to) + '<div class="dim">' + esc(r.car) + ' · ' + content(r) + '</div></td>'
-      + '<td>' + esc(r.vendor) + '</td>'
+      + '<td>' + (x.noVendor ? (c && c.vendor ? esc(c.vendor) : '<span class="why">(빈칸)</span>') + '<div><button class="btn" onclick="frMark(' + x.i + ',\'vendor\')">업체 지정</button></div>' : esc(r.vendor)) + '</td>'
       + '<td class="n">' + costCell(r) + '</td>'
       + '<td class="n">' + (c && c.st === 'fix' ? '<span class="strike">' + frWon(r.amt) + '</span><br>' + frWon(fin) : frWon(r.amt)) + (r.etc ? '<div class="dim">+기타 ' + frWon(r.etc) + '</div>' : '') + '</td>'
       + '<td>' + x.why.map(function(w){ return '<div class="why">' + esc(w) + '</div>'; }).join('') + state + '</td>'
@@ -195,7 +200,15 @@ function frMark(i, act){
   var path = 'settlement/freight/' + YM + '/' + FR_OPEN + '/chk/' + i;
   if (act === 'undo') return db.ref(path).remove();
   var r = FREIGHT[YM][FR_OPEN].rows[i];
+  if (act === 'vendor'){   /* 업체명 빈칸 → 업체 지정 (금액 확인 상태는 그대로 둠) */
+    var cur = ((FREIGHT[YM][FR_OPEN].chk || {})[i]) || {};
+    var nm = prompt(r.from + ' → ' + r.to + ' · ' + r.car + ' · ' + frWon(r.amt) + '원\n이 건을 어느 업체로 정산할까요? (청구서 업체명 그대로, 예: 포인트나인크루(곡물))', cur.vendor || r.costVendor || '');
+    if (nm == null) return;
+    nm = nm.trim();
+    return db.ref(path).set(Object.assign({}, cur, { st: cur.st || 'ok', vendor: nm || null, by: (me && me.email) || '', at: firebase.database.ServerValue.TIMESTAMP }));
+  }
   var rec = { st: act, by: (me && me.email) || '', at: firebase.database.ServerValue.TIMESTAMP };
+  var keep = ((FREIGHT[YM][FR_OPEN].chk || {})[i] || {}).vendor; if (keep) rec.vendor = keep;   /* 지정한 업체는 유지 */
   if (act === 'fix'){
     var v = prompt(r.from + ' → ' + r.to + ' · ' + r.car + '\n청구 금액 ' + frWon(r.amt) + '원' + (r.cost != null ? ' (원본 ' + frWon(r.cost) + '원)' : '') + '\n\n정산에 쓸 금액을 입력하세요 (기타 금액 제외)', String(r.amt));
     if (v == null) return;
