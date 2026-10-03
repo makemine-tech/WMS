@@ -27,9 +27,15 @@ function setOpt(k, v){ return db.ref('settlement/vendors/' + VW.vkey + '/opt/' +
 /* 마지막으로 만든 엑셀에서 무엇이 적용·변경됐는지 (화면) */
 function buildLogHtml(){
   var L = VW && VW._lastLog; if (!L) return '';
-  var tag = { '확인 필요': 'warn', '자동 적용': 'okk' };
-  return '<div class="sec-note" style="margin:.8rem 0 .3rem"><b>방금 만든 ' + esc(L.name) + '</b> 에 적용된 내용</div>'
-    + '<table class="ftbl" style="min-width:0"><tbody>' + L.log.map(function(l){
+  var tag = { '확인 필요': 'warn', '특이사항': 'warn', '자동 적용': 'okk' }, isW = function(l){ return l[0] === '확인 필요' || l[0] === '특이사항'; };
+  var W = L.log.filter(isW), O = L.log.filter(function(l){ return !isW(l); });
+  /* 특이사항·확인 필요는 맨 위에 따로 — 애매하거나 놓칠 수 있는 곳 (대표님 2026-10-03) */
+  var warn = W.length ? '<div style="border:1px solid #fbbf24;border-radius:10px;padding:.6rem .8rem;margin:.8rem 0 .4rem;background:rgba(251,191,36,.08)">'
+    + '<div style="font-weight:800;color:#fbbf24;margin-bottom:.35rem">⚠️ 특이사항 · 확인 필요 ' + W.length + '건 — 엑셀 맨 뒤 「점검」 시트에 위치와 함께 있습니다</div>'
+    + W.map(function(l){ return '<div class="sm" style="margin:.15rem 0">· <b>' + esc(l[0]) + '</b> ' + esc(l[1]) + '</div>'; }).join('') + '</div>'
+    : '<div class="sm" style="color:var(--g);margin:.8rem 0 .3rem">✔ 특이사항 없음</div>';
+  return warn + '<div class="sec-note" style="margin:.8rem 0 .3rem"><b>방금 만든 ' + esc(L.name) + '</b> 에 적용된 내용</div>'
+    + '<table class="ftbl" style="min-width:0"><tbody>' + O.map(function(l){
       return '<tr><td style="white-space:nowrap">' + (tag[l[0]] ? '<span class="chk ' + tag[l[0]] + '">' + esc(l[0]) + '</span>' : '<span class="dim">' + esc(l[0]) + '</span>') + '</td><td>' + esc(l[1]) + '</td></tr>'; }).join('')
     + '</tbody></table>';
 }
@@ -299,9 +305,9 @@ function buildDraft(){
   }).then(function(buf){
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = name;
     document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    var nCheck = log.filter(function(l){ return l[0] === '확인 필요'; }).length;
+    var nCheck = log.filter(function(l){ return l[0] === '확인 필요' || l[0] === '특이사항'; }).length;
     VW._lastLog = { log: log, name: name, at: Date.now() };
-    msg('✔ ' + name + ' 내려받음 — 확인 필요 ' + nCheck + '곳');
+    msg('✔ ' + name + ' 내려받음 — ⚠️ 특이사항·확인 필요 ' + nCheck + '건 (아래)');
     var box = $('buildLog'); if (box) box.innerHTML = buildLogHtml();
   }).catch(function(e){ msg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e); })
     .then(function(){ btn.disabled = false; });
