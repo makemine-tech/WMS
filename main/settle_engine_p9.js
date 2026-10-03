@@ -274,7 +274,7 @@
           var x = b === '곡' ? gokFee(fH, row) : b === '오' ? oriFee(fH, row) : { fee: 1000, pre: 0, kind: '송장당', box: '' };
           cnt[x.fee] = (cnt[x.fee] || 0) + 1; pre += x.pre || 0; days[v.d] = (days[v.d] || 0) + 1;
           var r2 = ws.addRow([k, v.d].concat(cols.map(function(c){ return v.q[c] || null; }), [x.box === '' || x.box == null ? null : x.box, PACK_NAME[x.fee] || x.kind, x.fee, x.pre || null]));
-          if (/같은상품|추가송장|빈줄|기타섞임/.test(x.kind) || (+x.box || 0) >= 8){ r2.getCell(cols.length + 4).fill = YEL; rare[x.kind] = (rare[x.kind] || 0) + 1; if (!rareAt[x.kind]) rareAt[x.kind] = r2.number; } });
+          if (/같은상품|추가송장|빈줄|기타섞임/.test(x.kind) || (+x.box || 0) >= 8){ rare[x.kind] = (rare[x.kind] || 0) + 1; if (!rareAt[x.kind]) rareAt[x.kind] = r2.number; } });
         var n = order.length, L = 2 + cols.length, cFee = L + 3, cPre = L + 4, SC = cPre + 2;
         ws.getColumn(2).numFmt = 'm"월" d"일"'; ws.getColumn(1).width = 16; for (var c = 3; c <= L; c++) ws.getColumn(c).width = 9; ws.getColumn(L + 2).width = 14;
         var col = function(c){ return ws.getColumn(c).letter; }, sc = col(SC), sd = col(SC + 1), se = col(SC + 2), sf = col(SC + 3), feeL = col(cFee), preL = col(cPre), last = n + 1;
@@ -291,7 +291,7 @@
         ws.getColumn(SC).width = 18; ws.getColumn(SC + 3).width = 13; ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 1 }];
         var rk = Object.keys(rare);
         mark(ws, sc + 1, b === '셀' ? '셀시어스는 송장당 1,000원' : '포장구분 = 금액 이름(기본포장 300 · 합포장1 1,000 · 합포장2 1,500), 소분포장은 개수 × 300 따로 — 오른쪽 요약표가 작업비정산서로');
-        rk.forEach(function(k){ mark(ws, ws.getColumn(cols.length + 4).letter + rareAt[k], '드문 포장구분 「' + k + '」 ' + rare[k] + '건 — 첫 줄로 이동 (포장구분 열 필터로 전부 보기)'); });
+        rk.forEach(function(k){ mark(ws, ws.getColumn(cols.length + 4).letter + rareAt[k], '드문 포장구분 「' + k + '」 ' + rare[k] + '건 — 첫 줄 (같은 경우는 포장구분·박스수 열 필터로 보기, 노란색은 이 한 칸만)'); });
         work[b] = { n: n, cnt: cnt, pre: pre, tot: tot, days: days, tiers: tiers, ref: function(t){ return b + '_작업상세!' + sd + (2 + tiers.indexOf(t)); }, refPre: b + '_작업상세!' + sd + rP };
         log.push(['자동 적용', b + '_작업상세 송장 ' + n + '건 · ' + tiers.map(function(t){ return t + '원 ' + (cnt[t] || 0) + '건'; }).join(' · ') + ' · 소분포장 ' + pre + '건 → ' + won(tot) + '원']);
       }); }); }, Promise.resolve()).then(function(){
@@ -385,7 +385,7 @@
             if (typeof r[7] === 'number') ws.getCell('H' + R).numFmt = 'm"월" d"일"';
             if (typeof r[8] === 'number') ws.getCell('I' + R).numFmt = 'yyyy-mm-dd hh:mm';
             sumM += +r[12] || 0; sumP += qty * unit * 1.1;
-            if (part){ partSum += qty * unit * 1.1; ws.getCell('O' + R).fill = YEL; ws.getCell('N' + R).fill = YEL; }
+            if (part){ partSum += qty * unit * 1.1; }
             if (PALFIX[i] != null) ws.getCell('M' + R).fill = YEL;
             if (qty * unit >= 100000 || (unit && unit !== 300)){ ws.getCell('P' + R).fill = YEL; big.push(r[0] + ' ' + r[4] + ' ' + qty + '×' + unit); mark(ws, 'P' + R, String(r[0]).trim() + ' ' + String(r[4]).slice(0, 24) + ' ' + qty + ' × ' + unit + '원' + (unit !== 300 ? ' — 단가가 300이 아님' : ' — 10만원 이상')); } }
           /* 원본 병합(파렛트수 등) 그대로 */
