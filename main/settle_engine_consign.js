@@ -34,7 +34,7 @@
       if (!head) head = a[0].map(function(h){ return String(h); });
       var map = head.map(function(h){ return H.indexOf(nsp(h)); });
       a.slice(1).forEach(function(r){ if (!sellerRe.test(String(r[iS]).trim())) return;
-        var o = map.map(function(j){ return j < 0 ? '' : r[j]; }), k = o.join('\u0001'); if (seen[k]) return; seen[k] = 1; rows.push(o); });
+        var o = map.map(function(j){ return j < 0 ? '' : r[j]; }), k = window.orderKey(H, r); if (seen[k]) return; seen[k] = 1; rows.push(o); });
     }); }); }, Promise.resolve()).then(function(){ return { head: head || [], rows: rows }; });
   }
 

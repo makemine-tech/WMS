@@ -214,10 +214,7 @@ function bestSourceSheet(xwb, tplHeads){
    이름: 업체명 핵심(메이크마인디자인_·_당월분·(괄호) 뗀 것) + SETTLE_ALIASES. 엔진이 traceSkip 이면 건너뜀(포인트나인크루처럼 따로 정산) */
 function vendorCore(n){ return String(n || '').replace(/^메이크마인디자인_/, '').replace(/_(당월분|계산서미발행|\d.*)$/, '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').replace(/^(주식회사|㈜|\(주\))/, ''); }
 function traceCargo(wb, log, skipFreight){
-  var core = vendorCore(VW.name), al = ((window.SETTLE_ALIASES || {})[VW.name] || (window.SETTLE_ALIASES || {})[core] || []).map(function(x){ return String(x).replace(/\s+/g, '').toLowerCase(); });
-  var par = (String(VW.name).match(/\(([^)]+)\)/g) || []).map(function(x){ return x.slice(1, -1).replace(/\s+/g, '').toLowerCase(); });   /* 제이에스로지원(테일즈코리아) → 테일즈코리아 */
-  var keys = [core.toLowerCase()].concat(al, par).filter(function(k){ return k.length >= 2; });
-  var hit = function(v){ var s = String(v || '').replace(/[\s()]/g, '').toLowerCase(); return !!s && keys.some(function(k){ return s.indexOf(k) >= 0 || (k.length >= 3 && k.indexOf(s) >= 0 && s.length >= 3); }); };
+  var hit = window.vendorMatcher(VW.name), core = hit.main;   /* settle_engines.js — 제주맥주위탁_만월회 → 만월회 (제주맥주 기록을 잡지 않게) */
   var T = [];
   if (!skipFreight) Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
     (F.rows || []).forEach(function(r, i){ var vn = frVendor(r, ch[i]); if (!hit(vn)) return;
@@ -268,7 +265,12 @@ function makeDraft(msg){
       }
       if (mode === 'fixed'){ if (isPivot) cell.value = it.qty.v; log.push(['고정', it.name + ' = ' + won(it.qty.v) + ' (지난달 그대로)']); return; }
       if (isPivot){ cell.value = it.qty.v; cell.fill = YEL; log.push(['확인 필요', it.name + ' — 피벗 계산이라 지난달 값 ' + won(it.qty.v) + ' 그대로' + (rr.text ? ' · 룰: ' + rr.text : '')]); return; }
-      if (it.qty.src.kind === 'input' || !it.qty.f){ cell.fill = YEL; log.push(['확인 필요', it.name + ' — 직접 입력 칸, 지난달 값 ' + won(it.qty.v) + (rr.text ? ' · 룰: ' + rr.text : '')]); return; }
+      if (it.qty.src.kind === 'input' || !it.qty.f){
+        /* 매달 같은 줄(솔루션·사용료·관리비·보관비 등)은 지난달 수량 그대로, 그 밖의 직접 입력 줄은 지난달에만 있던 일(입고비·소급·오배송 등)일 수 있어 0 + 노란 칸
+           (8월 재현에서 7월 「해외오배송소급 −215,231」·「입고비 파렛트화 201」이 따라와 틀린 것 — 대표님 2026-10-03 「일단 먼저 만들고 맞춰 나감」) */
+        var keep = /솔루션|사용료|관리|시스템|보관|월정|기본료|고정|이벗/.test(nsp(it.name));
+        if (!keep && +it.qty.v){ cell.value = 0; cell.fill = YEL; log.push(['확인 필요', it.name + ' — 직접 입력 칸, 지난달 ' + won(it.qty.v) + ' → 0 (지난달에만 있던 일이면 그대로, 이번 달에도 있으면 수량 입력)']); return; }
+        cell.fill = YEL; log.push(['확인 필요', it.name + ' — 직접 입력 칸, 지난달 값 ' + won(it.qty.v) + ' 그대로 (매달 같은 줄)' + (rr.text ? ' · 룰: ' + rr.text : '')]); return; }
       /* 거래명세표 오른쪽 옆 표(피벗 결과 등, R열 이후)를 가리키는 계산은 지난달 값이 남아 있으므로 확인 */
       if (it.qty.src.kind === 'calc' && /(^|[^A-Z!])([R-Z]|A[A-Z])\$?\d+/.test(it.qty.f)){ cell.fill = YEL; log.push(['확인 필요', it.name + ' — 옆 표(' + it.qty.f + ')를 가리키는 계산이라 지난달 값 ' + won(it.qty.v) + ' 그대로' + (rr.text ? ' · 룰: ' + rr.text : '')]); return; }
       log.push(['수식', it.name + ' — ' + it.qty.src.text + ' (엑셀을 열면 다시 계산)']);
@@ -321,7 +323,7 @@ function makeDraft(msg){
     /* 화물 흔적 — 업체 초안마다 (엔진 traceSkip 이면 건너뜀, 표본에 화물 청구서 시트가 있으면 청구서는 그 시트로 이미 들어가므로 입출고만) */
     if (!(eng && eng.traceSkip)) try { traceCargo(wb, log, A.sheets.some(function(s){ return s.kind && s.kind.key === 'freight'; })); } catch (e) { console.error(e); log.push(['확인 필요', '화물 흔적 찾기 오류: ' + ((e && e.message) || e)]); }
     /* 그대로 둔 시트 */
-    A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode;
+    A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode; if (eng && eng.isAuto && s.kind) return;   /* 자동 엔진이 종류별로 처리(못 하면 자기가 알림) */
       if (m !== 'copy' && m !== 'skip' && !(s.kind && s.kind.key === 'freight') && (s.rows > 0 || s.usedBy.length)) log.push(['확인 필요', '시트 「' + s.name + '」 — 지난달 내용 그대로 (룰을 정하면 바뀜)' + (s.usedBy.length ? ' · ' + s.usedBy.join(',') + '행이 참조' : '')]); });
     var order = { '확인 필요': 0, '자동 적용': 1, '입력': 2, '바꿈': 3, '자동 계산': 4, '수식': 5, '고정': 6, '안내': 7 };
     log.sort(function(a, b){ return (order[a[0]] != null ? order[a[0]] : 9) - (order[b[0]] != null ? order[b[0]] : 9); });

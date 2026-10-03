@@ -107,3 +107,25 @@ var SETTLE_ALIASES = window.SETTLE_ALIASES = { 'HK홀세일': ['에이치케이'
     }
   };
 })();
+
+/* 이벗 주문 같은 줄 판별 (2026-10-03): 이벗 주문목록을 여러 개(전체 + 위탁판매·추가분) 올리면 열 구성이 달라도 같은 주문이 겹침 →
+   주문번호·송장번호·상품명·옵션·수량·판매처로 같은 줄을 한 번만 (H = 띄어쓰기 뺀 제목 배열, r = 원본 줄) */
+window.orderKey = function(H, r){
+  var cols = ['주문번호', '송장번호', '상품명', '옵션', '수량', '판매처'], ix = cols.map(function(c){ return H.indexOf(c); });
+  if (ix[0] < 0 && ix[1] < 0) return r.join('\u0001');
+  return ix.map(function(i){ return i < 0 ? '' : String(r[i] == null ? '' : r[i]).replace(/\s+/g, ''); }).join('\u0001');
+};
+
+/* 업체 이름 맞추기 (2026-10-03): 화물 청구서·입출고 기록·택배 리스트에서 「이 업체」 줄 찾기 공통
+   핵심 이름 = 메이크마인디자인_·_당월분·_계산서미발행·__0000원·(괄호) 뗀 뒤 맨 끝 '_' 조각 (제주맥주위탁_만월회 → 만월회)
+   + 괄호 안 이름(제이에스로지원(테일즈코리아) → 테일즈코리아) + SETTLE_ALIASES 별칭 + extra
+   맞음 = 기록 이름에 핵심 이름이 들어 있거나, 기록 이름(3자 이상)이 핵심 이름의 앞부분(테일즈 ↔ 테일즈코리아) */
+window.vendorMatcher = function(name, extra){
+  var norm = function(v){ return String(v == null ? '' : v).replace(/[\s()]/g, '').toLowerCase(); };
+  var raw = String(name || ''), c = raw.replace(/^메이크마인디자인_/, '').replace(/_(당월분|계산서미발행|\d.*)$/, '').replace(/__.*$/, '').replace(/\(.*?\)/g, '').replace(/\s+/g, '');
+  var segs = c.split('_').filter(Boolean), main = segs[segs.length - 1] || c;
+  var par = (raw.match(/\(([^)]+)\)/g) || []).map(function(x){ return x.slice(1, -1); });
+  var keys = [main].concat(par, (window.SETTLE_ALIASES || {})[raw] || [], extra || []).map(norm).filter(function(k, i, a){ return k.length >= 2 && a.indexOf(k) === i; });
+  var f = function(v){ var s = norm(v); if (!s) return false; return keys.some(function(k){ return s.indexOf(k) >= 0 || (s.length >= 3 && k.indexOf(s) === 0); }); };
+  f.keys = keys; f.main = main; return f;
+};

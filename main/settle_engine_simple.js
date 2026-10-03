@@ -21,7 +21,7 @@
       var H = a[0].map(nsp), col = function(n){ return H.indexOf(n); };
       var c = { s: col('판매처'), to: col('수령자'), by: col('주문자'), n: col('송장번호'), m: col('매칭수량'), q: col('수량'), p: col('상품명'), d: col('등록일') };
       a.slice(1).forEach(function(r){ var o = { seller: String(r[c.s]).trim(), to: String(r[c.to] || ''), by: String(r[c.by] || ''), inv: String(r[c.n] || '').trim(), m: +r[c.m] || 0, q: +r[c.q] || 0, p: String(r[c.p] || ''), d: String(r[c.d] || '').slice(0, 10) };
-        if (!keep(o)) return; var k = r.join('\u0001'); if (seen[k]) return; seen[k] = 1; out.push(o); });
+        if (!keep(o)) return; var k = window.orderKey(H, r); if (seen[k]) return; seen[k] = 1; out.push(o); });
     }); }); }, Promise.resolve()).then(function(){ return out; });
   }
   var cansOf = function(o){ if (o.m > 0) return o.m; if (/---\s*\d+\s*개\s*\$/.test(o.p)) return o.q; var x = o.p.match(/(\d+)\s*(캔|개)/); return x ? +x[1] * (o.q || 1) : o.q; };

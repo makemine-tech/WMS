@@ -53,7 +53,7 @@ function bronteOrders(){
     var wb = XLSX.read(b, { type: 'array' }), a = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); if (!a.length) return;
     var H = a[0].map(function(h){ return String(h).replace(/\s/g, ''); }), c = function(n){ return H.indexOf(n); };
     var iS = c('판매처'), iN = c('송장번호'), iM = c('매칭수량'), iQ = c('수량'), iP = c('상품명'), iD = c('등록일');
-    a.slice(1).forEach(function(r){ if (!BRONTE_SELLER.test(String(r[iS]))) return; var k = r.join('\u0001'); if (seen[k]) return; seen[k] = 1;
+    a.slice(1).forEach(function(r){ if (!BRONTE_SELLER.test(String(r[iS]))) return; var k = window.orderKey(H, r); if (seen[k]) return; seen[k] = 1;
       var n = +r[iM] > 0 ? +r[iM] : ((String(r[iP]).match(/(\d+)\s*(캔|개)/) || [])[1] && !/---/.test(r[iP]) ? +(String(r[iP]).match(/(\d+)\s*(캔|개)/))[1] * (+r[iQ] || 1) : (+r[iQ] || 0));
       out.rows.push({ d: String(r[iD]).slice(0, 10), name: r[iP], q: r[iQ], cans: n, inv: String(r[iN] || '').trim() }); out.cans += n; if (r[iN]) out.inv[String(r[iN]).trim()] = 1; });
   }); }); }, Promise.resolve()).then(function(){ out.nInv = Object.keys(out.inv).length; return out; });

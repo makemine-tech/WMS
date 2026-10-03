@@ -30,7 +30,7 @@
         var st = ctx.st, log = ctx.log, won = ctx.won, YM = ctx.YM, Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
         var S0 = Math.round(Date.UTC(Y, M - 1, 1) / 864e5) + 25569, vname = cfg.name, vc = core(vname).toLowerCase();
         var keys = [vc].concat((cfg.alias || []).map(function(x){ return String(x).replace(/\s+/g, '').toLowerCase(); })).filter(function(k){ return k.length >= 2; });
-        var hit = function(v){ var s = String(v || '').replace(/[\s()]/g, '').toLowerCase(); return !!s && keys.some(function(k){ return s.indexOf(k) >= 0 || (k.length >= 3 && s.length >= 3 && k.indexOf(s) >= 0); }); };
+        var hit = window.vendorMatcher(cfg.name, cfg.alias);   /* settle_engines.js */
 
         /* ── 보관비 ── */
         (function(){

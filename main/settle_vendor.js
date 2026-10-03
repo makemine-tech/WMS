@@ -134,7 +134,7 @@ function won(n){ return n == null ? '' : Math.round(n).toLocaleString('ko-KR'); 
      ruleList: [ { d:'반영일', t:'룰' } ]             화면 맨 아래 '적용 룰' 목록 (번호는 순서대로)
      afterBuild(wb, ctx)                            엑셀 만들 때 업체 전용 처리
    } */
-function engineOf(vkey){ return (window.SETTLE_ENGINES && window.SETTLE_ENGINES[vkey]) || null; }
+function engineOf(vkey){ return (window.SETTLE_ENGINES && window.SETTLE_ENGINES[vkey]) || window.SETTLE_AUTO || null; }   /* 전용 엔진 없으면 자동(범용) 엔진 settle_engine_auto.js */
 /* 엔진 설정을 기존 계산에서 쓰던 모양 { items:{행:{mode}}, sheets:{시트키:{mode}} } 으로 */
 function cfgOf(vkey){
   var e = engineOf(vkey) || {}, R = { items: {}, sheets: {} };
