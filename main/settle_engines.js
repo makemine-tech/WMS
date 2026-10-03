@@ -134,3 +134,35 @@ window.vendorMatcher = function(name, extra){
   var f = function(v){ var s = norm(v); if (!s) return false; return keys.some(function(k){ return s.indexOf(k) >= 0 || (s.length >= 3 && k.indexOf(s) === 0); }); };
   f.keys = keys; f.main = main; return f;
 };
+
+/* 택배비·배송비 시트 공통 마무리 (대표님 2026-10-03, 신성애드만이 아니라 같은 모양 시트 전부)
+   시트 열: 등록일·출고일·판매처명·수령자·주문정보·수량·매칭정보·매칭총수량·상품종류·출력양식·발송정보·택배크기·택배비·추가운임·…·송장번호·건수
+   · 택배크기 = 대표님이 직접 확인·수정 → 노란 칸
+   · 추가운임 = 이벗 전체주문목록에서 같은 송장번호의 주소가 「제주」로 시작하면 400
+   · 거래명세표 택배발송(극소·소·중·대) 수량 = 이 시트 택배크기 COUNTIF 수식(택배크기를 고치면 따라 바뀜), 항공비/제주도 = 추가운임 있는 줄 수 */
+window.shipSheetFinish = function(wb, sheetName, st, ctx){
+  var ws = wb.getWorksheet(sheetName), log = ctx.log; if (!ws) return Promise.resolve();
+  var YEL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2B3' } };
+  var ns = function(v){ if (v && v.richText) v = v.richText.map(function(t){ return t.text; }).join(''); if (v && typeof v === 'object' && 'result' in v) v = v.result; return String(v == null ? '' : v).replace(/\s+/g, ''); };
+  var col = {}; ws.getRow(1).eachCell(function(c, n){ var h = ns(c.value); if (h && col[h] == null) col[h] = n; });
+  var cZ = col['택배크기'], cA = col['추가운임'], cN = col['송장번호']; if (!cZ || !cN) return Promise.resolve();
+  var last = 1; ws.eachRow(function(row, r){ if (r > 1 && ns(row.getCell(cN).value)) last = r; });
+  var box = ctx.BOX || {}, ids = Object.keys(box).filter(function(id){ return box[id].type === 'ebut_orders'; }), jeju = {};
+  return ids.reduce(function(p, id){ return p.then(function(){ return ctx.readBox(box[id]).then(function(x){
+    var a = XLSX.utils.sheet_to_json(x.Sheets[x.SheetNames[0]], { header: 1, defval: '' }); if (!a.length) return;
+    var H = a[0].map(ns), iN = H.indexOf('송장번호'), iA = H.indexOf('주소'); if (iN < 0 || iA < 0) return;
+    a.slice(1).forEach(function(r){ var v = String(r[iN] || '').trim(); if (v && /^\s*제주/.test(String(r[iA] || ''))) jeju[v] = 1; });
+  }); }); }, Promise.resolve()).then(function(){
+    var nJ = 0, cnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, nAdd = 0;
+    for (var r = 2; r <= last; r++){ var row = ws.getRow(r), inv = ns(row.getCell(cN).value); if (!inv) continue;
+      var z = row.getCell(cZ); z.style = Object.assign({}, z.style, { fill: YEL }); var zz = ns(z.value); if (cnt[zz] != null) cnt[zz]++;
+      if (cA){ var ad = row.getCell(cA); if (jeju[inv]){ ad.value = 400; nJ++; } if (+ns(ad.value) > 0) nAdd++; } }
+    var L = function(n){ return ws.getColumn(n).letter; }, rngZ = "'" + sheetName + "'!" + L(cZ) + '2:' + L(cZ) + Math.max(2, last), rngA = cA ? "'" + sheetName + "'!" + L(cA) + '2:' + L(cA) + Math.max(2, last) : null;
+    var lab = function(b){ return b.replace(/\s+/g, ''); }, sizeOf = function(b){ if (!/택배|발송|배송/.test(b)) return null; if (/극소/.test(b)) return '극소'; if (/\(소\)|소$/.test(b)) return '소'; if (/\(중\)|중$/.test(b)) return '중'; if (/\(대\d?\)|대\d?$/.test(b)) return '대'; return null; };
+    if (st) st.eachRow(function(row, r){ var b = lab(ns(row.getCell(2).value) + ns(row.getCell(3).value)); if (!b) return; var g = row.getCell(7), z = sizeOf(b);
+      if (z){ g.value = { formula: 'COUNTIF(' + rngZ + ',"' + z + '")', result: cnt[z] }; g.style = Object.assign({}, g.style, { fill: YEL }); }
+      else if (rngA && /항공|제주도|추가운임/.test(b)){ g.value = { formula: 'COUNTIF(' + rngA + ',">0")', result: nAdd }; } });
+    log.push(['자동 적용', '시트 「' + sheetName + '」 추가운임: 이벗 주소가 제주인 송장 ' + nJ + '건 = 400 · 택배크기 칸 노란색(직접 확인) · 거래명세표 택배 건수는 택배크기 COUNTIF 수식(고치면 따라 바뀜)']);
+    if (nJ && st) log.push(['특이사항', '제주 추가운임 400 ' + nJ + '건 — 거래명세표 항공비/제주도 줄 단가가 400 인지 확인']);
+  });
+};

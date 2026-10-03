@@ -93,6 +93,7 @@
           if (other) log.push(['특이사항', '택배크기가 극소·소·중·대가 아닌 줄 ' + other + '건 — 택배 시트 확인']);
           if (!rows.length) log.push(['특이사항', '이번 달 택배비 리스트에 이 업체 줄이 없습니다 (출력양식 ' + Object.keys(learnO).join('·') + ')']);
           log.push(['자동 적용', cfg.shipSheet + ' ← 이벗 택배비 리스트 ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대 + (air ? ' · 항공 ' + air : '') + (isl ? ' · 도선 ' + isl : '')]);
+          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx);   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
         });
       }
     };

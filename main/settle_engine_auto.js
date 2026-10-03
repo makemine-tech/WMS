@@ -51,7 +51,7 @@
       var keys = [vc].concat(par, al).filter(function(k){ return k.length >= 2; }), VM = window.vendorMatcher(vname);
       var hit = VM;   /* settle_engines.js vendorMatcher */
       var jobs = (A.sheets || []).filter(function(s){ return s.kind && wb.getWorksheet(s.name); });
-      var sizeSet = false, sizeCnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, air = 0, isl = 0, shipSeen = false, shipMissing = false, shipMax = -1;
+      var sizeSet = false, sizeCnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, air = 0, isl = 0, shipSeen = false, shipMissing = false, shipMax = -1, shipSheets = [], shipBig = null;
 
       return jobs.reduce(function(p, s){ return p.then(function(){
         var ws = wb.getWorksheet(s.name), k = s.kind.key, T = tplRows(ws);
@@ -74,6 +74,7 @@
             sizeSet = true;
             log.push(['자동 적용', '시트 「' + s.name + '」 ← 택배비 리스트 ' + rows.length + '건 (지난달 출력양식·판매처명 ' + Object.keys(L).map(function(x){ return x.split('\u0001')[1]; }).slice(0, 4).join('·') + ')']);
             rs.warn.forEach(function(w){ log.push(['확인 필요', '시트 「' + s.name + '」 — ' + w]); });
+            shipSheets.push(s.name); if (rows.length >= shipMax) shipBig = s.name;
           });
         }
         /* ── 이벗 전체주문목록 ── */
@@ -155,6 +156,8 @@
       }); }, Promise.resolve()).then(function(){
         /* 거래명세표 택배 건수 */
         if (!shipSeen) return;
+        /* 택배비 리스트가 있으면 공통 마무리(settle_engines.js shipSheetFinish): 제주 추가운임 400 · 택배크기 노란 칸 · 거래명세표 건수 = COUNTIF 수식 (가장 큰 택배 시트 기준) */
+        if (!shipMissing && shipBig) return shipSheets.reduce(function(p, n){ return p.then(function(){ return window.shipSheetFinish(wb, n, n === shipBig ? st : null, ctx); }); }, Promise.resolve());
         stRow(st, function(b){ return !!sizeOf(b); }).forEach(function(r){ var z = sizeOf(ns(st.getCell('B' + r).value) + ns(st.getCell('C' + r).value)), g = st.getCell('G' + r);
           g.value = shipMissing ? 0 : sizeCnt[z]; g.style = Object.assign({}, g.style, { fill: shipMissing ? YEL : NOFILL }); });
         stRow(st, function(b){ return /항공|제주도/.test(b); }).forEach(function(r){ var g = st.getCell('G' + r); g.value = shipMissing ? 0 : air; g.style = Object.assign({}, g.style, { fill: shipMissing ? YEL : NOFILL }); });
