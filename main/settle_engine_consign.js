@@ -79,6 +79,24 @@
               if (cfg.pctOf){ var p = cfg.pctOf[n]; if (p == null){ odd.push(k + ' ' + n + '캔'); p = 0; } amt[i] = Math.round(p * cfg.pct); }
               else amt[i] = n * cfg.rate; });
             if (cfg.ship && !direct){ var b = cfg.shipPer24 ? Math.max(1, Math.ceil(c / 24)) : 1; boxes[first] = b; ship[first] = b * cfg.ship; } });
+          /* plain(대표님 9월 플라잉피그 완성본 방식, 2026-10-03): 데이터 시트는 지난달과 같은 열만 + 맨 아래 「합계」 줄에 매칭수량 합계,
+             거래명세표 줄은 수량 = 캔 수(그 합계 칸) · 단가 = 캔당 단가 ÷ 1.1(VAT 별도) — 업체가 「캔 × 단가」로 바로 맞춰 보게. 택배비 줄은 비움 */
+          if (cfg.plain){
+            /* 열 = 이벗 주문목록 원본 열을 「매칭수량」까지 (완성본과 같은 A~AL) */
+            var cut = D.head.map(nsp).indexOf('매칭수량'), th = cut >= 0 ? D.head.slice(0, cut + 1) : D.head.slice();
+            var iMt = th.map(nsp).indexOf('매칭수량');
+            var prow = D.rows.map(function(r){ return th.map(function(h, j){ if (j === iMt) return cans(r); var k = H.indexOf(nsp(h)); return k < 0 ? null : (r[k] === '' ? null : r[k]); }); });
+            var pws = rewrite(wb, cfg.sheet, th, prow), PT = prow.length + 2, pc = colL(iMt + 1), tCp = prow.reduce(function(s, r){ return s + (+r[iMt] || 0); }, 0);
+            pws.getCell('A' + PT).value = '합계'; pws.getCell('A' + PT).font = { name: '맑은 고딕', size: 10, bold: true };
+            if (iMt >= 0){ pws.getCell(pc + PT).value = prow.length ? { formula: 'SUM(' + pc + '2:' + pc + (PT - 1) + ')', result: tCp } : 0; pws.getCell(pc + PT).font = { name: '맑은 고딕', size: 10, bold: true }; }
+            var tAp = amt.reduce(function(s, x){ return s + x; }, 0);
+            cfg.lines.forEach(function(L){ var r = lineRow(st, L.re); if (!r){ log.push(['확인 필요', '거래명세표에서 「' + L.name + '」 줄을 못 찾음']); return; }
+              if (L.kind === 'sales'){ st.getCell('F' + r).value = null; st.getCell('G' + r).value = iMt >= 0 ? { formula: "'" + cfg.sheet + "'!" + pc + PT, result: tCp } : tCp; st.getCell('H' + r).value = Math.round(cfg.rate / 1.1 * 100) / 100; }
+              else if (L.kind === 'shipQty' && !cfg.ship){ st.getCell('F' + r).value = null; st.getCell('G' + r).value = null; } });
+            log.push(['자동 적용', cfg.sheet + ' ← 이벗 판매처 ' + cfg.sellerName + ' ' + prow.length + '줄 · ' + tCp + '캔 → 거래명세표 수량 ' + tCp + ' × 단가 ' + won(cfg.rate / 1.1) + '(VAT 별도) = 포함가 ' + won(tAp)]);
+            if (!prow.length) log.push(['특이사항', '이번 달 ' + cfg.sellerName + ' 주문이 없습니다 — 0원']);
+            return;
+          }
           var head = D.head.concat(['캔수', '공급가(VAT포함)', '택배건수', '택배비']), base = D.head.length;
           var rows = D.rows.map(function(r, i){ return r.concat([cans(r), amt[i] || null, boxes[i] || null, ship[i] || null]); });
           var ws = rewrite(wb, cfg.sheet, head, rows), T = rows.length + 2;
@@ -124,11 +142,11 @@
     items: { 9: 'auto', 10: 'auto' }, sheets: { '제주누보및초콜릿판매': 'skip' }, verified: { 9: true, 10: true },   /* 8월 → 45,000 일치 */
     ruleList: [COMMON, R('공급가 = 캔당 1,750 × 캔 수, 택배 = 송장 건당 3,000 (둘 다 VAT 포함)')] });
 
-  E['메이크마인디자인_플라잉피그'] = consign({ seller: /^제주누보_플라잉피그$/, sellerName: '제주누보_플라잉피그', sheet: '위탁발송판매',
+  E['메이크마인디자인_플라잉피그'] = consign({ plain: true, seller: /^제주누보_플라잉피그$/, sellerName: '제주누보_플라잉피그', sheet: '위탁발송판매',
     rate: 1760,   /* 택배비 없음 — HK홀세일과 같은 건물, 직접 가져감 */
     lines: [{ kind: 'sales', re: /^위탁발송$/, name: '위탁발송' }, { kind: 'shipQty', re: /^위탁발송택배비$/, name: '위탁발송택배비' }],
     items: { 8: 'auto', 9: 'auto' }, sheets: { '위탁발송판매': 'skip', '직납': 'skip' }, verified: { 8: true, 9: true },   /* 8월 → 42,240 일치 */
-    ruleList: [COMMON, R('공급가 = 캔당 1,760 × 캔 수, 택배비 없음 (9월은 송장 없는 직납)')] });
+    ruleList: [COMMON, R('공급가 = 캔당 1,760 × 캔 수, 택배비 없음 (9월은 송장 없는 직납)'), R('정산서 모양 = 대표님 9월 완성본: 거래명세표 위탁발송 수량 = 캔 수(위탁발송판매 매칭수량 합계) · 단가 1,600(VAT 별도) · 택배비 줄 비움, 위탁발송판매 시트는 이벗 열 A~매칭수량 + 맨 아래 합계')] });
 
   E['메이크마인디자인_제주맥주위탁_만월회'] = consign({ seller: /^제주누보_만월회$/, sellerName: '제주누보_만월회', sheet: '위탁발송판매',
     table: { 1: 1960, 3: 5880, 6: 11130, 12: 20860, 24: 41860 }, ship: 3000, shipPer24: true,
