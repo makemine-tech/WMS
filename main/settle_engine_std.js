@@ -25,9 +25,11 @@
 
   function std(cfg){
     return {
-      items: cfg.items || {}, sheets: cfg.sheets || {}, verified: {}, opt: {}, ruleList: cfg.ruleList,
+      items: cfg.items || {}, sheets: cfg.sheets || {}, verified: cfg.verified || {}, opt: {}, ruleList: cfg.ruleList,
       afterBuild: function(wb, ctx){
-        var st = ctx.st, log = ctx.log, won = ctx.won, YM = ctx.YM, Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+        var st = ctx.st, log = ctx.log, won = ctx.won, YM = ctx.YM;
+        (cfg.zeroQty || []).forEach(function(re){ var r = lineRow(st, re); if (r) st.getCell('G' + r).value = 0; });
+        var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
         var S0 = Math.round(Date.UTC(Y, M - 1, 1) / 864e5) + 25569, vname = cfg.name, vc = core(vname).toLowerCase();
         var keys = [vc].concat((cfg.alias || []).map(function(x){ return String(x).replace(/\s+/g, '').toLowerCase(); })).filter(function(k){ return k.length >= 2; });
         var hit = window.vendorMatcher(cfg.name, cfg.alias);   /* settle_engines.js */
@@ -99,7 +101,11 @@
   var COMMON = [R('보관비 = 지난달 마지막 날 보관파렛에서 시작, 입출고 화물관리 그 달 입고·출고(파렛트)를 날짜별로 → 파렛트×일 합계가 거래명세표 보관비 수량 (단가는 지난달 그대로)'),
     R('택배비 = 이벗 택배비 리스트에서 지난달 택배 시트의 출력양식·판매처명 줄 → 택배크기별 건수(극소·소·중·대) · 추가운임 3,000 = 항공/제주 · 5,000 = 도선/섬. 파일이 아직 없으면 0 + 노란 칸'),
     R('솔루션비용 등 매달 같은 줄은 지난달 그대로 · 화물 청구서·입출고의 이 업체 흔적은 점검_화물흔적 시트로')];
-  E['심플리뷰티풀'] = std({ name: '심플리뷰티풀', shipSheet: '배송비', sheets: { '배송비': 'skip', '보관비': 'skip' }, items: {}, ruleList: [R('보관비만 책정 (택배 건이 생기면 택배비도)')].concat(COMMON) });
+  E['심플리뷰티풀'] = std({ name: '심플리뷰티풀', shipSheet: '배송비', sheets: { '배송비': 'skip', '보관비': 'skip' },
+    /* 2026-10-03 대표님 9월 확정본과 칸 단위 대조: 다른 곳은 솔루션비용 수량(1 → 0)뿐 → 룰로. 택배·보관비 줄 검증됨 */
+    items: { 8: 'auto', 9: 'auto', 10: 'auto', 11: 'auto', 12: 'auto', 13: 'auto', 19: 'auto', 20: 'auto' }, verified: { 8: true, 9: true, 10: true, 11: true, 12: true, 13: true, 19: true, 20: true },
+    zeroQty: [/^솔루션비용$/],
+    ruleList: [R('보관비만 책정 (택배 건이 생기면 택배비도)'), R('솔루션비용 수량 0 (청구 안 함) — 9월 확정본 기준')].concat(COMMON) });
   E['신성애드'] = std({ name: '신성애드', shipSheet: '택배비', sheets: { '택배비': 'skip', '보관비': 'skip' }, items: {}, ruleList: COMMON });
   E['트립인터__0000원'] = std({ name: '트립인터', alias: ['하나유통', '트립'], shipSheet: '택배비', sheets: { '택배비': 'skip', '보관비': 'skip' }, items: {}, ruleList: COMMON });
   E['오름코스메틱'] = std({ name: '오름코스메틱', alias: ['오름'], shipSheet: '배송비', sheets: { '배송비': 'skip', '보관비': 'skip', '반품': 'skip' }, items: {}, ruleList: COMMON });
