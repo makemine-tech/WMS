@@ -37,6 +37,9 @@
         var cans = L.reduce(function(s, o){ return s + cansOf(o); }, 0), inv = {}; L.forEach(function(o){ if (o.inv) inv[o.inv] = 1; });
         var n = Object.keys(inv).length;
         st.getCell('M16').value = cans; st.getCell('M17').value = n;
+        /* 날짜 칸(V6 년 · Y6 월 · AB6 일) = 발주 날짜(여럿이면 마지막), 발주가 없으면 정산월 말일 — 8월은 발주일 8/6 */
+        var YM = ctx.YM, last = L.map(function(o){ return o.d; }).filter(Boolean).sort().pop() || (YM + '-' + String(new Date(Date.UTC(+YM.slice(0, 4), +YM.slice(5, 7), 0)).getUTCDate()).padStart(2, '0'));
+        if (nsp(st.getCell('X6').value) === '년'){ st.getCell('V6').value = +last.slice(0, 4); st.getCell('Y6').value = +last.slice(5, 7); st.getCell('AB6').value = +last.slice(8, 10); }
         if (!L.length) log.push(['특이사항', '이번 달 엠에스컴퍼니 발주가 없습니다 — 0원 (보내지 않아도 되는지 확인)']);
         log.push(['자동 적용', '엠에스컴퍼니 발주 ' + L.length + '줄 · 송장 ' + n + '건 · ' + cans + '캔 → 제주누보 ' + won(cans * 1500) + ' + 택배 ' + won(n * 2727.3) + ' = 공급가 ' + won(cans * 1500 + n * 2727.3) + ' · 포함가 ' + won((cans * 1500 + n * 2727.3) * 1.1)]);
       });

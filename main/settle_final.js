@@ -181,6 +181,8 @@ function leftChecks(buf){
 function confirmFinal(file){
   if (FINAL_BUSY || !VW) return;
   if (!/\.(xlsx|xls|xlsm)$/i.test(file.name)){ alert('엑셀 파일(xlsx)을 올려 주세요'); return; }
+  /* 옛 xls 확정본은 다음 달 초안의 틀이 될 때 서식(테두리·글꼴·도장)이 빠짐 → xlsx 로 저장해 올리게 */
+  if (/\.xls$/i.test(file.name) && !confirm('옛 xls 형식입니다.\n\n이 파일이 다음 달 초안의 틀이 되는데, xls 는 웹에서 테두리·글꼴·도장 같은 서식이 빠집니다.\n엑셀에서 「다른 이름으로 저장 → Excel 통합 문서(xlsx)」로 저장해 올리시는 게 좋습니다.\n\n그래도 xls 로 확정할까요?')) return;
   var named = /^\d{1,2}월_거래내역서_/.test(file.name) ? SETTLE_STMT.vendorFromFile(file.name) : null;
   if (named && named.replace(/\s+/g, '') !== VW.name.replace(/\s+/g, '') && !confirm('파일 이름의 업체가 「' + named + '」 입니다.\n지금 화면은 「' + VW.name + '」 입니다.\n\n그래도 ' + VW.name + ' 확정본으로 올릴까요?')) return;
   var prev = doneOf(VW.vkey, YM);

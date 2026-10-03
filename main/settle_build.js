@@ -241,10 +241,12 @@ function makeDraft(msg){
   return decryptBox(VW.meta).then(function(bytes){
     if (/\.xls$/i.test(VW.meta.name)){   /* 옛 xls 는 xlsx 로 바꿔서 연다 (서식 일부 빠질 수 있음) */
       var x = XLSX.read(bytes, { type: 'array', cellStyles: true }); bytes = XLSX.write(x, { type: 'array', bookType: 'xlsx' });
-      log.push(['안내', '표본이 옛 xls 형식이라 xlsx 로 바꿔 열었습니다 — 서식 일부가 다를 수 있음']);
+      log.push(['확인 필요', '표본이 옛 xls 형식이라 테두리·글꼴·도장 같은 서식이 빠집니다 — 엑셀에서 「다른 이름으로 저장 → xlsx」로 바꿔 파일함(표본 달)에 다시 올리면 다음부터 그대로 나옵니다 (확정본도 xlsx 로 저장해 올려 주세요)']);
     }
     wb = new ExcelJS.Workbook(); return wb.xlsx.load(bytes);
   }).then(function(){
+    /* 기본 행 높이가 빠진 시트(xls 에서 바꾼 것 등)는 그대로 저장하면 엑셀이 파일을 못 엶 → 채움 (2026-10-03 엠에스컴퍼니 초안이 안 열리던 것) */
+    wb.eachSheet(function(ws){ if (!ws.properties || !ws.properties.defaultRowHeight) ws.properties = Object.assign({ defaultRowHeight: 15, dyDescent: 0.55, outlineLevelRow: 0, outlineLevelCol: 0 }, ws.properties || {}); });
     var st = wb.getWorksheet(A.sheet) || wb.worksheets[0];
     /* 1) 날짜 */
     st.eachRow(function(row){ row.eachCell(function(c){
@@ -264,6 +266,7 @@ function makeDraft(msg){
         return;
       }
       if (mode === 'fixed'){ if (isPivot) cell.value = it.qty.v; log.push(['고정', it.name + ' = ' + won(it.qty.v) + ' (지난달 그대로)']); return; }
+      if (mode === 'auto' && eng && eng.afterBuild) return;   /* 업체 룰(엔진)이 계산하는 줄 — 노란 표시·「직접 입력」 경고 없이 엔진에 맡김 */
       if (isPivot){ cell.value = it.qty.v; cell.fill = YEL; log.push(['확인 필요', it.name + ' — 피벗 계산이라 지난달 값 ' + won(it.qty.v) + ' 그대로' + (rr.text ? ' · 룰: ' + rr.text : '')]); return; }
       if (it.qty.src.kind === 'input' || !it.qty.f){
         /* 매달 같은 줄(솔루션·사용료·관리비·보관비 등)은 지난달 수량 그대로, 그 밖의 직접 입력 줄은 지난달에만 있던 일(입고비·소급·오배송 등)일 수 있어 0 + 노란 칸
