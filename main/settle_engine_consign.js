@@ -142,4 +142,20 @@
             { kind: 'zero', re: /^초콜릿위탁판매$/, name: '초콜릿 위탁판매' }, { kind: 'zero', re: /^초콜릿쿠팡납품내역$/, name: '초콜릿 쿠팡납품내역' }],
     items: { 12: 'auto', 13: 'auto', 19: 'fixed' }, sheets: { '03_제주맥주위탁': 'skip', '01_초콜릿위탁발송': 'skip', '02_초콜릿매입': 'skip', '경문판매내역': 'skip' },
     ruleList: [COMMON, R('제주누보(판매처 제주맥주_경문) = 캔당 1,600 × 캔 수 + 택배 송장 건당 3,000 (VAT 포함)'), R('이벗 시스템 사용료 55,000 매달 고정'), R('초콜릿 위탁판매·쿠팡납품은 아직 룰 없음 → 0원 + 노란 칸 (경문 자료로 직접)')] });
+
+  /* 디에이치 (2026-10-03): 솔루션비용 50,000(VAT 별도) 매달 고정 — 판매(박스앤캔 초콜릿·제주맥주) 주문이 없으면 솔루션비용만.
+     이벗 판매처에 위탁 판매(박스앤캔·제주·초콜릿…디에이치/DH) 주문이 보이면 특이사항(룰 정해야 함) — 고객사 DH인터내셔널_부천 본 물량(판매처 DH인터내셔널 등)은 이 정산과 무관 */
+  E['디에이치'] = { items: { 8: 'fixed', 12: 'auto', 13: 'auto', 14: 'auto' }, sheets: { '박스앤캔초콜릿판매내역': 'skip', '제주맥주판매내역': 'skip' }, verified: { 8: true }, opt: {},
+    ruleList: [R('솔루션비용(이벗) 50,000 VAT 별도 매달 고정'), R('박스앤캔 초콜릿판매·제주맥주판매·제주맥주 배송비 = 주문이 없으면 0 — 이벗 판매처에 디에이치/DH 주문이 있으면 특이사항(룰 필요)')],
+    afterBuild: function(wb, ctx){
+      var st = ctx.st, log = ctx.log;
+      [12, 13, 14].forEach(function(r){ var g = st.getCell('G' + r); if (txt(st.getCell('B' + r).value)) g.value = 0; if (r === 12) st.getCell('F' + r).value = 0; });
+      ['박스앤캔초콜릿판매내역', '제주맥주판매내역'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return; for (var r = 2; r <= ws.rowCount; r++) ws.getRow(r).eachCell(function(c, k){ if (k <= 33) c.value = null; }); });
+      return readOrders(ctx, /^(박스앤캔|제주|초콜릿).*(디에이치|DH)/i).then(function(D){
+        var n = D ? D.rows.length : 0;
+        if (!D) log.push(['확인 필요', '파일함에 이벗 전체주문목록이 없어 디에이치 주문을 확인하지 못했습니다']);
+        else if (n) log.push(['특이사항', '이벗 판매처에 디에이치/DH 주문 ' + n + '줄이 있습니다 — 청구 룰이 아직 없어 0원, 대화창에서 알려 주세요']);
+        log.push(['자동 적용', '솔루션비용 50,000 (VAT 별도) · 판매 0원' + (n ? '' : ' (이번 달 디에이치 판매 주문 없음)') + ' → 포함가 55,000']);
+      });
+    } };
 })();
