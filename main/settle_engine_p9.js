@@ -224,7 +224,7 @@
       { d: '2026-10-03', t: '기타작업내역 작업비 없는 출고 = 파렛트채 입출고(입고 3,000·출고 3,000·서류/출고작업 팔당 11,000)라 파렛트로만 청구. 단 완파렛트(45입 54 · 30입 72 · 15입 125 · 당쉼 20개입 72 · 스파클링 24개입 70박스)가 아닌 나머지 박스 × 300 × 1.1 (예: 서리태45 368박스/7팔 → 44박스). 박스는 딱 떨어지는데 파렛트수가 다르면 점검. 기준 모르는 상품은 점검 목록' },
       { d: '2026-10-03', t: '크기 표시 없는 「서리태」 = 45입(54박스)으로 봄 — 특이사항으로 알림. 애매한 경우(기준 모름·파렛트수 불일치·파렛트도 작업비도 없는 출고)는 「특이사항」으로 화면 맨 위와 점검 시트에' },
       { d: '2026-10-03', t: '기타작업내역 A열 = 발주번호(숫자=쿠팡) 또는 채널(컬리·홈쇼핑·올리브영…). 컬리 크기 없는 서리태·맷돌 = 45입(54) 기본 · 파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 · 박스가 완파렛트로 떨어지는데 파렛트수가 적게 적혔으면 고침(936박스/12팔 → 13팔) — 모두 특이사항으로 알림' },
-      { d: '2026-10-03', t: '점검 시트 = 맨 앞, 확인할 칸마다 한 줄(번호·상태·시트·칸·내용) — 시트 이름 누르면 그 칸으로 이동, 상태 미확인/완료 드롭다운, 완료면 회색 줄, 맨 위 남은 점검 개수' },
+      { d: '2026-10-03', t: '점검 = 확인할 칸은 모두 노란색, 점검 시트(맨 앞) 시트 이름 누르면 그 칸으로 이동, 확인하면 그 칸 노란색을 지움 = 완료 — ⑤ 완료 확정 때 남은 노란 칸을 자동으로 찾아 알림' },
       { d: '2026-10-03', t: '포장구분·작업비정산서 이름은 금액 기준만(기본포장 300 · 박스포장1 500 · 박스포장2 700 · 박스합포장1(작업상세는 합포장1) 1,000 · 박스합포장2(합포장2) 1,500) + 소분포장 300 — 설명형 이름 안 씀. 작업비정산서는 8월 양식 그대로에 소분포장 열(H)·줄(22) 추가, 합계 I:J열·23행' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
@@ -543,27 +543,24 @@
         beautify(wb);
         var ck = wb.getWorksheet('점검(확정 전 삭제)'); if (ck) wb.removeWorksheet(ck.id);
         ck = wb.addWorksheet('점검(확정 전 삭제)'); ck.orderNo = -1;
-        /* 점검 시트 (대표님 2026-10-03): 시트 이름을 누르면 그 칸으로 이동 → 확인·수정 후 노란색 지우고 상태를 「완료」로 → 맨 위 남은 개수가 0 이 되면 이 시트를 지우고 ⑤ 완료 확정 */
-        var NCK = CHK.length, H0 = 4, HL = H0 + NCK;
-        ck.columns = [{ width: 6 }, { width: 10 }, { width: 20 }, { width: 9 }, { width: 104 }];
-        ck.mergeCells('A1:E1'); ck.getCell('A1').value = '점검 목록 — 시트 이름을 누르면 그 칸으로 이동 · 확인하면 상태를 「완료」로 (돌아올 땐 Ctrl+G → Enter)';
+        /* 점검 방식 (대표님 2026-10-03): 확인할 칸은 모두 노란색(점검 색) → 점검 시트의 시트 이름을 누르면 그 칸으로 이동 → 확인했으면 그 칸 노란색을 지움(채우기 없음/주변 색).
+           노란색이 지워진 칸 = 점검 완료. ⑤ 완료 확정에 올리면 정산관리가 파일 전체에서 남은 노란 칸을 찾아 알려 줌 (settle_final.js) */
+        CHK.forEach(function(x){ var w = wb.getWorksheet(x[0]); if (!w) return;
+          var m = String(x[1]).split(':'), c1 = w.getCell(m[0]), c2 = w.getCell(m[1] || m[0]);
+          for (var rr = c1.row; rr <= c2.row; rr++) for (var cc = c1.col; cc <= c2.col; cc++){ var cl = w.getCell(rr, cc); cl.style = Object.assign({}, cl.style, { fill: YEL }); } });
+        var NCK = CHK.length, H0 = 4;
+        ck.columns = [{ width: 6 }, { width: 20 }, { width: 9 }, { width: 110 }];
+        ck.mergeCells('A1:D1'); ck.getCell('A1').value = '점검 목록 — 시트 이름을 누르면 그 칸(노란색)으로 이동합니다. 확인했으면 그 칸의 노란색을 지우세요.';
         ck.getCell('A1').font = F_TITLE; ck.getCell('A1').alignment = { vertical: 'middle' }; ck.getRow(1).height = 28;
-        ck.mergeCells('A2:E2');
-        ck.getCell('A2').value = { formula: '"전체 ' + NCK + '건 · 완료 "&COUNTIF(B' + (H0 + 1) + ':B' + HL + ',"완료")&"건 · 남은 점검 "&COUNTIF(B' + (H0 + 1) + ':B' + HL + ',"<>완료")&"건"', result: '전체 ' + NCK + '건 · 완료 0건 · 남은 점검 ' + NCK + '건' };
-        ck.getCell('A2').font = { name: '맑은 고딕', size: 11, bold: true, color: { argb: 'FFC00000' } };
-        ck.getRow(H0).values = ['번호', '상태', '시트', '칸', '확인할 내용']; styleHead(ck.getRow(H0), 5); ck.getRow(H0).height = 24;
-        CHK.forEach(function(x, k){ var r = ck.getRow(H0 + 1 + k);
-          r.values = [k + 1, '미확인', { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }, x[1], x[2]]; });
-        body(ck, H0, H0 + 1, HL, 1, 5);
-        for (var cr = H0 + 1; cr <= HL; cr++){
-          ck.getCell('A' + cr).alignment = A_C; ck.getCell('D' + cr).alignment = A_C; ck.getCell('E' + cr).alignment = { wrapText: true, vertical: 'middle' };
-          ck.getCell('C' + cr).font = { name: '맑은 고딕', size: 10, color: { argb: 'FF1F5FBF' }, underline: true };
-          ck.getCell('B' + cr).alignment = A_C; ck.getCell('B' + cr).font = { name: '맑은 고딕', size: 10, bold: true, color: { argb: 'FFC00000' } };
-          ck.getCell('B' + cr).dataValidation = { type: 'list', allowBlank: false, formulae: ['"미확인,완료"'] }; }
-        if (NCK) ck.addConditionalFormatting({ ref: 'A' + (H0 + 1) + ':E' + HL, rules: [{ type: 'expression', formulae: ['$B' + (H0 + 1) + '="완료"'], priority: 1,
-          style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFE2F0D9' } }, font: { color: { argb: 'FF7F7F7F' }, strike: true } } }] });
-        var nr = ck.getRow(HL + 2); nr.getCell(5).value = '노란 칸 = 확인할 곳. 확인·수정했으면 그 칸 노란색을 지우고 여기 상태를 「완료」로. 남은 점검이 0건이면 이 시트를 지우고 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.';
-        nr.getCell(5).font = { name: '맑은 고딕', size: 9, italic: true, color: { argb: 'FF7F7F7F' } }; nr.getCell(5).alignment = { wrapText: true };
+        ck.mergeCells('A2:D2');
+        ck.getCell('A2').value = '노란 칸 ' + NCK + '곳 · 노란색이 지워진 칸 = 점검 완료 · 다 지우면 이 시트를 지우고 ⑤ 완료 확정에 올리세요 — 남은 노란 칸이 있으면 정산관리가 찾아서 알려 드립니다. (점검 목록으로 돌아올 땐 Ctrl+G → Enter)';
+        ck.getCell('A2').font = { name: '맑은 고딕', size: 10, bold: true, color: { argb: 'FFC00000' } }; ck.getCell('A2').alignment = { wrapText: true, vertical: 'middle' }; ck.getRow(2).height = 32;
+        ck.getRow(H0).values = ['번호', '시트', '칸', '확인할 내용']; styleHead(ck.getRow(H0), 4); ck.getRow(H0).height = 24;
+        CHK.forEach(function(x, k){ ck.getRow(H0 + 1 + k).values = [k + 1, { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }, x[1], x[2]]; });
+        body(ck, H0, H0 + 1, H0 + NCK, 1, 4);
+        for (var cr = H0 + 1; cr <= H0 + NCK; cr++){
+          ck.getCell('A' + cr).alignment = A_C; ck.getCell('C' + cr).alignment = A_C; ck.getCell('D' + cr).alignment = { wrapText: true, vertical: 'middle' };
+          ck.getCell('B' + cr).font = { name: '맑은 고딕', size: 10, color: { argb: 'FF1F5FBF' }, underline: true }; }
         ck.properties.tabColor = { argb: 'FFC00000' };
         ck.views = [{ state: 'frozen', xSplit: 0, ySplit: H0, topLeftCell: 'A' + (H0 + 1), activeCell: 'B' + (H0 + 1), showGridLines: false, zoomScale: 100 }];
         log.push(['자동 적용', '청구내역서 포함가 ' + won(sum) + ' (공급가 ' + won(sum / 1.1) + ') · 점검 표시 ' + CHK.length + '곳']);

@@ -41,6 +41,7 @@ function finalCardHtml(){
     + '<div class="row" style="border:1px solid var(--g);border-radius:10px;padding:.6rem .8rem"><div class="ck">✅</div><div class="lb"><b>' + esc(d.name) + '</b>'
     + '<small>' + esc(ftime(d.at)) + ' 확정 · ' + esc(d.by || '') + (d.total != null ? ' · 합계 ' + won(d.total) + '원' : '') + (d.orig && d.orig !== d.name ? ' · 올린 파일 ' + esc(d.orig) : '') + '</small></div>'
     + '<div class="ac"><button class="btn" onclick="downFinal()">확정본 내려받기</button> <button class="btn" style="border-color:#f87171;color:#f87171" onclick="resetFinal()">↺ 처음부터 다시</button></div></div>'
+    + (d.checksLeft == null ? '' : d.checksLeft ? '<div class="sm" style="color:#fbbf24;margin-top:.4rem">⚠️ 확정 때 남아 있던 노란 칸(점검 표시) ' + d.checksLeft + '곳: ' + esc((d.checksList || []).slice(0, 20).join(', ')) + (d.checksLeft > 20 ? ' …' : '') + '</div>' : '<div class="sm" style="color:var(--g);margin-top:.4rem">✔ 점검 표시(노란 칸) 모두 확인됨</div>')
     + diffHtml(d)
     + (hist.length ? '<div class="sm dim" style="margin-top:.5rem">이전 확정 ' + hist.length + '번: ' + hist.map(function(h){ return esc(ftime(h.at)) + ' ' + esc(h.orig || h.name); }).join(' · ') + ' (파일함에 「이전 확정본」으로 남아 있음)</div>' : '')
     + zone;
@@ -151,6 +152,20 @@ function diffBooks(dw, fw, stmtName){
 }
 
 /* ── 올리기 = 완료 확정 ── */
+/* 남은 점검 색(노란 FFF2B3) 찾기 — 초안에서 확인할 칸은 모두 이 색, 대표님이 확인하면 색을 지움 (2026-10-03) */
+var CHECK_ARGB = 'FFFFF2B3';
+function leftChecks(buf){
+  var wb = new ExcelJS.Workbook();
+  return wb.xlsx.load(buf).then(function(){
+    var L = [], sheetLeft = false;
+    wb.eachSheet(function(ws){
+      if (/^점검/.test(ws.name)){ sheetLeft = true; return; }
+      ws.eachRow({ includeEmpty: false }, function(row){ row.eachCell({ includeEmpty: true }, function(c){
+        var f = c.fill; if (f && f.type === 'pattern' && f.pattern === 'solid' && f.fgColor && String(f.fgColor.argb).toUpperCase() === CHECK_ARGB) L.push(ws.name + '!' + c.address); }); });
+    });
+    return { list: L, sheet: sheetLeft };
+  });
+}
 function confirmFinal(file){
   if (FINAL_BUSY || !VW) return;
   if (!/\.(xlsx|xls|xlsm)$/i.test(file.name)){ alert('엑셀 파일(xlsx)을 올려 주세요'); return; }
@@ -159,11 +174,19 @@ function confirmFinal(file){
   var prev = doneOf(VW.vkey, YM);
   if (prev && !confirm('이미 확정된 파일이 있습니다.\n\n기존: ' + (prev.orig || prev.name) + ' (' + ftime(prev.at) + ')\n새 파일: ' + file.name + '\n\n새 파일을 정본으로 할까요? (기존 파일은 이력으로 남습니다)')) return;
   FINAL_BUSY = true;
-  var V = VW, ym = YM, vkey = V.vkey, buf, fwb, total = null, diff = null, diffErr = '', id = newId(), path = 'settlement/' + ym + '/' + id;
+  var V = VW, ym = YM, vkey = V.vkey, buf, fwb, left = null, total = null, diff = null, diffErr = '', id = newId(), path = 'settlement/' + ym + '/' + id;
   var ext = (file.name.split('.').pop() || 'xlsx').toLowerCase(), name = ym.slice(5, 7) + '월_거래내역서_' + V.name + '.' + ext;
   finalMsg('확정 파일 읽는 중…');
   file.arrayBuffer().then(function(b){
     buf = b; fwb = XLSX.read(b, { type: 'array', cellFormula: true });
+    finalMsg('남은 점검(노란 칸) 찾는 중…');
+    return leftChecks(b).then(function(lc){ left = lc;
+      if (lc.list.length || lc.sheet){
+        var t = (lc.list.length ? '아직 노란색(점검 표시)이 남은 칸 ' + lc.list.length + '곳:\n' + lc.list.slice(0, 15).join(', ') + (lc.list.length > 15 ? ' …' : '') + '\n\n' : '') + (lc.sheet ? '점검 시트가 아직 남아 있습니다.\n\n' : '');
+        if (!confirm(t + '그래도 이 파일로 확정할까요? (취소하면 엑셀에서 마저 확인)')) throw { cancel: true };
+      }
+    }).catch(function(x){ if (x && x.cancel) throw x; left = null; });
+  }).then(function(){
     try { var A2 = SETTLE_STMT.analyze(fwb); total = A2 && A2.totals ? (A2.totals.total != null ? A2.totals.total : null) : null; } catch (e) {}
     finalMsg('같은 설정으로 초안을 다시 만들어 비교하는 중…');
     return makeDraft(function(){}).then(function(D){ return D.wb.xlsx.writeBuffer(); }).then(function(db2){
@@ -183,6 +206,7 @@ function confirmFinal(file){
     var hist = (prev && prev.hist) || {};
     if (prev && prev.id) hist[prev.id] = { name: prev.name, orig: prev.orig || '', at: prev.at || 0 };
     var rec = { id: id, name: name, orig: file.name, at: now, by: by, total: total,
+      checksLeft: left ? left.list.length : null, checksList: left && left.list.length ? left.list.slice(0, 200) : null,
       nDiff: diff ? diff.n : null, diff: diff ? diff.list : null, diffErr: diffErr || null, hist: Object.keys(hist).length ? hist : null };
     var u = {};
     u['box/' + ym + '/' + id] = meta;
@@ -194,6 +218,6 @@ function confirmFinal(file){
     toast('✅ ' + ymLabel(ym) + ' ' + V.name + ' 완료 확정');
     finalMsg(diff ? '확정했습니다 — 초안과 다른 곳 ' + diff.n + '곳' : '확정했습니다' + (diffErr ? ' (초안 비교 실패: ' + diffErr + ')' : ''));
   }).catch(function(e){
-    FINAL_BUSY = false; finalMsg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e);
+    FINAL_BUSY = false; if (e && e.cancel){ finalMsg('확정을 취소했습니다 — 엑셀에서 노란 칸을 마저 확인해 주세요'); return; } finalMsg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e);
   });
 }
