@@ -131,7 +131,7 @@ window.vendorMatcher = function(name, extra){
   var segs = c.split('_').filter(Boolean), main = segs[segs.length - 1] || c;
   var par = (raw.match(/\(([^)]+)\)/g) || []).map(function(x){ return x.slice(1, -1); });
   var keys = [main].concat(par, (window.SETTLE_ALIASES || {})[raw] || [], extra || []).map(norm).filter(function(k, i, a){ return k.length >= 2 && a.indexOf(k) === i; });
-  var f = function(v){ var s = norm(v); if (!s) return false; return keys.some(function(k){ return s.indexOf(k) >= 0 || (s.length >= 3 && k.indexOf(s) === 0); }); };
+  var f = function(v){ var s = norm(v); if (!s) return false; return keys.some(function(k){ return s.indexOf(k) >= 0 || (k.indexOf(s) === 0 && (s.length >= 3 || (s.length === 2 && k.length <= 4))); }); };   /* 「신성」 → 신성애드 처럼 짧게 적은 이름도 */
   f.keys = keys; f.main = main; return f;
 };
 

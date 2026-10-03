@@ -109,12 +109,18 @@
           if (!sumR){ log.push(['확인 필요', '시트 「' + s.name + '」 — 합계 줄을 못 찾아 지난달 그대로']); return; }
           for (var r0 = T.H + 1; r0 < sumR; r0++){ var a = ws.getRow(r0).getCell(cA > 0 ? cA : 1).value, dv = ws.getRow(r0).getCell(cD).value; if (a != null && a !== '' && dv != null && dv !== '' && isFinite(+txt(dv))) start = +txt(dv); }
           var cin = {}, cout = {}, n = 0;
-          (ctx.CARGO || []).forEach(function(x){ if (!x || !x.date || (x.kind !== 'in' && x.kind !== 'out') || !hit(x.vendor)) return; var d = Math.round(Date.parse(x.date + 'T00:00:00Z') / 864e5) + 25569; if (d < S0 || d >= S0 + ND) return;
-            var pl = (+x.aj || 0) + (+x.etc || 0); n++; if (x.kind === 'in') cin[d] = (cin[d] || 0) + pl; else cout[d] = (cout[d] || 0) + pl; });
+          /* 화물관리 기록: 입고·출고 파렛트 + 모든 기록 내용을 그날 비고 칸에 */
+          var note = {}, KN = { in: '입고', out: '출고', parcel: '택배출고', ret: '반품 양품화', etc: '기타' }, cB2 = hd.indexOf('비고');
+          (ctx.CARGO || []).forEach(function(x){ if (!x || !x.date || !hit(x.vendor)) return; var d = Math.round(Date.parse(x.date + 'T00:00:00Z') / 864e5) + 25569; if (d < S0 || d >= S0 + ND) return;
+            var pl = (+x.aj || 0) + (+x.etc || 0); n++;
+            (note[d] = note[d] || []).push((KN[x.kind] || x.kind || '') + (pl ? ' ' + pl + '팔' : '') + (+x.box ? ' ' + x.box + '박스' : '') + ((x.memo || x.note) ? ' · ' + (x.memo || x.note) : ''));
+            if (x.kind === 'in') cin[d] = (cin[d] || 0) + pl; else if (x.kind === 'out') cout[d] = (cout[d] || 0) + pl; });
+          if (n && cB2 < 0){ cB2 = cD + 1; ws.getRow(T.H).getCell(cB2).value = '비고'; }
           var cur = start, tot = 0, first = T.H + 1;
           for (var i = 0; i < ND && first + i < sumR; i++){ var r = first + i, dd = S0 + i; cur += (cin[dd] || 0) - (cout[dd] || 0); tot += cur;
             if (cA > 0){ ws.getRow(r).getCell(cA).value = dd; ws.getRow(r).getCell(cA).numFmt = 'yyyy-mm-dd'; }
             ws.getRow(r).getCell(cI).value = cin[dd] || 0; ws.getRow(r).getCell(cO).value = cout[dd] || 0;
+            if (cB2 > 0) ws.getRow(r).getCell(cB2).value = note[dd] ? note[dd].join(' / ') : null;
             ws.getRow(r).getCell(cD).value = { formula: (i === 0 ? String(start) : L4(cD) + (r - 1)) + '+' + L4(cI) + r + '-' + L4(cO) + r, result: cur }; }
           for (var r2 = first + ND; r2 < sumR; r2++) ws.getRow(r2).eachCell(function(c){ c.value = null; });
           ws.getRow(sumR).getCell(cD).value = { formula: 'SUM(' + L4(cD) + first + ':' + L4(cD) + (first + ND - 1) + ')', result: tot };

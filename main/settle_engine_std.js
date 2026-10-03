@@ -42,14 +42,19 @@
           if (!sumR){ log.push(['확인 필요', '보관비 시트 합계 줄(SUM)을 못 찾음 — 지난달 그대로']); return; }
           for (var r0 = 2; r0 < sumR; r0++){ var a = ws.getCell('A' + r0).value, dv = ws.getCell('D' + r0).value; if (a != null && a !== '' && dv != null && dv !== ''){ lastD = r0; start = +txt(dv) || 0; } }
           var cin = {}, cout = {}, n = 0, C = ctx.CARGO || [];
-          C.forEach(function(x){ if (!x || !x.date || (x.kind !== 'in' && x.kind !== 'out') || !hit(x.vendor)) return;
+          /* 화물관리 기록: 입고·출고 파렛트는 입고파렛·출고파렛에, 모든 기록(입고·출고·택배출고·반품·기타)의 내용은 그날 비고 칸에 (대표님 2026-10-03 — 신성애드 등) */
+          var note = {}, KN = { in: '입고', out: '출고', parcel: '택배출고', ret: '반품 양품화', etc: '기타' };
+          C.forEach(function(x){ if (!x || !x.date || !hit(x.vendor)) return;
             var d = Math.round(Date.parse(x.date + 'T00:00:00Z') / 864e5) + 25569; if (d < S0 || d >= S0 + ND) return; var p = (+x.aj || 0) + (+x.etc || 0); n++;
-            if (x.kind === 'in') cin[d] = (cin[d] || 0) + p; else cout[d] = (cout[d] || 0) + p; });
+            (note[d] = note[d] || []).push((KN[x.kind] || x.kind || '') + (p ? ' ' + p + '팔' : '') + (+x.box ? ' ' + x.box + '박스' : '') + ((x.memo || x.note) ? ' · ' + (x.memo || x.note) : ''));
+            if (x.kind === 'in') cin[d] = (cin[d] || 0) + p; else if (x.kind === 'out') cout[d] = (cout[d] || 0) + p; });
+          if (n && !txt(ws.getCell('E1').value)){ ws.getCell('E1').value = '비고'; ws.getCell('E1').style = JSON.parse(JSON.stringify(ws.getCell('D1').style || {})); ws.getColumn(5).width = Math.max(ws.getColumn(5).width || 0, 40); }
           if (!ctx.CARGO) log.push(['확인 필요', '입출고 화물관리 기록을 못 읽어 보관비 입고·출고가 0 — 화면에서 화물관리 연결 확인']);
           var cur = start, tot = 0, last = Math.min(sumR - 1, 1 + ND);
           for (var i = 0; i < ND && 2 + i < sumR; i++){ var r = 2 + i, dd = S0 + i, ci = cin[dd] || 0, co = cout[dd] || 0; cur = cur + ci - co; tot += cur;
             ws.getCell('A' + r).value = dd; ws.getCell('A' + r).numFmt = 'yyyy-mm-dd'; ws.getCell('B' + r).value = ci; ws.getCell('C' + r).value = co;
-            ws.getCell('D' + r).value = { formula: (i === 0 ? start : 'D' + (r - 1)) + '+B' + r + '-C' + r, result: cur }; }
+            ws.getCell('D' + r).value = { formula: (i === 0 ? start : 'D' + (r - 1)) + '+B' + r + '-C' + r, result: cur };
+            ws.getCell('E' + r).value = note[dd] ? note[dd].join(' / ') : null; }
           for (var r2 = 2 + ND; r2 < sumR; r2++) ['A', 'B', 'C', 'D', 'E'].forEach(function(c){ ws.getCell(c + r2).value = null; });
           var sf = ws.getCell('D' + sumR).value; ws.getCell('D' + sumR).value = { formula: 'SUM(D2:D' + last + ')', result: tot };
           var sr = lineRow(st, /^보관비$/); if (sr){ var g = st.getCell('G' + sr); g.value = { formula: "'" + ws.name + "'!D" + sumR, result: tot }; }
