@@ -216,6 +216,7 @@
       { d: '2026-10-03', t: '번개배송(Q10 일본 등) = 송장당 출고비 1,500 × 1.1, 착불·기타비용 시트에 송장별 한 줄' },
       { d: '2026-10-03', t: '셀·오 보관비 품명 = 그날 화물 입출고 내용(메모 + 파렛트 수, 없으면 박스) 「올리브영 발송 1 / 울산화물발송 4」 형식' },
       { d: '2026-10-03', t: '메이크창고 판매처 누락재발송(누락·교환·오배송 재발송) = 우리 실수라 미청구 원칙 — 로켓쉽먼트만 청구' },
+      { d: '2026-10-03', t: '기타작업내역 원본 두 형식 자동 판별(작업비 열 = 박스수×작업비 / 작업수량·작업단가 열 = 작업수량×작업단가) · 원본 맨 아래 합계 줄 제외 · 화물 입출고는 그 달 기록만 — 1~8월 백테스트로 찾은 버그' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -310,12 +311,17 @@
           var sh = xb.Sheets['Sheet1'] || xb.Sheets[xb.SheetNames[0]];
           var a = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', blankrows: true, range: 0 });
           var lastI = a.length - 1; while (lastI > 0 && !a[lastI].some(function(v){ return v !== ''; })) lastI--;
+          /* 원본 형식이 달마다 둘: ① 「작업비」 열(P) = 단가, 수량 = 박스수(L) (4·9월)  ② N 작업수량·O 작업단가·P 작업금액 (5·7·8월) — 머리글로 판별 */
+          var hd = (a[0] || []).map(function(h){ return String(h).replace(/\s/g, ''); }), fmtB = hd[14] === '작업단가' || hd[15] === '작업금액';
+          if (fmtB) log.push(['안내', '기타작업내역 원본 = 작업수량·작업단가 형식 (수량 N열 × 단가 O열 × 1.1)']);
           var ws = fresh(wb, '기타작업내역');
           ws.addRow(['발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode', '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '박스수', '파렛트수', '작업수량', '작업단가', '작업금액', '비고']);
           var sumM = 0, sumP = 0, n = 0, big = [];
           for (var i = 1; i <= lastI; i++){ var r = a[i] || [], R = i + 1;
-            if (!r.some(function(v){ return v !== ''; })){ ws.addRow([]); continue; } n++;
-            var unit = +r[15] || 0, qty = unit ? (+r[11] || 0) : 0;
+            if (!r.some(function(v){ return v !== ''; })){ ws.addRow([]); continue; }
+            if (i === lastI && !r.slice(0, 12).some(function(v){ return v !== ''; })) break;   /* 원본 맨 아래 합계 줄(파렛트·금액 합)은 빼고 — 엔진이 합계 줄을 따로 만듦 */
+            n++;
+            var unit = +(fmtB ? r[14] : r[15]) || 0, qty = unit ? (+(fmtB ? r[13] : r[11]) || 0) : 0;
             ws.addRow([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12] === '' ? null : r[12], qty || null, unit || null, { formula: 'N' + R + '*O' + R + '*1.1', result: qty * unit * 1.1 }, r[16] || null]);
             if (typeof r[7] === 'number') ws.getCell('H' + R).numFmt = 'm"월" d"일"';
             if (typeof r[8] === 'number') ws.getCell('I' + R).numFmt = 'yyyy-mm-dd hh:mm';
@@ -352,6 +358,7 @@
             ws.getCell('A1').value = Y + '.' + String(M).padStart(2, '0') + ' 파렛 수량';
             var cin = {}, cout = {}, list = [], desc = {};   /* desc = 그날 품명(입출고 내용) — 8월처럼 「올리브영 발송 1 / 울산화물발송 4」 */
             ca.forEach(function(r){ if (typeof r[0] !== 'number' || r[2] !== name) return; var d = Math.floor(r[0]);
+              if (d < S0 || d >= S0 + ND) return;   /* 그 달 기록만 (엑셀에 앞뒤 달이 섞여 있어도) */
               if (r[1] === '입고') cin[d] = (cin[d] || 0) + (+r[4] || 0); else cout[d] = (cout[d] || 0) + (+r[4] || 0);
               var memo = String(r[7] || '').trim() || (r[1] === '입고' ? '입고' : '출고'), q = +r[4] ? ' ' + (+r[4]) : +r[3] ? ' ' + (+r[3]) + '박스' : '';
               (desc[d] = desc[d] || []).push(memo + q);
@@ -462,4 +469,5 @@
       });
     }
   };
+  E['포인트나인크루'].MONTHS = MONTHS;   /* 백테스트에서 지난 달 값(시작·마감 파렛트·착불)을 넣어 보기 위해 */
 })();
