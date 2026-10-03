@@ -326,7 +326,7 @@ function makeDraft(msg){
     /* 화물 흔적 — 업체 초안마다 (엔진 traceSkip 이면 건너뜀, 표본에 화물 청구서 시트가 있으면 청구서는 그 시트로 이미 들어가므로 입출고만) */
     if (!(eng && eng.traceSkip)) try { traceCargo(wb, log, A.sheets.some(function(s){ return s.kind && s.kind.key === 'freight'; })); } catch (e) { console.error(e); log.push(['확인 필요', '화물 흔적 찾기 오류: ' + ((e && e.message) || e)]); }
     /* 그대로 둔 시트 */
-    A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode; if (eng && eng.isAuto && s.kind) return;   /* 자동 엔진이 종류별로 처리(못 하면 자기가 알림) */
+    A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode; if (eng && eng.isAuto && s.kind) return; if (eng && eng.ownSheets && eng.ownSheets.test(s.name)) return;   /* 자동 엔진이 종류별로 처리(못 하면 자기가 알림) */
       if (m !== 'copy' && m !== 'skip' && !(s.kind && s.kind.key === 'freight') && (s.rows > 0 || s.usedBy.length)) log.push(['확인 필요', '시트 「' + s.name + '」 — 지난달 내용 그대로 (룰을 정하면 바뀜)' + (s.usedBy.length ? ' · ' + s.usedBy.join(',') + '행이 참조' : '')]); });
     var order = { '확인 필요': 0, '자동 적용': 1, '입력': 2, '바꿈': 3, '자동 계산': 4, '수식': 5, '고정': 6, '안내': 7 };
     log.sort(function(a, b){ return (order[a[0]] != null ? order[a[0]] : 9) - (order[b[0]] != null ? order[b[0]] : 9); });
