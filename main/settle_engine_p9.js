@@ -218,6 +218,7 @@
       { d: '2026-10-03', t: '메이크창고 판매처 누락재발송(누락·교환·오배송 재발송) = 우리 실수라 미청구 원칙 — 로켓쉽먼트만 청구' },
       { d: '2026-10-03', t: '기타작업내역 원본 두 형식 자동 판별(작업비 열 = 박스수×작업비 / 작업수량·작업단가 열 = 작업수량×작업단가) · 원본 맨 아래 합계 줄 제외 · 화물 입출고는 그 달 기록만 — 1~8월 백테스트로 찾은 버그' },
       { d: '2026-10-03', t: '기타출고비(기타작업내역 작업금액)는 항상 ×1.1 — 3·5·7월은 빠져 있었음(합 549,830원 덜 받음)' },
+      { d: '2026-10-03', t: '반품 양품화 = 입출고 화물관리 「반품 양품화」 기록의 박스 수 × 1,000 × 1.1, 착불·기타비용 시트에 건별 한 줄 (박스 수 빈칸이면 노란 칸)' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -236,7 +237,7 @@
       if (!rows.length) log.push(['확인 필요', '파일함에 이번 달 「포인트나인크루 출고 ROW」가 없습니다']);
       if (!etcId) log.push(['확인 필요', '파일함에 0930_포인트나인크루(쿠팡 발주서 종류)가 없습니다 — 기타작업내역은 지난달 그대로']);
       if (!cargoId && !(ctx.CARGO && ctx.CARGO.length)) log.push(['확인 필요', '화물 입출고 엑셀도, 입출고 화물관리 ' + YM + ' 기록도 없습니다 — 보관비 입고·출고가 비어요']);
-      var BOLT = {}, work = {}, stor = {}, vC = 0, vD = 0, vF = 0, vG = 0;
+      var BOLT = {}, RET = [], work = {}, stor = {}, vC = 0, vD = 0, vF = 0, vG = 0;
       var rd = function(id){ ctx.msg && ctx.msg(box[id].name + ' 읽는 중…'); return ctx.readBox(box[id]); };
 
       return rows.reduce(function(p, id){ return p.then(function(){ return rd(id).then(function(xwb){
@@ -353,6 +354,12 @@
               String(x.vendor || '').split(',').forEach(function(v){ v = v.trim(); var nm = /곡물/.test(v) ? '곡물도감' : /셀시어스/.test(v) ? '셀시어스' : /오리진|당쉼/.test(v) ? '오리진케어' : v; ca.push([d, k, nm, x.box || '', p, '', '', x.memo || x.note || '']); }); });
             log.push(['안내', '보관비 입고·출고 = 입출고 화물관리 ' + YM + ' 기록 (화물 입출고 엑셀이 파일함에 없음)' + (skip ? ' · 택배출고·기타 ' + skip + '건은 제외' : '')]); }
           else if (cb) log.push(['안내', '보관비 입고·출고 = 파일함 화물 입출고 엑셀']);
+          /* 반품 양품화 = 박스당 1,000 × 1.1 → 착불·기타비용 시트 (대표님 2026-10-03) — 화물관리 기록(kind ret), 없으면 엑셀의 「반품」 줄 */
+          var p9v = function(v){ return /곡물/.test(v) ? '곡물도감' : /셀시어스/.test(v) ? '셀시어스' : /오리진|당쉼/.test(v) ? '오리진케어' : /포인트/.test(v) ? '포인트나인크루' : null; };
+          if (ctx.CARGO) ctx.CARGO.forEach(function(x){ if (!x || x.kind !== 'ret' || !x.date) return; var nm = p9v(String(x.vendor || '')); if (!nm) return;
+            var d = Math.round(Date.parse(x.date + 'T00:00:00Z') / 864e5) + 25569; if (d >= S0 && d < S0 + ND) RET.push({ d: d, nm: nm, box: +x.box || 0, memo: x.memo || x.note || '' }); });
+          else ca.forEach(function(r){ if (typeof r[0] !== 'number' || !/반품/.test(r[1])) return; var nm = p9v(String(r[2] || '')), d = Math.floor(r[0]); if (!nm || d < S0 || d >= S0 + ND) return;
+            RET.push({ d: d, nm: nm, box: +r[3] || 0, memo: r[7] || '' }); });
           var LAY = { 곡: { start: 'D6', I: 'D', E: 'E', O: 'F', cost: 'G', cur: 'H', unit: 'I', sum: 'J' }, 셀: { start: 'C6', I: 'C', E: 'D', O: 'E', cost: 'F', cur: 'G', unit: 'H', sum: 'I' }, 오: { start: 'C6', I: 'C', E: 'D', O: 'E', cost: 'F', cur: 'G', unit: 'H', sum: 'I' } };
           ['곡', '셀', '오'].forEach(function(b){
             var ws = wb.getWorksheet(b + '_보관비'), L = LAY[b], name = BRAND[b]; if (!ws) return;
@@ -360,6 +367,7 @@
             var cin = {}, cout = {}, list = [], desc = {};   /* desc = 그날 품명(입출고 내용) — 8월처럼 「올리브영 발송 1 / 울산화물발송 4」 */
             ca.forEach(function(r){ if (typeof r[0] !== 'number' || r[2] !== name) return; var d = Math.floor(r[0]);
               if (d < S0 || d >= S0 + ND) return;   /* 그 달 기록만 (엑셀에 앞뒤 달이 섞여 있어도) */
+              if (r[1] !== '입고' && r[1] !== '출고') return;   /* 반품 양품화 등은 파렛트 입출고 아님 */
               if (r[1] === '입고') cin[d] = (cin[d] || 0) + (+r[4] || 0); else cout[d] = (cout[d] || 0) + (+r[4] || 0);
               var memo = String(r[7] || '').trim() || (r[1] === '입고' ? '입고' : '출고'), q = +r[4] ? ' ' + (+r[4]) : +r[3] ? ' ' + (+r[3]) + '박스' : '';
               (desc[d] = desc[d] || []).push(memo + q);
@@ -435,6 +443,13 @@
             ws.getCell('B' + r).value = '번개배송 출고비 · ' + x.it.join(', ') + ' · 송장 ' + k; ws.getCell('C' + r).value = 1; ws.getCell('D' + r).value = 1500;
             ws.getCell('E' + r).value = { formula: 'C' + r + '*D' + r + '*1.1', result: v }; });
           if (bo.length) log.push(['자동 적용', '번개배송 출고비 ' + bo.length + '건 × 1,500 × 1.1 = ' + won(bo.length * 1650)]);
+          var rb = 0;
+          RET.sort(function(x, y){ return x.d - y.d; }).forEach(function(x){ var r = 2 + n++, v = x.box * 1000 * 1.1; tot += v; rb += x.box;
+            ws.getCell('A' + r).value = x.d; ws.getCell('A' + r).numFmt = 'm"월" d"일"';
+            ws.getCell('B' + r).value = x.nm + ' 반품양품화 ' + x.box + '박스' + (x.memo ? ' · ' + x.memo : ''); ws.getCell('C' + r).value = x.box; ws.getCell('D' + r).value = 1000;
+            ws.getCell('E' + r).value = { formula: 'C' + r + '*D' + r + '*1.1', result: v };
+            if (!x.box){ ws.getCell('C' + r).fill = YEL; mark(ws, 'C' + r, '반품 양품화 박스 수가 기록에 없음 — 직접 입력'); } });
+          log.push(['자동 적용', RET.length ? '반품 양품화 ' + RET.length + '건 · ' + rb + '박스 × 1,000 × 1.1 = ' + won(rb * 1100) : '반품 양품화 기록 없음 (화물관리 「반품 양품화」로 적으면 자동 청구)']);
           var F = 2 + n;
           ws.getCell('E' + F).value = { formula: 'SUM(E2:E' + Math.max(2, F - 1) + ')', result: tot };
           st.getCell('G38').value = { formula: '택배착불및기타비용!E' + F, result: tot };
