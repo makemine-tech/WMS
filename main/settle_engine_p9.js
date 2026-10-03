@@ -222,6 +222,7 @@
       { d: '2026-10-03', t: '기타작업내역 작업비 없는 출고 = 파렛트채 입출고(입고 3,000·출고 3,000·서류/출고작업 팔당 11,000)라 파렛트로만 청구. 단 완파렛트(45입 54 · 30입 72 · 15입 125 · 당쉼 20개입 72 · 스파클링 24개입 70박스)가 아닌 나머지 박스 × 300 × 1.1 (예: 서리태45 368박스/7팔 → 44박스). 박스는 딱 떨어지는데 파렛트수가 다르면 점검. 기준 모르는 상품은 점검 목록' },
       { d: '2026-10-03', t: '크기 표시 없는 「서리태」 = 45입(54박스)으로 봄 — 특이사항으로 알림. 애매한 경우(기준 모름·파렛트수 불일치·파렛트도 작업비도 없는 출고)는 「특이사항」으로 화면 맨 위와 점검 시트에' },
       { d: '2026-10-03', t: '기타작업내역 A열 = 발주번호(숫자=쿠팡) 또는 채널(컬리·홈쇼핑·올리브영…). 컬리 크기 없는 서리태·맷돌 = 45입(54) 기본 · 파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 · 박스가 완파렛트로 떨어지는데 파렛트수가 적게 적혔으면 고침(936박스/12팔 → 13팔) — 모두 특이사항으로 알림' },
+      { d: '2026-10-03', t: '점검 시트 = 맨 앞, 확인할 칸마다 한 줄(번호·상태·시트·칸·내용) — 시트 이름 누르면 그 칸으로 이동, 상태 미확인/완료 드롭다운, 완료면 회색 줄, 맨 위 남은 점검 개수' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -265,12 +266,12 @@
         var ws = fresh(wb, b + '_작업상세');
         ws.addRow(['송장번호', '발주일'].concat(cols, ['박스수', '포장구분', '포장비', '소분포장']));
         ws.getRow(1).font = { bold: true }; ws.getRow(1).alignment = { wrapText: true, vertical: 'middle' };
-        var cnt = {}, rare = {}, pre = 0, days = {};
+        var cnt = {}, rare = {}, rareAt = {}, pre = 0, days = {};
         order.forEach(function(k){ var v = inv[k], row = [k].concat(cols.map(function(c){ return v.q[c] || ''; }));
           var x = b === '곡' ? gokFee(fH, row) : b === '오' ? oriFee(fH, row) : { fee: 1000, pre: 0, kind: '송장당', box: '' };
           cnt[x.fee] = (cnt[x.fee] || 0) + 1; pre += x.pre || 0; days[v.d] = (days[v.d] || 0) + 1;
           var r2 = ws.addRow([k, v.d].concat(cols.map(function(c){ return v.q[c] || null; }), [x.box === '' || x.box == null ? null : x.box, x.kind, x.fee, x.pre || null]));
-          if (/같은상품|추가송장|빈줄|기타섞임/.test(x.kind) || (+x.box || 0) >= 8){ r2.getCell(cols.length + 4).fill = YEL; rare[x.kind] = (rare[x.kind] || 0) + 1; } });
+          if (/같은상품|추가송장|빈줄|기타섞임/.test(x.kind) || (+x.box || 0) >= 8){ r2.getCell(cols.length + 4).fill = YEL; rare[x.kind] = (rare[x.kind] || 0) + 1; if (!rareAt[x.kind]) rareAt[x.kind] = r2.number; } });
         var n = order.length, L = 2 + cols.length, cFee = L + 3, cPre = L + 4, SC = cPre + 2;
         ws.getColumn(2).numFmt = 'm"월" d"일"'; ws.getColumn(1).width = 16; for (var c = 3; c <= L; c++) ws.getColumn(c).width = 9; ws.getColumn(L + 2).width = 14;
         var col = function(c){ return ws.getColumn(c).letter; }, sc = col(SC), sd = col(SC + 1), se = col(SC + 2), sf = col(SC + 3), feeL = col(cFee), preL = col(cPre), last = n + 1;
@@ -286,7 +287,8 @@
         for (var r = 1; r <= rT; r++) [sc, sd, se, sf].forEach(function(cc){ var cl = ws.getCell(cc + r); cl.border = BOX4; if (r === 1 || r === rT) cl.font = { bold: true }; if (cc !== sc) cl.numFmt = '#,##0'; });
         ws.getColumn(SC).width = 18; ws.getColumn(SC + 3).width = 13; ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 1 }];
         var rk = Object.keys(rare);
-        mark(ws, sc + 1, b === '셀' ? '셀시어스는 송장당 1,000원' : '새 포장 기준(2026-10-03): 완박스 300 · 합포 1~2박스 1,000 · 3박스↑/S팩 합포/60입 단독 1,500, 소분포장은 개수×300 따로' + (rk.length ? ' / 노란 포장구분 = 드문 경우: ' + rk.map(function(k){ return k + ' ' + rare[k] + '건'; }).join(', ') : ''));
+        mark(ws, sc + 1, b === '셀' ? '셀시어스는 송장당 1,000원' : '새 포장 기준(2026-10-03): 완박스 300 · 합포 1~2박스 1,000 · 3박스↑/S팩 합포/60입 단독 1,500, 소분포장은 개수×300 따로');
+        rk.forEach(function(k){ mark(ws, ws.getColumn(cols.length + 4).letter + rareAt[k], '드문 포장구분 「' + k + '」 ' + rare[k] + '건 — 첫 줄로 이동 (포장구분 열 필터로 전부 보기)'); });
         work[b] = { n: n, cnt: cnt, pre: pre, tot: tot, days: days, tiers: tiers, ref: function(t){ return b + '_작업상세!' + sd + (2 + tiers.indexOf(t)); }, refPre: b + '_작업상세!' + sd + rP };
         log.push(['자동 적용', b + '_작업상세 송장 ' + n + '건 · ' + tiers.map(function(t){ return t + '원 ' + (cnt[t] || 0) + '건'; }).join(' · ') + ' · 소분포장 ' + pre + '건 → ' + won(tot) + '원']);
       }); }); }, Promise.resolve()).then(function(){
@@ -326,26 +328,27 @@
              박스가 완파렛트로 딱 떨어지는데 파렛트수가 적게 적혔으면(936박스/12팔 = 72×13) 파렛트수를 고침(적재비 11,000/팔), 많게 적혔으면 점검만.
              A열 = 발주번호(숫자 = 쿠팡) 또는 채널(컬리·홈쇼핑·올리브영·네이버…). 크기 표시 없는 서리태·맷돌: 컬리는 45입이 기본(룰), 그 밖은 45입으로 보고 특이사항.
              파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 (기록 누락분, 특이사항으로 알림) */
-          var STD = function(r){ var s = String(r[4]) + ' ' + String(r[2]);
+          var STD = function(r, ri){ var s = String(r[4]) + ' ' + String(r[2]);
             if (/스파클링|24개|24입/.test(s)) return 70;
             if (/당쉼|오리진/.test(s) && !/스파클링/.test(s)) return 72;
             var n = /45개|45입|(^|\D)45(\D|$)/.test(s) ? 54 : /30개|30입|(^|\D)30(\D|$)/.test(s) ? 72 : /15개|15입|(^|\D)15(\D|$)/.test(s) ? 125 : null;
-            if (n == null && /서리태|맷돌/.test(s)){ if (!/컬리/.test(String(r[0]))){ var gk2 = String(r[0]).trim() + ' ' + String(r[4]).trim(); GUESS[gk2] = (GUESS[gk2] || 0) + 1; } return 54; }   /* 크기 없는 서리태·맷돌 = 45입 (컬리는 기본, 그 밖은 특이사항) */
+            if (n == null && /서리태|맷돌/.test(s)){ if (!/컬리/.test(String(r[0]))){ var gk2 = String(r[0]).trim() + ' ' + String(r[4]).trim(); GUESS[gk2] = (GUESS[gk2] || 0) + 1; if (ri != null) PEND.push(['E', ri + 1, '크기 표시 없는 「' + String(r[4]).trim() + '」(' + String(r[0]).trim() + ') — 45입(완파렛트 54박스)으로 봄, 다른 크기면 알려 주세요']); } return 54; }   /* 크기 없는 서리태·맷돌 = 45입 (컬리는 기본, 그 밖은 특이사항) */
             return n; };
-          var GUESS = {}, PALFIX = {};
+          var GUESS = {}, PALFIX = {}, PEND = [];
           var gStart = {}, groups = {}, PART = {}, partInfo = [], noStd = [], palOff = [], noBill = [];
           (sh['!merges'] || []).forEach(function(m){ if (m.s.c === 12 && m.s.r >= 1) for (var rr = m.s.r; rr <= m.e.r; rr++) gStart[rr] = m.s.r; });
           for (var gi = 1; gi <= lastI; gi++){ var gr = a[gi] || []; if (!gr.some(function(v){ return v !== ''; })) continue; var gs = gStart[gi] != null ? gStart[gi] : gi; (groups[gs] = groups[gs] || []).push(gi); }
           Object.keys(groups).forEach(function(gs){ var rs = groups[gs], pal = +(a[gs] || [])[12] || 0;
             var priced = rs.some(function(i){ return +(fmtB ? a[i][14] : a[i][15]); }), bx = rs.reduce(function(s, i){ return s + (+a[i][11] || 0); }, 0);
-            if (!pal && !priced && bx > 0){ rs.forEach(function(i){ if (+a[i][11]) PART[i] = +a[i][11]; }); noBill.push((+gs + 1) + '행 ' + String(a[gs][0]).trim() + ' ' + String(a[gs][4]).slice(0, 20) + ' ' + bx + '박스'); }   /* 파렛트도 작업비도 없는 출고 = 박스 × 300 */
+            if (!pal && !priced && bx > 0){ rs.forEach(function(i){ if (+a[i][11]) PART[i] = +a[i][11]; }); noBill.push((+gs + 1) + '행 ' + String(a[gs][0]).trim() + ' ' + String(a[gs][4]).slice(0, 20) + ' ' + bx + '박스'); PEND.push(['N', +gs + 1, String(a[gs][0]).trim() + ' ' + String(a[gs][4]).slice(0, 20) + ' ' + bx + '박스 — 파렛트수도 작업비도 없어 박스 × 300 넣음 (기록 누락분)']); }   /* 파렛트도 작업비도 없는 출고 = 박스 × 300 */
             if (!pal || priced) return;
-            var box = rs.reduce(function(s, i){ return s + (+a[i][11] || 0); }, 0), st = rs.map(function(i){ return STD(a[i]); }).filter(function(x, k, arr){ return arr.indexOf(x) === k; });
-            if (st.length !== 1 || st[0] == null){ noStd.push((+gs + 1) + '행 ' + a[gs][4] + ' ' + box + '박스/' + pal + '팔'); return; }
+            var box = rs.reduce(function(s, i){ return s + (+a[i][11] || 0); }, 0), st = rs.map(function(i){ return STD(a[i], i); }).filter(function(x, k, arr){ return arr.indexOf(x) === k; });
+            if (st.length !== 1 || st[0] == null){ noStd.push((+gs + 1) + '행 ' + a[gs][4] + ' ' + box + '박스/' + pal + '팔'); PEND.push(['M', +gs + 1, String(a[gs][4]).slice(0, 24) + ' ' + box + '박스/' + pal + '팔 — 완파렛트 박스 수 기준을 모름 (알려 주시면 룰로)']); return; }
             if (box === pal * st[0]) return;
             var rem = box % st[0], tag = (+gs + 1) + '행 ' + String(a[gs][4]).slice(0, 24) + ' ' + box + '박스/' + pal + '팔';
-            if (!rem){ var np = box / st[0]; if (np > pal){ a[gs][12] = np; PALFIX[gs] = pal; palOff.push(tag + ' → 파렛트수 ' + pal + '→' + np + ' 고침'); } else palOff.push(tag + ' = 완파렛트 ' + np + '팔 분량 (파렛트수가 더 많이 적힘 — 확인)'); return; }
-            PART[rs[rs.length - 1]] = rem; partInfo.push(tag + ' → 나머지 ' + rem + '박스'); });
+            if (!rem){ var np = box / st[0]; if (np > pal){ a[gs][12] = np; PALFIX[gs] = pal; palOff.push(tag + ' → 파렛트수 ' + pal + '→' + np + ' 고침'); PEND.push(['M', +gs + 1, tag + ' → 박스가 완파렛트 ' + np + '팔 분량이라 파렛트수 ' + pal + '→' + np + ' 고침 (노란 칸)']); }
+              else { palOff.push(tag + ' = 완파렛트 ' + np + '팔 분량 (파렛트수가 더 많이 적힘 — 확인)'); PEND.push(['M', +gs + 1, tag + ' = 완파렛트 ' + np + '팔 분량인데 파렛트수가 더 많이 적힘 — 확인']); } return; }
+            PART[rs[rs.length - 1]] = rem; partInfo.push(tag + ' → 나머지 ' + rem + '박스'); PEND.push(['N', rs[rs.length - 1] + 1, tag + ' (완 ' + st[0] + '박스/팔) → 완파렛트 뺀 나머지 ' + rem + '박스 × 300']); });
           var ws = fresh(wb, '기타작업내역');
           ws.addRow(['발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode', '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '박스수', '파렛트수', '작업수량', '작업단가', '작업금액', '비고']);
           var sumM = 0, sumP = 0, n = 0, big = [], partSum = 0;
@@ -361,7 +364,7 @@
             sumM += +r[12] || 0; sumP += qty * unit * 1.1;
             if (part){ partSum += qty * unit * 1.1; ws.getCell('O' + R).fill = YEL; ws.getCell('N' + R).fill = YEL; }
             if (PALFIX[i] != null) ws.getCell('M' + R).fill = YEL;
-            if (qty * unit >= 100000 || (unit && unit !== 300)){ ws.getCell('P' + R).fill = YEL; big.push(r[0] + ' ' + r[4] + ' ' + qty + '×' + unit); } }
+            if (qty * unit >= 100000 || (unit && unit !== 300)){ ws.getCell('P' + R).fill = YEL; big.push(r[0] + ' ' + r[4] + ' ' + qty + '×' + unit); mark(ws, 'P' + R, String(r[0]).trim() + ' ' + String(r[4]).slice(0, 24) + ' ' + qty + ' × ' + unit + '원' + (unit !== 300 ? ' — 단가가 300이 아님' : ' — 10만원 이상')); } }
           /* 원본 병합(파렛트수 등) 그대로 */
           (sh['!merges'] || []).forEach(function(m){ if (m.e.r <= lastI && m.s.r >= 1) try { ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1); ws.getCell(m.s.r + 1, m.s.c + 1).alignment = { vertical: 'middle', horizontal: 'center' }; } catch (e) {} });
           var F = ws.rowCount + 1;
@@ -370,17 +373,17 @@
           [14, 8, 8, 12, 46, 16, 16, 11, 16, 9, 9, 8, 9, 9, 9, 12, 24].forEach(function(w, i){ ws.getColumn(i + 1).width = w; });
           mark(ws, 'N1', '작업수량 = 박스수, 작업단가 = 원본 「작업비」 열, 작업금액 = 수량×단가×1.1 (0930 형식)');
           mark(ws, 'A' + F, '원본에 없는 별도 출고는 이 위에 줄을 추가 — 합계 수식 범위 안에');
-          if (partInfo.length){ mark(ws, 'O1', '완파렛트가 아닌 출고 ' + partInfo.length + '묶음 = 수작업 적재 → 완파렛트 뺀 나머지 박스 × 300 (노란 N·O칸): ' + partInfo.join(' · '));
+          PEND.sort(function(x, y){ return x[1] - y[1]; }).forEach(function(p){ mark(ws, p[0] + p[1], p[2]); });
+          if (partInfo.length){
             log.push(['자동 적용', '완파렛트 아닌 출고 ' + partInfo.length + '묶음 → 나머지 박스 × 300 × 1.1 = ' + won(partSum)]); }
-          var gk = Object.keys(GUESS); if (gk.length){ mark(ws, 'E1', '상품명에 크기(15/30/45입) 표시가 없어 45입(완파렛트 54박스)으로 본 출고 (컬리 외): ' + gk.map(function(k){ return k + ' ' + GUESS[k] + '줄'; }).join(', ') + ' — 다른 크기면 알려 주세요');
+          var gk = Object.keys(GUESS); if (gk.length){
             log.push(['특이사항', '크기 표시 없는 상품을 45입(54박스)으로 보고 계산: ' + gk.map(function(k){ return k + ' ' + GUESS[k] + '줄'; }).join(', ')]); }
-          if (noBill.length){ mark(ws, 'L1', '파렛트수도 작업비도 없는 출고 ' + noBill.length + '묶음 → 박스 × 300 넣음 (기록 누락분): ' + noBill.slice(0, 15).join(' · ') + (noBill.length > 15 ? ' …' : ''));
+          if (noBill.length){
             log.push(['특이사항', '파렛트수·작업비 둘 다 없는 출고 ' + noBill.length + '묶음 → 박스 × 300 넣음: ' + noBill.slice(0, 5).join(' · ')]); }
-          if (palOff.length){ mark(ws, 'M1', '박스는 완파렛트로 딱 떨어지는데 파렛트수가 다름 ' + palOff.length + '묶음 (노란 M칸 = 고침, 적재비 11,000/팔): ' + palOff.join(' · '));
+          if (palOff.length){
             log.push(['특이사항', '파렛트수가 박스 수와 안 맞는 출고: ' + palOff.join(' · ')]); }
-          if (noStd.length){ mark(ws, 'M1', '완파렛트 박스 수 기준을 모르는 출고 ' + noStd.length + '묶음 (45입 54·30입 72·15입 125·당쉼 72·스파클링 70·크기 없는 서리태 54 외) — 기준 알려 주시면 자동 판별: ' + noStd.slice(0, 12).join(' · ') + (noStd.length > 12 ? ' …' : ''));
+          if (noStd.length){
             log.push(['특이사항', '완파렛트 기준을 모르는 출고 ' + noStd.length + '묶음 — 점검 시트 참고']); }
-          if (big.length) mark(ws, 'P1', '노란 작업금액 = 10만원↑ 또는 단가가 300이 아닌 줄 ' + big.length + '줄: ' + big.slice(0, 8).join(' · ') + (big.length > 8 ? ' …' : ''));
           st.getCell('F23').value = { formula: '기타작업내역!M' + F, result: sumM }; st.getCell('F25').value = { formula: '기타작업내역!P' + F, result: sumP };
           work._M = sumM; work._P = sumP;
           log.push(['자동 적용', '기타작업내역 ' + n + '줄 · 파렛트 ' + sumM + ' · 기타출고비 ' + won(sumP)]);
@@ -478,7 +481,7 @@
             ws.getCell('A' + r).value = dd.length === 3 ? Math.round(Date.UTC(+dd[0], +dd[1] - 1, +dd[2]) / 864e5) + 25569 : x.d; ws.getCell('A' + r).numFmt = 'm"월" d"일"';
             ws.getCell('B' + r).value = '로켓쉽먼트 ' + x.to + ' · ' + x.it.join(', ') + ' · 송장 ' + k; ws.getCell('C' + r).value = 1;
             ws.getCell('D' + r).fill = YEL; ws.getCell('E' + r).value = { formula: 'C' + r + '*D' + r + '*1.1', result: 0 }; });
-          if (rkOrd.length){ mark(ws, 'D' + (2 + (MC.cod || []).length) + ':D' + (1 + n), '로켓쉽먼트 ' + rkOrd.length + '건 — 비용(노란 칸)은 수량 따라 대표님이 직접 입력');
+          if (rkOrd.length){ for (var rq = 2 + (MC.cod || []).length; rq <= 1 + n; rq++) mark(ws, 'D' + rq, '로켓쉽먼트 비용 입력 — ' + String(ws.getCell('B' + rq).value).slice(0, 60));
             log.push(['확인 필요', '착불 시트에 로켓쉽먼트 송장 ' + rkOrd.length + '건 — 비용 칸(노란색)은 직접 입력해 주세요']); }
           var bo = Object.keys(BOLT).sort(function(x, y){ return (BOLT[x].d || 0) - (BOLT[y].d || 0) || x.localeCompare(y); });
           bo.forEach(function(k){ var x = BOLT[k], r = 2 + n++, v = 1500 * 1.1; tot += v;
@@ -516,14 +519,30 @@
         mark(st, 'G38', '착불·기타비용 = 대표님 메모 + 로켓쉽먼트 그래놀라 송장(비용 직접 입력)');
         beautify(wb);
         var ck = wb.getWorksheet('점검(확정 전 삭제)'); if (ck) wb.removeWorksheet(ck.id);
-        ck = wb.addWorksheet('점검(확정 전 삭제)');
-        ck.columns = [{ header: '시트', width: 20 }, { header: '칸', width: 10 }, { header: '확인할 내용', width: 110 }]; styleHead(ck.getRow(1), 3); ck.getRow(1).height = 24;
-        CHK.forEach(function(x){ var r = ck.addRow(x); r.getCell(1).value = { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }; });
-        body(ck, 1, 2, ck.rowCount, 1, 3);
-        for (var cr = 2; cr <= ck.rowCount; cr++){ ck.getCell('A' + cr).font = { name: '맑은 고딕', size: 10, color: { argb: 'FF1F5FBF' }, underline: true }; ck.getCell('B' + cr).alignment = A_C; ck.getCell('C' + cr).alignment = { wrapText: true, vertical: 'middle' }; }
-        ck.addRow([]); var nr = ck.addRow(['', '', '노란 칸 = 드물거나 큰 금액이라 한 번 볼 곳. 확인이 끝나면 이 시트를 지우고 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.']);
-        nr.getCell(3).font = { name: '맑은 고딕', size: 9, italic: true, color: { argb: 'FF7F7F7F' } };
-        look(ck, 'FFC00000', [0, 1]);
+        ck = wb.addWorksheet('점검(확정 전 삭제)'); ck.orderNo = -1;
+        /* 점검 시트 (대표님 2026-10-03): 시트 이름을 누르면 그 칸으로 이동 → 확인·수정 후 노란색 지우고 상태를 「완료」로 → 맨 위 남은 개수가 0 이 되면 이 시트를 지우고 ⑤ 완료 확정 */
+        var NCK = CHK.length, H0 = 4, HL = H0 + NCK;
+        ck.columns = [{ width: 6 }, { width: 10 }, { width: 20 }, { width: 9 }, { width: 104 }];
+        ck.mergeCells('A1:E1'); ck.getCell('A1').value = '점검 목록 — 시트 이름을 누르면 그 칸으로 이동 · 확인하면 상태를 「완료」로 (돌아올 땐 Ctrl+G → Enter)';
+        ck.getCell('A1').font = F_TITLE; ck.getCell('A1').alignment = { vertical: 'middle' }; ck.getRow(1).height = 28;
+        ck.mergeCells('A2:E2');
+        ck.getCell('A2').value = { formula: '"전체 ' + NCK + '건 · 완료 "&COUNTIF(B' + (H0 + 1) + ':B' + HL + ',"완료")&"건 · 남은 점검 "&COUNTIF(B' + (H0 + 1) + ':B' + HL + ',"<>완료")&"건"', result: '전체 ' + NCK + '건 · 완료 0건 · 남은 점검 ' + NCK + '건' };
+        ck.getCell('A2').font = { name: '맑은 고딕', size: 11, bold: true, color: { argb: 'FFC00000' } };
+        ck.getRow(H0).values = ['번호', '상태', '시트', '칸', '확인할 내용']; styleHead(ck.getRow(H0), 5); ck.getRow(H0).height = 24;
+        CHK.forEach(function(x, k){ var r = ck.getRow(H0 + 1 + k);
+          r.values = [k + 1, '미확인', { text: x[0], hyperlink: "#'" + x[0] + "'!" + x[1] }, x[1], x[2]]; });
+        body(ck, H0, H0 + 1, HL, 1, 5);
+        for (var cr = H0 + 1; cr <= HL; cr++){
+          ck.getCell('A' + cr).alignment = A_C; ck.getCell('D' + cr).alignment = A_C; ck.getCell('E' + cr).alignment = { wrapText: true, vertical: 'middle' };
+          ck.getCell('C' + cr).font = { name: '맑은 고딕', size: 10, color: { argb: 'FF1F5FBF' }, underline: true };
+          ck.getCell('B' + cr).alignment = A_C; ck.getCell('B' + cr).font = { name: '맑은 고딕', size: 10, bold: true, color: { argb: 'FFC00000' } };
+          ck.getCell('B' + cr).dataValidation = { type: 'list', allowBlank: false, formulae: ['"미확인,완료"'] }; }
+        if (NCK) ck.addConditionalFormatting({ ref: 'A' + (H0 + 1) + ':E' + HL, rules: [{ type: 'expression', formulae: ['$B' + (H0 + 1) + '="완료"'], priority: 1,
+          style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFE2F0D9' } }, font: { color: { argb: 'FF7F7F7F' }, strike: true } } }] });
+        var nr = ck.getRow(HL + 2); nr.getCell(5).value = '노란 칸 = 확인할 곳. 확인·수정했으면 그 칸 노란색을 지우고 여기 상태를 「완료」로. 남은 점검이 0건이면 이 시트를 지우고 저장 → 정산관리 ⑤ 완료 확정에 올려 주세요.';
+        nr.getCell(5).font = { name: '맑은 고딕', size: 9, italic: true, color: { argb: 'FF7F7F7F' } }; nr.getCell(5).alignment = { wrapText: true };
+        ck.properties.tabColor = { argb: 'FFC00000' };
+        ck.views = [{ state: 'frozen', xSplit: 0, ySplit: H0, topLeftCell: 'A' + (H0 + 1), activeCell: 'B' + (H0 + 1), showGridLines: false, zoomScale: 100 }];
         log.push(['자동 적용', '청구내역서 포함가 ' + won(sum) + ' (공급가 ' + won(sum / 1.1) + ') · 점검 표시 ' + CHK.length + '곳']);
       });
     }
