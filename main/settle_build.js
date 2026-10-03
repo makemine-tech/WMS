@@ -69,6 +69,22 @@ function guessSrc(s, opts){
   return opts[0].v;
 }
 
+/* ── 이번 달 진행 상태 (원점 → 초안 계산됨 → 완료 확정) — 「처음부터 다시」를 누르면 원점으로 보이게 (대표님 2026-10-03)
+   run/{ym}/draft = { at, total, nCheck, name } : 초안을 내려받을 때 저장, 처음부터 다시 = run/{ym} 통째로 지움 */
+function runStateHtml(){
+  var run = runOf(), d = run.draft, f = (typeof doneOf === 'function') ? doneOf(VW.vkey, YM) : null;
+  var step = f ? 3 : d ? 2 : 1, st = function(n, t){ var on = n === step, past = n < step;
+    return '<span style="padding:.3rem .7rem;border-radius:999px;font-size:12.5px;font-weight:700;' + (on ? 'background:#60a5fa;color:#0b0d12' : past ? 'background:rgba(96,165,250,.18);color:#93c5fd' : 'background:rgba(255,255,255,.05);color:#6b7280') + '">' + (past ? '✔ ' : '') + t + '</span>'; };
+  var line = st(1, '① 원점') + ' <span class="dim">→</span> ' + st(2, '② 초안 계산됨') + ' <span class="dim">→</span> ' + st(3, '③ 완료 확정');
+  var msg = f ? '✅ 완료 확정됨 — ' + esc(ftime(f.at)) + (f.total != null ? ' · 합계 ' + won(f.total) + '원' : '')
+    : d ? '초안 계산됨 — ' + esc(ftime(d.at)) + (d.total != null ? ' · 포함가 <b>' + won(d.total) + '원</b>' : '') + ' · ⚠️ 특이사항·확인 ' + (d.nCheck || 0) + '건 — 엑셀에서 점검 후 맨 아래 ⑤ 완료 확정'
+    : '<b>원점 상태 — 아직 계산 전입니다.</b> 아래 「초안 내려받기」를 누르면 지금 파일함 원본과 지금 룰로 처음부터 계산합니다.';
+  return '<div id="runState" style="border:1px solid ' + (step === 1 ? '#fbbf24' : 'var(--line, #2a3040)') + ';border-radius:10px;padding:.6rem .8rem;margin:.2rem 0 .8rem">'
+    + '<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">' + line + '</div><div class="sm" style="margin-top:.45rem">' + msg + '</div></div>';
+}
+function refreshRunState(flash){ var el = $('runState'); if (!el) return; el.outerHTML = runStateHtml();
+  if (flash){ var n = $('runState'); if (n){ n.scrollIntoView({ behavior: 'smooth', block: 'center' }); n.animate([{ boxShadow: '0 0 0 3px #fbbf24' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1600, iterations: 2 }); } } }
+
 /* ── 화면: ④ 이번 달 엑셀 만들기 카드 ── */
 function buildCardHtml(A, R){
   var run = runOf(), src = run.src || {}, man = run.manual || {};
@@ -88,7 +104,7 @@ function buildCardHtml(A, R){
       + ' <span class="dim">비우면 지난달 값</span></td></tr>';
   }).join('');
   var yy = YM.slice(5, 7);
-  return '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
+  return runStateHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
     + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">이번 달 원본으로 바꿀 데이터 시트 — 쓸 파일 확인</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
       : '<div class="sec-note">이번 달 원본으로 바꿀 데이터 시트가 정해지지 않았습니다 (대화창에서 요청하면 업체 설정에 넣습니다).</div>')
     + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매달 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
@@ -309,6 +325,10 @@ function buildDraft(){
     VW._lastLog = { log: log, name: name, at: Date.now() };
     msg('✔ ' + name + ' 내려받음 — ⚠️ 특이사항·확인 필요 ' + nCheck + '건 (아래)');
     var box = $('buildLog'); if (box) box.innerHTML = buildLogHtml();
+    var tl = log.map(function(l){ return l[1]; }).join(' '), tm = tl.match(/포함가 ([\d,]+)/), tot = tm ? +tm[1].replace(/,/g, '') : null;
+    var dr = { at: Date.now(), total: tot, nCheck: nCheck, name: name };
+    if (!VENDORS[VW.vkey]) VENDORS[VW.vkey] = {}; var V2 = VENDORS[VW.vkey]; V2.run = V2.run || {}; V2.run[YM] = V2.run[YM] || {}; V2.run[YM].draft = dr;
+    refreshRunState(false); setRun('draft', dr);
   }).catch(function(e){ msg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e); })
     .then(function(){ btn.disabled = false; });
 }

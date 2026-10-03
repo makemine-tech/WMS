@@ -61,8 +61,10 @@ function resetFinal(){
   if (!d){   /* 확정 전: 이번 달 화면 입력값(수동 수량·원본 선택)만 지우고 결과 목록 비움 — 초안은 언제나 지금 원본·룰로 새로 만들어짐 */
     if (!confirm(ymLabel(YM) + ' ' + VW.name + ' 정산을 처음부터 다시 할까요?\n\n· 아직 확정 전이라 지울 확정 파일은 없습니다\n· 이 달 화면에 넣은 입력값(수량·원본 선택)과 방금 만든 결과 목록을 지웁니다\n\n그다음 「초안 내려받기」를 누르면 지금 파일함 원본과 지금 룰로 처음부터 새로 만듭니다.')) return;
     db.ref('settlement/vendors/' + VW.vkey + '/run/' + YM).set(null).then(function(){
-      VW._lastLog = null; var bl = $('buildLog'); if (bl) bl.innerHTML = '';
-      toast('↺ ' + ymLabel(YM) + ' ' + VW.name + ' — 처음부터 다시'); finalMsg('입력값을 지웠습니다 — 초안을 다시 받아 주세요');
+      VW._lastLog = null; var bl = $('buildLog'); if (bl) bl.innerHTML = ''; var bm = $('buildMsg'); if (bm) bm.textContent = '';
+      var V2 = VENDORS[VW.vkey]; if (V2 && V2.run) delete V2.run[YM];
+      toast('↺ ' + ymLabel(YM) + ' ' + VW.name + ' — 원점으로 돌아갔습니다'); finalMsg('원점으로 돌아갔습니다 — 위 ④ 에서 초안을 다시 받으면 처음부터 계산합니다');
+      refreshRunState(true);
     }).catch(function(e){ alert('실패: ' + ((e && (e.code || e.message)) || e)); });
     return;
   }
@@ -72,7 +74,8 @@ function resetFinal(){
   u['vendors/' + VW.vkey + '/run/' + YM] = null;
   u['vendors/' + VW.vkey + '/resets/' + YM + '/' + newId()] = { id: d.id, name: d.name, orig: d.orig || '', total: d.total == null ? null : d.total, at: firebase.database.ServerValue.TIMESTAMP, by: by };
   if ((ALLBOX[YM] || {})[d.id]) u['box/' + YM + '/' + d.id + '/superseded'] = 'reset';
-  db.ref('settlement').update(u).then(function(){ toast('↺ ' + ymLabel(YM) + ' ' + VW.name + ' — 처음부터 다시 (확정 취소)'); finalMsg('확정을 취소했습니다 — 초안을 다시 받아 확인한 뒤 다시 확정해 주세요'); })
+  db.ref('settlement').update(u).then(function(){ var V2 = VENDORS[VW.vkey]; if (V2){ if (V2.run) delete V2.run[YM]; if (V2.done) delete V2.done[YM]; } VW._lastLog = null; var bl = $('buildLog'); if (bl) bl.innerHTML = '';
+    toast('↺ ' + ymLabel(YM) + ' ' + VW.name + ' — 확정 취소, 원점으로'); finalMsg('확정을 취소하고 원점으로 돌아갔습니다 — 위 ④ 에서 초안을 다시 받아 주세요'); refreshRunState(true); })
     .catch(function(e){ alert('실패: ' + ((e && (e.code || e.message)) || e)); });
 }
 function finalMsg(t){ FINAL_MSG = t; var c = $('finalCard'); if (c) c.innerHTML = finalCardHtml(); }
