@@ -208,6 +208,34 @@ function bestSourceSheet(xwb, tplHeads){
 }
 
 /* 초안 만들기 (내려받기·완료 확정 비교에 같이 씀) → { wb, log, name } */
+/* ── 화물 흔적 (대표님 2026-10-03): 화물·용차 청구서와 입출고 화물관리 기록에 다른 업체 비용이 섞여 들어오므로
+   업체 초안을 만들 때 그 달 청구서(Sheet1, 확인 화면에서 지정한 업체 반영)·입출고 기록에서 이 업체 흔적을 찾아
+   ⚠️ 특이사항 + 「점검_화물흔적」 시트(노란 칸)로 보여 줌 — 정산서에 넣는 건 대표님이 점검하면서 직접.
+   이름: 업체명 핵심(메이크마인디자인_·_당월분·(괄호) 뗀 것) + SETTLE_ALIASES. 엔진이 traceSkip 이면 건너뜀(포인트나인크루처럼 따로 정산) */
+function vendorCore(n){ return String(n || '').replace(/^메이크마인디자인_/, '').replace(/_(당월분|계산서미발행|\d.*)$/, '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').replace(/^(주식회사|㈜|\(주\))/, ''); }
+function traceCargo(wb, log, skipFreight){
+  var core = vendorCore(VW.name), al = ((window.SETTLE_ALIASES || {})[VW.name] || (window.SETTLE_ALIASES || {})[core] || []).map(function(x){ return String(x).replace(/\s+/g, '').toLowerCase(); });
+  var par = (String(VW.name).match(/\(([^)]+)\)/g) || []).map(function(x){ return x.slice(1, -1).replace(/\s+/g, '').toLowerCase(); });   /* 제이에스로지원(테일즈코리아) → 테일즈코리아 */
+  var keys = [core.toLowerCase()].concat(al, par).filter(function(k){ return k.length >= 2; });
+  var hit = function(v){ var s = String(v || '').replace(/[\s()]/g, '').toLowerCase(); return !!s && keys.some(function(k){ return s.indexOf(k) >= 0 || (k.length >= 3 && k.indexOf(s) >= 0 && s.length >= 3); }); };
+  var T = [];
+  if (!skipFreight) Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
+    (F.rows || []).forEach(function(r, i){ var vn = frVendor(r, ch[i]); if (!hit(vn)) return;
+      T.push(['화물·용차 청구서', r.d, (r.from || '') + ' → ' + (r.to || '') + ' · ' + (r.car || '') + (r.qty ? ' · ' + r.qty : '') + (r.item ? ' ' + r.item : ''), frFinal(r, ch[i]) + (+r.etc || 0), '청구서 업체명 「' + vn + '」' + (r.note ? ' · ' + r.note : '')]); }); });
+  var C = (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : [];
+  C.forEach(function(x){ if (!x || String(x.date || '').slice(0, 7) !== YM || !hit(x.vendor)) return;
+    var K = { parcel: '택배출고', in: '입고', out: '출고', ret: '반품 양품화', etc: '기타' }[x.kind] || x.kind || '';
+    T.push(['입출고 화물관리', x.date, K + ' · 파렛트 ' + ((+x.aj || 0) + (+x.etc || 0)) + (x.box ? ' · 박스 ' + x.box : '') + (x.memo || x.note ? ' · ' + (x.memo || x.note) : ''), +x.fee || null, '업체 「' + x.vendor + '」' + (x.work === 'Y' ? ' · 작업 유' : '')]); });
+  if (!T.length){ log.push(['안내', '화물 청구서·입출고 기록에 「' + core + '」 흔적 없음' + (skipFreight ? ' (청구서는 용차비 시트로 따로 들어감)' : '')]); return; }
+  T.sort(function(a, b){ return String(a[1]).localeCompare(String(b[1])); });
+  var old = wb.getWorksheet('점검_화물흔적'); if (old) wb.removeWorksheet(old.id);
+  var ws = wb.addWorksheet('점검_화물흔적'); ws.orderNo = -1; ws.properties.tabColor = { argb: 'FFC00000' };
+  ws.columns = [{ width: 16 }, { width: 12 }, { width: 60 }, { width: 13 }, { width: 40 }];
+  ws.addRow(['이 업체로 보이는 화물·입출고 기록 — 정산서에 넣을 것은 넣고, 확인했으면 이 시트를 지우세요']).font = { bold: true, size: 12 };
+  var hr = ws.addRow(['출처', '날짜', '내용', '금액', '비고']); hr.font = { bold: true, color: { argb: 'FFFFFFFF' } }; hr.eachCell(function(c){ c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3A5F' } }; });
+  T.forEach(function(t){ var r = ws.addRow(t); r.getCell(4).numFmt = '#,##0'; for (var c = 1; c <= 5; c++) r.getCell(c).fill = YEL; });
+  log.push(['특이사항', '화물 청구서·입출고 기록에 이 업체 흔적 ' + T.length + '건 — 맨 앞 「점검_화물흔적」 시트 (예: ' + T.slice(0, 3).map(function(t){ return t[1] + ' ' + t[2].slice(0, 30) + (t[3] ? ' ' + won(t[3]) + '원' : ''); }).join(' / ') + ')']);
+}
 function makeDraft(msg){
   msg = msg || function(){};
   var A = VW.A, R = cfgOf(VW.vkey), run = runOf(), eng = engineOf(VW.vkey), log = [], wb;
@@ -290,6 +318,8 @@ function makeDraft(msg){
     return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
       .catch(function(e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); });
   }).then(function(){
+    /* 화물 흔적 — 업체 초안마다 (엔진 traceSkip 이면 건너뜀, 표본에 화물 청구서 시트가 있으면 청구서는 그 시트로 이미 들어가므로 입출고만) */
+    if (!(eng && eng.traceSkip)) try { traceCargo(wb, log, A.sheets.some(function(s){ return s.kind && s.kind.key === 'freight'; })); } catch (e) { console.error(e); log.push(['확인 필요', '화물 흔적 찾기 오류: ' + ((e && e.message) || e)]); }
     /* 그대로 둔 시트 */
     A.sheets.forEach(function(s){ var m = ((R.sheets || {})[sKey(s.name)] || {}).mode;
       if (m !== 'copy' && m !== 'skip' && !(s.kind && s.kind.key === 'freight') && (s.rows > 0 || s.usedBy.length)) log.push(['확인 필요', '시트 「' + s.name + '」 — 지난달 내용 그대로 (룰을 정하면 바뀜)' + (s.usedBy.length ? ' · ' + s.usedBy.join(',') + '행이 참조' : '')]); });

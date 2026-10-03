@@ -16,6 +16,8 @@
    }
 ============================================================ */
 var SETTLE_ENGINES = window.SETTLE_ENGINES = window.SETTLE_ENGINES || {};
+/* 화물 청구서·입출고 기록에서 업체를 다른 이름으로 적는 경우 (화물 흔적 찾기용, settle_build.js traceCargo) */
+var SETTLE_ALIASES = window.SETTLE_ALIASES = { 'HK홀세일': ['에이치케이', 'HK'] };
 
 (function(){
   'use strict';
@@ -32,7 +34,7 @@ var SETTLE_ENGINES = window.SETTLE_ENGINES = window.SETTLE_ENGINES || {};
      4. 업체명 '포인트나인크루' → '포인트나인크루(곡물)'
      5. 내역서 B1 '청구내역서' 년월 → 정산월
      6. 내역서 G21 = 용차비 시트 부가세 합계 */
-  SETTLE_ENGINES['포인트나인크루_용차비'] = {
+  SETTLE_ENGINES['포인트나인크루_용차비'] = { traceSkip: true,
     items: { 21: 'auto' },
     sheets: { '용차비': 'copy' },
     /* 8월 청구서로 8월분을 다시 만들어 실제 완료본과 대조: 120건 · 포함가 34,969,000 · 공급가 31,790,000 · 세액 3,179,000 일치 (2026-10-02) */
