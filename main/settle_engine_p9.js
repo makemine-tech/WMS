@@ -221,6 +221,7 @@
       { d: '2026-10-03', t: '반품 양품화 = 입출고 화물관리 「반품 양품화」 기록의 박스 수 × 1,000 × 1.1, 착불·기타비용 시트에 건별 한 줄 (박스 수 빈칸이면 노란 칸)' },
       { d: '2026-10-03', t: '기타작업내역 작업비 없는 출고 = 파렛트채 입출고(입고 3,000·출고 3,000·서류/출고작업 팔당 11,000)라 파렛트로만 청구. 단 완파렛트(45입 54 · 30입 72 · 15입 125 · 당쉼 20개입 72 · 스파클링 24개입 70박스)가 아닌 나머지 박스 × 300 × 1.1 (예: 서리태45 368박스/7팔 → 44박스). 박스는 딱 떨어지는데 파렛트수가 다르면 점검. 기준 모르는 상품은 점검 목록' },
       { d: '2026-10-03', t: '크기 표시 없는 「서리태」 = 45입(54박스)으로 봄 — 특이사항으로 알림. 애매한 경우(기준 모름·파렛트수 불일치·파렛트도 작업비도 없는 출고)는 「특이사항」으로 화면 맨 위와 점검 시트에' },
+      { d: '2026-10-03', t: '기타작업내역 A열 = 발주번호(숫자=쿠팡) 또는 채널(컬리·홈쇼핑·올리브영…). 컬리 크기 없는 서리태·맷돌 = 45입(54) 기본 · 파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 · 박스가 완파렛트로 떨어지는데 파렛트수가 적게 적혔으면 고침(936박스/12팔 → 13팔) — 모두 특이사항으로 알림' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -322,26 +323,28 @@
              예) 서리태45 368박스/7팔 → 54×6=324 완파렛트, 나머지 44박스 × 300 · 서리태15 50박스/1팔 → 50박스 × 300
              완파렛트 박스 수: 45입 54 · 30입 72 · 15입 125 · 당쉼 20개입 72 · 스파클링 24개입 70.
              파렛트수(M) 병합 칸은 한 묶음(나머지는 묶음 마지막 줄에). 작업비가 이미 있는 줄은 그대로.
-             박스가 완파렛트로 딱 떨어지는데 파렛트수가 안 맞으면(936박스/12팔 = 72×13) 청구 없이 점검 — 파렛트수 확인 */
+             박스가 완파렛트로 딱 떨어지는데 파렛트수가 적게 적혔으면(936박스/12팔 = 72×13) 파렛트수를 고침(적재비 11,000/팔), 많게 적혔으면 점검만.
+             A열 = 발주번호(숫자 = 쿠팡) 또는 채널(컬리·홈쇼핑·올리브영·네이버…). 크기 표시 없는 서리태·맷돌: 컬리는 45입이 기본(룰), 그 밖은 45입으로 보고 특이사항.
+             파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 (기록 누락분, 특이사항으로 알림) */
           var STD = function(r){ var s = String(r[4]) + ' ' + String(r[2]);
             if (/스파클링|24개|24입/.test(s)) return 70;
             if (/당쉼|오리진/.test(s) && !/스파클링/.test(s)) return 72;
             var n = /45개|45입|(^|\D)45(\D|$)/.test(s) ? 54 : /30개|30입|(^|\D)30(\D|$)/.test(s) ? 72 : /15개|15입|(^|\D)15(\D|$)/.test(s) ? 125 : null;
-            if (n == null && /서리태/.test(s)){ GUESS[String(r[4]).trim()] = (GUESS[String(r[4]).trim()] || 0) + 1; return 54; }   /* 크기 표시 없는 「서리태」 = 45입으로 봄 (대표님 2026-10-03) — 특이사항으로 알림 */
+            if (n == null && /서리태|맷돌/.test(s)){ if (!/컬리/.test(String(r[0]))){ var gk2 = String(r[0]).trim() + ' ' + String(r[4]).trim(); GUESS[gk2] = (GUESS[gk2] || 0) + 1; } return 54; }   /* 크기 없는 서리태·맷돌 = 45입 (컬리는 기본, 그 밖은 특이사항) */
             return n; };
-          var GUESS = {};
+          var GUESS = {}, PALFIX = {};
           var gStart = {}, groups = {}, PART = {}, partInfo = [], noStd = [], palOff = [], noBill = [];
           (sh['!merges'] || []).forEach(function(m){ if (m.s.c === 12 && m.s.r >= 1) for (var rr = m.s.r; rr <= m.e.r; rr++) gStart[rr] = m.s.r; });
           for (var gi = 1; gi <= lastI; gi++){ var gr = a[gi] || []; if (!gr.some(function(v){ return v !== ''; })) continue; var gs = gStart[gi] != null ? gStart[gi] : gi; (groups[gs] = groups[gs] || []).push(gi); }
           Object.keys(groups).forEach(function(gs){ var rs = groups[gs], pal = +(a[gs] || [])[12] || 0;
             var priced = rs.some(function(i){ return +(fmtB ? a[i][14] : a[i][15]); }), bx = rs.reduce(function(s, i){ return s + (+a[i][11] || 0); }, 0);
-            if (!pal && !priced && bx > 0) noBill.push((+gs + 1) + '행 ' + String(a[gs][4] || a[gs][0]).slice(0, 24) + ' ' + bx + '박스');   /* 파렛트도 작업비도 없는데 박스가 나감 = 청구 0원 */
+            if (!pal && !priced && bx > 0){ rs.forEach(function(i){ if (+a[i][11]) PART[i] = +a[i][11]; }); noBill.push((+gs + 1) + '행 ' + String(a[gs][0]).trim() + ' ' + String(a[gs][4]).slice(0, 20) + ' ' + bx + '박스'); }   /* 파렛트도 작업비도 없는 출고 = 박스 × 300 */
             if (!pal || priced) return;
             var box = rs.reduce(function(s, i){ return s + (+a[i][11] || 0); }, 0), st = rs.map(function(i){ return STD(a[i]); }).filter(function(x, k, arr){ return arr.indexOf(x) === k; });
             if (st.length !== 1 || st[0] == null){ noStd.push((+gs + 1) + '행 ' + a[gs][4] + ' ' + box + '박스/' + pal + '팔'); return; }
             if (box === pal * st[0]) return;
             var rem = box % st[0], tag = (+gs + 1) + '행 ' + String(a[gs][4]).slice(0, 24) + ' ' + box + '박스/' + pal + '팔';
-            if (!rem){ palOff.push(tag + ' = 완파렛트 ' + box / st[0] + '팔 분량'); return; }
+            if (!rem){ var np = box / st[0]; if (np > pal){ a[gs][12] = np; PALFIX[gs] = pal; palOff.push(tag + ' → 파렛트수 ' + pal + '→' + np + ' 고침'); } else palOff.push(tag + ' = 완파렛트 ' + np + '팔 분량 (파렛트수가 더 많이 적힘 — 확인)'); return; }
             PART[rs[rs.length - 1]] = rem; partInfo.push(tag + ' → 나머지 ' + rem + '박스'); });
           var ws = fresh(wb, '기타작업내역');
           ws.addRow(['발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode', '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '박스수', '파렛트수', '작업수량', '작업단가', '작업금액', '비고']);
@@ -357,6 +360,7 @@
             if (typeof r[8] === 'number') ws.getCell('I' + R).numFmt = 'yyyy-mm-dd hh:mm';
             sumM += +r[12] || 0; sumP += qty * unit * 1.1;
             if (part){ partSum += qty * unit * 1.1; ws.getCell('O' + R).fill = YEL; ws.getCell('N' + R).fill = YEL; }
+            if (PALFIX[i] != null) ws.getCell('M' + R).fill = YEL;
             if (qty * unit >= 100000 || (unit && unit !== 300)){ ws.getCell('P' + R).fill = YEL; big.push(r[0] + ' ' + r[4] + ' ' + qty + '×' + unit); } }
           /* 원본 병합(파렛트수 등) 그대로 */
           (sh['!merges'] || []).forEach(function(m){ if (m.e.r <= lastI && m.s.r >= 1) try { ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1); ws.getCell(m.s.r + 1, m.s.c + 1).alignment = { vertical: 'middle', horizontal: 'center' }; } catch (e) {} });
@@ -368,12 +372,12 @@
           mark(ws, 'A' + F, '원본에 없는 별도 출고는 이 위에 줄을 추가 — 합계 수식 범위 안에');
           if (partInfo.length){ mark(ws, 'O1', '완파렛트가 아닌 출고 ' + partInfo.length + '묶음 = 수작업 적재 → 완파렛트 뺀 나머지 박스 × 300 (노란 N·O칸): ' + partInfo.join(' · '));
             log.push(['자동 적용', '완파렛트 아닌 출고 ' + partInfo.length + '묶음 → 나머지 박스 × 300 × 1.1 = ' + won(partSum)]); }
-          var gk = Object.keys(GUESS); if (gk.length){ mark(ws, 'E1', '상품명에 크기(15/30/45입) 표시가 없어 45입(완파렛트 54박스)으로 본 출고: ' + gk.map(function(k){ return k + ' ' + GUESS[k] + '줄'; }).join(', ') + ' — 다른 크기면 알려 주세요');
+          var gk = Object.keys(GUESS); if (gk.length){ mark(ws, 'E1', '상품명에 크기(15/30/45입) 표시가 없어 45입(완파렛트 54박스)으로 본 출고 (컬리 외): ' + gk.map(function(k){ return k + ' ' + GUESS[k] + '줄'; }).join(', ') + ' — 다른 크기면 알려 주세요');
             log.push(['특이사항', '크기 표시 없는 상품을 45입(54박스)으로 보고 계산: ' + gk.map(function(k){ return k + ' ' + GUESS[k] + '줄'; }).join(', ')]); }
-          if (noBill.length){ mark(ws, 'L1', '파렛트수도 작업비도 없는데 박스가 나간 출고 ' + noBill.length + '묶음 = 청구 0원 — 누락인지 확인: ' + noBill.slice(0, 15).join(' · ') + (noBill.length > 15 ? ' …' : ''));
-            log.push(['특이사항', '파렛트수·작업비 둘 다 없는 출고 ' + noBill.length + '묶음 (청구 0원) — 점검 시트']); }
-          if (palOff.length){ mark(ws, 'M1', '박스는 완파렛트로 딱 떨어지는데 파렛트수가 다름 ' + palOff.length + '묶음 — 파렛트수(적재비 11,000/팔) 확인: ' + palOff.join(' · '));
-            log.push(['특이사항', '파렛트수가 박스 수와 안 맞는 출고 ' + palOff.length + '묶음 — 점검 시트']); }
+          if (noBill.length){ mark(ws, 'L1', '파렛트수도 작업비도 없는 출고 ' + noBill.length + '묶음 → 박스 × 300 넣음 (기록 누락분): ' + noBill.slice(0, 15).join(' · ') + (noBill.length > 15 ? ' …' : ''));
+            log.push(['특이사항', '파렛트수·작업비 둘 다 없는 출고 ' + noBill.length + '묶음 → 박스 × 300 넣음: ' + noBill.slice(0, 5).join(' · ')]); }
+          if (palOff.length){ mark(ws, 'M1', '박스는 완파렛트로 딱 떨어지는데 파렛트수가 다름 ' + palOff.length + '묶음 (노란 M칸 = 고침, 적재비 11,000/팔): ' + palOff.join(' · '));
+            log.push(['특이사항', '파렛트수가 박스 수와 안 맞는 출고: ' + palOff.join(' · ')]); }
           if (noStd.length){ mark(ws, 'M1', '완파렛트 박스 수 기준을 모르는 출고 ' + noStd.length + '묶음 (45입 54·30입 72·15입 125·당쉼 72·스파클링 70·크기 없는 서리태 54 외) — 기준 알려 주시면 자동 판별: ' + noStd.slice(0, 12).join(' · ') + (noStd.length > 12 ? ' …' : ''));
             log.push(['특이사항', '완파렛트 기준을 모르는 출고 ' + noStd.length + '묶음 — 점검 시트 참고']); }
           if (big.length) mark(ws, 'P1', '노란 작업금액 = 10만원↑ 또는 단가가 300이 아닌 줄 ' + big.length + '줄: ' + big.slice(0, 8).join(' · ') + (big.length > 8 ? ' …' : ''));
