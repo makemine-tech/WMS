@@ -111,8 +111,13 @@ var SETTLE_ALIASES = window.SETTLE_ALIASES = { 'HK홀세일': ['에이치케이'
 /* 이벗 주문 같은 줄 판별 (2026-10-03): 이벗 주문목록을 여러 개(전체 + 위탁판매·추가분) 올리면 열 구성이 달라도 같은 주문이 겹침 →
    주문번호·송장번호·상품명·옵션·수량·판매처로 같은 줄을 한 번만 (H = 띄어쓰기 뺀 제목 배열, r = 원본 줄) */
 window.orderKey = function(H, r){
+  var iCode = H.indexOf('코드');   /* 이벗 주문줄 고유 번호 — 있으면 이걸로 (같은 주문 안의 같은 상품 두 줄도 따로) */
+  if (iCode >= 0 && String(r[iCode] == null ? '' : r[iCode]).trim()) return 'code\u0001' + String(r[iCode]).trim();
   var cols = ['주문번호', '송장번호', '상품명', '옵션', '수량', '판매처'], ix = cols.map(function(c){ return H.indexOf(c); });
   if (ix[0] < 0 && ix[1] < 0) return r.join('\u0001');
+  /* 주문번호·송장번호가 둘 다 비면(직납 등) 서로 다른 주문을 같은 줄로 보지 않게 — 그 파일 줄 전체로 (9월 플라잉피그 직납 9건이 합쳐지던 것) */
+  var on = ix[0] < 0 ? '' : String(r[ix[0]] == null ? '' : r[ix[0]]).trim(), iv = ix[1] < 0 ? '' : String(r[ix[1]] == null ? '' : r[ix[1]]).trim();
+  if (!on && !iv) return 'row\u0001' + r.join('\u0001');
   return ix.map(function(i){ return i < 0 ? '' : String(r[i] == null ? '' : r[i]).replace(/\s+/g, ''); }).join('\u0001');
 };
 
