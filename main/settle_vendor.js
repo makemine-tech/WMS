@@ -32,29 +32,62 @@ function samplesByVendor(){
 /* 이번 달 초안의 틀 = 정산월보다 앞 달 중 가장 최근 (없으면 맨 앞) */
 function defaultSample(list){ for (var i = 0; i < list.length; i++) if (list[i].ym < YM) return list[i]; return list[0]; }
 
+/* ── 업체 목록 정렬 (대표님 2026-10-03): 복잡성(기본)·정산액·이름, 각각 오름/내림 ──
+   정산액·복잡성은 표본(지난달 거래내역서)을 한 번 열어 계산해 settlement/vendors/{키}/stat 에 저장 → 목록은 저장값으로 정렬
+   복잡도 = 데이터 시트 수 × 10 + 청구 항목 수(0원 제외) + 데이터 줄 수 ÷ 1,000 */
+var VSORT = (function(){ try { return JSON.parse(localStorage.getItem('settleVSort')) || { k: 'cx', d: -1 }; } catch (x) { return { k: 'cx', d: -1 }; } })();
+function setVSort(k){ VSORT = VSORT.k === k ? { k: k, d: -VSORT.d } : { k: k, d: k === 'name' ? 1 : -1 }; try { localStorage.setItem('settleVSort', JSON.stringify(VSORT)); } catch (x) {} renderVendors(); }
+function statOf(A, sid){
+  var items = (A.items || []).filter(function(it){ return !it.zero; }).length, sh = (A.sheets || []), rows = sh.reduce(function(s, x){ return s + (x.rows || 0); }, 0);
+  var t = A.totals || {}, total = t.total != null ? t.total : t.sub != null ? Math.round(t.sub * 1.1) : null;
+  return { sid: sid, total: total, items: items, sheets: sh.length, rows: rows, cx: sh.length * 10 + items + Math.round(rows / 1000), at: Date.now() };
+}
+var STAT_BUSY = false;
+function fillStats(g){   /* 저장된 값이 없거나 표본이 바뀐 업체만 하나씩 열어 계산 */
+  if (STAT_BUSY) return;
+  var todo = Object.keys(g).filter(function(n){ var v = VENDORS[vKey(n)], d = defaultSample(g[n]); return !(v && v.stat && v.stat.sid === d.id); });
+  if (!todo.length) return;
+  STAT_BUSY = true; var done = 0, el = function(){ return $('vstatMsg'); };
+  todo.reduce(function(p, n){ return p.then(function(){
+    var d = defaultSample(g[n]), ck = d.ym + '/' + d.id; if (el()) el().textContent = '정산액·복잡도 계산 중 ' + (++done) + '/' + todo.length + ' — ' + n;
+    var go = STMT_CACHE[ck] ? Promise.resolve(STMT_CACHE[ck]) : getBytes(d.m.path).then(function(ab){ return WMS2FA.decrypt(d.m.path, d.m.iv, ab); })
+      .then(function(bytes){ var A = SETTLE_STMT.analyze(XLSX.read(bytes, { type: 'array', cellFormula: true })); STMT_CACHE[ck] = A; return A; });
+    return go.then(function(A){ return db.ref('settlement/vendors/' + vKey(n) + '/stat').set(statOf(A, d.id)); }).catch(function(x){ console.warn(n, x); });
+  }); }, Promise.resolve()).then(function(){ STAT_BUSY = false; if (el()) el().textContent = ''; });
+}
 function renderVendors(){
   var box = $('tabVendors'); if (!box) return;
   if (VW) return renderWork();
-  var g = samplesByVendor(), names = Object.keys(g).sort(function(a, b){ return a.localeCompare(b, 'ko'); });
+  var g = samplesByVendor(), st = function(n){ var v = VENDORS[vKey(n)]; return (v && v.stat) || {}; };
+  var names = Object.keys(g).sort(function(a, b){
+    if (VSORT.k === 'name') return VSORT.d * a.localeCompare(b, 'ko');
+    var x = st(a)[VSORT.k], y = st(b)[VSORT.k];
+    if (x == null && y == null) return a.localeCompare(b, 'ko'); if (x == null) return 1; if (y == null) return -1;
+    return VSORT.d * (x - y) || a.localeCompare(b, 'ko'); });
   var html = '<div class="bar"><span class="bar-t">업체 정산</span><span class="sec-note">작성할 정산월: <b>' + esc(ymLabel(YM)) + '</b> (파일함 탭에서 바꿈)</span></div>'
     + '<div class="sec-note" style="margin-bottom:.9rem">지난달 완료 거래내역서(표본)를 고르면 그 업체 정산 작성이 시작됩니다. 표본은 파일함에 올린 <b>MM월_거래내역서_업체명</b> 파일에서 자동으로 모읍니다.</div>';
   if (!names.length){
     html += '<div class="soon">아직 표본이 없습니다.<br>파일함에서 정산월을 <b>지난달</b>로 바꾸고 <b>00_정산서완료</b> 폴더의 거래내역서를 올려 주세요.</div>';
   } else {
+    var sb = function(k, t){ var on = VSORT.k === k; return '<button class="btn' + (on ? ' p' : '') + '" style="padding:.3rem .7rem" onclick="setVSort(\'' + k + '\')">' + t + (on ? (VSORT.d > 0 ? ' ▲' : ' ▼') : '') + '</button>'; };
     html += '<div class="card"><div class="card-h"><span class="card-t">업체 ' + names.length + '곳</span><span class="card-s">룰이 코드에 반영된 업체는 ⚙️ 표시 · 룰은 대화창에서 요청</span></div>'
+      + '<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:-.2rem 0 .6rem"><span class="sm dim">정렬</span>' + sb('cx', '복잡성') + sb('total', '정산액') + sb('name', '이름')
+      + '<span class="sm dim">· 같은 버튼을 다시 누르면 오름/내림 · 정산액·복잡성 = 지난달 표본 기준</span><span class="sm" id="vstatMsg" style="color:#fbbf24"></span></div>'
       + names.map(function(n){
         var list = g[n], v = VENDORS[vKey(n)], en = engineOf(vKey(n)), cnt = en && en.ruleList ? en.ruleList.length : 0, dft = defaultSample(list);
         var pickSel = list.length > 1 ? '<select class="tsel" id="smp_' + vKey(n) + '">' + list.map(function(x){ return '<option value="' + x.ym + '|' + x.id + '"' + (x === dft ? ' selected' : '') + '>' + esc(ymLabel(x.ym)) + ' · ' + (x.m.final ? '✅ ' : '') + esc(x.m.name) + '</option>'; }).join('') + '</select>'
           : '<span class="sm dim">' + esc(ymLabel(list[0].ym)) + ' · ' + esc(list[0].m.name) + '</span>';
         var sc = v && v.score, pc = sc ? sc.pct : null, dn = doneOf(vKey(n), YM);
         var stTag = dn ? '<span class="chk okk">✅ ' + esc(ymLabel(YM)) + ' 완료 확정 ' + esc(ftime(dn.at)) + '</span>' : '<span class="chk warn">⏳ ' + esc(ymLabel(YM)) + ' 작업 중</span>';
-        return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>')
+        var S2 = st(n), stx = S2.cx != null ? '<small style="display:block">정산액 <b>' + (S2.total != null ? won(S2.total) + '원' : '?') + '</b> · 복잡도 <b>' + S2.cx + '</b> <span class="dim">(시트 ' + S2.sheets + ' · 항목 ' + S2.items + ' · 줄 ' + won(S2.rows) + ')</span></small>' : '<small style="display:block" class="dim">정산액·복잡도 계산 대기</small>';
+        return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button></div></div>';
       }).join('') + '</div>';
   }
   box.innerHTML = html;
+  if (names.length) setTimeout(function(){ fillStats(g); }, 300);
 }
 
 function startVendor(name){
