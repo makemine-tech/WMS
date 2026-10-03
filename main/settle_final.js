@@ -40,7 +40,7 @@ function finalCardHtml(){
   return head
     + '<div class="row" style="border:1px solid var(--g);border-radius:10px;padding:.6rem .8rem"><div class="ck">✅</div><div class="lb"><b>' + esc(d.name) + '</b>'
     + '<small>' + esc(ftime(d.at)) + ' 확정 · ' + esc(d.by || '') + (d.total != null ? ' · 합계 ' + won(d.total) + '원' : '') + (d.orig && d.orig !== d.name ? ' · 올린 파일 ' + esc(d.orig) : '') + '</small></div>'
-    + '<div class="ac"><button class="btn" onclick="downFinal()">확정본 내려받기</button></div></div>'
+    + '<div class="ac"><button class="btn" onclick="downFinal()">확정본 내려받기</button> <button class="btn" style="border-color:#f87171;color:#f87171" onclick="resetFinal()">↺ 처음부터 다시</button></div></div>'
     + diffHtml(d)
     + (hist.length ? '<div class="sm dim" style="margin-top:.5rem">이전 확정 ' + hist.length + '번: ' + hist.map(function(h){ return esc(ftime(h.at)) + ' ' + esc(h.orig || h.name); }).join(' · ') + ' (파일함에 「이전 확정본」으로 남아 있음)</div>' : '')
     + zone;
@@ -49,6 +49,21 @@ function finalDrop(e){
   e.preventDefault(); e.stopPropagation();   /* 파일함 올리기(문서 전체 끌어다 놓기)로 가지 않게 */
   var dr = $('drop'); if (dr) dr.classList.remove('over');
   var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) confirmFinal(f);
+}
+/* ↺ 처음부터 다시: 이 달 이 업체 완료 확정을 취소하고 깨끗한 상태로 (룰이 바뀌었을 때 지금 룰로 다시 만들어 다시 확정)
+   · done/{ym} 지움 → ⏳ 작업 중으로, 다음 달 표본에서도 빠짐
+   · 확정 파일은 지우지 않고 파일함에 「이전 확정본」(superseded:'reset')으로 남김 + resets/{ym} 에 이력
+   · 이번 달 화면 입력값(run/{ym}: 수동 수량·원본 선택)도 지움 */
+function resetFinal(){
+  var d = doneOf(VW.vkey, YM); if (!d || FINAL_BUSY) return;
+  if (!confirm(ymLabel(YM) + ' ' + VW.name + ' 정산을 처음부터 다시 할까요?\n\n· 완료 확정이 취소되고 「작업 중」으로 돌아갑니다\n· 확정했던 파일(' + (d.orig || d.name) + ')은 지우지 않고 파일함에 「이전 확정본」으로 남습니다\n· 이 달 화면에 넣은 입력값(수량·원본 선택)도 지웁니다\n\n그다음 초안을 다시 받아 → 엑셀 확인 → 다시 확정하면 됩니다.')) return;
+  var u = {}, by = (me && me.email) || '';
+  u['vendors/' + VW.vkey + '/done/' + YM] = null;
+  u['vendors/' + VW.vkey + '/run/' + YM] = null;
+  u['vendors/' + VW.vkey + '/resets/' + YM + '/' + newId()] = { id: d.id, name: d.name, orig: d.orig || '', total: d.total == null ? null : d.total, at: firebase.database.ServerValue.TIMESTAMP, by: by };
+  if ((ALLBOX[YM] || {})[d.id]) u['box/' + YM + '/' + d.id + '/superseded'] = 'reset';
+  db.ref('settlement').update(u).then(function(){ toast('↺ ' + ymLabel(YM) + ' ' + VW.name + ' — 처음부터 다시 (확정 취소)'); finalMsg('확정을 취소했습니다 — 초안을 다시 받아 확인한 뒤 다시 확정해 주세요'); })
+    .catch(function(e){ alert('실패: ' + ((e && (e.code || e.message)) || e)); });
 }
 function finalMsg(t){ FINAL_MSG = t; var c = $('finalCard'); if (c) c.innerHTML = finalCardHtml(); }
 function downFinal(){

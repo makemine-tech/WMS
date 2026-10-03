@@ -219,7 +219,7 @@
       { d: '2026-10-03', t: '기타작업내역 원본 두 형식 자동 판별(작업비 열 = 박스수×작업비 / 작업수량·작업단가 열 = 작업수량×작업단가) · 원본 맨 아래 합계 줄 제외 · 화물 입출고는 그 달 기록만 — 1~8월 백테스트로 찾은 버그' },
       { d: '2026-10-03', t: '기타출고비(기타작업내역 작업금액)는 항상 ×1.1 — 3·5·7월은 빠져 있었음(합 549,830원 덜 받음)' },
       { d: '2026-10-03', t: '반품 양품화 = 입출고 화물관리 「반품 양품화」 기록의 박스 수 × 1,000 × 1.1, 착불·기타비용 시트에 건별 한 줄 (박스 수 빈칸이면 노란 칸)' },
-      { d: '2026-10-03', t: '기타작업내역 작업비 없는 출고 = 파렛트채 입출고(입고 3,000·출고 3,000·서류/출고작업 팔당 11,000)라 파렛트로만 청구. 단 완파렛트(45입 54 · 30입 72 · 15입 125박스 × 파렛트수)가 아니면 수작업 적재 → 그 줄 박스 전체 × 300 × 1.1 (노란 N·O칸). 기준 모르는 상품은 점검 목록' },
+      { d: '2026-10-03', t: '기타작업내역 작업비 없는 출고 = 파렛트채 입출고(입고 3,000·출고 3,000·서류/출고작업 팔당 11,000)라 파렛트로만 청구. 단 완파렛트(45입 54 · 30입 72 · 15입 125 · 당쉼 20개입 72 · 스파클링 24개입 70박스)가 아닌 나머지 박스 × 300 × 1.1 (예: 서리태45 368박스/7팔 → 44박스). 박스는 딱 떨어지는데 파렛트수가 다르면 점검. 기준 모르는 상품은 점검 목록' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -317,10 +317,16 @@
           /* 원본 형식이 달마다 둘: ① 「작업비」 열(P) = 단가, 수량 = 박스수(L) (4·9월)  ② N 작업수량·O 작업단가·P 작업금액 (5·7·8월) — 머리글로 판별 */
           var hd = (a[0] || []).map(function(h){ return String(h).replace(/\s/g, ''); }), fmtB = hd[14] === '작업단가' || hd[15] === '작업금액';
           if (fmtB) log.push(['안내', '기타작업내역 원본 = 작업수량·작업단가 형식 (수량 N열 × 단가 O열 × 1.1)']);
-          /* 완파렛트가 아닌 출고 = 수작업 적재 → 그 줄 박스 전체 × 300 (대표님 2026-10-03)
-             완파렛트 박스 수: 45입 54 · 30입 72 · 15입 125. 파렛트수(M) 병합 칸은 한 묶음. 작업비가 이미 있는 줄은 그대로 */
-          var STD = function(r){ var s = String(r[4]) + ' ' + String(r[2]); return /45개|45입|(^|\D)45(\D|$)/.test(s) ? 54 : /30개|30입|(^|\D)30(\D|$)/.test(s) ? 72 : /15개|15입|(^|\D)15(\D|$)/.test(s) ? 125 : null; };
-          var gStart = {}, groups = {}, PART = {}, partInfo = [], noStd = [];
+          /* 완파렛트가 아닌 출고 = 수작업 적재 → 완파렛트를 뺀 나머지 박스 × 300 (대표님 2026-10-03)
+             예) 서리태45 368박스/7팔 → 54×6=324 완파렛트, 나머지 44박스 × 300 · 서리태15 50박스/1팔 → 50박스 × 300
+             완파렛트 박스 수: 45입 54 · 30입 72 · 15입 125 · 당쉼 20개입 72 · 스파클링 24개입 70.
+             파렛트수(M) 병합 칸은 한 묶음(나머지는 묶음 마지막 줄에). 작업비가 이미 있는 줄은 그대로.
+             박스가 완파렛트로 딱 떨어지는데 파렛트수가 안 맞으면(936박스/12팔 = 72×13) 청구 없이 점검 — 파렛트수 확인 */
+          var STD = function(r){ var s = String(r[4]) + ' ' + String(r[2]);
+            if (/스파클링|24개|24입/.test(s)) return 70;
+            if (/당쉼|오리진/.test(s) && !/스파클링/.test(s)) return 72;
+            return /45개|45입|(^|\D)45(\D|$)/.test(s) ? 54 : /30개|30입|(^|\D)30(\D|$)/.test(s) ? 72 : /15개|15입|(^|\D)15(\D|$)/.test(s) ? 125 : null; };
+          var gStart = {}, groups = {}, PART = {}, partInfo = [], noStd = [], palOff = [];
           (sh['!merges'] || []).forEach(function(m){ if (m.s.c === 12 && m.s.r >= 1) for (var rr = m.s.r; rr <= m.e.r; rr++) gStart[rr] = m.s.r; });
           for (var gi = 1; gi <= lastI; gi++){ var gr = a[gi] || []; if (!gr.some(function(v){ return v !== ''; })) continue; var gs = gStart[gi] != null ? gStart[gi] : gi; (groups[gs] = groups[gs] || []).push(gi); }
           Object.keys(groups).forEach(function(gs){ var rs = groups[gs], pal = +(a[gs] || [])[12] || 0;
@@ -328,7 +334,9 @@
             var box = rs.reduce(function(s, i){ return s + (+a[i][11] || 0); }, 0), st = rs.map(function(i){ return STD(a[i]); }).filter(function(x, k, arr){ return arr.indexOf(x) === k; });
             if (st.length !== 1 || st[0] == null){ noStd.push((+gs + 1) + '행 ' + a[gs][4] + ' ' + box + '박스/' + pal + '팔'); return; }
             if (box === pal * st[0]) return;
-            rs.forEach(function(i){ PART[i] = true; }); partInfo.push((+gs + 1) + '행 ' + String(a[gs][4]).slice(0, 24) + ' ' + box + '박스/' + pal + '팔(완 ' + pal * st[0] + ')'); });
+            var rem = box % st[0], tag = (+gs + 1) + '행 ' + String(a[gs][4]).slice(0, 24) + ' ' + box + '박스/' + pal + '팔';
+            if (!rem){ palOff.push(tag + ' = 완파렛트 ' + box / st[0] + '팔 분량'); return; }
+            PART[rs[rs.length - 1]] = rem; partInfo.push(tag + ' → 나머지 ' + rem + '박스'); });
           var ws = fresh(wb, '기타작업내역');
           ws.addRow(['발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode', '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '박스수', '파렛트수', '작업수량', '작업단가', '작업금액', '비고']);
           var sumM = 0, sumP = 0, n = 0, big = [], partSum = 0;
@@ -337,7 +345,7 @@
             if (i === lastI && !r.slice(0, 12).some(function(v){ return v !== ''; })) break;   /* 원본 맨 아래 합계 줄(파렛트·금액 합)은 빼고 — 엔진이 합계 줄을 따로 만듦 */
             n++;
             var unit = +(fmtB ? r[14] : r[15]) || 0, qty = unit ? (+(fmtB ? r[13] : r[11]) || 0) : 0;
-            var part = !unit && PART[i]; if (part){ unit = 300; qty = +r[11] || 0; }
+            var part = !unit && PART[i]; if (part){ unit = 300; qty = PART[i]; }
             ws.addRow([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12] === '' ? null : r[12], qty || null, unit || null, { formula: 'N' + R + '*O' + R + '*1.1', result: qty * unit * 1.1 }, r[16] || null]);
             if (typeof r[7] === 'number') ws.getCell('H' + R).numFmt = 'm"월" d"일"';
             if (typeof r[8] === 'number') ws.getCell('I' + R).numFmt = 'yyyy-mm-dd hh:mm';
@@ -352,10 +360,12 @@
           [14, 8, 8, 12, 46, 16, 16, 11, 16, 9, 9, 8, 9, 9, 9, 12, 24].forEach(function(w, i){ ws.getColumn(i + 1).width = w; });
           mark(ws, 'N1', '작업수량 = 박스수, 작업단가 = 원본 「작업비」 열, 작업금액 = 수량×단가×1.1 (0930 형식)');
           mark(ws, 'A' + F, '원본에 없는 별도 출고는 이 위에 줄을 추가 — 합계 수식 범위 안에');
-          if (partInfo.length){ mark(ws, 'O1', '완파렛트가 아닌 출고 ' + partInfo.length + '묶음 = 수작업 적재 → 박스 전체 × 300 (노란 N·O칸): ' + partInfo.join(' · '));
-            log.push(['자동 적용', '완파렛트 아닌 출고 ' + partInfo.length + '묶음 → 박스 × 300 × 1.1 = ' + won(partSum)]); }
-          if (noStd.length){ mark(ws, 'M1', '완파렛트 박스 수 기준을 모르는 출고 ' + noStd.length + '묶음 (45입 54·30입 72·15입 125 외) — 기준 알려 주시면 자동 판별: ' + noStd.slice(0, 12).join(' · ') + (noStd.length > 12 ? ' …' : ''));
-            log.push(['확인 필요', '완파렛트 기준을 모르는 출고 ' + noStd.length + '묶음 (당쉼·스파클링 등) — 점검 시트 참고']); }
+          if (partInfo.length){ mark(ws, 'O1', '완파렛트가 아닌 출고 ' + partInfo.length + '묶음 = 수작업 적재 → 완파렛트 뺀 나머지 박스 × 300 (노란 N·O칸): ' + partInfo.join(' · '));
+            log.push(['자동 적용', '완파렛트 아닌 출고 ' + partInfo.length + '묶음 → 나머지 박스 × 300 × 1.1 = ' + won(partSum)]); }
+          if (palOff.length){ mark(ws, 'M1', '박스는 완파렛트로 딱 떨어지는데 파렛트수가 다름 ' + palOff.length + '묶음 — 파렛트수(적재비 11,000/팔) 확인: ' + palOff.join(' · '));
+            log.push(['확인 필요', '파렛트수가 박스 수와 안 맞는 출고 ' + palOff.length + '묶음 — 점검 시트']); }
+          if (noStd.length){ mark(ws, 'M1', '완파렛트 박스 수 기준을 모르는 출고 ' + noStd.length + '묶음 (45입 54·30입 72·15입 125·당쉼 72·스파클링 70 외) — 기준 알려 주시면 자동 판별: ' + noStd.slice(0, 12).join(' · ') + (noStd.length > 12 ? ' …' : ''));
+            log.push(['확인 필요', '완파렛트 기준을 모르는 출고 ' + noStd.length + '묶음 — 점검 시트 참고']); }
           if (big.length) mark(ws, 'P1', '노란 작업금액 = 10만원↑ 또는 단가가 300이 아닌 줄 ' + big.length + '줄: ' + big.slice(0, 8).join(' · ') + (big.length > 8 ? ' …' : ''));
           st.getCell('F23').value = { formula: '기타작업내역!M' + F, result: sumM }; st.getCell('F25').value = { formula: '기타작업내역!P' + F, result: sumP };
           work._M = sumM; work._P = sumP;
