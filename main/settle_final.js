@@ -35,7 +35,8 @@ function finalCardHtml(){
     + '<div class="s">' + esc(VW.name) + ' · ' + lab + ' 최종 거래내역서 (xlsx) — 눌러서 고르거나 여기로 끌어다 놓기</div></div>'
     + '<input type="file" id="finalIn" accept=".xlsx,.xls,.xlsm" class="hide" style="display:none" onchange="if(this.files[0])confirmFinal(this.files[0]);this.value=\'\'">'
     + (FINAL_MSG ? '<div class="sm" style="margin-top:.4rem">' + esc(FINAL_MSG) + '</div>' : '');
-  if (!d) return head + '<div class="sm dim">아직 확정 전입니다 (⏳ 작업 중)</div>' + zone;
+  if (!d) return head + '<div class="sm dim" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">아직 확정 전입니다 (⏳ 작업 중)'
+    + ' <button class="btn" style="border-color:#f87171;color:#f87171" onclick="resetFinal()">↺ 처음부터 다시</button></div>' + zone;
   var hist = Object.keys(d.hist || {}).map(function(k){ return d.hist[k]; }).sort(function(a, b){ return (b.at || 0) - (a.at || 0); });
   return head
     + '<div class="row" style="border:1px solid var(--g);border-radius:10px;padding:.6rem .8rem"><div class="ck">✅</div><div class="lb"><b>' + esc(d.name) + '</b>'
@@ -56,7 +57,15 @@ function finalDrop(e){
    · 확정 파일은 지우지 않고 파일함에 「이전 확정본」(superseded:'reset')으로 남김 + resets/{ym} 에 이력
    · 이번 달 화면 입력값(run/{ym}: 수동 수량·원본 선택)도 지움 */
 function resetFinal(){
-  var d = doneOf(VW.vkey, YM); if (!d || FINAL_BUSY) return;
+  var d = doneOf(VW.vkey, YM); if (FINAL_BUSY) return;
+  if (!d){   /* 확정 전: 이번 달 화면 입력값(수동 수량·원본 선택)만 지우고 결과 목록 비움 — 초안은 언제나 지금 원본·룰로 새로 만들어짐 */
+    if (!confirm(ymLabel(YM) + ' ' + VW.name + ' 정산을 처음부터 다시 할까요?\n\n· 아직 확정 전이라 지울 확정 파일은 없습니다\n· 이 달 화면에 넣은 입력값(수량·원본 선택)과 방금 만든 결과 목록을 지웁니다\n\n그다음 「초안 내려받기」를 누르면 지금 파일함 원본과 지금 룰로 처음부터 새로 만듭니다.')) return;
+    db.ref('settlement/vendors/' + VW.vkey + '/run/' + YM).set(null).then(function(){
+      VW._lastLog = null; var bl = $('buildLog'); if (bl) bl.innerHTML = '';
+      toast('↺ ' + ymLabel(YM) + ' ' + VW.name + ' — 처음부터 다시'); finalMsg('입력값을 지웠습니다 — 초안을 다시 받아 주세요');
+    }).catch(function(e){ alert('실패: ' + ((e && (e.code || e.message)) || e)); });
+    return;
+  }
   if (!confirm(ymLabel(YM) + ' ' + VW.name + ' 정산을 처음부터 다시 할까요?\n\n· 완료 확정이 취소되고 「작업 중」으로 돌아갑니다\n· 확정했던 파일(' + (d.orig || d.name) + ')은 지우지 않고 파일함에 「이전 확정본」으로 남습니다\n· 이 달 화면에 넣은 입력값(수량·원본 선택)도 지웁니다\n\n그다음 초안을 다시 받아 → 엑셀 확인 → 다시 확정하면 됩니다.')) return;
   var u = {}, by = (me && me.email) || '';
   u['vendors/' + VW.vkey + '/done/' + YM] = null;
