@@ -18,6 +18,8 @@
   var THIN = { style: 'thin', color: { argb: 'FFBFBFBF' } }, BOX4 = { top: THIN, left: THIN, bottom: THIN, right: THIN };
   var ADJ = { 곡: 20, 셀: 6, 오: 10 };                                   /* 부자재 파렛트 (창고관리에 없음) */
   var BRAND = { 곡: '곡물도감', 셀: '셀시어스', 오: '오리진케어' };
+  /* 포장구분 이름 = 금액 기준 (8월까지 쓰던 이름, 대표님 2026-10-03 — 설명형 이름으로 업체에 떠먹여 주지 않음) */
+  var PACK_NAME = { 300: '기본포장', 500: '박스포장1', 700: '박스포장2', 1000: '합포장1', 1500: '합포장2' };
   var P9_ITEM = /곡물도감|그래놀라|Granola|서리태|콩물|두유|카무트|비움|맷돌|당쉼|오리진|혈당컷|결명자|셀시어스|OTG/;   /* 포인트나인 상품 */
 
   /* 달마다 넣는 값: start = 창고관리 전달 말일 + 부자재, end = 그달 말 재고조사 + 부자재, cod = [일, 내용, 건수, 건당비용] */
@@ -182,7 +184,7 @@
     /* 청구내역서·작업비정산서: 양식은 그대로, 글꼴(굴림·Calibri → 맑은 고딕)·탭 색·화면만 */
     ['청구내역서', '작업비정산서'].forEach(function(n){ var ws = wb.getWorksheet(n); if (!ws) return;
       ws.eachRow(function(row){ row.eachCell(function(cl){ var f = cl.font; if (f && /굴림|Calibri|돋움|Arial/.test(f.name || '')) cl.font = Object.assign({}, f, { name: '맑은 고딕' }); }); });
-      if (n === '작업비정산서') for (var r7 = 9; r7 <= 22; r7++) ws.getRow(r7).eachCell(function(cl){ var v = valOf(cl.value); if (typeof v === 'number' && (!cl.numFmt || cl.numFmt === 'General')) cl.numFmt = '#,##0'; });
+      if (n === '작업비정산서') for (var r7 = 9; r7 <= 23; r7++) ws.getRow(r7).eachCell(function(cl){ var v = valOf(cl.value); if (typeof v === 'number' && (!cl.numFmt || cl.numFmt === 'General')) cl.numFmt = '#,##0'; });
       look(ws, C_HEAD); });
   }
 
@@ -223,6 +225,7 @@
       { d: '2026-10-03', t: '크기 표시 없는 「서리태」 = 45입(54박스)으로 봄 — 특이사항으로 알림. 애매한 경우(기준 모름·파렛트수 불일치·파렛트도 작업비도 없는 출고)는 「특이사항」으로 화면 맨 위와 점검 시트에' },
       { d: '2026-10-03', t: '기타작업내역 A열 = 발주번호(숫자=쿠팡) 또는 채널(컬리·홈쇼핑·올리브영…). 컬리 크기 없는 서리태·맷돌 = 45입(54) 기본 · 파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 · 박스가 완파렛트로 떨어지는데 파렛트수가 적게 적혔으면 고침(936박스/12팔 → 13팔) — 모두 특이사항으로 알림' },
       { d: '2026-10-03', t: '점검 시트 = 맨 앞, 확인할 칸마다 한 줄(번호·상태·시트·칸·내용) — 시트 이름 누르면 그 칸으로 이동, 상태 미확인/완료 드롭다운, 완료면 회색 줄, 맨 위 남은 점검 개수' },
+      { d: '2026-10-03', t: '포장구분·작업비정산서 이름은 금액 기준만(기본포장 300 · 박스포장1 500 · 박스포장2 700 · 박스합포장1(작업상세는 합포장1) 1,000 · 박스합포장2(합포장2) 1,500) + 소분포장 300 — 설명형 이름 안 씀. 작업비정산서는 8월 양식 그대로에 소분포장 열(H)·줄(22) 추가, 합계 I:J열·23행' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
     ],
     afterBuild: function(wb, ctx){
@@ -270,7 +273,7 @@
         order.forEach(function(k){ var v = inv[k], row = [k].concat(cols.map(function(c){ return v.q[c] || ''; }));
           var x = b === '곡' ? gokFee(fH, row) : b === '오' ? oriFee(fH, row) : { fee: 1000, pre: 0, kind: '송장당', box: '' };
           cnt[x.fee] = (cnt[x.fee] || 0) + 1; pre += x.pre || 0; days[v.d] = (days[v.d] || 0) + 1;
-          var r2 = ws.addRow([k, v.d].concat(cols.map(function(c){ return v.q[c] || null; }), [x.box === '' || x.box == null ? null : x.box, x.kind, x.fee, x.pre || null]));
+          var r2 = ws.addRow([k, v.d].concat(cols.map(function(c){ return v.q[c] || null; }), [x.box === '' || x.box == null ? null : x.box, PACK_NAME[x.fee] || x.kind, x.fee, x.pre || null]));
           if (/같은상품|추가송장|빈줄|기타섞임/.test(x.kind) || (+x.box || 0) >= 8){ r2.getCell(cols.length + 4).fill = YEL; rare[x.kind] = (rare[x.kind] || 0) + 1; if (!rareAt[x.kind]) rareAt[x.kind] = r2.number; } });
         var n = order.length, L = 2 + cols.length, cFee = L + 3, cPre = L + 4, SC = cPre + 2;
         ws.getColumn(2).numFmt = 'm"월" d"일"'; ws.getColumn(1).width = 16; for (var c = 3; c <= L; c++) ws.getColumn(c).width = 9; ws.getColumn(L + 2).width = 14;
@@ -278,16 +281,16 @@
         var tiers = b === '셀' ? [1000] : [300, 1000, 1500];
         [['포장비 구분', '건수', '단가', '금액']].forEach(function(h){ ws.getCell(sc + 1).value = h[0]; ws.getCell(sd + 1).value = h[1]; ws.getCell(se + 1).value = h[2]; ws.getCell(sf + 1).value = h[3]; });
         tiers.forEach(function(t, i){ var r = 2 + i;
-          ws.getCell(sc + r).value = t === 300 ? '완박스(송장만)' : t === 1000 ? '합포 기본' : '합포 3박스↑·내품4↑';
+          ws.getCell(sc + r).value = PACK_NAME[t];
           ws.getCell(sd + r).value = { formula: 'COUNTIF(' + feeL + '2:' + feeL + last + ',' + t + ')', result: cnt[t] || 0 };
           ws.getCell(se + r).value = t; ws.getCell(sf + r).value = { formula: sd + r + '*' + se + r, result: (cnt[t] || 0) * t }; });
         var rP = 2 + tiers.length, rT = rP + 1, tot = tiers.reduce(function(s, t){ return s + (cnt[t] || 0) * t; }, 0) + pre * 300;
-        ws.getCell(sc + rP).value = '소분포장(선작업)'; ws.getCell(sd + rP).value = { formula: 'SUM(' + preL + '2:' + preL + last + ')', result: pre }; ws.getCell(se + rP).value = 300; ws.getCell(sf + rP).value = { formula: sd + rP + '*' + se + rP, result: pre * 300 };
+        ws.getCell(sc + rP).value = '소분포장'; ws.getCell(sd + rP).value = { formula: 'SUM(' + preL + '2:' + preL + last + ')', result: pre }; ws.getCell(se + rP).value = 300; ws.getCell(sf + rP).value = { formula: sd + rP + '*' + se + rP, result: pre * 300 };
         ws.getCell(sc + rT).value = '합계(VAT 별도)'; ws.getCell(sf + rT).value = { formula: 'SUM(' + sf + '2:' + sf + rP + ')', result: tot };
         for (var r = 1; r <= rT; r++) [sc, sd, se, sf].forEach(function(cc){ var cl = ws.getCell(cc + r); cl.border = BOX4; if (r === 1 || r === rT) cl.font = { bold: true }; if (cc !== sc) cl.numFmt = '#,##0'; });
         ws.getColumn(SC).width = 18; ws.getColumn(SC + 3).width = 13; ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 1 }];
         var rk = Object.keys(rare);
-        mark(ws, sc + 1, b === '셀' ? '셀시어스는 송장당 1,000원' : '새 포장 기준(2026-10-03): 완박스 300 · 합포 1~2박스 1,000 · 3박스↑/S팩 합포/60입 단독 1,500, 소분포장은 개수×300 따로');
+        mark(ws, sc + 1, b === '셀' ? '셀시어스는 송장당 1,000원' : '포장구분 = 금액 이름(기본포장 300 · 합포장1 1,000 · 합포장2 1,500), 소분포장은 개수 × 300 따로 — 오른쪽 요약표가 작업비정산서로');
         rk.forEach(function(k){ mark(ws, ws.getColumn(cols.length + 4).letter + rareAt[k], '드문 포장구분 「' + k + '」 ' + rare[k] + '건 — 첫 줄로 이동 (포장구분 열 필터로 전부 보기)'); });
         work[b] = { n: n, cnt: cnt, pre: pre, tot: tot, days: days, tiers: tiers, ref: function(t){ return b + '_작업상세!' + sd + (2 + tiers.indexOf(t)); }, refPre: b + '_작업상세!' + sd + rP };
         log.push(['자동 적용', b + '_작업상세 송장 ' + n + '건 · ' + tiers.map(function(t){ return t + '원 ' + (cnt[t] || 0) + '건'; }).join(' · ') + ' · 소분포장 ' + pre + '건 → ' + won(tot) + '원']);
@@ -300,15 +303,35 @@
         vF = (work.곡.cnt[1000] || 0) + (work.셀.cnt[1000] || 0) + (work.오.cnt[1000] || 0); vG = (work.곡.cnt[1500] || 0) + (work.오.cnt[1500] || 0);
         js.getCell('C3').value = Y + '.' + String(M).padStart(2, '0') + '.' + ND + '.';
         js.getCell('A14').value = YM + '-01 ~ ' + YM + '-' + ND;
-        [['C12', '포장비'], ['D12', '선작업'], ['E12', '-'], ['F12', '합포장'], ['G12', '합포장'], ['C13', '완박스(송장만)'], ['D13', '소분포장'], ['E13', '-'], ['F13', '합포 기본'], ['G13', '합포 3박스↑'],
-         ['A17', '완박스(송장만)'], ['D17', 300], ['A18', '소분포장(선작업)'], ['D18', 300], ['A19', '-'], ['D19', 0], ['A20', '합포 기본'], ['D20', 1000], ['A21', '합포 3박스↑·내품4↑'], ['D21', 1500]].forEach(function(x){ js.getCell(x[0]).value = x[1]; });
-        js.getCell('C14').value = { formula: sumRef(300), result: vC }; js.getCell('D14').value = { formula: work.곡.refPre + '+' + work.오.refPre, result: vD };
-        js.getCell('E14').value = 0; js.getCell('F14').value = { formula: sumRef(1000), result: vF }; js.getCell('G14').value = { formula: sumRef(1500), result: vG };
-        ['C14', 'D14', 'E14', 'F14', 'G14'].forEach(function(a){ js.getCell(a).fill = NOFILL; });
-        var h = [vC * 300, vD * 300, 0, vF * 1000, vG * 1500], H22 = h.reduce(function(a, x){ return a + x; }, 0);
-        var setR = function(ws, a, v){ var c = ws.getCell(a); c.value = c.value && c.value.formula ? { formula: c.value.formula, result: v } : v; };
-        [['F17', vC], ['F18', vD], ['F19', 0], ['F20', vF], ['F21', vG], ['H17', h[0]], ['H18', h[1]], ['H19', 0], ['H20', h[3]], ['H21', h[4]], ['H14', vC + vD + vF + vG], ['H22', H22], ['C10', H22], ['G10', H22 * 0.1], ['C9', H22 * 1.1]].forEach(function(x){ setR(js, x[0], x[1]); });
-        log.push(['자동 적용', '작업비정산서 완박스 ' + vC + ' · 소분포장 ' + vD + ' · 합포 1,000 ' + vF + ' · 합포 1,500 ' + vG + ' → 작업비 ' + won(H22) + ' (VAT 포함 ' + won(H22 * 1.1) + ')']);
+        /* 8월까지와 같은 양식: 포장비(기본포장 300·박스포장1 500·박스포장2 700) · 합포장(박스합포장1 1000·박스합포장2 1500) + 소분포장 300 을 H열·22행에 추가, 합계는 I:J열·23행 */
+        var cp = function(from, to){ js.getCell(to).style = JSON.parse(JSON.stringify(js.getCell(from).style || {})); };
+        var um = function(r){ try { js.unMergeCells(r); } catch (x) {} }, mg = function(r){ try { js.mergeCells(r); } catch (x) {} };
+        if (txt(js.getCell('A22').value) !== '소분포장'){
+          var sH12 = JSON.stringify(js.getCell('H12').style || {}), sH14 = JSON.stringify(js.getCell('H14').style || {}), r22 = {};
+          ['A','B','C','D','E','F','G','H','I','J','K','L'].forEach(function(c){ r22[c] = JSON.stringify(js.getCell(c + '22').style || {}); });
+          ['H12:I13', 'H14:I14', 'A22:G22', 'H22:I22', 'J22:L22'].forEach(um);
+          cp('G12', 'H12'); cp('G13', 'H13'); cp('G14', 'H14');
+          ['I12', 'J12', 'I13', 'J13'].forEach(function(a){ js.getCell(a).style = JSON.parse(sH12); }); ['I14', 'J14'].forEach(function(a){ js.getCell(a).style = JSON.parse(sH14); });
+          ['A','B','C','D','E','F','G','H','I','J','K','L'].forEach(function(c){ cp(c + '21', c + '22'); js.getCell(c + '23').style = JSON.parse(r22[c]); });
+          ['A22:C22', 'D22:E22', 'F22:G22', 'H22:I22', 'J22:L22', 'A23:G23', 'H23:I23', 'J23:L23', 'I12:J13', 'I14:J14'].forEach(mg);
+          if (js.getColumn(10).width < 9) js.getColumn(10).width = 9;
+        }
+        [['C12', '포장비'], ['D12', '포장비'], ['E12', '포장비'], ['F12', '합포장'], ['G12', '합포장'], ['H12', '소분포장'], ['I12', '합계'],
+         ['C13', '기본포장'], ['D13', '박스포장1'], ['E13', '박스포장2'], ['F13', '박스합포장1'], ['G13', '박스합포장2'], ['H13', '소분포장'],
+         ['A17', '기본포장'], ['D17', 300], ['A18', '박스포장1'], ['D18', 500], ['A19', '박스포장2'], ['D19', 700], ['A20', '박스합포장1'], ['D20', 1000], ['A21', '박스합포장2'], ['D21', 1500],
+         ['A22', '소분포장'], ['D22', 300], ['A23', '합계'], ['J23', '(VAT >별도)'], ['J22', null]].forEach(function(x){ js.getCell(x[0]).value = x[1]; });
+        js.getCell('C14').value = { formula: sumRef(300), result: vC }; js.getCell('D14').value = 0; js.getCell('E14').value = 0;
+        js.getCell('F14').value = { formula: sumRef(1000), result: vF }; js.getCell('G14').value = { formula: sumRef(1500), result: vG };
+        js.getCell('H14').value = { formula: work.곡.refPre + '+' + work.오.refPre, result: vD };
+        js.getCell('I14').value = { formula: 'SUM(C14:H14)', result: vC + vF + vG + vD };
+        ['C14', 'D14', 'E14', 'F14', 'G14', 'H14'].forEach(function(a){ js.getCell(a).fill = NOFILL; js.getCell(a).numFmt = '#,##0'; });
+        [['F17', 'C14'], ['F18', 'D14'], ['F19', 'E14'], ['F20', 'F14'], ['F21', 'G14'], ['F22', 'H14']].forEach(function(x){ js.getCell(x[0]).value = { formula: x[1], result: 0 }; });
+        for (var hr = 17; hr <= 22; hr++) js.getCell('H' + hr).value = { formula: 'D' + hr + '*F' + hr, result: 0 };
+        var h = [vC * 300, 0, 0, vF * 1000, vG * 1500, vD * 300], H22 = h.reduce(function(a, x){ return a + x; }, 0);
+        js.getCell('H23').value = { formula: 'SUM(H17:I22)', result: H22 };
+        js.getCell('C10').value = { formula: 'H23', result: H22 }; js.getCell('G10').value = { formula: 'C10*0.1', result: H22 * 0.1 }; js.getCell('C9').value = { formula: 'C10+G10', result: H22 * 1.1 };
+        [['F17', vC], ['F18', 0], ['F19', 0], ['F20', vF], ['F21', vG], ['F22', vD], ['H17', h[0]], ['H18', 0], ['H19', 0], ['H20', h[3]], ['H21', h[4]], ['H22', h[5]]].forEach(function(x){ var c = js.getCell(x[0]); c.value = { formula: c.value.formula, result: x[1] }; });
+        log.push(['자동 적용', '작업비정산서 기본포장 ' + vC + ' · 박스합포장1 ' + vF + ' · 박스합포장2 ' + vG + ' · 소분포장 ' + vD + ' → 작업비 ' + won(H22) + ' (VAT 포함 ' + won(H22 * 1.1) + ')']);
         work._H22 = H22;
       }).then(function(){
         /* 기타작업내역 */
