@@ -27,7 +27,24 @@
     var core = stdCore(cfg);
     /* cfg.after(wb, ctx) = 업체 전용 처리를 공통(보관비·택배비) 뒤에 (탑프레쉬 — settle_engine_top.js) */
     return { needs: cfg.needs, items: cfg.items || {}, sheets: cfg.sheets || {}, verified: cfg.verified || {}, verifiedSheets: cfg.verifiedSheets, ownSheets: cfg.ownSheets, opt: {}, ruleList: cfg.ruleList,
-      afterBuild: function(wb, ctx){ return Promise.resolve(core(wb, ctx)).then(function(){ return cfg.after && cfg.after(wb, ctx); }); } };
+      afterBuild: function(wb, ctx){ return Promise.resolve(core(wb, ctx)).then(function(){ return cfg.returns && stdReturns(cfg, wb, ctx); }).then(function(){ return cfg.after && cfg.after(wb, ctx); }); } };
+  }
+  /* cfg.returns = { sheet: '반품비', who: /업체/ } — 박스앤캔 택배비 「반품」 시트에서 고객명이 이 업체인 줄로 시트를 새로 (합계 줄·거래명세표 참조는 replaceSheet 가 옮김) · 파일이 없으면 반품비 0 + 노란 칸 */
+  function stdReturns(cfg, wb, ctx){
+    var st = ctx.st, log = ctx.log, box = ctx.BOX || {}, ws = wb.getWorksheet(cfg.returns.sheet); if (!ws) return;
+    var L = Object.keys(box).filter(function(id){ return box[id].type === 'bnc_courier'; }), lr = 0;
+    st.eachRow(function(row, r){ if (!lr && /^반품비/.test(nsp(row.getCell(2).value))) lr = r; });
+    if (!L.length){ if (lr){ var g = st.getCell('G' + lr); g.value = 0; g.style = Object.assign({}, g.style, { fill: YEL }); }
+      log.push(['확인 필요', '박스앤캔 택배비 파일이 아직 없어 반품비 0 (노란 칸) — 들어오면 초안 다시 받기']); return; }
+    return L.reduce(function(p, id){ return p.then(function(acc){ return ctx.readBox(box[id]).then(function(x){ acc.push(x); return acc; }); }); }, Promise.resolve([])).then(function(F){
+      var TH = []; ws.getRow(1).eachCell(function(c, n){ TH[n - 1] = txt(c.value); }); TH = Array.prototype.slice.call(TH).map(function(h){ return h || ''; });
+      var rows = [];
+      F.forEach(function(x){ var w = x.Sheets['반품']; if (!w) return; var a = XLSX.utils.sheet_to_json(w, { header: 1, defval: '' }), H = (a[0] || []).map(nsp), iC = H.indexOf('고객명');
+        a.slice(1).forEach(function(r){ if (cfg.returns.who.test(String(r[iC]))) rows.push(TH.map(function(h){ var i = H.indexOf(nsp(h)); return i >= 0 ? r[i] : ''; })); }); });
+      replaceSheet(wb, cfg.returns.sheet, TH, rows);
+      if (lr && !rows.length){ var g2 = st.getCell('G' + lr); if (!(g2.value && g2.value.formula)) g2.value = 0; }
+      log.push(['자동 적용', cfg.returns.sheet + ' ← 박스앤캔 반품 시트 ' + rows.length + '건']);
+    });
   }
   window.SETTLE_STD = std;
   function stdCore(cfg){
@@ -100,6 +117,9 @@
           /* sizeAll: 택배크기를 모두 이 크기로 (오름코스메틱 = 극소) · bigQty: 매칭총수량이 이 이상인 송장은 노란 표시 + 특이사항 → 대표님이 크기 확인 */
           var iQ = col('매칭총수량') > 0 ? col('매칭총수량') : col('수량'), big = [];
           if (cfg.sizeAll && iSz > 0) rows.forEach(function(r){ r[iSz] = cfg.sizeAll; });
+          /* sizeByQty = [[최대수량, 크기], …] — 원본 크기가 비어 있으면 매칭총수량으로 (제이피코프: 1~5 극소 · 6~16 소 · 17~48 중 · 그 이상 대) */
+          if (cfg.sizeByQty && iSz > 0 && iQ > 0) rows.forEach(function(r){ if (String(r[iSz] == null ? '' : r[iSz]).trim()) return; var q = +r[iQ] || 0; if (!q) return;
+            for (var k = 0; k < cfg.sizeByQty.length; k++) if (q <= cfg.sizeByQty[k][0]){ r[iSz] = cfg.sizeByQty[k][1]; return; } });
           if (cfg.sizeDefault && iSz > 0) rows.forEach(function(r){ if (!String(r[iSz] == null ? '' : r[iSz]).trim()) r[iSz] = cfg.sizeDefault; });   /* 원본 크기가 비어 있을 때만 (탑프레쉬) */
           var iM = col('매칭정보');   /* 미매칭(추가송장 등)은 상품수를 몰라 같이 표시 — 8월 오름 「추가송장」 = 중 · bigRe = 크기가 커지는 제품(탑프레쉬 그린박스) */
           if (cfg.bigQty && iQ > 0) rows.forEach(function(r, i){ var m = iM > 0 ? String(r[iM]) : ''; if ((+r[iQ] || 0) >= cfg.bigQty || /미매칭/.test(m) || (cfg.bigRe && cfg.bigRe.test(m))) big.push(i); });
@@ -111,7 +131,7 @@
           if (other) log.push(['특이사항', '택배크기가 극소·소·중·대가 아닌 줄 ' + other + '건 — 택배 시트 확인']);
           if (!rows.length) log.push(['특이사항', '이번 달 택배비 리스트에 이 업체 줄이 없습니다 (출력양식 ' + Object.keys(learnO).join('·') + ')']);
           log.push(['자동 적용', cfg.shipSheet + ' ← 이벗 택배비 리스트 ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대 + (air ? ' · 항공 ' + air : '') + (isl ? ' · 도선 ' + isl : '')]);
-          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!(cfg.sizeAll || cfg.sizeDefault) }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
+          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!(cfg.sizeAll || cfg.sizeDefault || cfg.sizeByQty) }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
             if (!big.length) return;
             var iV = col('송장번호');
             big.forEach(function(i){ var row = ss.getRow(2 + i); [iSz, iQ].forEach(function(n){ var c = row.getCell(n); c.style = Object.assign({}, c.style, { fill: YEL }); }); });
@@ -137,4 +157,18 @@
     /* ✅ 7월 확정본 + 8월 원본(8월 배송비로 만든 리스트)으로 8월 재현: 항공 1 · 보관비 93 · 솔루션 1 일치, 노란 표시 4건 = 8월에 소·중으로 고친 송장 4건 (2026-10-04) */
     items: { 8: 'auto', 9: 'auto', 10: 'auto', 11: 'auto', 12: 'auto', 19: 'fixed', 20: 'auto' }, verified: { 12: true, 20: true },
     ruleList: [{ d: '2026-10-04', t: '택배크기 = 모두 극소, 상품(매칭총수량) 20개 이상·미매칭(추가송장) 송장은 노란 표시 + 특이사항 → 초안에서 크기 확인·조정' }].concat(COMMON) });
+})();
+/* 제이피코프 (2026-10-04 · 2025-09 ~ 2026-08 정산서 12개월 분석) — 택배크기는 방탄커피 개수(매칭총수량)로:
+   1~5 극소 · 6~16 소 · 17~48 중 · 그 이상 대 (16개는 소 12건·중 3건이라 16개 이상은 노란 표시로 확인) · 반품비 = 박스앤캔 반품 시트 */
+(function(){
+  var E = window.SETTLE_ENGINES, R = function(t){ return { d: '2026-10-04', t: t }; };
+  E['제이피코프'] = window.SETTLE_STD({ name: '제이피코프', shipSheet: '배송비', needs: ['ebut_shiplist', 'ebut_orders', 'bnc_courier'],
+    sheets: { '배송비': 'skip', '보관비': 'skip' }, ownSheets: /^(반품비|쿠팡입고내역)$/,
+    sizeByQty: [[5, '극소'], [16, '소'], [48, '중'], [1e9, '대']], bigQty: 16,
+    returns: { sheet: '반품비', who: /제이피코프/ },
+    items: { 16: 'auto', 17: 'auto', 18: 'auto', 19: 'auto', 20: 'auto', 22: 'auto', 24: 'auto', 26: 'auto', 13: 'fixed', 28: 'fixed' },
+    /* ✅ 7월 확정본 + 8월 원본(크기 비운 8월 배송비)으로 8월 재현: 극소 349 · 소 85 · 중 1 · 반품 4 · 포장작업비 439 · 보관비 124 → 소계 1,671,800 = 8월 확정본 */
+    verified: { 16: true, 17: true, 18: true, 19: true, 20: true, 22: true, 24: true, 26: true }, verifiedSheets: /^(배송비|반품비)$/,
+    ruleList: [R('택배크기 = 원본이 비어 있으면 매칭총수량(방탄커피 개수)으로 1~5 극소 · 6~16 소 · 17~48 중 · 그 이상 대, 16개 이상·미매칭은 노란 표시'),
+      R('반품비 = 박스앤캔 반품 시트에서 고객명 제이피코프 줄 · 포장작업비 = 택배 건수 + 반품 (지난달 수식 그대로) · 솔루션 70,000 매달 그대로')].concat(window.SETTLE_STD_RULES || []) });
 })();
