@@ -185,7 +185,7 @@ function starCheck(){
   var ov = document.getElementById('starOv'); if (ov) ov.remove();
   ov = document.createElement('div'); ov.id = 'starOv';
   ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto';
-  ov.innerHTML = '<div class="card" style="max-width:1080px;width:100%;margin:0"><div class="card-h"><span class="card-t">⭐ 스타인터내셔널 작업 ROW ↔ STAR 재고관리 입출고 — ' + esc(ymLabel(YM)) + '</span>'
+  ov.innerHTML = '<div class="card" style="max-width:1080px;width:100%;margin:0"><div class="card-h"><span class="card-t">⭐ 스타인터내셔널 작업 엑셀(정산 기준) 대비 STAR 재고관리 점검 — ' + esc(ymLabel(YM)) + '</span>'
     + '<button class="btn" style="margin-left:auto" onclick="document.getElementById(\'starOv\').remove()">닫기</button></div><div id="starBody" class="sec-note">파일 여는 중…</div></div>';
   ov.addEventListener('click', function(e){ if (e.target === ov) ov.remove(); }); document.body.appendChild(ov);
   var body = function(h){ var b = document.getElementById('starBody'); if (b) b.innerHTML = h; };
@@ -197,45 +197,59 @@ function starCheck(){
     .then(function(r){ body(starHtml(SETTLE_STAR.compare(files, r[0].val() || {}, r[1].val() || {}, YM))); })
     .catch(function(e){ body('<span style="color:#f87171">대조 실패: ' + esc((e && (e.code || e.message)) || e) + '</span>'); console.error(e); });
 }
+/* 엑셀(작업 ROW) = 정산 기준 (대표님 2026-10-05) — 엑셀 대비로 STAR 를 점검한다.
+   STAR 가 엑셀보다 많음 = 엑셀에 없는 작업 → 받을 돈 놓침? / 실작업과 별개인 임의 변동?
+   STAR 가 엑셀보다 적음 = 엑셀대로 작업했는데 재고에 덜 반영 */
 function starHtml(R){
   var n = function(v){ return (+v || 0).toLocaleString('ko-KR'); };
+  var sg = function(v){ return (v > 0 ? '+' : '') + n(v); };
   var dirL = function(d){ return d === 'in' ? '<b style="color:var(--g);white-space:nowrap">입고</b>' : '<b style="color:var(--b);white-space:nowrap">출고</b>'; };
-  var bad = function(t){ return '<b style="color:#f87171">' + t + '</b>'; }, good = '<b style="color:var(--g)">✔ 맞음</b>';
+  var bad = function(t){ return '<b style="color:#f87171">' + t + '</b>'; }, warn = function(t){ return '<b style="color:var(--y)">' + t + '</b>'; }, good = '<b style="color:var(--g)">✔ STAR 일치</b>';
   var span = function(b){ return b.d0 === b.d1 ? b.d0 : b.d0 + ' ~ ' + b.d1; };
-  var nDiff = R.pairs.filter(function(p){ return p.diff.length; }).length, nOk = R.pairs.length - nDiff;
-  var nOnly = R.starOnly.filter(function(b){ return !b.offset; }).length, nOff = R.starOnly.length - nOnly;
+  /* 엑셀 하나하나가 한 줄 — 짝 있는 것 + STAR 기록 없는 것, 날짜순 */
+  var rows = R.pairs.map(function(p){ return { f: p.f, b: p.b, diff: p.diff }; })
+    .concat(R.rowOnly.map(function(f){ return { f: f, b: null, diff: [] }; }))
+    .sort(function(x, y){ return (x.f.date || '').localeCompare(y.f.date || '') || x.f.name.localeCompare(y.f.name, 'ko'); });
+  var nOk = rows.filter(function(r){ return r.b && !r.diff.length; }).length, nDiff = rows.filter(function(r){ return r.b && r.diff.length; }).length, nNo = R.rowOnly.length;
+  var nOnly = R.starOnly.length;
   var h = '<div style="font-size:14px;margin:.2rem 0 .8rem;line-height:1.8">'
-    + '작업 ROW ' + R.files.length + '개 · STAR 기록 ' + R.from.slice(5) + ' ~ ' + R.to.slice(5) + ' 기준<br>'
-    + good + ' ' + nOk + '건 · ' + (nDiff ? bad('수량 다름 ' + nDiff + '건') : '수량 다름 0') + ' · '
-    + (R.rowOnly.length ? bad('ROW만 있음 ' + R.rowOnly.length + '건') : 'ROW만 있음 0') + ' · '
-    + (nOnly ? bad('STAR 기록만 있음 ' + nOnly + '건') : 'STAR 기록만 있음 0') + (nOff ? ' · 입고→같은 수량 출고 ' + (nOff / 2) + '쌍 (확인)' : '') + '</div>';
-  /* ① 짝 */
-  h += '<div class="sec-note" style="margin:.4rem 0 .3rem"><b>① 작업 ROW ↔ STAR 기록 짝</b> — 바코드별 수량이 가장 많이 겹치는 STAR 입출고 묶음(엑셀 업로드 1번 · 쿠팡 출고 작업 1번)</div>'
-    + '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>작업 ROW</th><th></th><th class="n">ROW 수량</th><th class="n">이름에 적힌 수량</th><th>STAR 기록</th><th class="n">STAR 수량</th><th>결과</th></tr></thead><tbody>'
-    + R.pairs.map(function(p){
-      var f = p.f, b = p.b, nqBad = f.nameQty != null && f.nameQty !== f.total;
-      var res = !p.diff.length ? good : bad('✘ 바코드 ' + p.diff.length + '개 다름 (ROW ' + (f.total - b.total > 0 ? '+' : '') + n(f.total - b.total) + ')');
-      var det = p.diff.length ? '<tr class="flag"><td colspan="7"><details><summary style="cursor:pointer">다른 바코드 ' + p.diff.length + '개 보기</summary>'
-        + '<table class="ftbl" style="min-width:0;margin-top:.3rem"><thead><tr><th>바코드</th><th>상품</th><th class="n">ROW</th><th class="n">STAR</th><th class="n">차이</th></tr></thead><tbody>'
-        + p.diff.map(function(d){ return '<tr><td style="font-family:var(--mo)">' + esc(d.bc) + '</td><td>' + esc(d.name) + '</td><td class="n">' + n(d.fq) + '</td><td class="n">' + n(d.bq) + '</td><td class="n">' + (d.fq - d.bq > 0 ? '+' : '') + n(d.fq - d.bq) + '</td></tr>'; }).join('')
+    + '<b>기준 = 작업 엑셀(정산 파일) ' + R.files.length + '개</b> · STAR 기록 ' + R.from.slice(5) + ' ~ ' + R.to.slice(5) + '<br>'
+    + good + ' ' + nOk + '개 · ' + (nDiff ? bad('수량 다름 ' + nDiff + '개') : '수량 다름 0') + ' · ' + (nNo ? bad('STAR 기록 없음 ' + nNo + '개') : 'STAR 기록 없음 0')
+    + ' │ ' + (nOnly ? warn('엑셀에 없는 STAR 변동 ' + nOnly + '건') : '엑셀에 없는 STAR 변동 0') + '</div>';
+
+  /* ① 엑셀 기준 점검 */
+  h += '<div class="sec-note" style="margin:.4rem 0 .3rem"><b>① 작업 엑셀 기준 점검</b> — 엑셀마다 STAR 재고관리에 같은 입출고가 들어갔는지 (바코드별 수량 비교, 차이 = STAR − 엑셀)</div>'
+    + '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>작업 엑셀 (기준)</th><th></th><th class="n">엑셀 수량</th><th class="n">이름에 적은 수량</th><th>STAR 기록</th><th class="n">STAR 수량</th><th class="n">STAR − 엑셀</th><th>결과</th></tr></thead><tbody>'
+    + rows.map(function(r){
+      var f = r.f, b = r.b, nqBad = f.nameQty != null && f.nameQty !== f.total;
+      var head = '<td>' + esc(f.name) + '<div class="sm">' + (f.dir ? esc(f.kind) : '') + (f.date ? ' · ' + esc(f.date) : '') + ' · ' + Object.keys(f.items).length + '종</div></td><td>' + (f.dir ? dirL(f.dir) : '') + '</td>'
+        + '<td class="n">' + n(f.total) + '</td><td class="n">' + (f.nameQty == null ? '' : (nqBad ? bad(n(f.nameQty)) : n(f.nameQty))) + '</td>';
+      if (!f.dir) return '<tr class="flag">' + head + '<td colspan="4">' + bad('엑셀 모양을 못 읽음 — 대화창에 알려 주세요') + '</td></tr>';
+      if (!b) return '<tr class="flag">' + head + '<td>—</td><td class="n">0</td><td class="n">' + sg(-f.total) + '</td><td>' + bad('✘ STAR 기록 없음') + '<div class="sm">엑셀대로 작업했다면 STAR 재고에 ' + (f.dir === 'in' ? '입고' : '출고') + ' 반영이 빠짐</div></td></tr>';
+      var more = 0, less = 0; r.diff.forEach(function(d){ if (d.bq > d.fq) more += d.bq - d.fq; else less += d.fq - d.bq; });
+      var res = !r.diff.length ? good : bad('✘ 바코드 ' + r.diff.length + '개 다름')
+        + (more ? '<div class="sm">STAR 가 ' + n(more) + '개 많음 — 엑셀에 없는 작업이면 <b>청구 누락</b>, 아니면 임의 변동</div>' : '')
+        + (less ? '<div class="sm">STAR 가 ' + n(less) + '개 적음 — 엑셀만큼 재고 반영 안 됨</div>' : '');
+      var det = r.diff.length ? '<tr class="flag"><td colspan="8"><details><summary style="cursor:pointer">다른 바코드 ' + r.diff.length + '개 보기</summary>'
+        + '<table class="ftbl" style="min-width:0;margin-top:.3rem"><thead><tr><th>바코드</th><th>상품</th><th class="n">엑셀</th><th class="n">STAR</th><th class="n">STAR − 엑셀</th></tr></thead><tbody>'
+        + r.diff.map(function(d){ return '<tr><td style="font-family:var(--mo)">' + esc(d.bc) + '</td><td>' + esc(d.name) + '</td><td class="n">' + n(d.fq) + '</td><td class="n">' + n(d.bq) + '</td><td class="n">' + (d.bq > d.fq ? warn(sg(d.bq - d.fq)) : sg(d.bq - d.fq)) + '</td></tr>'; }).join('')
         + '</tbody></table></details></td></tr>' : '';
-      return '<tr' + (p.diff.length ? ' class="flag"' : '') + '><td>' + esc(f.name) + '<div class="sm">' + esc(f.kind) + (f.date ? ' · ' + esc(f.date) : '') + ' · ' + Object.keys(f.items).length + '종</div></td><td>' + dirL(f.dir) + '</td>'
-        + '<td class="n">' + n(f.total) + '</td><td class="n">' + (f.nameQty == null ? '' : (nqBad ? bad(n(f.nameQty)) : n(f.nameQty))) + '</td>'
+      return '<tr' + (r.diff.length ? ' class="flag"' : '') + '>' + head
         + '<td>' + esc(b.name) + '<div class="sm">' + esc(b.src) + ' · ' + esc(span(b)) + ' · ' + n(b.n) + '줄' + (b.def ? ' · 불량 ' + n(b.def) + '(별도)' : '') + '</div></td>'
-        + '<td class="n">' + n(b.total) + '</td><td>' + res + '</td></tr>' + det;
+        + '<td class="n">' + n(b.total) + '</td><td class="n">' + (b.total === f.total ? '0' : (b.total > f.total ? warn(sg(b.total - f.total)) : bad(sg(b.total - f.total)))) + '</td><td>' + res + '</td></tr>' + det;
     }).join('') + '</tbody></table></div>';
-  /* ② STAR 기록만 */
-  h += '<div class="sec-note" style="margin:1rem 0 .3rem"><b>② STAR 기록만 있음 (' + esc(ymLabel(YM)) + ')</b> — 재고관리엔 입출고가 있는데 작업 ROW 파일이 없음 → <b>ROW 파일을 빠뜨렸거나 청구 누락</b>일 수 있음</div>'
-    + (R.starOnly.length ? '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>날짜</th><th></th><th>STAR 기록</th><th class="n">수량</th><th class="n">줄</th><th>메모</th></tr></thead><tbody>'
+
+  /* ② 엑셀에 없는 STAR 변동 */
+  h += '<div class="sec-note" style="margin:1rem 0 .3rem"><b>② 엑셀에 없는 STAR 변동 (' + esc(ymLabel(YM)) + ')</b> — STAR 재고는 움직였는데 작업 엑셀이 없음. '
+    + '실제 작업이면 <b>엑셀이 빠져 받을 돈을 놓친 것</b>, 아니면 실작업과 별개인 <b>임의 변동</b>(잘못 올림·되돌림·재고 정리) — 어느 쪽인지 확인</div>'
+    + (nOnly ? '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>날짜</th><th></th><th>STAR 기록</th><th class="n">수량</th><th class="n">줄</th><th>메모</th></tr></thead><tbody>'
       + R.starOnly.map(function(b){ return '<tr class="flag"><td style="white-space:nowrap">' + esc(span(b)) + '</td><td>' + dirL(b.dir) + '</td><td>' + esc(b.name) + '<div class="sm">' + esc(b.src) + '</div></td>'
         + '<td class="n">' + n(b.total) + '</td><td class="n">' + n(b.n) + '</td><td>' + esc(b.note || '')
-        + (b.offset ? '<div class="chk warn" style="margin:.2rem 0 0">↔ ' + esc(b.offset.d0) + ' ' + (b.offset.dir === 'in' ? '입고' : '출고') + ' 「' + esc(b.offset.name) + '」와 바코드·수량 똑같음 — 되돌린 업로드인지, 들어와서 그대로 나간 작업(청구 대상)인지 확인</div>' : '') + '</td></tr>'; }).join('')
+        + (b.offset ? '<div class="chk warn" style="margin:.2rem 0 0">↔ ' + esc(b.offset.d0) + ' ' + (b.offset.dir === 'in' ? '입고' : '출고') + ' 「' + esc(b.offset.name) + '」와 바코드·수량 똑같음 — 되돌린 업로드(임의 변동)인지, 들어와서 그대로 나간 작업(청구 대상)인지</div>' : '') + '</td></tr>'; }).join('')
       + '</tbody></table></div>' : '<div class="sm">없음 ✔</div>');
-  /* ③ ROW 만 */
-  h += '<div class="sec-note" style="margin:1rem 0 .3rem"><b>③ 작업 ROW만 있음</b> — 작업 ROW 는 있는데 STAR 재고관리에 같은 입출고가 없음 → <b>재고 반영 누락</b>일 수 있음</div>'
-    + (R.rowOnly.length ? '<table class="ftbl" style="min-width:0"><tbody>' + R.rowOnly.map(function(f){ return '<tr class="flag"><td>' + esc(f.name) + '</td><td>' + (f.dir ? dirL(f.dir) + ' · ' + esc(f.kind) : bad('읽을 수 없는 모양')) + '</td><td class="n">' + n(f.total) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="sm">없음 ✔</div>');
-  /* ④ 수동 */
-  if (R.manual.length) h += '<div class="sec-note" style="margin:1rem 0 .3rem"><b>④ 참고 — 바코드 스캔·재고 수정</b> (작업 ROW 와 짝짓지 않음)</div><table class="ftbl" style="min-width:0"><tbody>'
+
+  /* ③ 참고 — 스캔·조정 */
+  if (R.manual.length) h += '<div class="sec-note" style="margin:1rem 0 .3rem"><b>③ 참고 — 바코드 스캔·재고 수정</b> (작업 엑셀과 짝짓지 않음 · 큰 수량이면 확인)</div><table class="ftbl" style="min-width:0"><tbody>'
     + R.manual.map(function(b){ return '<tr><td>' + esc(b.d0) + '</td><td>' + dirL(b.dir) + '</td><td>' + esc(b.name) + '</td><td class="n">' + n(b.total) + '</td><td>' + esc(b.note || '') + '</td></tr>'; }).join('') + '</tbody></table>';
   return h;
 }
