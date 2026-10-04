@@ -24,6 +24,16 @@
   function isF(v){ return !!(v && typeof v === 'object' && (v.formula || v.sharedFormula)); }
   var clone = function(o){ return JSON.parse(JSON.stringify(o || {})); };
   var day = function(d){ return +String(d || '').slice(8, 10) || ''; };
+  /* 달마다 대표님 컨테이너 기록 (대화창으로 받음 — 화물관리보다 우선) · what = 무슨 물건(AG·카톤·컨테이너번호, 카톡 대화로 확인), file = 그 입고 작업 엑셀 */
+  var CONT = {
+    '2026-09': [
+      { date: '2026-09-02', memo: '40피트 파렛트 입고>>파렛트 재적재', what: 'AG-584·AG-555 잔스포츠·팩세이프·이스트팩 백팩 7,137개 (차량 인천99아5605)', file: '(검수완료)260806_EMA_잔스포츠, 팩세이프, 이스트팩 (AG-584, AG-555)_7,137.xlsx' },
+      { date: '2026-09-03', memo: '20피트 컨테이너 까대기', what: 'AG-901 나이키 수영복 2,303개 172카톤 (미국 항공건 FNSLAX260226, 카톡상 9/2 하차)', file: '(검수완료)260825_블루오리진_나이키 수영복(AG-901)_2303_(컬러링).xlsx' },
+      { date: '2026-09-15', memo: '40피트 파렛트 입고>>파렛트 재적재', what: 'AG-772 아디다스 운동화 4,606족 451카톤 (FGLHK2608065 · 컨 TEMU7695219)', file: '작업 엑셀 없음 — STAR 9/17 「0915_아디다시입고 전산업로드파일」 · 패킹리스트 PI131 4606pcs → 9/29 출고' },
+      { date: '2026-09-30', memo: '20피트 컨테이너 까대기', what: 'AG-866 아디다스 골프 2,251개 (EGLV091600505702 · 컨 TCLU3786777 · 10:30)', file: '(검수요청)260930_MFL_아디다스 골프(AG-866)_2251.xlsx' },
+      { date: '2026-09-30', memo: '20피트 컨테이너 까대기', what: 'AG-808 아디다스 2,957개 (ONEYPKGG45974600 · 컨 EITU0533106 · 11:00)', file: '(검수요청)260930_MFL_아디다스(AG-808)_2957.xlsx' }
+    ]
+  };
   var sheetName = function(n){ return String(n).replace(/\.[a-z0-9]+$/i, '').replace(/[\[\]:*?\/\\]/g, '').replace(/^\(검수완료\)/, '').slice(0, 31); };
 
   /* 파일 이름에서: N파렛트 · N박스 · 비닐포장 N · 긴급 · 택배 */
@@ -104,9 +114,20 @@
       });
       W.sort(function(a, b){ return String(a.date).localeCompare(String(b.date)) || (a.kind === 'in' ? 0 : 1) - (b.kind === 'in' ? 0 : 1); });
 
-      /* 2) 컨테이너 까대기 ← 화물관리 */
-      var K = cargo.filter(function(x){ return x.kind === 'in' && /피트|컨테이너|까대기/.test(memo(x)); }).sort(function(a, b){ return a.date.localeCompare(b.date); }).map(function(x){
-        var ft = /40\s*피트/.test(memo(x)) ? 40 : 20;   /* 「40피트 파렛트 입고>>파렛트 재적재」처럼 까대기 문구가 없어도 컨테이너 입고면 같은 금액 (대표님 2026-10-05) */
+      /* 2) 컨테이너 까대기 — 대표님 기록(CONT, 대화창으로 받음)이 우선, 없으면 화물관리. 둘 다 있으면 서로 빠진 것 특이사항 */
+      var CK = cargo.filter(function(x){ return x.kind === 'in' && /피트|컨테이너|까대기/.test(memo(x)); }).sort(function(a, b){ return a.date.localeCompare(b.date) || (a.at || 0) - (b.at || 0); });
+      var ftOf = function(s){ return /40\s*피트/.test(s) ? 40 : 20; };   /* 「40피트 파렛트 입고>>파렛트 재적재」처럼 까대기 문구가 없어도 컨테이너 입고면 같은 금액 (대표님 2026-10-05) */
+      var K, mine = CONT[YM];
+      if (mine){
+        var left = CK.slice();
+        K = mine.map(function(c){ var ft = ftOf(c.memo), i = -1;
+          left.some(function(x, j){ if (x.date === c.date && ftOf(memo(x)) === ft){ i = j; return true; } return false; });
+          var hit = i >= 0 ? left.splice(i, 1)[0] : null;
+          if (!hit) log.push(['특이사항', c.date + ' 「' + c.memo + '」 (' + c.what + ') — 대표님 기록에만 있고 화물관리엔 없음 → 대표님 기록대로 넣음 (화물관리에도 적어 두기)']);
+          return { date: c.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: c.what + (c.file ? ' · ' + c.file : '') + (hit ? '' : ' · 화물관리 기록 없음') }; });
+        left.forEach(function(x){ log.push(['확인 필요', x.date + ' 화물관리 「' + memo(x) + '」 ' + pl(x) + '팔 — 대표님 기록에 없어 정산서에 안 넣음 (빠진 거면 대화창에 알려 주세요)']); });
+        log.push(['자동 적용', '컨테이너 까대기 = 대표님 기록 ' + mine.length + '건 (화물관리 ' + CK.length + '건과 크로스 체크): ' + mine.map(function(c){ return c.date.slice(5) + ' ' + ftOf(c.memo) + '피트 ' + c.what.split(' ')[0]; }).join(' / ')]);
+      } else K = CK.map(function(x){ var ft = ftOf(memo(x));
         return { date: x.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: '화물관리 ' + x.date + ' 「' + memo(x) + '」 ' + pl(x) + '팔' }; });
 
       /* 3) 거래명세표 다시 쓰기 */
@@ -208,7 +229,7 @@
       /* 6) 요약 */
       var byK = { in: 0, po: 0, move: 0 }; W.forEach(function(w){ byK[w.kind]++; });
       log.push(['자동 적용', '작업 ' + W.length + '건 (입고 ' + byK.in + ' · 쿠팡출고 ' + byK.po + ' · 이관 ' + byK.move + ') → 거래명세표 날짜별 줄 + 작업 시트 ' + W.length + '개: ' + W.map(function(w){ return day(w.date) + '일 ' + (w.kind === 'in' ? '입고 ' : w.kind === 'po' ? '쿠팡출고 ' : '이관 ') + w.qty + (w.pal ? '·' + w.pal + '팔' : ''); }).join(' / ')]);
-      log.push(['자동 적용', '컨테이너 까대기 ' + K.length + '건 ← 화물관리' + (K.length ? ': ' + K.map(function(x){ return day(x.date) + '일 ' + x.name; }).join(', ') : '') + ' (대표님 기록과 크로스 체크)']);
+      if (!mine) log.push(['자동 적용', '컨테이너 까대기 ' + K.length + '건 ← 화물관리' + (K.length ? ': ' + K.map(function(x){ return day(x.date) + '일 ' + x.name; }).join(', ') : '') + ' (이 달 대표님 기록이 아직 없음 — 대화창으로 주시면 그게 우선)']);
       log.push(['자동 적용', '거래명세표 공급가 ' + won(supply) + ' · 세액 ' + won(tax) + ' · 포함가 ' + won(supply + tax) + ' (노란 칸 = 단가·수량 확인 — 비어 있는 단가는 0 으로 계산됨)']);
       return W;
     });
@@ -230,7 +251,7 @@
       { d: '2026-10-05', t: '비닐포장 = 장당 300 (수량 = 파일 이름 「N장·N개 비닐포장」)' },
       { d: '2026-10-05', t: '긴급작업(파일 이름 「긴급」) = 4인 작업비 1인당 100,000 추가 → 400,000 (인원 수량은 노란 칸 — 다르면 수정)' },
       R('엑셀 없는 STAR 입고가 엑셀 있는 출고로 나갔으면 = 실제 입고 작업 → STAR 기록으로 입고검수·사이즈컬러조사(노란 칸) + 시트 · 바코드·수량 똑같은 입고→출고(재고제로화 등) = 임의 변동, 정산 안 함'),
-      R('컨테이너 까대기 = 화물관리 스타 입고 중 메모에 20피트·40피트·컨테이너 → 20피트 200,000 · 40피트 400,000 (대표님 기록이 우선 — 크로스 체크는 대표님)'),
+      R('컨테이너 까대기 = 대표님 기록(달마다 대화창으로 받아 CONT 에 넣음, 무슨 물건·AG·작업 엑셀 함께)이 우선 · 화물관리와 크로스 체크해 한쪽에만 있으면 특이사항 · 대표님 기록이 없는 달은 화물관리 스타 입고 중 20피트·40피트·컨테이너 메모 → 20피트 200,000 · 40피트 400,000'),
       R('공간비 = 지난달 그대로 · 용차비 = 화물 청구서 스타인터내셔널 건(용차비 시트 합계)'),
       R('말일 재고 시트 = STAR 재고관리 말일 마감 재고 (바코드별, 박스·품명·브랜드·품번·컬러·사이즈·원산지·불량)')
     ],
