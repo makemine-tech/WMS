@@ -45,14 +45,16 @@ function statOf(A, sid){
 var STAT_BUSY = false;
 function fillStats(g){   /* 저장된 값이 없거나 표본이 바뀐 업체만 하나씩 열어 계산 */
   if (STAT_BUSY) return;
-  var todo = Object.keys(g).filter(function(n){ var v = VENDORS[vKey(n)], d = defaultSample(g[n]); return !(v && v.stat && v.stat.sid === d.id); });
+  /* 정확도도 같이 — 저장된 점수가 지금 코드(엔진 룰)·표본과 다르면 다시 계산 (2026-10-04 대표님: 멘소래담 룰을 다 넣었는데 목록엔 엔진 생기기 전 0% 가 남아 있던 것) */
+  var todo = Object.keys(g).filter(function(n){ var v = VENDORS[vKey(n)], d = defaultSample(g[n]); return !(v && v.stat && v.stat.sid === d.id) || !(v.score && v.score.sig === engSig(vKey(n), d.id)); });
   if (!todo.length) return;
   STAT_BUSY = true; var done = 0, el = function(){ return $('vstatMsg'); };
   todo.reduce(function(p, n){ return p.then(function(){
     var d = defaultSample(g[n]), ck = d.ym + '/' + d.id; if (el()) el().textContent = '정산액·복잡도 계산 중 ' + (++done) + '/' + todo.length + ' — ' + n;
     var go = STMT_CACHE[ck] ? Promise.resolve(STMT_CACHE[ck]) : getBytes(d.m.path).then(function(ab){ return WMS2FA.decrypt(d.m.path, d.m.iv, ab); })
       .then(function(bytes){ var A = SETTLE_STMT.analyze(XLSX.read(bytes, { type: 'array', cellFormula: true })); STMT_CACHE[ck] = A; return A; });
-    return go.then(function(A){ return db.ref('settlement/vendors/' + vKey(n) + '/stat').set(statOf(A, d.id)); }).catch(function(x){ console.warn(n, x); });
+    return go.then(function(A){ var vk = vKey(n), S = scoreOf(A, cfgOf(vk), vk);
+      return db.ref('settlement/vendors/' + vk).update({ stat: statOf(A, d.id), score: { pct: S.pct, ym: YM, sig: engSig(vk, d.id), at: firebase.database.ServerValue.TIMESTAMP } }); }).catch(function(x){ console.warn(n, x); });
   }); }, Promise.resolve()).then(function(){ STAT_BUSY = false; if (el()) el().textContent = ''; });
 }
 function renderVendors(){
@@ -134,6 +136,12 @@ function won(n){ return n == null ? '' : Math.round(n).toLocaleString('ko-KR'); 
      ruleList: [ { d:'반영일', t:'룰' } ]             화면 맨 아래 '적용 룰' 목록 (번호는 순서대로)
      afterBuild(wb, ctx)                            엑셀 만들 때 업체 전용 처리
    } */
+/* 엔진 룰 지문 — 룰이 바뀌면 달라져서 목록 정확도를 다시 계산하게 함 */
+function engSig(vkey, sid){
+  var e = engineOf(vkey) || {}, t = JSON.stringify([e.items || {}, e.sheets || {}, e.verified || {}, String(e.ownSheets || ''), String(e.verifiedSheets || ''), (e.ruleList || []).length, sid]), h = 0;
+  for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+  return 'v1.' + (h >>> 0).toString(36);
+}
 function engineOf(vkey){ return (window.SETTLE_ENGINES && window.SETTLE_ENGINES[vkey]) || window.SETTLE_AUTO || null; }   /* 전용 엔진 없으면 자동(범용) 엔진 settle_engine_auto.js */
 /* 엔진 설정을 기존 계산에서 쓰던 모양 { items:{행:{mode}}, sheets:{시트키:{mode}} } 으로 */
 function cfgOf(vkey){
@@ -161,7 +169,10 @@ function itemLevel(it, rr, eng){
   if ((rr && rr.mode === 'auto') || (eng && eng.auto && eng.auto[it.r])) return 'auto';
   return 'none';
 }
-function sheetLevel(s, rr){ return rr && (rr.mode === 'skip' || rr.mode === 'copy') ? rr.mode : 'none'; }
+function sheetLevel(s, rr, eng){
+  if (eng && eng.verifiedSheets && eng.verifiedSheets.test(s.name)) return 'ok';   /* 업체 룰이 채우고 확정본과 일치 확인 */
+  if (eng && eng.ownSheets && eng.ownSheets.test(s.name)) return 'auto';           /* 업체 룰이 채움 */
+  return rr && (rr.mode === 'skip' || rr.mode === 'copy') ? rr.mode : 'none'; }
 function scoreOf(A, R, vkey){
   R = R || {}; var eng = engineOf(vkey);
   var items = A.items.filter(function(i){ return !i.zero; });
@@ -172,7 +183,7 @@ function scoreOf(A, R, vkey){
     it._w = w; it._lv = k; ip += w * LV[k].v; by[k] = (by[k] || 0) + w;
   });
   var sheets = A.sheets.filter(function(s){ return s.rows > 0 || s.usedBy.length; }), sp = 0;
-  sheets.forEach(function(s){ s._lv = sheetLevel(s, (R.sheets || {})[sKey(s.name)]); sp += LV[s._lv].v; });
+  sheets.forEach(function(s){ s._lv = sheetLevel(s, (R.sheets || {})[sKey(s.name)], eng); sp += LV[s._lv].v; });
   sp = sheets.length ? sp / sheets.length : 1;
   var pct = Math.round((sheets.length ? ip * 0.8 + sp * 0.2 : ip) * 100);
   var todo = items.filter(function(i){ return LV[i._lv].v < 1; }).sort(function(a, b){ return b._w - a._w; });
@@ -197,11 +208,11 @@ function scoreCardHtml(S, A){
 function refreshScore(){ if (VW && VW.A) renderWork(); }
 function lvChip(kind, key, k){ return '<span class="lvchip" style="border-color:' + LV[k].c + '">' + LV[k].ic + ' ' + LV[k].t + '</span>'; }
 function saveScore(pct){
-  var v = VENDORS[VW.vkey] || {}, sig = VW.vkey + '|' + YM + '|' + pct;
+  var v = VENDORS[VW.vkey] || {}, es = engSig(VW.vkey, VW.fileId), sig = VW.vkey + '|' + YM + '|' + pct + '|' + es;
   if (VW._savedScore === sig) return;            /* 저장 → 다시 그림 → 또 저장 되풀이 막기 */
   VW._savedScore = sig;
-  if (v.score && v.score.pct === pct && v.score.ym === YM) return;
-  db.ref('settlement/vendors/' + VW.vkey + '/score').set({ pct: pct, ym: YM, at: firebase.database.ServerValue.TIMESTAMP });
+  if (v.score && v.score.pct === pct && v.score.ym === YM && v.score.sig === es) return;
+  db.ref('settlement/vendors/' + VW.vkey + '/score').set({ pct: pct, ym: YM, sig: es, at: firebase.database.ServerValue.TIMESTAMP });
 }
 /* 화면 맨 아래 — 이 업체에 반영된 룰 (Claude 가 settle_engines.js 에 적어 둔 것) */
 function ruleListHtml(){

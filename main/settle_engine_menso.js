@@ -16,10 +16,15 @@
   var GROUPS = [['스마트스토어배송', /스마트스토어/], ['무신사', /무신사/], ['에이블리', /에이블리/], ['화해', /화해/], ['지그재그', /지그재그/], ['기타', /.*/]];
 
   E['멘소래담'] = {
-    items: { 8: 'auto', 9: 'auto', 10: 'auto', 11: 'auto', 12: 'auto' }, sheets: {}, verified: {}, opt: {},
-    ownSheets: /^(토탈배송비|스마트스토어배송|무신사|에이블리|화해|지그재그|기타)/,   /* 이 엔진이 채우는 시트 (이름 뒤 건수가 달마다 바뀜) */
+    /* 18 스마트스토어 관리 · 19 솔루션비용 · 20 외부몰 관리 = 매달 같은 금액(지난달 그대로)
+       8 택배발송(극소) · 12 항공비 = 9월 배송비 원본으로 돌려 9월 확정본과 줄 단위 일치(2026-10-03) */
+    items: { 8: 'auto', 9: 'auto', 10: 'auto', 11: 'auto', 12: 'auto', 18: 'fixed', 19: 'fixed', 20: 'fixed' }, sheets: {}, verified: { 8: true, 9: true, 10: true, 11: true, 12: true }, opt: {},
+    ownSheets: /^(토탈배송비|스마트스토어배송|무신사|에이블리|화해|지그재그|기타|\d{4}_전산재고)/,   /* 이 엔진이 채우는 시트 (이름 뒤 건수·앞 날짜가 달마다 바뀜) */
+    verifiedSheets: /^(토탈배송비|스마트스토어배송|무신사|에이블리|화해|지그재그|기타)/,   /* 9월 확정본과 줄 단위 일치 확인 */
     ruleList: [R('택배비 리스트에서 출력양식 「누락오배송」 줄은 청구 제외'), R('판매처 「맨소래담_연동몰」 = 이벗 전체주문목록 같은 송장번호의 주문자(무신사·에이블리·지그재그)로 바꿔 시트 나눔'),
-      R('택배크기 기본 「극소」'), R('추가운임 = 이벗 주소가 제주인 송장 400'), R('시트 = 토탈배송비 + 판매처별(스마트스토어배송·무신사·에이블리·화해·지그재그·기타), 시트 이름 건수는 이번 달 건수')],
+      R('택배크기 기본 「극소」'), R('추가운임 = 이벗 주소가 제주인 송장 400'), R('시트 = 토탈배송비 + 판매처별(스마트스토어배송·무신사·에이블리·화해·지그재그·기타), 시트 이름 건수는 이번 달 건수'),
+      { d: '2026-10-04', t: '스마트스토어 관리 300,000 · 솔루션비용 50,000 · 외부몰 관리 200,000 = 매달 그대로' },
+      { d: '2026-10-04', t: '전산재고 시트 = 이번 달 이벗 재고현황 통째로, 시트 이름은 말일(예: 0930_전산재고)' }],
     afterBuild: function(wb, ctx){
       var st = ctx.st, log = ctx.log, box = ctx.BOX || {};
       var ids = function(t){ return Object.keys(box).filter(function(id){ return box[id].type === t; }); };
@@ -61,6 +66,26 @@
         if (left) log.push(['특이사항', '판매처 「맨소래담_연동몰」 ' + left + '건은 이벗 주문목록에서 주문자를 못 찾아 그대로(기타 시트) — 확인']);
         /* 추가운임·건수 수식 (토탈 기준) */
         return made.reduce(function(p, m, i){ return p.then(function(){ return window.shipSheetFinish(wb, m[0], i === 0 ? st : null, ctx, { noSizeYellow: true }); }); }, Promise.resolve());
+      }).then(function(){
+        /* 전산재고 = 이번 달 이벗 재고현황 통째로, 이름은 말일 MMDD_전산재고 */
+        var sn = wb.worksheets.map(function(w){ return w.name; }).filter(function(n){ return /^\d{4}_전산재고$/.test(n); })[0]; if (!sn) return;
+        var Y = +ctx.YM.slice(0, 4), M = +ctx.YM.slice(5, 7), nn = ('0' + M).slice(-2) + ('0' + new Date(Date.UTC(Y, M, 0)).getUTCDate()).slice(-2) + '_전산재고';
+        return read('ebut_stock').then(function(F){
+          if (!F.length){ log.push(['확인 필요', '이벗 재고현황이 파일함에 없어 「' + sn + '」 시트는 지난달 그대로 — 올리고 초안 다시 받기']); return; }
+          var best = null;
+          F.forEach(function(x){ x.SheetNames.forEach(function(n){ var a = XLSX.utils.sheet_to_json(x.Sheets[n], { header: 1, defval: '' });
+            for (var i = 0; i < Math.min(a.length, 12); i++) if (a[i].map(ns).indexOf('가용재고수량') >= 0){ var r = a.slice(i + 1).filter(function(r){ return r.some(function(v){ return v !== ''; }); }); if (!best || r.length > best.rows.length) best = { head: a[i].map(String), rows: r }; break; } }); });
+          if (!best){ log.push(['확인 필요', '이벗 재고현황에서 가용재고수량 제목줄을 못 찾아 「' + sn + '」 시트는 지난달 그대로']); return; }
+          replaceSheet(wb, sn, best.head, best.rows);
+          var w = wb.getWorksheet(sn); if (w && sn !== nn && !wb.getWorksheet(nn)) w.name = nn;
+          log.push(['자동 적용', '시트 「' + nn + '」 ← 이벗 재고현황 ' + best.rows.length + '품목']);
+        });
+      }).then(function(){
+        /* 반품비 — 고르는 룰 미정: 8월 박스앤캔 반품 시트 맨소래담 15건 중 확정본은 10건만 청구 (2026-10-04 대표님께 질문 중) */
+        return read('bnc_courier').then(function(F){
+          var n = 0; F.forEach(function(x){ var w = x.Sheets['반품']; if (!w) return; XLSX.utils.sheet_to_json(w, { header: 1, defval: '' }).forEach(function(r){ if (/맨소|멘소/.test(String(r[2]))) n++; }); });
+          log.push(['특이사항', '반품비 시트는 지난달 그대로 — 고르는 룰 미정' + (F.length ? ' (이번 달 박스앤캔 반품 시트에 맨소래담 ' + n + '건)' : ' (박스앤캔 택배비 파일 없음)')]);
+        });
       });
     }
   };
