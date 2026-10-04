@@ -47,6 +47,15 @@
     }).then(function(R){
       var nR = 0; R.rows.forEach(function(r){ if (add(r)) nR++; });
       replaceSheet(wb, cfg.returns.sheet, TH, rows);
+      if (cfg.returns.bySize && lr){   /* 반품비 극소 줄 + 다음 줄(소) = 박스크기 COUNTIF (제주맥주 모양) */
+        var iZ = TH.map(nsp).indexOf('박스크기'), Lz = iZ >= 0 ? String.fromCharCode(65 + iZ) : null, last = Math.max(2, rows.length + 1), cnt = { 극소: 0, 소: 0 };
+        rows.forEach(function(r){ var z = nsp(r[iZ]); if (cnt[z] != null) cnt[z]++; });
+        if (Lz){ st.getCell('G' + lr).value = { formula: 'COUNTIF(' + cfg.returns.sheet + '!' + Lz + '2:' + Lz + last + ',"극소")', result: cnt.극소 };
+          if (/^소$/.test(nsp(st.getCell('F' + (lr + 1)).value))) st.getCell('G' + (lr + 1)).value = { formula: 'COUNTIF(' + cfg.returns.sheet + '!' + Lz + '2:' + Lz + last + ',"소")', result: cnt.소 }; }
+        log.push(['자동 적용', cfg.returns.sheet + ' ' + rows.length + '건 (극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ')' + (R.files.length ? ' · 참조 파일 ' + R.files.join(', ') : '')]);
+        if (R.miss.length) log.push(['특이사항', '반품 참조 파일 ' + R.miss.join(', ') + ' — 열 이름이 맞지 않아 못 넣음, 직접 확인']);
+        return;
+      }
       if (lr && !rows.length){ var g2 = st.getCell('G' + lr); if (!(g2.value && g2.value.formula)) g2.value = 0; }
       log.push(['자동 적용', cfg.returns.sheet + ' ' + rows.length + '건 ← ' + [L.length ? '박스앤캔 반품 시트 ' + nB + '건' : '', R.files.length ? '참조 파일(' + R.files.join(', ') + ') ' + nR + '건' : ''].filter(Boolean).join(' + ')]);
       R.map.forEach(function(m){ if (/←/.test(m)) log.push(['안내', '반품 참조 열 맞춤 — ' + m + (/수량←/.test(m) ? '' : ' · 수량 = 줄마다 1(반품 1건)')]); });
@@ -63,8 +72,8 @@
         var keys = [vc].concat((cfg.alias || []).map(function(x){ return String(x).replace(/\s+/g, '').toLowerCase(); })).filter(function(k){ return k.length >= 2; });
         var hit = window.vendorMatcher(cfg.name, cfg.alias);   /* settle_engines.js */
 
-        /* ── 보관비 ── */
-        (function(){
+        /* ── 보관비 ── (cfg.noStore = 업체 전용 처리 — 제주맥주는 보관비 시트 모양이 달라 settle_engine_jeju.js) */
+        if (!cfg.noStore) (function(){
           var ws = wb.getWorksheet(cfg.storeSheet || '보관비'); if (!ws){ log.push(['확인 필요', '보관비 시트가 없습니다']); return; }
           var sumR = 0, lastD = 0, start = 0;
           ws.eachRow(function(row, r){ var d = row.getCell(4).value; if (d && typeof d === 'object' && /SUM\(/i.test(d.formula || '')) { if (!sumR) sumR = r; } });
@@ -99,6 +108,10 @@
         var col = function(nm){ return th.indexOf(nm); };
         /* 지난달 줄에서 출력양식·판매처명 배우기 */
         var learnO = {}, learnS = {}; ss.eachRow(function(row, r1){ if (r1 < 2) return; var o = nsp(row.getCell(col('출력양식')).value), s2 = nsp(row.getCell(col('판매처명')).value); if (o) learnO[o] = 1; if (s2) learnS[s2] = 1; });   /* 내용 있는 줄만 (시트 범위가 104만 줄로 잡힌 표본이 있음) */
+        /* sizeLearn: 지난달 시트에서 매칭정보(상품 조합) → 택배크기 배우기 (제주맥주 — 같은 조합은 지난달 크기 그대로) */
+        var learnZ = {};
+        if (cfg.sizeLearn && col('매칭정보') > 0 && col('택배크기') > 0) ss.eachRow(function(row, r1){ if (r1 < 2) return; var k = nsp(row.getCell(col('매칭정보')).value), z = nsp(row.getCell(col('택배크기')).value); if (!k || !z) return; (learnZ[k] = learnZ[k] || {})[z] = (learnZ[k][z] || 0) + 1; });
+        var learned = function(k){ var m = learnZ[nsp(k)]; if (!m) return null; return Object.keys(m).sort(function(a, b){ return m[b] - m[a]; })[0]; };
         var clearSheet = function(){ ss.eachRow(function(row, r){ if (r >= 2) row.eachCell(function(c){ c.value = null; }); }); };
         var SIZES = [['극소', /^택배발송\(극소\)$/], ['소', /^택배발송\(소\)$/], ['중', /^택배발송\(중\)$/], ['대', /^택배발송\(대\)$/]];
         if (!ids.length){
@@ -124,12 +137,17 @@
           /* sizeAll: 택배크기를 모두 이 크기로 (오름코스메틱 = 극소) · bigQty: 매칭총수량이 이 이상인 송장은 노란 표시 + 특이사항 → 대표님이 크기 확인 */
           var iQ = col('매칭총수량') > 0 ? col('매칭총수량') : col('수량'), big = [];
           if (cfg.sizeAll && iSz > 0) rows.forEach(function(r){ r[iSz] = cfg.sizeAll; });
+          var iM0 = col('매칭정보'), nLearn = 0, flagIdx = {};
+          if (cfg.sizeLearn && iSz > 0 && iM0 > 0) rows.forEach(function(r, i){ if (String(r[iSz] == null ? '' : r[iSz]).trim()) return; var z = learned(r[iM0]); if (z){ r[iSz] = z; nLearn++; }
+            else if (cfg.sizeFlag && cfg.sizeFlag(+r[iQ] || 0)) flagIdx[i] = 1; });   /* 지난달에 없던 조합 + 애매한 수량 → 노란 표시 */
           /* sizeByQty = [[최대수량, 크기], …] — 원본 크기가 비어 있으면 매칭총수량으로 (제이피코프: 1~5 극소 · 6~16 소 · 17~48 중 · 그 이상 대) */
           if (cfg.sizeByQty && iSz > 0 && iQ > 0) rows.forEach(function(r){ if (String(r[iSz] == null ? '' : r[iSz]).trim()) return; var q = +r[iQ] || 0; if (!q) return;
             for (var k = 0; k < cfg.sizeByQty.length; k++) if (q <= cfg.sizeByQty[k][0]){ r[iSz] = cfg.sizeByQty[k][1]; return; } });
           if (cfg.sizeDefault && iSz > 0) rows.forEach(function(r){ if (!String(r[iSz] == null ? '' : r[iSz]).trim()) r[iSz] = cfg.sizeDefault; });   /* 원본 크기가 비어 있을 때만 (탑프레쉬) */
           var iM = col('매칭정보');   /* 미매칭(추가송장 등)은 상품수를 몰라 같이 표시 — 8월 오름 「추가송장」 = 중 · bigRe = 크기가 커지는 제품(탑프레쉬 그린박스) */
           if (cfg.bigQty && iQ > 0) rows.forEach(function(r, i){ var m = iM > 0 ? String(r[iM]) : ''; if ((+r[iQ] || 0) >= cfg.bigQty || /미매칭/.test(m) || (cfg.bigRe && cfg.bigRe.test(m))) big.push(i); });
+          Object.keys(flagIdx).forEach(function(i){ if (big.indexOf(+i) < 0) big.push(+i); });
+          if (cfg.sizeLearn) log.push(['자동 적용', '택배크기: 지난달 같은 상품 조합 ' + nLearn + '건은 지난달 크기 그대로, 나머지 ' + (rows.length - nLearn) + '건은 수량 규칙']);
           rows.forEach(function(r, i){ var row = ss.getRow(2 + i); r.forEach(function(v, n){ if (n) row.getCell(n).value = v === '' ? null : v; }); });
           rows.forEach(function(r){ var z = String(r[iSz] || '').trim(); if (cnt[z] != null) cnt[z]++; else other++; var ad = +r[iAdd] || 0; if (ad === 3000) air++; else if (ad === 5000) isl++; });
           SIZES.forEach(function(s){ setQty(st, s[1], cnt[s[0]], log, s[0]); });
@@ -138,11 +156,11 @@
           if (other) log.push(['특이사항', '택배크기가 극소·소·중·대가 아닌 줄 ' + other + '건 — 택배 시트 확인']);
           if (!rows.length) log.push(['특이사항', '이번 달 택배비 리스트에 이 업체 줄이 없습니다 (출력양식 ' + Object.keys(learnO).join('·') + ')']);
           log.push(['자동 적용', cfg.shipSheet + ' ← 이벗 택배비 리스트 ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대 + (air ? ' · 항공 ' + air : '') + (isl ? ' · 도선 ' + isl : '')]);
-          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!(cfg.sizeAll || cfg.sizeDefault || cfg.sizeByQty) }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
+          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!(cfg.sizeAll || cfg.sizeDefault || cfg.sizeByQty || cfg.sizeLearn), jejuFee: cfg.jejuFee }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
             if (!big.length) return;
             var iV = col('송장번호');
             big.forEach(function(i){ var row = ss.getRow(2 + i); [iSz, iQ].forEach(function(n){ var c = row.getCell(n); c.style = Object.assign({}, c.style, { fill: YEL }); }); });
-            log.push(['특이사항', '상품 ' + cfg.bigQty + '개 이상·미매칭' + (cfg.bigRe ? '·' + (cfg.bigName || '큰 제품') : '') + ' 송장 ' + big.length + '건 — ' + cfg.shipSheet + ' 시트 노란 줄, 택배크기(지금 ' + (cfg.sizeAll || (cfg.sizeDefault ? '원본, 없으면 ' + cfg.sizeDefault : '원본')) + ') 확인·조정: '
+            log.push(['특이사항', (cfg.bigQty ? '상품 ' + cfg.bigQty + '개 이상·' : '처음 보는 상품 조합 중 애매한 수량·') + '미매칭' + (cfg.bigRe ? '·' + (cfg.bigName || '큰 제품') : '') + ' 송장 ' + big.length + '건 — ' + cfg.shipSheet + ' 시트 노란 줄, 택배크기(지금 ' + (cfg.sizeAll || (cfg.sizeDefault ? '원본, 없으면 ' + cfg.sizeDefault : '원본')) + ') 확인·조정: '
               + big.map(function(i){ return (rows[i][iV] || '') + '(' + (iM > 0 && /미매칭/.test(String(rows[i][iM])) ? '미매칭' : rows[i][iQ] + '개') + ')'; }).join(', ')]);
           });
         });
