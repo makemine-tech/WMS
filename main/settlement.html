@@ -369,13 +369,15 @@ function qset(q, txt, cls, p){ var s = q.querySelector('.st'); s.textContent = t
 
 function upload(file, ym, q){
   qset(q, '읽는 중…', '', 0);
-  var buf, P, type, t, summary = '', id = newId(), path = 'settlement/' + ym + '/' + id;
+  var buf, P, type, t, summary = '', id = newId(), path = 'settlement/' + ym + '/' + id, moved = null;
   return file.arrayBuffer().then(function(b){
     buf = b; qset(q, '종류 확인 중…', '', .05);
     return new Promise(function(r){ setTimeout(r, 30); });      /* 화면 갱신 먼저 (큰 엑셀은 몇 초 걸림) */
   }).then(function(){
     try { P = profile(file.name, buf); } catch (e) { P = { f: { ext:'', name:file.name, sheets:[], sheetKey:'', headKey:'' }, wb:null }; }
     type = detect(P.f); t = typeOf(type);
+    /* 다른 달 거래내역서(08월_거래내역서_… 를 9월 파일함에)는 그 달 파일함으로 — 지난 정산서 = 표본 (대표님 2026-10-04) */
+    if (type === 'statement'){ var sy = stmtYm(file.name, ym); if (sy && sy !== ym){ ym = sy; moved = sy; } }
     try { summary = t.summary ? t.summary(P.f, P.wb) : ''; } catch (e) { summary = ''; }
     if (!summary && P.f.sheets.length) summary = '시트 ' + P.f.sheets.map(function(s){ return s.name; }).slice(0, 4).join(' · ');
     var fr = null;
@@ -398,7 +400,7 @@ function upload(file, ym, q){
       });
     }).then(function(){
       old.forEach(removeFile);
-      qset(q, (t.icon || '') + ' ' + t.label, type === 'unknown' ? 'er' : 'ok', 1);
+      qset(q, (t.icon || '') + ' ' + t.label + (moved ? ' → ' + ymLabel(moved) + ' 파일함 (표본)' : ''), type === 'unknown' ? 'er' : 'ok', 1);
       setTimeout(function(){ q.remove(); }, 4000);
     });
   }).catch(function(e){
@@ -410,6 +412,16 @@ function removeFile(id){
   var m = BOX[id]; if (!m) return Promise.resolve();
   var u = {}; u['box/' + YM + '/' + id] = null; u['freight/' + YM + '/' + id] = null;
   return st.ref(m.path).delete().catch(function(){}).then(function(){ return db.ref('settlement').update(u); });
+}
+/* 이 파일함에 잘못 들어간 다른 달 거래내역서 → 제 달 파일함 (암호문 파일·경로(path)는 그대로, 목록 기록만 옮김) */
+function moveMisplaced(){
+  var u = {}, n = 0;
+  Object.keys(BOX).forEach(function(id){ var m = BOX[id]; if (m.type !== 'statement' || m.final || m.superseded) return;
+    var sy = stmtYm(m.name, YM); if (!sy || sy === YM) return;
+    u['box/' + sy + '/' + id] = m; u['box/' + YM + '/' + id] = null; n++; });
+  if (!n) return;
+  if (!confirm('다른 달 거래내역서 ' + n + '개를 제 달 파일함으로 옮길까요?\n\n파일은 그대로이고 목록 위치만 바뀝니다.')) return;
+  db.ref('settlement').update(u).then(function(){ toast('📦 ' + n + '개 옮겼습니다'); }).catch(function(e){ toast('옮기기 실패: ' + ((e && (e.code || e.message)) || e)); });
 }
 function delFile(id){
   var m = BOX[id]; if (!m) return;
@@ -494,7 +506,11 @@ function render(){
   var commonTypes_n = need;
 
   /* 업체용·기타 = 종류별 묶음, 눌러서 펼침 (대표님 2026-10-04 — 전부 펼쳐 보이면 너무 길다). ❓ 종류 모름은 확인할 것이라 처음부터 펼침 */
-  var others = ids.filter(function(id){ return typeOf(BOX[id].type).cat !== 'common'; }), grp = {};
+  /* 거래내역서는 이 달 것만 (✅ 완료 확정본 — 다시 확정해 밀려난 옛 확정본은 숨김). 다른 달 거래내역서가 이 파일함에 있으면 따로 묶고 옮기기 버튼 (대표님 2026-10-04) */
+  var misp = [], others = ids.filter(function(id){ var m = BOX[id];
+    if (typeOf(m.type).cat === 'common') return false;
+    if (m.type === 'statement'){ if (m.superseded) return false; var sy = m.final ? null : stmtYm(m.name, YM); if (sy && sy !== YM){ misp.push(id); return false; } }
+    return true; }), grp = {};
   others.forEach(function(id){ (grp[BOX[id].type] = grp[BOX[id].type] || []).push(id); });
   var gks = Object.keys(grp).sort(function(a, b){ return (a === 'unknown' ? 0 : 1) - (b === 'unknown' ? 0 : 1) || typeOf(a).label.localeCompare(typeOf(b).label, 'ko'); });
   $('vendorList').innerHTML = gks.length ? gks.map(function(k){
@@ -507,6 +523,13 @@ function render(){
         return '<div class="row' + (k === 'unknown' ? ' unk' : '') + '"><div class="ck"></div><div class="lb"></div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>'; }).join('')
       + '</details>';
   }).join('') : '<div class="empty-s">아직 없습니다.</div>';
+  if (misp.length){
+    var to = {}; misp.forEach(function(id){ var y = stmtYm(BOX[id].name, YM); to[y] = (to[y] || 0) + 1; });
+    var tl = Object.keys(to).sort().map(function(y){ return ymLabel(y) + ' ' + to[y] + '개'; }).join(' · ');
+    $('vendorList').innerHTML = '<div class="row unk" style="grid-template-columns:26px 1fr auto"><div class="ck">📦</div>'
+      + '<div class="lb">다른 달 거래내역서가 이 파일함에 있습니다 — ' + esc(tl) + '<small>지난 정산서(표본)는 제 달 파일함에 있어야 이번 달 표본으로 바로 잡힙니다. 눌러서 옮기세요 (파일은 그대로, 목록만 이동)</small></div>'
+      + '<div class="ac"><button class="btn p" onclick="moveMisplaced()">제 달 파일함으로 옮기기</button></div></div>' + $('vendorList').innerHTML;
+  }
 
   $('ymNote').textContent = '공통 ' + done + ' / ' + commonTypes_n + ' (택배비 제외) · 파일 ' + ids.length + '개';
 }

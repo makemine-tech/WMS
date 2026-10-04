@@ -15,14 +15,22 @@ var STMT_CACHE = {};
 function vKey(name){ return String(name || '').trim().replace(/[.#$/\[\]]/g, '_') || '_'; }
 function sKey(name){ return String(name || '').replace(/[.#$/\[\]]/g, '_'); }
 
-/* 파일함 전체(모든 달)에서 표본(거래내역서) 모으기 → 업체별 */
+/* 거래내역서 파일 이름의 달 → 정산월 (08월_거래내역서_… 를 2026-09 파일함에 올렸으면 2026-08). 이름에 달이 없으면 null */
+function stmtYm(name, boxYm){
+  var mm = String(name || '').match(/^(\d{1,2})월_거래내역서_/); if (!mm || !boxYm) return null;
+  var m = +mm[1], y = +boxYm.slice(0, 4), bm = +boxYm.slice(5, 7); if (m < 1 || m > 12) return null;
+  if (m > bm) y--;   /* 1월 파일함에 12월 거래내역서 → 지난해 */
+  return y + '-' + ('0' + m).slice(-2);
+}
+/* 파일함 전체(모든 달)에서 표본(거래내역서) 모으기 → 업체별
+   ym = 그 거래내역서의 정산월 (파일 이름의 달 — 다른 달 파일함에 잘못 올렸어도 제 달로 봄. 완료 확정본은 올린 달) */
 function samplesByVendor(){
   var g = {};
   Object.keys(ALLBOX).forEach(function(ym){
     Object.keys(ALLBOX[ym] || {}).forEach(function(id){
       var m = ALLBOX[ym][id]; if (!m || m.type !== 'statement' || m.superseded) return;
       var name = SETTLE_STMT.vendorFromFile(m.name);
-      (g[name] = g[name] || []).push({ ym: ym, id: id, m: m });
+      (g[name] = g[name] || []).push({ ym: m.final ? ym : (stmtYm(m.name, ym) || ym), id: id, m: m });
     });
   });
   /* 최근 달 먼저, 같은 달이면 완료 확정본 먼저 */
