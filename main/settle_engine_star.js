@@ -107,9 +107,8 @@
 
       /* 2) 컨테이너 까대기 ← 화물관리 */
       var K = cargo.filter(function(x){ return x.kind === 'in' && /피트|컨테이너|까대기/.test(memo(x)); }).sort(function(a, b){ return a.date.localeCompare(b.date); }).map(function(x){
-        var ft = /40\s*피트/.test(memo(x)) ? 40 : 20, plain = /까대기/.test(memo(x));
-        if (!plain) log.push(['특이사항', x.date + ' 화물관리 「' + memo(x) + '」 — 까대기 문구가 없어 ' + ft + '피트 까대기로 넣음 (노란 칸, 금액 확인)']);
-        return { date: x.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, yp: !plain, note: '화물관리 ' + x.date + ' 「' + memo(x) + '」 ' + pl(x) + '팔' }; });
+        var ft = /40\s*피트/.test(memo(x)) ? 40 : 20;   /* 「40피트 파렛트 입고>>파렛트 재적재」처럼 까대기 문구가 없어도 컨테이너 입고면 같은 금액 (대표님 2026-10-05) */
+        return { date: x.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: '화물관리 ' + x.date + ' 「' + memo(x) + '」 ' + pl(x) + '팔' }; });
 
       /* 3) 거래명세표 다시 쓰기 */
       var find = function(re, col){ var hit = 0; st.eachRow(function(row, r){ if (!hit && re.test(ns(row.getCell(col || 2).value))) hit = r; }); return hit; };
@@ -224,6 +223,7 @@
       R('파렛트 = 입출고 화물관리 그날 스타 밀크런 출고 — 없으면 파일 이름 「N파렛트」, 다르면 특이사항(노란 칸) · 택배쉽먼트는 파렛트 줄 없음'),
       R('본사이관 등 재고출고 = 이관출고박스수(박스바코드 종류) × 1,000 (노란 칸)'),
       R('파일 이름 「택배쉽먼트 N박스」 = 단가 빈 노란 줄로 넣음 — 금액 직접'),
+      { d: '2026-10-05', t: '컨테이너 입고는 까대기 문구가 없어도(「40피트 파렛트 입고>>파렛트 재적재」 등) 20피트 200,000 · 40피트 400,000' },
       { d: '2026-10-05', t: '비닐포장 = 장당 300 (수량 = 파일 이름 「N장·N개 비닐포장」)' },
       { d: '2026-10-05', t: '긴급작업(파일 이름 「긴급」) = 4인 작업비 1인당 100,000 추가 → 400,000 (인원 수량은 노란 칸 — 다르면 수정)' },
       R('엑셀 없는 STAR 입고가 엑셀 있는 출고로 나갔으면 = 실제 입고 작업 → STAR 기록으로 입고검수·사이즈컬러조사(노란 칸) + 시트 · 바코드·수량 똑같은 입고→출고(재고제로화 등) = 임의 변동, 정산 안 함'),
