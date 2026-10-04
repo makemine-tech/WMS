@@ -103,7 +103,7 @@ function renderVendors(){
           + '<div class="fi">' + memoInput(vKey(n), v) + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button>'
           + '<a class="sm dim" href="javascript:void 0" style="display:block;text-align:right;margin-top:.3rem" data-n="' + esc(n) + '" onclick="vendorHide(this.dataset.n, true)">목록에서 빼기</a></div>'
-          + '<div class="vmove"><button title="위로" onclick="vMove(\'' + vk + '\', -1)">▲</button><button title="아래로" onclick="vMove(\'' + vk + '\', 1)">▼</button></div></div>';
+          + '<div class="vmove"><button title="맨 위로" onclick="vMove(\'' + vk + '\', -1e6)"><span class="tb">▲</span></button><button title="위로" onclick="vMove(\'' + vk + '\', -1)">▲</button><button title="아래로" onclick="vMove(\'' + vk + '\', 1)">▼</button><button title="맨 아래로" onclick="vMove(\'' + vk + '\', 1e6)"><span class="bb">▼</span></button></div></div>';
       }).join('') + '</div>';
     VLIST = names.map(vKey);
   }
@@ -316,7 +316,7 @@ function vSaveOrder(list){
   db.ref('settlement/vendors').update(u).catch(function(e){ toast('순서 저장 실패: ' + ((e && (e.code || e.message)) || e)); });
 }
 function vMove(vk, d){
-  var L = VLIST.slice(), i = L.indexOf(vk), j = i + d; if (i < 0 || j < 0 || j >= L.length) return;
+  var L = VLIST.slice(), i = L.indexOf(vk), j = Math.max(0, Math.min(L.length - 1, i + d)); if (i < 0 || j === i) return;   /* ±1e6 = 맨 위·맨 아래 */
   L.splice(i, 1); L.splice(j, 0, vk); vSaveOrder(L);
   setTimeout(function(){ var el = document.querySelector('.vrow[data-vk="' + CSS.escape(vk) + '"]'); if (el){ el.classList.add('moved'); setTimeout(function(){ el.classList.remove('moved'); }, 700); } }, 30);
 }
