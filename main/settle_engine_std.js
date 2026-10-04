@@ -24,9 +24,14 @@
   function setQty(st, re, v, log, why, mark){ var r = lineRow(st, re); if (!r) return false; var c = st.getCell('G' + r); c.value = v; if (mark){ c.style = Object.assign({}, c.style, { fill: YEL }); } return true; }
 
   function std(cfg){
-    return {
-      items: cfg.items || {}, sheets: cfg.sheets || {}, verified: cfg.verified || {}, opt: {}, ruleList: cfg.ruleList,
-      afterBuild: function(wb, ctx){
+    var core = stdCore(cfg);
+    /* cfg.after(wb, ctx) = 업체 전용 처리를 공통(보관비·택배비) 뒤에 (탑프레쉬 — settle_engine_top.js) */
+    return { needs: cfg.needs, items: cfg.items || {}, sheets: cfg.sheets || {}, verified: cfg.verified || {}, verifiedSheets: cfg.verifiedSheets, ownSheets: cfg.ownSheets, opt: {}, ruleList: cfg.ruleList,
+      afterBuild: function(wb, ctx){ return Promise.resolve(core(wb, ctx)).then(function(){ return cfg.after && cfg.after(wb, ctx); }); } };
+  }
+  window.SETTLE_STD = std;
+  function stdCore(cfg){
+    return function(wb, ctx){
         var st = ctx.st, log = ctx.log, won = ctx.won, YM = ctx.YM;
         (cfg.zeroQty || []).forEach(function(re){ var r = lineRow(st, re); if (r) st.getCell('G' + r).value = 0; });
         var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
@@ -78,7 +83,7 @@
           log.push(['확인 필요', '택배비 원본(이벗 택배비 리스트)이 아직 파일함에 없습니다 — 택배 건수 0으로 비워 둠(노란 칸), 들어오면 초안을 다시 받으세요']);
           return;
         }
-        var rows = [], seen = {};
+        var rows = [], seen = {}, dropMiss = 0;
         return ids.reduce(function(p, id){ return p.then(function(){ ctx.msg && ctx.msg(box[id].name + ' 읽는 중…'); return ctx.readBox(box[id]).then(function(xwb){
           var a = XLSX.utils.sheet_to_json(xwb.Sheets[xwb.SheetNames[0]], { header: 1, defval: '' }), hi = 0;
           for (var i = 0; i < Math.min(a.length, 10); i++) if (a[i].map(nsp).indexOf('택배크기') >= 0){ hi = i; break; }
@@ -86,6 +91,7 @@
           var useLearn = Object.keys(learnO).length || Object.keys(learnS).length;
           a.slice(hi + 1).forEach(function(r){ var o = nsp(r[iO]), s = nsp(r[iS]);
             var mine = useLearn ? (learnO[o] || learnS[s]) : (hit(o) || hit(s)); if (!mine) return;
+            if (/누락오배송/.test(o) && !learnO[o]){ dropMiss++; return; }   /* 누락오배송 = 우리 쪽 재발송, 청구 안 함 (지난달 시트에 있던 출력양식이면 그대로) — 2026-10-04 탑프레쉬 */
             var k = r.join('\u0001'); if (seen[k]) return; seen[k] = 1;
             rows.push(th.map(function(h){ var j = H.indexOf(h); return j < 0 ? (h === '건수' ? 1 : null) : r[j]; })); });
         }); }); }, Promise.resolve()).then(function(){
@@ -94,28 +100,29 @@
           /* sizeAll: 택배크기를 모두 이 크기로 (오름코스메틱 = 극소) · bigQty: 매칭총수량이 이 이상인 송장은 노란 표시 + 특이사항 → 대표님이 크기 확인 */
           var iQ = col('매칭총수량') > 0 ? col('매칭총수량') : col('수량'), big = [];
           if (cfg.sizeAll && iSz > 0) rows.forEach(function(r){ r[iSz] = cfg.sizeAll; });
-          var iM = col('매칭정보');   /* 미매칭(추가송장 등)은 상품수를 몰라 같이 표시 — 8월 오름 「추가송장」 = 중 */
-          if (cfg.bigQty && iQ > 0) rows.forEach(function(r, i){ if ((+r[iQ] || 0) >= cfg.bigQty || (iM > 0 && /미매칭/.test(String(r[iM])))) big.push(i); });
+          if (cfg.sizeDefault && iSz > 0) rows.forEach(function(r){ if (!String(r[iSz] == null ? '' : r[iSz]).trim()) r[iSz] = cfg.sizeDefault; });   /* 원본 크기가 비어 있을 때만 (탑프레쉬) */
+          var iM = col('매칭정보');   /* 미매칭(추가송장 등)은 상품수를 몰라 같이 표시 — 8월 오름 「추가송장」 = 중 · bigRe = 크기가 커지는 제품(탑프레쉬 그린박스) */
+          if (cfg.bigQty && iQ > 0) rows.forEach(function(r, i){ var m = iM > 0 ? String(r[iM]) : ''; if ((+r[iQ] || 0) >= cfg.bigQty || /미매칭/.test(m) || (cfg.bigRe && cfg.bigRe.test(m))) big.push(i); });
           rows.forEach(function(r, i){ var row = ss.getRow(2 + i); r.forEach(function(v, n){ if (n) row.getCell(n).value = v === '' ? null : v; }); });
           rows.forEach(function(r){ var z = String(r[iSz] || '').trim(); if (cnt[z] != null) cnt[z]++; else other++; var ad = +r[iAdd] || 0; if (ad === 3000) air++; else if (ad === 5000) isl++; });
           SIZES.forEach(function(s){ setQty(st, s[1], cnt[s[0]], log, s[0]); });
           setQty(st, /^(항공비|제주도)$/, air, log, '항공'); setQty(st, /^(도선비|섬도서산간)$/, isl, log, '도선');
+          if (dropMiss) log.push(['특이사항', '출력양식 「누락오배송」 ' + dropMiss + '건은 청구에서 뺌 (재발송)']);
           if (other) log.push(['특이사항', '택배크기가 극소·소·중·대가 아닌 줄 ' + other + '건 — 택배 시트 확인']);
           if (!rows.length) log.push(['특이사항', '이번 달 택배비 리스트에 이 업체 줄이 없습니다 (출력양식 ' + Object.keys(learnO).join('·') + ')']);
           log.push(['자동 적용', cfg.shipSheet + ' ← 이벗 택배비 리스트 ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대 + (air ? ' · 항공 ' + air : '') + (isl ? ' · 도선 ' + isl : '')]);
-          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!cfg.sizeAll }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
+          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!(cfg.sizeAll || cfg.sizeDefault) }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
             if (!big.length) return;
             var iV = col('송장번호');
             big.forEach(function(i){ var row = ss.getRow(2 + i); [iSz, iQ].forEach(function(n){ var c = row.getCell(n); c.style = Object.assign({}, c.style, { fill: YEL }); }); });
-            log.push(['특이사항', '상품 ' + cfg.bigQty + '개 이상·미매칭 송장 ' + big.length + '건 — ' + cfg.shipSheet + ' 시트 노란 줄, 택배크기(지금 ' + (cfg.sizeAll || '원본') + ') 확인·조정: '
+            log.push(['특이사항', '상품 ' + cfg.bigQty + '개 이상·미매칭' + (cfg.bigRe ? '·' + (cfg.bigName || '큰 제품') : '') + ' 송장 ' + big.length + '건 — ' + cfg.shipSheet + ' 시트 노란 줄, 택배크기(지금 ' + (cfg.sizeAll || (cfg.sizeDefault ? '원본, 없으면 ' + cfg.sizeDefault : '원본')) + ') 확인·조정: '
               + big.map(function(i){ return (rows[i][iV] || '') + '(' + (iM > 0 && /미매칭/.test(String(rows[i][iM])) ? '미매칭' : rows[i][iQ] + '개') + ')'; }).join(', ')]);
           });
         });
-      }
     };
   }
 
-  var COMMON = [R('보관비 = 지난달 마지막 날 보관파렛에서 시작, 입출고 화물관리 그 달 입고·출고(파렛트)를 날짜별로 → 파렛트×일 합계가 거래명세표 보관비 수량 (단가는 지난달 그대로)'),
+  var COMMON = window.SETTLE_STD_RULES = [R('보관비 = 지난달 마지막 날 보관파렛에서 시작, 입출고 화물관리 그 달 입고·출고(파렛트)를 날짜별로 → 파렛트×일 합계가 거래명세표 보관비 수량 (단가는 지난달 그대로)'),
     R('택배비 = 이벗 택배비 리스트에서 지난달 택배 시트의 출력양식·판매처명 줄 → 택배크기별 건수(극소·소·중·대) · 추가운임 3,000 = 항공/제주 · 5,000 = 도선/섬. 파일이 아직 없으면 0 + 노란 칸'),
     R('솔루션비용 등 매달 같은 줄은 지난달 그대로 · 화물 청구서·입출고의 이 업체 흔적은 점검_화물흔적 시트로')];
   E['심플리뷰티풀'] = std({ name: '심플리뷰티풀', shipSheet: '배송비', sheets: { '배송비': 'skip', '보관비': 'skip' },
