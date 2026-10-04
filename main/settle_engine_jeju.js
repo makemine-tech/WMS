@@ -96,8 +96,29 @@
       });
     };
 
+    /* ── 배송비 맨 오른쪽 주소·전화1 ← 주문목록 같은 송장번호 (대표님 2026-10-04 — 제주맥주 배송비는 주소·연락처까지) ── */
+    var addrStep = function(){
+      var ws = wb.getWorksheet('배송비'); if (!ws) return;
+      var TH = []; ws.getRow(1).eachCell(function(c, k){ TH[k] = ns(c.value); });
+      var cV = TH.indexOf('송장번호'), cA = TH.indexOf('주소'), cP = TH.indexOf('전화1');
+      if (cV < 0) return;
+      if (cA < 0){ cA = TH.length; ws.getRow(1).getCell(cA).value = '주소'; }
+      if (cP < 0){ cP = Math.max(TH.length, cA + 1); ws.getRow(1).getCell(cP).value = '전화1'; }
+      return read(ids('ebut_orders')).then(function(F){
+        var m = {};
+        F.forEach(function(x){ var a = XLSX.utils.sheet_to_json(x.Sheets[x.SheetNames[0]], { header: 1, defval: '' }); if (!a.length) return; var H = a[0].map(ns), iV = H.indexOf('송장번호'), iA = H.indexOf('주소'), iP = H.indexOf('전화1');
+          if (iV < 0) return; a.slice(1).forEach(function(r){ var v = ns(r[iV]); if (v && !m[v]) m[v] = [r[iA], r[iP]]; }); });
+        var n = 0, miss = 0, hst = ws.getRow(1).getCell(cV).style;
+        ws.eachRow(function(row, r){ if (r < 2) return; var v = ns(row.getCell(cV).value); if (!v) return; var o = m[v];
+          if (o){ row.getCell(cA).value = o[0] || null; row.getCell(cP).value = o[1] ? String(o[1]) : null; n++; } else miss++; });
+        [cA, cP].forEach(function(c){ var h = ws.getRow(1).getCell(c); if (hst) h.style = hst; if (!ws.getColumn(c).width || ws.getColumn(c).width < 14) ws.getColumn(c).width = c === cA ? 50 : 15; });
+        log.push(['자동 적용', '배송비 주소·전화1 ← 주문목록 같은 송장번호 ' + n + '건' + (miss ? ' · 못 찾음 ' + miss + '건' : '')]);
+        if (miss) log.push(['특이사항', '배송비 송장 ' + miss + '건은 주문목록에서 주소를 못 찾음 — 주문목록 파일 확인']);
+      });
+    };
+
     /* ── 기타출고및작업비 ── */
-    return Promise.resolve(stockStep()).then(function(){ return read(ids('ebut_orders')); }).then(function(F){
+    return Promise.resolve(stockStep()).then(addrStep).then(function(){ return read(ids('ebut_orders')); }).then(function(F){
       var ws = wb.getWorksheet('기타출고및작업비'); if (!ws) return;
       var TH = []; ws.getRow(1).eachCell({ includeEmpty: true }, function(c, k){ TH[k - 1] = ns(c.value); });
       var at = function(h){ return TH.indexOf(h); };
@@ -157,5 +178,6 @@
       R('제주 추가운임 3,000 → 제주운임추가 · 반품비 극소·소 = 박스앤캔 반품(메이크창고(제주맥주)) + 반품 참조 파일'),
       R('기타출고및작업비 = 주문목록 제주맥주: B2B 제작후직배송(박스 = 캔÷24, 12본입 ÷12 · 300/박스 · 메이크마인 0 · 파렛트 = 25박스 이상 100박스당 1) + 선물세트 900 · 디스펜서·감자칩 300 → 기타출고비(1)·파렛트출고비'),
       R('보관비 = 전월 말일 보관파렛 + 화물관리 입고·출고(메모를 내용 칸에), 월말 택배출고 보정은 직접 · 용차비 = 화물 청구서 제주맥주 건 · 연동솔루션 매달 그대로'),
+      R('배송비 맨 오른쪽 주소·전화1 = 주문목록 같은 송장번호'),
       R('당월말일기준재고표 = 참조 파일(재고) 제주맥주재고파악_MMDD(재고조사풀에서 마감한 파일): 전산재고 = 전산 가용 · 실재고조사수량 = 현재실재고 · 불량재고 · 불량차감후 = 수식, 줄·이름은 지난달 표 그대로, 보관 파렛트수는 지난달 값(노란 칸)')] });
 })();

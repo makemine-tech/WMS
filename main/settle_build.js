@@ -396,7 +396,8 @@ function makeDraft(msg){
     /* afterBuild 는 Promise 를 돌려줘도 된다 — 이번 달 파일함(BOX)·원본 읽기(readBox → SheetJS 통합문서)·화면 메시지(msg) 제공 */
     var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: selBox(), REF: refList(), msg: msg,   /* 이 업체가 쓰는 파일(체크한 것)만 */
       CARGO: (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : null,   /* 입출고 화물관리 그 달 기록 */
-      readBox: function(m){ return decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); } };
+      readBox: function(m){ var k = m.path || m.p || m.name; if (!RB_CACHE[k]) RB_CACHE[k] = decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); return RB_CACHE[k]; } };   /* 같은 초안 안에서 같은 파일은 한 번만 열기 (주문목록 26MB 를 여러 단계가 읽음) */
+    var RB_CACHE = {};
     ctx.REF.forEach(function(f){ log.push(['안내', '📎 참조 파일 「' + f.name + '」 (용도 ' + f.use + ') — 위 「자동 적용」에 이 파일이 안 보이면 이 업체 룰에 그 용도가 아직 없는 것 (직접 확인 · 룰은 대화창에서)']); });
     return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
       .catch(function(e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); });
