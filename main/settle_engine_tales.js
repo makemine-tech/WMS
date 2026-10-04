@@ -71,13 +71,32 @@
     return '파우치작업';                                                                                    /* 혼합2·혼합3·단일2·샘플팩·파우치백 = 파우치 세트 줄 */
   }
 
+  /* 쿠팡 밀크런 내역(참조 파일, 용도 밀크런 또는 이름에 밀크런) — 쿠팡에서 받은 「xls」는 HTML 표라 글자로 읽음 */
+  function htmlRows(s){ var out = []; (String(s).match(/<tr[\s\S]*?<\/tr>/gi) || []).forEach(function(tr){ var c = []; tr.replace(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi, function(_, v){ c.push(v.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()); return ''; }); if (c.length) out.push(c); }); return out; }
+  function readMilk(ctx, log){
+    var refs = (ctx.REF || []).filter(function(f){ return f.use === '밀크런' || /밀크런/.test(f.name); }), rows = [], files = [];
+    var raw = function(f){ return typeof decryptBox === 'function' ? decryptBox(f.m).then(function(b){ return new TextDecoder('utf-8').decode(b instanceof ArrayBuffer ? new Uint8Array(b) : b); }) : Promise.reject(new Error('원본 읽기 없음')); };
+    return refs.reduce(function(p, f){ return p.then(function(){
+      return raw(f).then(function(t){ if (/<table/i.test(t)) return htmlRows(t);
+        return ctx.readBox(f.m).then(function(x){ return XLSX.utils.sheet_to_json(x.Sheets[x.SheetNames[0]], { header: 1, defval: '' }).map(function(r){ return r.map(function(v){ return String(v).trim(); }); }); }); })
+      .then(function(a){ var hi = -1; for (var i = 0; i < Math.min(a.length, 10); i++) if (a[i].map(ns).indexOf('밀크런번호') >= 0){ hi = i; break; }
+        if (hi < 0){ log.push(['확인 필요', '📎 「' + f.name + '」 — 밀크런번호 열을 못 찾음']); return; }
+        var H = a[hi].map(ns), ix = function(k){ return H.indexOf(k); }; files.push(f.name);
+        a.slice(hi + 1).forEach(function(r){ var no = String(r[ix('밀크런번호')] || '').trim(); if (!no) return; if (ix('상태') >= 0 && /취소/.test(r[ix('상태')])) return;
+          var d = String(r[ix('픽업일')] || '').match(/(\d{4})-(\d{2})-(\d{2})/); if (!d) return;
+          var po = String(r[ix('발주번호')] || '').split(/[\/,\s]+/).filter(Boolean);
+          rows.push({ no: no, date: d[0], pal: +String(r[ix('총팔레트수량')] || '').replace(/[^\d.]/g, '') || 0, box: +String(r[ix('박스수')] || '').replace(/[^\d.]/g, '') || 0,
+            center: String(r[ix('물류센터')] || '').replace(/\(.*?\)/g, '').trim(), po: po }); }); });
+    }).catch(function(e){ log.push(['확인 필요', '📎 「' + f.name + '」 읽기 실패: ' + ((e && e.message) || e)]); }); }, Promise.resolve()).then(function(){ return { rows: rows, files: files }; });
+  }
+
   function after(wb, ctx){
     var st = ctx.st, log = ctx.log, box = ctx.BOX || {}, YM = ctx.YM, won = ctx.won;
     var base = window.TALES_SIZE || { ex: {}, cap: {} }, ex = Object.assign({}, base.ex), cap = JSON.parse(JSON.stringify(base.cap || {}));
     var nTpl = learnTpl(wb, ex, cap);
     var ids = Object.keys(box).filter(function(id){ return box[id].type === 'ebut_orders'; });
     var read = function(L){ return L.reduce(function(p, id){ return p.then(function(acc){ ctx.msg && ctx.msg(box[id].name + ' 읽는 중…'); return ctx.readBox(box[id]).then(function(x){ acc.push(x); return acc; }); }); }, Promise.resolve([])); };
-    return read(ids).then(function(F){
+    return readMilk(ctx, log).then(function(MR){ return read(ids).then(function(F){
       /* 1) 이벗 테일즈 줄 */
       var tpl = wb.getWorksheet('토탈집계데이터'); if (!tpl){ log.push(['확인 필요', '표본에 「토탈집계데이터」 시트가 없음']); return; }
       var TH = []; tpl.getRow(1).eachCell({ includeEmpty: true }, function(c, n){ TH[n - 1] = ns(c.value); });
@@ -171,12 +190,22 @@
         } else log.push(['확인 필요', '보관비 시트 형식이 달라 지난달 그대로']);
       }
       if (wb.getWorksheet('밀크런출고비')){
+        /* 밀크런 = 쿠팡 밀크런 내역(참조 파일) · 트럭쉽먼트 등 나머지 = 화물관리 출고 — 같은 날 화물관리 밀크런 기록은 내역으로 바꿈 */
         var MH = []; wb.getWorksheet('밀크런출고비').getRow(1).eachCell(function(c, n){ MH[n - 1] = txt(c.value); });
-        var mrows = mk.map(function(x){ return MH.map(function(h){ var k = ns(h);
-          if (k === '입고일') return dnum(x); if (k === '팔레트수') return pl(x); if (k === '트럭수') return /밀크런/.test(memo(x)) ? '밀크런' : '1 트럭'; if (k === '센터') return /크로스닥/.test(memo(x)) ? '인천13' : ''; return ''; }); });
+        var inMonth = MR.rows.filter(function(m){ return m.date.slice(0, 7) === YM; }), mDays = {}, list = [];
+        inMonth.forEach(function(m){ mDays[m.date] = (mDays[m.date] || 0) + m.pal; });
+        mk.forEach(function(x){ if (mDays[x.date] != null && /밀크런/.test(memo(x))){ if (pl(x) !== mDays[x.date]) log.push(['특이사항', '밀크런 ' + x.date + ' 팔레트 — 쿠팡 내역 ' + mDays[x.date] + ' · 화물관리 ' + pl(x) + ' (밀크런출고비는 쿠팡 내역, 보관비 시트 밀크런출고는 화물관리 값)']); return; }
+          list.push({ date: x.date, d: dnum(x), pal: pl(x), truck: /밀크런/.test(memo(x)) ? '밀크런' : '1 트럭', center: /크로스닥/.test(memo(x)) ? '인천13' : '', src: '화물' }); });
+        inMonth.forEach(function(m){ if (!mk.some(function(x){ return x.date === m.date && /밀크런/.test(memo(x)); })) log.push(['특이사항', '쿠팡 밀크런 ' + m.date + ' ' + m.pal + '팔레트(' + m.no + ') — 화물관리에 같은 날 밀크런 출고 기록 없음 (보관비 시트 밀크런출고에 없음)']);
+          list.push({ date: m.date, d: Math.round(Date.parse(m.date + 'T00:00:00Z') / 864e5) + 25569, pal: m.pal, truck: '밀크런', center: m.center, no: m.no, po: m.po.length ? m.po[0] + (m.po.length > 1 ? ' 외 ' + (m.po.length - 1) + '건' : '') : '', box: m.box, src: '쿠팡' }); });
+        list.sort(function(p, q){ return p.d - q.d; });
+        var mrows = list.map(function(x){ return MH.map(function(h){ var k = ns(h);
+          if (k === '쉽먼트번호') return x.no || ''; if (k === '예약번호') return x.po || ''; if (k === '입고일') return x.d; if (k === '센터') return x.center; if (k === '트럭수') return x.truck; if (k === '팔레트수') return x.pal; if (k === '총납품수량') return x.box ? x.box + '박스' : ''; return ''; }); });
         put('밀크런출고비', mrows, MH);
         var ws2 = wb.getWorksheet('밀크런출고비'), cd2 = col(ws2, '입고일'); if (cd2) for (var q = 2; q <= mrows.length + 1; q++) ws2.getCell(cd2 + q).numFmt = 'yyyy-mm-dd';
-        log.push(['자동 적용', '밀크런출고비 ← 화물관리 출고(크로스닥·밀크런·쉽먼트) ' + mrows.length + '건 · 팔레트 ' + mk.reduce(function(s, x){ return s + pl(x); }, 0) + ' (쉽먼트 번호·예약번호·납품 수량은 비어 있음)']);
+        var nK = list.filter(function(x){ return x.src === '쿠팡'; }).length;
+        log.push(['자동 적용', '밀크런출고비 ' + list.length + '건 · 팔레트 ' + list.reduce(function(t, x){ return t + x.pal; }, 0) + ' — ' + (MR.files.length ? '밀크런 ' + nK + '건 ← 📎 ' + MR.files.join(', ') + ' (밀크런번호·발주번호·박스수), ' : '') + '트럭쉽먼트 등 ' + (list.length - nK) + '건 ← 화물관리']);
+        if (!MR.files.length) log.push(['확인 필요', '쿠팡 밀크런 내역(참조 파일, 용도 밀크런)이 없어 밀크런도 화물관리 팔레트로만 — 쉽먼트 번호·예약번호 비어 있음']);
       }
       /* 작업 인건추가비 = 화물관리 「기타」의 「○○ N개 제작」 (파우치 300 · 선물세트+박스 900 · 선물세트 750) */
       var r0 = line(/작업인건추가비/), rEnd = line(/^택배반품비/);
@@ -195,11 +224,11 @@
       if (rRet){ st.getCell('G' + rRet).value = 0;
         for (var r6 = rRet + 1; r6 < (rYong || rRet + 5); r6++){ ['A', 'B', 'G', 'H'].forEach(function(c){ st.getCell(c + r6).value = null; }); }
         log.push(['안내', '택배 반품·착불 줄은 비워 둠 — 이번 달 반품이 있으면 직접 입력']); }
-    });
+    }); });
   }
 
   E['제이에스로지원(테일즈코리아)'] = {
-    needs: ['ebut_orders'], traceSkip: true,   /* 화물관리·화물 청구서는 보관비·밀크런·제작·용차비 시트로 이미 들어감 */
+    needs: ['ebut_orders'],   /* 📎 참조 파일: 밀크런 = 쿠팡 밀크런 내역 */ traceSkip: true,   /* 화물관리·화물 청구서는 보관비·밀크런·제작·용차비 시트로 이미 들어감 */
     items: { 9: 'auto', 10: 'auto', 11: 'auto', 12: 'auto', 13: 'auto', 14: 'auto', 20: 'auto', 21: 'auto', 23: 'auto', 25: 'auto',
              36: 'auto', 37: 'auto', 38: 'auto', 39: 'auto', 40: 'auto', 41: 'auto', 44: 'auto', 45: 'auto', 46: 'auto', 47: 'auto', 48: 'auto', 49: 'fixed' },
     sheets: {}, verified: {},
@@ -216,6 +245,7 @@
       R('이베이(쿠팡)쉽먼트 출고작업비 = 쉽먼트 송장 수 × 1,500 · 제주 주소 송장 = 추가운임 3,000'),
       R('보관비 시트 ← 화물관리: 입고 → 입고파렛(까대기·컨테이너면 수작업 파렛트도), 출고 크로스닥·밀크런·쉽먼트 → 밀크런출고, 그 밖 출고 → 일반출고 · 보관파렛 = 지난달 값 그대로(노란 칸)'),
       R('밀크런출고비 ← 화물관리 크로스닥·밀크런·쉽먼트 출고 팔레트 · 작업 인건추가비 ← 화물관리 「○○ N개 제작」 (파우치 300 · 선물세트+박스 900 · 선물세트 750) · 반품 줄은 비우고 직접 입력'),
+      R('밀크런출고비: 밀크런 = 📎 참조 파일 쿠팡 밀크런 내역(용도 밀크런 · 밀크런번호 → 쉽먼트 번호, 발주번호 → 예약번호 「첫 번호 외 n건」, 픽업일, 물류센터, 총 팔레트, 박스수) · 트럭쉽먼트 등은 화물관리 출고 · 팔레트가 화물관리와 다르면 특이사항'),
       R('파우치작업비 = 주문의 파우치 세트(혼합2·혼합3·단일2·샘플팩 등, (완) 제외) 개수 × 300 — 단품 TS·TP 와 세트 안 구성품은 안 셈 (대표님 확인)')
     ],
     afterBuild: after

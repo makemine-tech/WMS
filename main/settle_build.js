@@ -84,7 +84,7 @@ function fileUse(){
 }
 function selBox(){ var U = fileUse(), o = {}; Object.keys(U).forEach(function(id){ if (U[id].on) o[id] = BOX[id]; }); refFiles().forEach(function(id){ o[id] = BOX[id]; }); return o; }
 /* ── 업체 참조 파일 (대표님 2026-10-04): 이 업체에만 쓰는 임시 자료(반품·재고·화물…) — box/{ym}/{id}.ref = 업체키, .use = 용도 · 엔진은 ctx.REF 로 용도별로 씀 ── */
-var REF_USES = ['반품', '재고', '화물', '기타'];
+var REF_USES = ['반품', '재고', '화물', '밀크런', '기타'];
 function refFiles(){ return Object.keys(BOX).filter(function(id){ return BOX[id] && BOX[id].ref === VW.vkey; }).sort(function(a, b){ return (BOX[a].at || 0) - (BOX[b].at || 0); }); }
 function refList(){ return refFiles().map(function(id){ var m = BOX[id]; return { id: id, name: m.name, use: m.use || '기타', type: m.type, m: m }; }); }
 function setRefUse(id, use){ db.ref('settlement/box/' + YM + '/' + id + '/use').set(use); }
