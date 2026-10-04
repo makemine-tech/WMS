@@ -41,6 +41,7 @@ var WMS_PAGES=[
     {key:'star_extract', file:'star_extract.html', label:'데이터 추출', floor:2, gate:true},
     {key:'stock_check',       file:'stock_check.html',       label:'재고조사풀 (업체별 재고조사 모음)', floor:2, gate:true},
     {key:'stock_tales_minus', file:'stock_tales_minus.html', label:'└ 테일즈 마이너스재고 조정', floor:2, gate:true},
+    {key:'stock_jeju',        file:'stock_jeju.html',        label:'└ 제주맥주 재고조사 마감', floor:2, gate:true},
     {key:'picktalk',     file:'picktalk.html',     label:'피크톡', floor:2, gate:true},
     {key:'barcodeprint', file:'barcodeprint.html', label:'바코드 라벨 인쇄', floor:2, gate:true},
   ]},

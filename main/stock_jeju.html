@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>제주맥주 재고조사 마감 — 재고조사풀</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- 로그인 게이트(wms_access.js)가 쓰는 SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<style>
+  :root{ --bg:#0b0d12; --surface:#141822; --surface2:#1c2331; --border:#2a3040;
+         --text:#e6e9f0; --muted:#8b94a8; --accent:#4ade80; --accent2:#fbbf24; --red:#f05050; --blue:#3b82f6; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:1.2rem .9rem 3rem; }
+  .wrap{ width:100%; max-width:1180px; margin:0 auto; }
+  .top{ display:flex; align-items:center; justify-content:space-between; gap:.8rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .ttl{ font-size:1.3rem; font-weight:900; letter-spacing:-.4px; }
+  .ttl small{ display:block; font-family:'Space Mono',monospace; font-size:.62rem; color:var(--muted); font-weight:400; letter-spacing:.12em; margin-top:.2rem; }
+  .home{ background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:8px; padding:.45rem .8rem; font-size:.78rem; font-weight:700; text-decoration:none; }
+  .home:hover{ color:var(--text); }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1rem; margin-bottom:.9rem; }
+  .card-h{ font-size:.95rem; font-weight:800; margin-bottom:.5rem; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .rule{ font-size:.78rem; color:var(--muted); line-height:1.75; }
+  .rule b{ color:var(--text); }
+  .drop{ border:2px dashed var(--border); border-radius:12px; padding:1.4rem 1rem; text-align:center; cursor:pointer; position:relative; }
+  .drop:hover,.drop.over{ border-color:var(--accent); background:rgba(74,222,128,.05); }
+  .drop input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .drop-t{ font-size:.95rem; font-weight:700; }
+  .drop-s{ font-size:.72rem; color:var(--muted); margin-top:.3rem; }
+  .slots{ display:grid; grid-template-columns:repeat(4,1fr); gap:.5rem; margin-top:.8rem; }
+  @media(max-width:760px){ .slots{ grid-template-columns:repeat(2,1fr); } }
+  .slot{ background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:.55rem .65rem; font-size:.74rem; }
+  .slot b{ display:block; font-size:.78rem; margin-bottom:.15rem; }
+  .slot.ok{ border-color:rgba(74,222,128,.5); }
+  .slot .fn{ color:var(--accent); word-break:break-all; }
+  .slot .no{ color:var(--muted); }
+  .stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem; margin:.2rem 0 .8rem; }
+  @media(max-width:700px){ .stats{ grid-template-columns:repeat(2,1fr); } }
+  .st{ background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:.6rem .7rem; }
+  .st-l{ font-size:.66rem; color:var(--muted); font-weight:700; }
+  .st-v{ font-size:1.35rem; font-weight:900; margin-top:.15rem; }
+  .st-v.ok{ color:var(--accent); } .st-v.warn{ color:var(--accent2); } .st-v.bad{ color:var(--red); }
+  .btn{ width:100%; padding:.85rem; border:none; border-radius:10px; background:var(--accent); color:#06281a; font-family:inherit; font-size:.95rem; font-weight:900; cursor:pointer; }
+  .btn:hover{ filter:brightness(1.08); }
+  .btn:disabled{ background:var(--surface2); color:#555c6b; cursor:not-allowed; }
+  .btn.ghost{ background:var(--surface2); color:var(--text); border:1px solid var(--border); font-weight:700; width:auto; padding:.45rem .8rem; font-size:.78rem; }
+  table{ width:100%; border-collapse:collapse; font-size:.8rem; }
+  th{ background:var(--surface2); color:var(--muted); text-align:left; padding:.45rem .55rem; border-bottom:1px solid var(--border); white-space:nowrap; font-size:.72rem; position:sticky; top:0; }
+  td{ padding:.4rem .55rem; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
+  td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tbl-wrap{ max-height:520px; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+  tr.diff td{ background:rgba(240,80,80,.08); }
+  tr.newrow td:first-child{ color:var(--accent2); }
+  .neg{ color:var(--red); font-weight:800; }
+  .okc{ color:var(--accent); font-weight:800; }
+  .badc{ color:var(--red); font-weight:800; }
+  .dim{ color:var(--muted); font-size:.72rem; }
+  .empty{ padding:1.4rem; text-align:center; color:var(--muted); font-size:.82rem; }
+  .warnbox{ border:1px solid rgba(251,191,36,.45); background:rgba(251,191,36,.07); border-radius:10px; padding:.7rem .85rem; font-size:.78rem; color:#fde68a; line-height:1.6; margin-bottom:.7rem; }
+  select{ background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.25rem .35rem; font-family:inherit; font-size:.75rem; max-width:260px; }
+  .hide{ display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="ttl">🍺 제주맥주 재고조사 마감<small>JEJU BEER · MONTHLY STOCK CLOSE</small></div>
+    <a class="home" href="/stock_check.html">‹ 재고조사풀</a>
+  </div>
+
+  <div class="card">
+    <div class="card-h">① 파일 4개 올리기 <span class="dim">— 한꺼번에 끌어 놓아도 종류를 알아서 나눕니다</span></div>
+    <div class="rule">
+      <b>지난달 재고파악</b> (제주맥주재고파악_0831.xlsx) · <b>이달 입고목록</b> · <b>이달 출고목록</b> (이벗 다운로드) · <b>전산 마감재고</b> (이벗 마감재고기록)<br>
+      이달 마감 = <b>지난달 현재실재고 + 이달 입고(가용입고, 정상·반품·이동 모두) − 이달 출고(가용출고수량)</b> → 전산 가용재고와 비교해 차이를 찾습니다.
+    </div>
+    <div class="drop" id="drop" style="margin-top:.7rem">
+      <input type="file" id="fileIn" multiple accept=".xlsx,.xls">
+      <div class="drop-t">📂 엑셀 파일을 여기에 놓거나 눌러서 고르기</div>
+      <div class="drop-s">같은 종류를 다시 올리면 새 파일로 바뀝니다 · 파일은 이 브라우저 안에서만 읽고 서버에 올리지 않습니다</div>
+    </div>
+    <div class="slots" id="slots"></div>
+  </div>
+
+  <div class="card hide" id="mapCard">
+    <div class="card-h">② 표에 없는 상품 <span class="dim">— 지난달 표의 어느 줄인지 골라 주세요 (한 번 고르면 다음 달부터 기억)</span></div>
+    <div id="mapBody"></div>
+  </div>
+
+  <div class="card hide" id="resCard">
+    <div class="card-h">③ <span id="resTitle">마감 재고</span></div>
+    <div class="stats" id="stats"></div>
+    <div id="resWarn"></div>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th>상품명</th><th class="num" id="thPrev">전월마감</th><th class="num">입고</th><th class="num">출고</th><th class="num">현재실재고</th><th class="num">전산 가용</th><th class="num">차이</th><th class="num">전산 불량</th><th>확인</th>
+    </tr></thead><tbody id="resBody"></tbody></table></div>
+    <div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap;align-items:center">
+      <button class="btn" id="dlBtn" style="width:auto;padding:.75rem 1.2rem" onclick="download()">📥 제주맥주재고파악 파일 내려받기</button>
+      <span class="dim" id="dlNote"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   제주맥주 재고조사 마감 (대표님 2026-10-04)
+   지난달 재고파악 파일(0831_재고현황: 상품명·전월마감·입고·출고·현재실재고·불량재고·비고)을 틀로
+   이달 입고목록·출고목록(이벗)을 상품별로 더해 이달 마감(MMDD_재고현황)을 만들고, 이벗 마감재고기록(가용재고)과 비교.
+   상품 이름 짝: 상품코드([JB001]) → 이름 정리(공백·기호, &=앤) 같음/앞부분 → 화면에서 고른 것(localStorage 'jejuStockMap')
+   검증: 0831 파일 안의 8월 입고·출고 목록 합계 = 표의 8월입고·출고 칸 (전 품목 일치)
+============================================================ */
+var F = { prev: null, in: null, out: null, erp: null };   /* 읽은 파일 { name, aoa(시트별) … } */
+var MAP = (function(){ try { return JSON.parse(localStorage.getItem('jejuStockMap')) || {}; } catch (e) { return {}; } })();
+var R = null;   /* 계산 결과 */
+var KIND = { prev: '지난달 재고파악', in: '이달 입고목록', out: '이달 출고목록', erp: '전산 마감재고' };
+
+function $(i){ return document.getElementById(i); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function num(v){ var n = parseFloat(String(v == null ? '' : v).replace(/[, ]/g, '')); return isNaN(n) ? 0 : n; }
+function fmt(n){ return (Math.round(n * 100) / 100).toLocaleString('ko-KR'); }
+function ns(s){ return String(s == null ? '' : s).replace(/\s+/g, ''); }
+function codeOf(s){ var m = String(s || '').match(/\[(JB\d+(?:-\d+)?)\]/i); return m ? m[1].toUpperCase() : ''; }
+function norm(s){ return String(s || '').replace(/\[[^\]]*\]/g, '').replace(/&/g, '앤').replace(/[\s\-_()\/.,]/g, '').toLowerCase(); }
+
+/* ── 파일 읽기 · 종류 알아내기 ── */
+function readFile(file){
+  return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(e){ try { res(XLSX.read(new Uint8Array(e.target.result), { type: 'array' })); } catch (x) { rej(x); } }; r.onerror = rej; r.readAsArrayBuffer(file); });
+}
+function headRow(aoa, need){ for (var i = 0; i < Math.min(aoa.length, 12); i++){ var h = aoa[i].map(ns); if (need.every(function(k){ return h.indexOf(k) >= 0; })) return i; } return -1; }
+function detect(wb){
+  for (var s = 0; s < wb.SheetNames.length; s++){ var a = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[s]], { header: 1, defval: '' });
+    if (headRow(a, ['상품명', '현재실재고']) >= 0) return { kind: 'prev', sheet: wb.SheetNames[s], aoa: a };
+    if (headRow(a, ['상품명', '가용재고수량']) >= 0) return { kind: 'erp', sheet: wb.SheetNames[s], aoa: a };
+    if (headRow(a, ['상품명', '가용출고수량']) >= 0) return { kind: 'out', sheet: wb.SheetNames[s], aoa: a };
+    if (headRow(a, ['상품명', '가용입고']) >= 0) return { kind: 'in', sheet: wb.SheetNames[s], aoa: a }; }
+  return null;
+}
+function addFiles(list){
+  Array.prototype.reduce.call(list, function(p, file){ return p.then(function(){ return readFile(file).then(function(wb){
+    var d = detect(wb); if (!d){ alert(file.name + '\n\n어떤 파일인지 모르겠습니다 (재고파악·입고목록·출고목록·마감재고기록 중 하나여야 함)'); return; }
+    d.name = file.name; F[d.kind] = d; }).catch(function(e){ alert(file.name + ' 읽기 실패: ' + (e && e.message || e)); }); }); }, Promise.resolve())
+    .then(function(){ renderSlots(); compute(); });
+}
+
+/* ── 지난달 표 · 입출고 · 전산 ── */
+function prevRows(){
+  var a = F.prev.aoa, h = headRow(a, ['상품명', '현재실재고']), H = a[h].map(ns), i = function(k){ return H.indexOf(k); };
+  var iN = i('상품명'), iE = i('현재실재고'), iF = i('불량재고'), iG = i('비고'), iB = 1, iC = 2, iD = 3;
+  var out = [];
+  a.slice(h + 1).forEach(function(r){ var n = String(r[iN] || '').trim(); if (!n) return;
+    var e = r[iE] !== '' ? num(r[iE]) : num(r[iB]) + num(r[iC]) - num(r[iD]);
+    out.push({ name: n, prev: e, bad: iF >= 0 ? num(r[iF]) : 0, memo: iG >= 0 ? r[iG] : '' }); });
+  return out;
+}
+function sumBy(d, qtyCol){
+  var a = d.aoa, h = headRow(a, ['상품명', qtyCol]), H = a[h].map(ns), iP = H.indexOf('상품명'), iO = H.indexOf('옵션명'), iQ = H.indexOf(qtyCol), m = {};
+  a.slice(h + 1).forEach(function(r){ var p = String(r[iP] || '').trim(); if (!p) return; var k = p + '|' + (iO >= 0 ? String(r[iO] || '').trim() : ''); m[k] = (m[k] || 0) + num(r[iQ]); });
+  return m;
+}
+function erpBy(){
+  var a = F.erp.aoa, h = headRow(a, ['상품명', '가용재고수량']), H = a[h].map(ns), iP = H.indexOf('상품명'), iO = H.indexOf('옵션명'), iA = H.indexOf('가용재고수량'), iB = H.indexOf('불량재고수량'), iD = H.indexOf('일자'), m = {}, day = '';
+  a.slice(h + 1).forEach(function(r){ var p = String(r[iP] || '').trim(); if (!p) return; var k = p + '|' + (iO >= 0 ? String(r[iO] || '').trim() : '');
+    var o = m[k] || (m[k] = { avail: 0, bad: 0 }); o.avail += num(r[iA]); o.bad += iB >= 0 ? num(r[iB]) : 0; if (iD >= 0 && r[iD]) day = String(r[iD]); });
+  return { m: m, day: day };
+}
+/* 이벗 상품(상품명|옵션) → 지난달 표 상품명 */
+function matchName(key, names){
+  if (MAP[key] != null) return MAP[key];
+  var p = key.split('|')[0], o = key.split('|')[1] || '', c = codeOf(p);
+  if (c){ var hit = names.filter(function(n){ return codeOf(n) === c; }); if (hit.length === 1) return hit[0]; }
+  var full = norm(p + (o && !/^-?본품$|^-$/.test(o) ? o : '')), base = norm(p);
+  var eq = names.filter(function(n){ return norm(n) === full || norm(n) === base; }); if (eq.length === 1) return eq[0];
+  var pre = names.filter(function(n){ var k = norm(n); return k.length >= 3 && (full.indexOf(k) === 0); }); if (pre.length === 1) return pre[0];   /* 그랜드감자칩할라피뇨 ⊂ 그랜드감자칩할라피뇨앤레드칠리 */
+  var st = names.filter(function(n){ return norm(n).indexOf(base) === 0 && base.length >= 2; }); if (st.length === 1) return st[0];       /* 톡쏘다 → 톡쏘다-본품 */
+  return null;
+}
+
+function compute(){
+  if (!F.prev){ $('resCard').classList.add('hide'); $('mapCard').classList.add('hide'); return; }
+  var rows = prevRows(), names = rows.map(function(r){ return r.name; }), byName = {};
+  rows.forEach(function(r){ r.in = 0; r.out = 0; r.erp = null; r.erpBad = null; r.src = []; byName[r.name] = r; });
+  var IN = F.in ? sumBy(F.in, '가용입고') : {}, OUT = F.out ? sumBy(F.out, '가용출고수량') : {}, E = F.erp ? erpBy() : { m: {}, day: '' };
+  var keys = {}; [IN, OUT, E.m].forEach(function(m){ Object.keys(m).forEach(function(k){ keys[k] = 1; }); });
+  var unmapped = [], skipped = [];
+  Object.keys(keys).forEach(function(k){
+    var to = matchName(k, names), q = { in: IN[k] || 0, out: OUT[k] || 0, erp: E.m[k] };
+    if (to === '@skip'){ skipped.push({ key: k, q: q }); return; }
+    if (to === '@new' || (to && !byName[to] && to.indexOf('@') !== 0)){ var nm = k.split('|')[0] + (k.split('|')[1] && !/^-?본품$|^-$/.test(k.split('|')[1]) ? ' ' + k.split('|')[1] : '');
+      if (!byName[nm]){ byName[nm] = { name: nm, prev: 0, bad: 0, memo: '', in: 0, out: 0, erp: null, erpBad: null, src: [], isNew: true }; rows.push(byName[nm]); } to = nm; }
+    if (!to){ if (q.in || q.out || (q.erp && (q.erp.avail || q.erp.bad))) unmapped.push({ key: k, q: q }); return; }
+    var r = byName[to]; r.in += q.in; r.out += q.out; r.src.push(k);
+    if (q.erp){ r.erp = (r.erp || 0) + q.erp.avail; r.erpBad = (r.erpBad || 0) + q.erp.bad; } });
+  rows.forEach(function(r){ r.close = r.prev + r.in - r.out; r.diff = r.erp == null ? null : r.close - r.erp; });
+  /* 날짜 이름: 전산 일자 → 없으면 입출고 마지막 날 */
+  var day = E.day || '', M = day ? +day.slice(4, 6) : 0;
+  if (!M){ var mm = (F.prev.sheet.match(/^(\d\d)(\d\d)/) || []); M = mm[1] ? (+mm[1] % 12) + 1 : 0; }
+  var lastDay = function(m){ var y = day ? +day.slice(0, 4) : new Date().getFullYear(); return new Date(y, m, 0).getDate(); };
+  var mmdd = day ? day.slice(4, 8) : (M ? ('0' + M).slice(-2) + lastDay(M) : '');
+  var pm = (F.prev.sheet.match(/^(\d\d)\d\d/) || [])[1]; pm = pm ? +pm : (M ? (M + 10) % 12 + 1 : '');
+  /* 이동입고(재고 전환)는 있는데 출고목록에 이동출고가 없으면 → 원래 상품 쪽이 그만큼 많게 계산됨 (2026-09: 6캔바코드 → 24캔 696) */
+  var moves = [];
+  if (F.in){ var a = F.in.aoa, h = headRow(a, ['상품명', '가용입고']), H = a[h].map(ns), iK = H.indexOf('구분'), iP = H.indexOf('상품명'), iQ = H.indexOf('가용입고'), iM = H.indexOf('비고'), iD = H.indexOf('입고일');
+    a.slice(h + 1).forEach(function(r){ if (iK >= 0 && /이동/.test(r[iK])) moves.push({ d: r[iD], p: r[iP], q: num(r[iQ]), memo: iM >= 0 ? r[iM] : '' }); }); }
+  var outHasMove = false;
+  if (F.out){ var b = F.out.aoa, hb = headRow(b, ['상품명', '가용출고수량']), Hb = b[hb].map(ns), jK = Hb.indexOf('구분'), jW = Hb.indexOf('출고방법');
+    outHasMove = b.slice(hb + 1).some(function(r){ return (jK >= 0 && /이동/.test(r[jK])) || (jW >= 0 && /이동/.test(r[jW])); }); }
+  R = { rows: rows, unmapped: unmapped, skipped: skipped, M: M, mmdd: mmdd, pm: pm, hasErp: !!F.erp, moves: moves, outHasMove: outHasMove };
+  renderMap(names); renderRes();
+}
+
+/* ── 화면 ── */
+function renderSlots(){
+  $('slots').innerHTML = ['prev', 'in', 'out', 'erp'].map(function(k){ var d = F[k];
+    return '<div class="slot' + (d ? ' ok' : '') + '"><b>' + (d ? '✅ ' : '⬜ ') + KIND[k] + '</b>' + (d ? '<span class="fn">' + esc(d.name) + '</span>' : '<span class="no">아직 없음</span>') + '</div>'; }).join('');
+}
+function renderMap(names){
+  var L = R.unmapped.concat(R.skipped.map(function(x){ x.skip = 1; return x; }));
+  if (!L.length){ $('mapCard').classList.add('hide'); return; }
+  $('mapCard').classList.remove('hide');
+  var opts = function(cur){ return '<option value="">— 고르기 —</option><option value="@new"' + (cur === '@new' ? ' selected' : '') + '>➕ 표에 새 줄로 추가</option><option value="@skip"' + (cur === '@skip' ? ' selected' : '') + '>🚫 재고표에서 뺌 (세트·가상 상품 등)</option>'
+    + names.map(function(n){ return '<option' + (cur === n ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join(''); };
+  $('mapBody').innerHTML = '<div class="tbl-wrap" style="max-height:320px"><table><thead><tr><th>이벗 상품 (상품명 / 옵션)</th><th class="num">입고</th><th class="num">출고</th><th class="num">전산 가용</th><th>지난달 표의 줄</th></tr></thead><tbody>'
+    + L.map(function(x){ var p = x.key.split('|');
+      return '<tr' + (x.skip ? ' style="opacity:.55"' : '') + '><td>' + esc(p[0]) + (p[1] ? ' <span class="dim">/ ' + esc(p[1]) + '</span>' : '') + '</td><td class="num">' + fmt(x.q.in) + '</td><td class="num">' + fmt(x.q.out) + '</td><td class="num">' + (x.q.erp ? fmt(x.q.erp.avail) : '-') + '</td>'
+        + '<td><select data-k="' + esc(x.key) + '" onchange="setMap(this.dataset.k, this.value)">' + opts(MAP[x.key]) + '</select></td></tr>'; }).join('') + '</tbody></table></div>';
+}
+function setMap(k, v){ if (v) MAP[k] = v; else delete MAP[k]; try { localStorage.setItem('jejuStockMap', JSON.stringify(MAP)); } catch (e) {} compute(); }
+function renderRes(){
+  $('resCard').classList.remove('hide');
+  $('resTitle').textContent = (R.mmdd || '이달') + ' 마감 재고 — ' + (R.pm || '?') + '월 마감 + ' + (R.M || '?') + '월 입고 − 출고';
+  $('thPrev').textContent = (R.pm || '전') + '월마감';
+  var rows = R.rows, nDiff = rows.filter(function(r){ return r.diff != null && Math.abs(r.diff) > 1e-9; }).length, nNeg = rows.filter(function(r){ return r.close < 0; }).length;
+  var nErpMiss = R.hasErp ? rows.filter(function(r){ return r.erp == null && Math.abs(r.close) > 1e-9; }).length : 0;
+  $('stats').innerHTML = [['품목', rows.length, ''], ['전산과 차이', R.hasErp ? nDiff : '전산 파일 없음', R.hasErp ? (nDiff ? 'bad' : 'ok') : 'warn'],
+    ['표에 없는 상품', R.unmapped.length, R.unmapped.length ? 'warn' : 'ok'], ['마이너스 재고', nNeg, nNeg ? 'bad' : 'ok']]
+    .map(function(s){ return '<div class="st"><div class="st-l">' + s[0] + '</div><div class="st-v ' + s[2] + '">' + s[1] + '</div></div>'; }).join('');
+  var w = [];
+  if (!F.in || !F.out) w.push('이달 ' + (!F.in ? '입고목록' : '') + (!F.in && !F.out ? '·' : '') + (!F.out ? '출고목록' : '') + '이 아직 없습니다 — 0으로 계산 중');
+  if (R.unmapped.length) w.push('② 에서 표에 없는 상품 ' + R.unmapped.length + '개를 어느 줄인지 골라 주세요 — 고르기 전에는 계산에 안 들어갑니다');
+  if (R.moves.length && !R.outHasMove) w.push('이동입고 ' + R.moves.length + '건이 있는데 출고목록에 이동출고가 없습니다 — 전환한 원래 상품의 재고가 그만큼 많게 계산됩니다 (이벗에서 이동출고까지 포함해 출고목록을 받거나, 차이로 확인): '
+    + R.moves.map(function(m){ return m.d + ' ' + m.p + ' ' + fmt(m.q) + (m.memo ? ' (' + m.memo + ')' : ''); }).join(', '));
+  if (R.hasErp && !nDiff && !R.unmapped.length) w.push('✅ 전산 가용재고와 모두 일치 — 재고조사 마감 가능');
+  if (nErpMiss) w.push('전산 마감재고에 없는 상품 ' + nErpMiss + '개 (실재고가 0 이 아님) — 차이 칸 「전산 없음」 확인');
+  $('resWarn').innerHTML = w.map(function(t){ return '<div class="warnbox"' + (/^✅/.test(t) ? ' style="border-color:rgba(74,222,128,.5);background:rgba(74,222,128,.07);color:#bbf7d0"' : '') + '>' + esc(t) + '</div>'; }).join('');
+  rows = rows.slice().sort(function(a, b){ var da = a.diff ? 1 : 0, db = b.diff ? 1 : 0; return db - da; });   /* 차이 있는 줄 먼저 */
+  $('resBody').innerHTML = rows.map(function(r){ var d = r.diff, bad = d != null && Math.abs(d) > 1e-9;
+    var chk = !R.hasErp ? '' : r.erp == null ? (Math.abs(r.close) > 1e-9 ? '<span class="badc">전산 없음</span>' : '<span class="dim">-</span>') : bad ? '<span class="badc">차이 ' + (d > 0 ? '+' : '') + fmt(d) + '</span>' : '<span class="okc">일치</span>';
+    return '<tr class="' + (bad || (R.hasErp && r.erp == null && Math.abs(r.close) > 1e-9) ? 'diff' : '') + (r.isNew ? ' newrow' : '') + '"><td>' + esc(r.name) + (r.isNew ? ' <span class="dim">(새 줄)</span>' : '') + '</td><td class="num">' + fmt(r.prev) + '</td><td class="num">' + fmt(r.in) + '</td><td class="num">' + fmt(r.out) + '</td>'
+      + '<td class="num' + (r.close < 0 ? ' neg' : '') + '"><b>' + fmt(r.close) + '</b></td><td class="num">' + (r.erp == null ? '<span class="dim">-</span>' : fmt(r.erp)) + '</td><td class="num">' + (d == null ? '' : (bad ? '<span class="badc">' + (d > 0 ? '+' : '') + fmt(d) + '</span>' : '0')) + '</td>'
+      + '<td class="num">' + (r.erpBad == null ? '<span class="dim">' + fmt(r.bad) + '</span>' : fmt(r.erpBad)) + '</td><td>' + chk + '</td></tr>'; }).join('');
+  $('dlNote').textContent = '파일 이름: 제주맥주재고파악_' + (R.mmdd || 'MMDD') + '.xlsx · 시트 ' + (R.mmdd || '') + '_재고현황 · ' + R.M + '월출고목록 · ' + R.M + '월입고목록' + (R.hasErp ? ' · 전산비교' : '');
+}
+
+/* ── 내려받기: 지난달 파일과 같은 모양 ── */
+function download(){
+  if (!R) return;
+  var M = R.M, pm = R.pm, head = ['상품명', pm + '월재고마감', M + '월입고수량', M + '월출고수량', '현재실재고', '불량재고', '비고'];
+  var aoa = [head];
+  R.rows.forEach(function(r, i){ var n = i + 2, memo = R.hasErp && r.diff != null && Math.abs(r.diff) > 1e-9 ? '전산 ' + fmt(r.erp) + ' · 차이 ' + (r.diff > 0 ? '+' : '') + fmt(r.diff) : (R.hasErp && r.erp == null && Math.abs(r.close) > 1e-9 ? '전산 없음' : '');
+    aoa.push([r.name, r.prev, r.in || '', r.out || '', { t: 'n', f: 'SUM(B' + n + '+C' + n + '-D' + n + ')', v: r.close }, r.erpBad != null ? (r.erpBad || '') : (r.bad || ''), memo]); });
+  var L = R.rows.length + 1; var sIn = R.rows.reduce(function(s, r){ return s + r.in; }, 0), sOut = R.rows.reduce(function(s, r){ return s + r.out; }, 0);
+  aoa.push(['', '', { t: 'n', f: 'SUM(C2:C' + L + ')', v: sIn }, { t: 'n', f: 'SUM(D2:D' + L + ')', v: sOut }, '', '', '']);
+  var wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 34 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 28 }];
+  XLSX.utils.book_append_sheet(wb, ws, (R.mmdd || '') + '_재고현황');
+  if (F.out) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(F.out.aoa), M + '월출고목록');
+  if (F.in) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(F.in.aoa), M + '월입고목록');
+  if (R.hasErp){ var c = [['상품명', '현재실재고', '전산 가용재고', '차이', '전산 불량재고', '이벗 상품']];
+    R.rows.forEach(function(r){ c.push([r.name, r.close, r.erp == null ? '' : r.erp, r.erp == null ? '' : r.diff, r.erpBad == null ? '' : r.erpBad, r.src.join(' / ')]); });
+    R.unmapped.forEach(function(x){ c.push([x.key.replace('|', ' / ') + ' (표에 없음)', '', x.q.erp ? x.q.erp.avail : '', '', x.q.erp ? x.q.erp.bad : '', '']); });
+    var cs = XLSX.utils.aoa_to_sheet(c); cs['!cols'] = [{ wch: 34 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 50 }]; XLSX.utils.book_append_sheet(wb, cs, '전산비교'); }
+  XLSX.writeFile(wb, '제주맥주재고파악_' + (R.mmdd || 'MMDD') + '.xlsx');
+}
+
+(function(){
+  var drop = $('drop'), fin = $('fileIn');
+  fin.addEventListener('change', function(){ addFiles(fin.files); fin.value = ''; });
+  ['dragenter', 'dragover'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave', 'drop'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
+  drop.addEventListener('drop', function(e){ if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  renderSlots();
+})();
+</script>
+<script src="/wms_access.js" data-page="stock_jeju" data-floor="2"></script>
+</body>
+</html>
