@@ -40,11 +40,11 @@ function samplesByVendor(){
 /* 이번 달 초안의 틀 = 정산월보다 앞 달 중 가장 최근 (없으면 맨 앞) */
 function defaultSample(list){ for (var i = 0; i < list.length; i++) if (list[i].ym < YM) return list[i]; return list[0]; }
 
-/* ── 업체 목록 정렬 (대표님 2026-10-03): 복잡성(기본)·정산액·이름, 각각 오름/내림 ──
+/* ── 업체 목록 정렬 (대표님 2026-10-03): 미작성순(2026-10-04)·복잡성(기본)·정산액·이름, 각각 오름/내림 ──
    정산액·복잡성은 표본(지난달 거래내역서)을 한 번 열어 계산해 settlement/vendors/{키}/stat 에 저장 → 목록은 저장값으로 정렬
    복잡도 = 데이터 시트 수 × 10 + 청구 항목 수(0원 제외) + 데이터 줄 수 ÷ 1,000 */
 var VSORT = (function(){ try { return JSON.parse(localStorage.getItem('settleVSort')) || { k: 'cx', d: -1 }; } catch (x) { return { k: 'cx', d: -1 }; } })();
-function setVSort(k){ VSORT = VSORT.k === k ? { k: k, d: -VSORT.d } : { k: k, d: k === 'name' ? 1 : -1 }; try { localStorage.setItem('settleVSort', JSON.stringify(VSORT)); } catch (x) {} renderVendors(); }
+function setVSort(k){ VSORT = VSORT.k === k ? { k: k, d: -VSORT.d } : { k: k, d: k === 'name' || k === 'todo' ? 1 : -1 }; try { localStorage.setItem('settleVSort', JSON.stringify(VSORT)); } catch (x) {} renderVendors(); }
 function statOf(A, sid){
   var items = (A.items || []).filter(function(it){ return !it.zero; }).length, sh = (A.sheets || []), rows = sh.reduce(function(s, x){ return s + (x.rows || 0); }, 0);
   var t = A.totals || {}, total = t.total != null ? t.total : t.sub != null ? Math.round(t.sub * 1.1) : null;
@@ -69,8 +69,11 @@ function renderVendors(){
   var box = $('tabVendors'); if (!box) return;
   if (VW) return renderWork();
   var g = samplesByVendor(), st = function(n){ var v = VENDORS[vKey(n)]; return (v && v.stat) || {}; };
+  /* 작성 단계 (대표님 2026-10-04 미작성순): 0 미작성 → 1 초안 받음 → 2 완료 확정 */
+  var stage = function(n){ var k = vKey(n); return doneOf(k, YM) ? 2 : (((((VENDORS[k] || {}).run) || {})[YM] || {}).draft ? 1 : 0); };
   var names = Object.keys(g).sort(function(a, b){
     if (VSORT.k === 'name') return VSORT.d * a.localeCompare(b, 'ko');
+    if (VSORT.k === 'todo') return VSORT.d * (stage(a) - stage(b)) || a.localeCompare(b, 'ko');
     var x = st(a)[VSORT.k], y = st(b)[VSORT.k];
     if (x == null && y == null) return a.localeCompare(b, 'ko'); if (x == null) return 1; if (y == null) return -1;
     return VSORT.d * (x - y) || a.localeCompare(b, 'ko'); });
@@ -81,7 +84,8 @@ function renderVendors(){
   } else {
     var sb = function(k, t){ var on = VSORT.k === k; return '<button class="btn' + (on ? ' p' : '') + '" style="padding:.3rem .7rem" onclick="setVSort(\'' + k + '\')">' + t + (on ? (VSORT.d > 0 ? ' ▲' : ' ▼') : '') + '</button>'; };
     html += '<div class="card"><div class="card-h"><span class="card-t">업체 ' + names.length + '곳</span><span class="card-s">룰이 코드에 반영된 업체는 ⚙️ 표시 · 룰은 대화창에서 요청</span></div>'
-      + '<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:-.2rem 0 .6rem"><span class="sm dim">정렬</span>' + sb('cx', '복잡성') + sb('total', '정산액') + sb('name', '이름')
+      + '<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:-.2rem 0 .6rem"><span class="sm dim">정렬</span>' + sb('todo', '미작성순') + sb('cx', '복잡성') + sb('total', '정산액') + sb('name', '이름')
+      + (function(){ var c = [0, 0, 0]; names.forEach(function(n){ c[stage(n)]++; }); return '<span class="sm" style="margin:0 .2rem"><b style="color:#fbbf24">미작성 ' + c[0] + '</b> · 초안 ' + c[1] + ' · <span style="color:var(--g)">완료 ' + c[2] + '</span></span>'; })()
       + '<span class="sm dim">· 같은 버튼을 다시 누르면 오름/내림 · 정산액·복잡성 = 지난달 표본 기준</span><span class="sm" id="vstatMsg" style="color:#fbbf24"></span></div>'
       + names.map(function(n){
         var list = g[n], v = VENDORS[vKey(n)], en = engineOf(vKey(n)), cnt = en && en.ruleList ? en.ruleList.length : 0, dft = defaultSample(list);
