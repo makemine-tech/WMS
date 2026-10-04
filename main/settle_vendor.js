@@ -92,12 +92,26 @@ function renderVendors(){
         var S2 = st(n), stx = S2.cx != null ? '<small style="display:block">정산액 <b>' + (S2.total != null ? won(S2.total) + '원' : '?') + '</b> · 복잡도 <b>' + S2.cx + '</b> <span class="dim">(시트 ' + S2.sheets + ' · 항목 ' + S2.items + ' · 줄 ' + won(S2.rows) + ')</span></small>' : '<small style="display:block" class="dim">정산액·복잡도 계산 대기</small>';
         return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
-          + '<div class="fi">' + pickSel + '</div>'
+          + '<div class="fi">' + memoInput(vKey(n), v) + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button></div></div>';
       }).join('') + '</div>';
   }
   box.innerHTML = html;
   if (names.length) setTimeout(function(){ fillStats(g); }, 300);
+}
+
+/* 업체 목록 한 줄 메모 (대표님 2026-10-04) — 정산월마다 따로: 할 일·남은 것·점검사항
+   settlement/vendors/{키}/memo/{정산월} = { t, at } · 쓰는 동안은 목록을 다시 그리지 않음(class rule) · Enter 또는 칸을 벗어나면 저장 */
+function memoInput(vk, v){
+  var cur = ((((v || {}).memo) || {})[YM] || {}).t || '';
+  return '<input class="rule vmemo' + (cur ? ' has' : '') + '" data-vk="' + esc(vk) + '" value="' + esc(cur) + '" maxlength="300" placeholder="📝 ' + esc(ymLabel(YM)) + ' 메모 — 할 일 · 남은 것 · 점검사항"'
+    + ' title="' + esc(cur) + '" onkeydown="if(event.key===\'Enter\'){this.blur()}" onchange="saveMemo(this)">';
+}
+function saveMemo(el){
+  var vk = el.dataset.vk, t = el.value.trim();
+  db.ref('settlement/vendors/' + vk + '/memo/' + YM).set(t ? { t: t, at: firebase.database.ServerValue.TIMESTAMP } : null)
+    .then(function(){ el.classList.toggle('has', !!t); el.title = t; el.classList.add('saved'); setTimeout(function(){ el.classList.remove('saved'); }, 1200); })
+    .catch(function(e){ toast('메모 저장 실패: ' + ((e && (e.code || e.message)) || e)); });
 }
 
 function startVendor(name){
