@@ -49,6 +49,7 @@
       replaceSheet(wb, cfg.returns.sheet, TH, rows);
       if (lr && !rows.length){ var g2 = st.getCell('G' + lr); if (!(g2.value && g2.value.formula)) g2.value = 0; }
       log.push(['자동 적용', cfg.returns.sheet + ' ' + rows.length + '건 ← ' + [L.length ? '박스앤캔 반품 시트 ' + nB + '건' : '', R.files.length ? '참조 파일(' + R.files.join(', ') + ') ' + nR + '건' : ''].filter(Boolean).join(' + ')]);
+      R.map.forEach(function(m){ if (/←/.test(m)) log.push(['안내', '반품 참조 열 맞춤 — ' + m + (/수량←/.test(m) ? '' : ' · 수량 = 줄마다 1(반품 1건)')]); });
       if (R.miss.length) log.push(['특이사항', '반품 참조 파일 ' + R.miss.join(', ') + ' — 열 이름이 「' + cfg.returns.sheet + '」 시트(' + TH.filter(Boolean).join('·') + ')와 맞지 않아 못 넣음, 직접 확인']);
     });
   }
