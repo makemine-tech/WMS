@@ -43,7 +43,6 @@
       add('쿠팡출고 수량', '납품수량', w.qty, P.out);
       if (w.pal) { add('쿠팡출고적재비', '파렛트', w.pal, P.load, { yq: w.palWarn }); add('밀크런파렛트', '파렛트', w.pal, P.milk, { yq: w.palWarn }); }
       add('바코드 덧방', '수량', w.qty, P.relabel);
-      if (w.ni.parcel && w.ni.box) add('택배쉽먼트 박스', '박스', w.ni.box, null, { yp: true, note: '택배 크기별 단가 확인 (위 택배발송 줄로 옮겨도 됨)' });
       if (w.ni.vinyl) add('비닐포장', '장', w.ni.vinyl, P.vinyl, { note: '파일 이름 「비닐포장 ' + w.ni.vinyl + '」 · 장당 ' + P.vinyl });
       if (w.ni.urgent) add('긴급작업 인건비', '인', P.urgentN, P.urgent, { yq: true, note: '파일 이름 「긴급」 — 기본 ' + P.urgentN + '인 × 1인 ' + P.urgent.toLocaleString() + ' (인원 다르면 수량 수정)' });
     } else if (w.kind === 'move'){
@@ -138,7 +137,11 @@
       };
       var r = rSec, supply = 0, first = rSec, lines = [];
       put(r++, tSec, {}, false, false, true);
-      parcel.forEach(function(T){ supply += put(r, T, { G: 0 }, false, false, true); lines.push(r); r++; });
+      /* 택배쉽먼트 = 파일 이름 「택배쉽먼트 N박스」 → 택배발송(중) (대표님 2026-10-05: 9/29 축구공 3박스 = 중) */
+      var pw = W.filter(function(w){ return w.kind === 'po' && w.ni.parcel && w.ni.box; }), pBox = pw.reduce(function(s, w){ return s + w.ni.box; }, 0);
+      parcel.forEach(function(T){ var mid = /\(중\)/.test(ns(T.cs[1][1]));
+        supply += put(r, T, mid && pBox ? { G: pBox, S: pw.map(function(w){ return day(w.date) + '일 ' + w.ni.box + '박스'; }).join(' · ') + ' (택배쉽먼트 = 중)' } : { G: 0 }, false, false, true); lines.push(r); r++; });
+      if (pBox) log.push(['자동 적용', '택배쉽먼트 ' + pBox + '박스 → 택배발송(중) — ' + pw.map(function(w){ return '「' + w.name + '」'; }).join(', ') + ' (크기 다르면 그 줄로 옮기기)']);
       put(r++, tBlank, {});
       W.forEach(function(w){
         var L = rowsOf(w), md = String(w.date || '').slice(5).replace('-', '');
@@ -222,7 +225,7 @@
       R('쿠팡출고 = 쿠팡출고 수량 × 450 + 쿠팡출고적재비 파렛트 × 8,000 + 밀크런파렛트 × 3,000 + 바코드 덧방 수량 × 120 (쿠팡출고엔 덧방이 같이) · 날짜 = 파일 이름 MMDD'),
       R('파렛트 = 입출고 화물관리 그날 스타 밀크런 출고 — 없으면 파일 이름 「N파렛트」, 다르면 특이사항(노란 칸) · 택배쉽먼트는 파렛트 줄 없음'),
       R('본사이관 등 재고출고 = 이관출고박스수(박스바코드 종류) × 1,000 (노란 칸)'),
-      R('파일 이름 「택배쉽먼트 N박스」 = 단가 빈 노란 줄로 넣음 — 금액 직접'),
+      { d: '2026-10-05', t: '택배쉽먼트(파일 이름 「택배쉽먼트 N박스」) = 쿠팡출고 수량·덧방 + 박스 수를 <택배쉽먼트> 택배발송(중) 3,500 으로 (파렛트 줄 없음)' },
       { d: '2026-10-05', t: '컨테이너 입고는 까대기 문구가 없어도(「40피트 파렛트 입고>>파렛트 재적재」 등) 20피트 200,000 · 40피트 400,000' },
       { d: '2026-10-05', t: '비닐포장 = 장당 300 (수량 = 파일 이름 「N장·N개 비닐포장」)' },
       { d: '2026-10-05', t: '긴급작업(파일 이름 「긴급」) = 4인 작업비 1인당 100,000 추가 → 400,000 (인원 수량은 노란 칸 — 다르면 수정)' },
