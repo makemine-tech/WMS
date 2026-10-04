@@ -81,6 +81,10 @@
       hint:'이벗 재고 다운로드 — 월말 전산재고 시트',
       test:function(f){ return !!sheetWith(f, ['가용재고수량','불량재고수량','옵션코드']); },
       summary:function(f){ var s = sheetWith(f, ['가용재고수량','불량재고수량']); return nf(s.rows) + '품목'; } },
+    { key:'star_row', cat:'vendor', label:'스타인터내셔널 작업 ROW', icon:'⭐',
+      hint:'스타 작업지시서 원본 — (검수완료) 입고 검수파일 · MMDD_쿠팡출고 발주서 · 본사이관 재고출고양식. STAR 재고관리 입출고와 대조',
+      test:function(f){ return !!(window.SETTLE_STAR && SETTLE_STAR.looks(f)); },   /* 쿠팡 발주서보다 먼저 — 이름(쿠팡출고)으로 앳댓·포인트 발주서와 구분 (settle_star.js) */
+      summary:function(f, wb){ var p = SETTLE_STAR.parse(wb, f.name); return (p.dir === 'in' ? '입고 ' : '출고 ') + p.kind + ' · ' + nf(p.total) + '개 · ' + nf(Object.keys(p.items).length) + '종'; } },
     { key:'coupang_po', cat:'vendor', label:'쿠팡 발주서·입고내역', icon:'🛒',
       hint:'쿠팡 발주번호·SKU·물류센터 목록',
       test:function(f){ return !!sheetWith(f, ['발주번호','물류센터']) && !!(sheetWith(f, ['SKU ID']) || sheetWith(f, ['SKU 이름'])); },
