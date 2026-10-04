@@ -17,7 +17,7 @@
   var E = window.SETTLE_ENGINES = window.SETTLE_ENGINES || {};
   var YEL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2B3' } };
   var R = function(t){ return { d: '2026-10-05', t: t }; };
-  var P = { in: 100, survey: 1000, out: 450, load: 8000, milk: 3000, relabel: 120, box: 1000, ft20: 200000, ft40: 400000 };
+  var P = { in: 100, survey: 1000, out: 450, load: 8000, milk: 3000, relabel: 120, box: 1000, ft20: 200000, ft40: 400000, vinyl: 300, urgent: 100000, urgentN: 4 };
   function txt(v){ if (v && v.richText) return v.richText.map(function(t){ return t.text; }).join(''); if (v && typeof v === 'object' && 'result' in v) return v.result == null ? '' : String(v.result); if (v && typeof v === 'object' && 'formula' in v) return ''; return v == null ? '' : String(v); }
   function ns(v){ return txt(v).replace(/\s+/g, ''); }
   function fml(c){ var v = c.value; if (v && typeof v === 'object' && v.formula) return v.formula; return null; }
@@ -44,8 +44,8 @@
       if (w.pal) { add('쿠팡출고적재비', '파렛트', w.pal, P.load, { yq: w.palWarn }); add('밀크런파렛트', '파렛트', w.pal, P.milk, { yq: w.palWarn }); }
       add('바코드 덧방', '수량', w.qty, P.relabel);
       if (w.ni.parcel && w.ni.box) add('택배쉽먼트 박스', '박스', w.ni.box, null, { yp: true, note: '택배 크기별 단가 확인 (위 택배발송 줄로 옮겨도 됨)' });
-      if (w.ni.vinyl) add('비닐포장', '수량', w.ni.vinyl, null, { yp: true, note: '파일 이름 「비닐포장」 — 단가 확인' });
-      if (w.ni.urgent) add('긴급추가요금', '건', 1, null, { yp: true, note: '파일 이름 「긴급추가요금」 — 금액 확인' });
+      if (w.ni.vinyl) add('비닐포장', '장', w.ni.vinyl, P.vinyl, { note: '파일 이름 「비닐포장 ' + w.ni.vinyl + '」 · 장당 ' + P.vinyl });
+      if (w.ni.urgent) add('긴급작업 인건비', '인', P.urgentN, P.urgent, { yq: true, note: '파일 이름 「긴급」 — 기본 ' + P.urgentN + '인 × 1인 ' + P.urgent.toLocaleString() + ' (인원 다르면 수량 수정)' });
     } else if (w.kind === 'move'){
       add('이관출고박스수', '박스', w.boxes, P.box, { yq: true, note: '박스바코드 ' + w.boxes + '종 = 박스 수 · ' + w.qty + '개' });
     }
@@ -223,7 +223,9 @@
       R('쿠팡출고 = 쿠팡출고 수량 × 450 + 쿠팡출고적재비 파렛트 × 8,000 + 밀크런파렛트 × 3,000 + 바코드 덧방 수량 × 120 (쿠팡출고엔 덧방이 같이) · 날짜 = 파일 이름 MMDD'),
       R('파렛트 = 입출고 화물관리 그날 스타 밀크런 출고 — 없으면 파일 이름 「N파렛트」, 다르면 특이사항(노란 칸) · 택배쉽먼트는 파렛트 줄 없음'),
       R('본사이관 등 재고출고 = 이관출고박스수(박스바코드 종류) × 1,000 (노란 칸)'),
-      R('파일 이름 「비닐포장」「긴급추가요금」「택배쉽먼트 N박스」 = 단가 빈 노란 줄로 넣음 — 금액 직접'),
+      R('파일 이름 「택배쉽먼트 N박스」 = 단가 빈 노란 줄로 넣음 — 금액 직접'),
+      { d: '2026-10-05', t: '비닐포장 = 장당 300 (수량 = 파일 이름 「N장·N개 비닐포장」)' },
+      { d: '2026-10-05', t: '긴급작업(파일 이름 「긴급」) = 4인 작업비 1인당 100,000 추가 → 400,000 (인원 수량은 노란 칸 — 다르면 수정)' },
       R('엑셀 없는 STAR 입고가 엑셀 있는 출고로 나갔으면 = 실제 입고 작업 → STAR 기록으로 입고검수·사이즈컬러조사(노란 칸) + 시트 · 바코드·수량 똑같은 입고→출고(재고제로화 등) = 임의 변동, 정산 안 함'),
       R('컨테이너 까대기 = 화물관리 스타 입고 중 메모에 20피트·40피트·컨테이너 → 20피트 200,000 · 40피트 400,000 (대표님 기록이 우선 — 크로스 체크는 대표님)'),
       R('공간비 = 지난달 그대로 · 용차비 = 화물 청구서 스타인터내셔널 건(용차비 시트 합계)'),
