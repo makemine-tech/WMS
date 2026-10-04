@@ -162,7 +162,7 @@ window.shipSheetFinish = function(wb, sheetName, st, ctx, opt){
     var lab = function(b){ return b.replace(/\s+/g, ''); }, sizeOf = function(b){ if (!/택배|발송|배송/.test(b)) return null; if (/극소/.test(b)) return '극소'; if (/\(소\)|소$/.test(b)) return '소'; if (/\(중\)|중$/.test(b)) return '중'; if (/\(대\d?\)|대\d?$/.test(b)) return '대'; return null; };
     if (st) st.eachRow(function(row, r){ var b = lab(ns(row.getCell(2).value) + ns(row.getCell(3).value)); if (!b) return; var g = row.getCell(7), z = sizeOf(b);
       if (z){ g.value = { formula: 'COUNTIF(' + rngZ + ',"' + z + '")', result: cnt[z] }; if (!opt.noSizeYellow) g.style = Object.assign({}, g.style, { fill: YEL }); }
-      else if (rngA && /항공|제주도|추가운임/.test(b)){ g.value = { formula: 'COUNTIF(' + rngA + ',">0")', result: nAdd }; } });
+      else if (rngA && /항공|제주|추가운임/.test(b) && !/도선|섬/.test(b)){   /* 제주맥주 「제주운임추가」도 (2026-10-04 — 피벗 수식이 남아 #REF!) */ g.value = { formula: 'COUNTIF(' + rngA + ',">0")', result: nAdd }; } });
     log.push(['자동 적용', '시트 「' + sheetName + '」 추가운임: 이벗 주소가 제주인 송장 ' + nJ + '건 = ' + (opt.jejuFee || 400).toLocaleString() + ' · 택배크기 칸 노란색(직접 확인) · 거래명세표 택배 건수는 택배크기 COUNTIF 수식(고치면 따라 바뀜)']);
     if (nJ && st) log.push(['특이사항', '제주 추가운임 ' + (opt.jejuFee || 400).toLocaleString() + ' ' + nJ + '건 — 거래명세표 항공비/제주도 줄 단가 확인']);
   });

@@ -20,6 +20,7 @@
 var YEL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2B3' } };
 
 function lastDay(ym){ var y = +ym.slice(0, 4), m = +ym.slice(5, 7); return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
+function txt0(v){ if (v && v.richText) return v.richText.map(function(t){ return t.text; }).join(''); if (v && typeof v === 'object' && 'result' in v) return v.result == null ? '' : String(v.result); return v == null ? '' : String(v); }
 function nsp(v){ return String(v == null ? '' : v).replace(/\s+/g, ''); }
 function runOf(){ return ((((VENDORS[VW.vkey] || {}).run) || {})[YM]) || {}; }
 function optOf(){ var e = engineOf(VW.vkey); return (e && e.opt) || {}; }   /* 업체 설정(settle_engines.js)의 옵션 */
@@ -400,6 +401,12 @@ function makeDraft(msg){
     return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
       .catch(function(e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); });
   }).then(function(){
+    /* 안전장치: 거래명세표에 피벗 수식(GETPIVOTDATA)이 남아 있으면 피벗표가 없어 #REF! → 지난달 값 + 노란 칸 + 확인 필요 (2026-10-04 제주맥주 제주운임추가) */
+    var stp = wb.getWorksheet(A.sheet) || wb.worksheets[0];
+    stp.eachRow(function(row, r){ row.eachCell(function(c){ var f = fOf(c); if (!f || !/GETPIVOTDATA/i.test(f)) return;
+      var name = (txt0(row.getCell(2).value) + ' ' + txt0(row.getCell(6).value)).trim();
+      c.value = c.result != null ? c.result : (c.value && c.value.result != null ? c.value.result : 0); c.fill = YEL;
+      log.push(['확인 필요', (name || c.address) + ' — 지난달 피벗 수식이 남아 있어 지난달 값 ' + won(+c.value || 0) + ' 으로 바꿈, 이번 달 값 직접 확인']); }); });
     /* 화물 흔적 — 업체 초안마다 (엔진 traceSkip 이면 건너뜀, 표본에 화물 청구서 시트가 있으면 청구서는 그 시트로 이미 들어가므로 입출고만) */
     if (!(eng && eng.traceSkip)) try { traceCargo(wb, log, A.sheets.some(function(s){ return s.kind && s.kind.key === 'freight'; })); } catch (e) { console.error(e); log.push(['확인 필요', '화물 흔적 찾기 오류: ' + ((e && e.message) || e)]); }
     /* 그대로 둔 시트 */
