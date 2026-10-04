@@ -24,7 +24,7 @@
     ruleList: [R('택배비 리스트에서 출력양식 「누락오배송」 줄은 청구 제외'), R('판매처 「맨소래담_연동몰」 = 이벗 전체주문목록 같은 송장번호의 주문자(무신사·에이블리·지그재그)로 바꿔 시트 나눔'),
       R('택배크기 기본 「극소」'), R('추가운임 = 이벗 주소가 제주인 송장 400'), R('시트 = 토탈배송비 + 판매처별(스마트스토어배송·무신사·에이블리·화해·지그재그·기타), 시트 이름 건수는 이번 달 건수'),
       { d: '2026-10-04', t: '스마트스토어 관리 300,000 · 솔루션비용 50,000 · 외부몰 관리 200,000 = 매달 그대로' },
-      { d: '2026-10-04', t: '전산재고 시트 = 이번 달 이벗 재고현황 통째로, 시트 이름은 말일(예: 0930_전산재고)' }],
+      { d: '2026-10-04', t: '전산재고 시트 = 이번 달 이벗 재고현황 통째로(상품명 순), 시트 이름은 말일(예: 0930_전산재고)' }],
     afterBuild: function(wb, ctx){
       var st = ctx.st, log = ctx.log, box = ctx.BOX || {};
       var ids = function(t){ return Object.keys(box).filter(function(id){ return box[id].type === t; }); };
@@ -76,6 +76,8 @@
           F.forEach(function(x){ x.SheetNames.forEach(function(n){ var a = XLSX.utils.sheet_to_json(x.Sheets[n], { header: 1, defval: '' });
             for (var i = 0; i < Math.min(a.length, 12); i++) if (a[i].map(ns).indexOf('가용재고수량') >= 0){ var r = a.slice(i + 1).filter(function(r){ return r.some(function(v){ return v !== ''; }); }); if (!best || r.length > best.rows.length) best = { head: a[i].map(String), rows: r }; break; } }); });
           if (!best){ log.push(['확인 필요', '이벗 재고현황에서 가용재고수량 제목줄을 못 찾아 「' + sn + '」 시트는 지난달 그대로']); return; }
+          var iP = best.head.map(ns).indexOf('상품명');   /* 상품명 순 (2026-10-01 9월분 만들 때 룰) */
+          if (iP >= 0) best.rows.sort(function(a, b){ return String(a[iP]).localeCompare(String(b[iP]), 'ko'); });
           replaceSheet(wb, sn, best.head, best.rows);
           var w = wb.getWorksheet(sn); if (w && sn !== nn && !wb.getWorksheet(nn)) w.name = nn;
           log.push(['자동 적용', '시트 「' + nn + '」 ← 이벗 재고현황 ' + best.rows.length + '품목']);
