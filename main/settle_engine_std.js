@@ -90,15 +90,26 @@
             rows.push(th.map(function(h){ var j = H.indexOf(h); return j < 0 ? (h === '건수' ? 1 : null) : r[j]; })); });
         }); }); }, Promise.resolve()).then(function(){
           clearSheet();
-          rows.forEach(function(r, i){ var row = ss.getRow(2 + i); r.forEach(function(v, n){ if (n) row.getCell(n).value = v === '' ? null : v; }); });
           var iSz = col('택배크기'), iAdd = col('추가운임'), cnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, air = 0, isl = 0, other = 0;
+          /* sizeAll: 택배크기를 모두 이 크기로 (오름코스메틱 = 극소) · bigQty: 매칭총수량이 이 이상인 송장은 노란 표시 + 특이사항 → 대표님이 크기 확인 */
+          var iQ = col('매칭총수량') > 0 ? col('매칭총수량') : col('수량'), big = [];
+          if (cfg.sizeAll && iSz > 0) rows.forEach(function(r){ r[iSz] = cfg.sizeAll; });
+          var iM = col('매칭정보');   /* 미매칭(추가송장 등)은 상품수를 몰라 같이 표시 — 8월 오름 「추가송장」 = 중 */
+          if (cfg.bigQty && iQ > 0) rows.forEach(function(r, i){ if ((+r[iQ] || 0) >= cfg.bigQty || (iM > 0 && /미매칭/.test(String(r[iM])))) big.push(i); });
+          rows.forEach(function(r, i){ var row = ss.getRow(2 + i); r.forEach(function(v, n){ if (n) row.getCell(n).value = v === '' ? null : v; }); });
           rows.forEach(function(r){ var z = String(r[iSz] || '').trim(); if (cnt[z] != null) cnt[z]++; else other++; var ad = +r[iAdd] || 0; if (ad === 3000) air++; else if (ad === 5000) isl++; });
           SIZES.forEach(function(s){ setQty(st, s[1], cnt[s[0]], log, s[0]); });
           setQty(st, /^(항공비|제주도)$/, air, log, '항공'); setQty(st, /^(도선비|섬도서산간)$/, isl, log, '도선');
           if (other) log.push(['특이사항', '택배크기가 극소·소·중·대가 아닌 줄 ' + other + '건 — 택배 시트 확인']);
           if (!rows.length) log.push(['특이사항', '이번 달 택배비 리스트에 이 업체 줄이 없습니다 (출력양식 ' + Object.keys(learnO).join('·') + ')']);
           log.push(['자동 적용', cfg.shipSheet + ' ← 이벗 택배비 리스트 ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대 + (air ? ' · 항공 ' + air : '') + (isl ? ' · 도선 ' + isl : '')]);
-          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx);   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
+          return window.shipSheetFinish(wb, cfg.shipSheet, st, ctx, { noSizeYellow: !!cfg.sizeAll }).then(function(){   /* 제주 추가운임 400 · 택배크기 노란 칸 · 건수 COUNTIF 수식 */
+            if (!big.length) return;
+            var iV = col('송장번호');
+            big.forEach(function(i){ var row = ss.getRow(2 + i); [iSz, iQ].forEach(function(n){ var c = row.getCell(n); c.style = Object.assign({}, c.style, { fill: YEL }); }); });
+            log.push(['특이사항', '상품 ' + cfg.bigQty + '개 이상·미매칭 송장 ' + big.length + '건 — ' + cfg.shipSheet + ' 시트 노란 줄, 택배크기(지금 ' + (cfg.sizeAll || '원본') + ') 확인·조정: '
+              + big.map(function(i){ return (rows[i][iV] || '') + '(' + (iM > 0 && /미매칭/.test(String(rows[i][iM])) ? '미매칭' : rows[i][iQ] + '개') + ')'; }).join(', ')]);
+          });
         });
       }
     };
@@ -114,5 +125,9 @@
     ruleList: [R('보관비만 책정 (택배 건이 생기면 택배비도)'), R('솔루션비용 수량 0 (청구 안 함) — 9월 확정본 기준')].concat(COMMON) });
   E['신성애드'] = std({ name: '신성애드', shipSheet: '택배비', sheets: { '택배비': 'skip', '보관비': 'skip' }, items: {}, ruleList: COMMON });
   E['트립인터__0000원'] = std({ name: '트립인터', alias: ['하나유통', '트립'], shipSheet: '택배비', sheets: { '택배비': 'skip', '보관비': 'skip' }, items: {}, ruleList: COMMON });
-  E['오름코스메틱'] = std({ name: '오름코스메틱', alias: ['오름'], shipSheet: '배송비', sheets: { '배송비': 'skip', '보관비': 'skip', '반품': 'skip' }, items: {}, ruleList: COMMON });
+  /* 2026-10-04 대표님: 특이사항·복잡한 부분 없음, 택배크기는 대부분 극소 — 상품 20개 이상 송장은 표시해서 초안에서 크기 확인 */
+  E['오름코스메틱'] = std({ name: '오름코스메틱', alias: ['오름'], shipSheet: '배송비', sheets: { '배송비': 'skip', '보관비': 'skip', '반품': 'skip' }, sizeAll: '극소', bigQty: 20,
+    /* ✅ 7월 확정본 + 8월 원본(8월 배송비로 만든 리스트)으로 8월 재현: 항공 1 · 보관비 93 · 솔루션 1 일치, 노란 표시 4건 = 8월에 소·중으로 고친 송장 4건 (2026-10-04) */
+    items: { 8: 'auto', 9: 'auto', 10: 'auto', 11: 'auto', 12: 'auto', 19: 'fixed', 20: 'auto' }, verified: { 12: true, 20: true },
+    ruleList: [{ d: '2026-10-04', t: '택배크기 = 모두 극소, 상품(매칭총수량) 20개 이상·미매칭(추가송장) 송장은 노란 표시 + 특이사항 → 초안에서 크기 확인·조정' }].concat(COMMON) });
 })();
