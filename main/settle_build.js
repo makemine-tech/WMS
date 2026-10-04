@@ -333,7 +333,7 @@ function makeDraft(msg){
     var qcol = A.header ? A.header.qty + 1 : 7;
     A.items.forEach(function(it){
       if (it.zero) return;
-      var cell = st.getRow(it.r).getCell(qcol), rr = (R.items || {})[it.r] || {}, mode = rr.mode;
+      var cell = st.getRow(it.r).getCell(qcol), rr = (R.items || {})[it.r] || {}, mode = rr.mode || (eng && eng.allAuto ? 'auto' : undefined);   /* allAuto: 거래명세표를 엔진이 통째로 다시 씀(스타 쿠팡대행) */
       var isPivot = it.qty.f && /GETPIVOTDATA/i.test(it.qty.f);
       if (eng && eng.compute && eng.compute[it.r] != null){ cell.value = eng.compute[it.r]; log.push(['자동 계산', it.name + ' = ' + won(eng.compute[it.r])]); return; }
       if (mode === 'manual'){

@@ -209,7 +209,7 @@ var LV = {
 function itemLevel(it, rr, eng){
   if (eng && eng.verified && eng.verified[it.r]) return 'ok';
   if (rr && (rr.mode === 'fixed' || rr.mode === 'manual')) return rr.mode;
-  if ((rr && rr.mode === 'auto') || (eng && eng.auto && eng.auto[it.r])) return 'auto';
+  if ((rr && rr.mode === 'auto') || (eng && eng.auto && eng.auto[it.r]) || (eng && eng.allAuto)) return 'auto';
   return 'none';
 }
 function sheetLevel(s, rr, eng){

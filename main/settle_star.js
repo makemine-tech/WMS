@@ -78,7 +78,7 @@
       c = function(n){ return T.head.indexOf(n); };
       var iQ = c('확정수량') >= 0 ? c('확정수량') : c('발주수량'), iB = c('원본바코드') >= 0 ? c('원본바코드') : c('SKUBarcode'), iN = c('SKU이름'), iC = c('물류센터');
       if (iQ < 0 || iB < 0) continue;
-      out.dir = 'out'; out.kind = '쿠팡출고';
+      out.dir = 'out'; out.kind = '쿠팡출고'; out.sheet = sn[i];
       T.rows.forEach(function(r){ add(r[iB], r[iQ], String(r[iN] || '').trim(), String(r[iC] || '').trim()); });
     }
     /* 2) 재고출고양식 — 박스바코드·바코드·수량·비고 */
@@ -86,7 +86,9 @@
       T = table(wb.Sheets[sn[i]], ['박스바코드','바코드','수량']); if (!T) continue;
       c = function(n){ return T.head.indexOf(n); };
       var nb = c('비고');
-      out.dir = 'out'; out.kind = '재고출고';
+      out.dir = 'out'; out.kind = '재고출고'; out.sheet = sn[i];
+      var bx = {}; T.rows.forEach(function(r){ var b = String(r[c('박스바코드')] || '').split(',')[0].trim(); if (b && +r[c('수량')]) bx[b] = 1; });
+      out.boxes = Object.keys(bx).length;   /* 박스바코드(쉼표 앞) 종류 = 나간 박스 수 */
       T.rows.forEach(function(r){ add(r[c('바코드')], r[c('수량')], '', nb >= 0 ? String(r[nb] || '').trim() : ''); if (!out.note && nb >= 0 && r[nb]) out.note = String(r[nb]).trim(); });
       if (out.note) out.kind = out.note;
     }
@@ -96,7 +98,7 @@
       if (T){
         c = function(n){ return T.head.indexOf(n); };
         var iNm = c('한글품명') >= 0 ? c('한글품명') : c('품명'), iCd = c('품번');
-        out.dir = 'in'; out.kind = '입고(검수)';
+        out.dir = 'in'; out.kind = '입고(검수)'; out.sheet = '약식';
         T.rows.forEach(function(r){ add(r[c('바코드')], r[c('수량')], [r[iCd], r[iNm]].filter(Boolean).join(' '), ''); });
       }
     }
@@ -183,7 +185,30 @@
     };
   }
 
-  root.SETTLE_STAR = { looks: looks, parse: parse, compare: compare, bkey: bkey, nameDate: nameDate, nameQty: nameQty };
+  /* STAR 재고관리 기록 읽기 (브라우저 — settlement.html 의 db·GID) → { logs, orders } · 한 번 읽으면 재사용 */
+  var LOADED = null;
+  function load(){
+    if (LOADED) return LOADED;
+    var base = 'wms_sync/groups/' + ((typeof GID !== 'undefined' && GID) || 'makechango') + '/';
+    LOADED = Promise.all([db.ref(base + 'star_instock/logs').get(), db.ref(base + 'star_outorder/orders').get()])
+      .then(function(r){ return { logs: r[0].val() || {}, orders: r[1].val() || {} }; })
+      .catch(function(e){ LOADED = null; throw e; });
+    setTimeout(function(){ LOADED = null; }, 5 * 60e3);   /* 5분 뒤엔 새로 읽음 */
+    return LOADED;
+  }
+  /* 그날 끝 재고 (바코드별) — 8/31 확정본 재고 시트와 428개 바코드 모두 일치 확인 (2026-10-05) */
+  function stockAt(logs, day){
+    var end = Date.parse(day + 'T15:00:00Z'), G = {};   /* KST 그날 24시 */
+    Object.keys(logs || {}).forEach(function(k){ var l = logs[k] || {}; if ((+l.ts || 0) >= end) return;
+      var bc = String(l.barcode == null ? '' : l.barcode).trim(); if (!bc) return; var q = +l.qty || 0, out = l.type === 'out';
+      var g = G[bc] || (G[bc] = { bc: bc, q: 0, def: 0, box: {}, m: null });
+      g.q += out ? -q : q; if (!out) g.def += +l.defQty || 0;
+      var bx = String(l.box || '').trim(); if (bx) g.box[bx] = (g.box[bx] || 0) + (out ? -q : q);
+      if (!out && !g.m && (l.name || l.code)) g.m = l; });
+    return Object.keys(G).map(function(k){ return G[k]; }).filter(function(g){ return g.q > 0 || g.def > 0; });
+  }
+
+  root.SETTLE_STAR = { looks: looks, parse: parse, compare: compare, bkey: bkey, nameDate: nameDate, nameQty: nameQty, load: load, stockAt: stockAt };
 })(typeof window !== 'undefined' ? window : global);
 
 /* ── 화면 (settlement.html 파일함 「⭐ 스타인터내셔널 작업 ROW」 묶음 → 🔍 STAR 재고관리와 대조) ──
@@ -200,8 +225,8 @@ function starCheck(){
   var base = 'wms_sync/groups/' + (GID || 'makechango') + '/', files = [];
   ids.reduce(function(p, id){ return p.then(function(){ return decryptBox(BOX[id]).then(function(b){ files.push({ id: id, name: BOX[id].name, wb: XLSX.read(b, { type: 'array' }) }); }); }); }, Promise.resolve())
     .then(function(){ body('STAR 재고관리 입출고 기록 읽는 중…');
-      return Promise.all([db.ref(base + 'star_instock/logs').get(), db.ref(base + 'star_outorder/orders').get()]); })
-    .then(function(r){ body(starHtml(SETTLE_STAR.compare(files, r[0].val() || {}, r[1].val() || {}, YM))); })
+      return SETTLE_STAR.load(); })
+    .then(function(S){ body(starHtml(SETTLE_STAR.compare(files, S.logs, S.orders, YM))); })
     .catch(function(e){ body('<span style="color:#f87171">대조 실패: ' + esc((e && (e.code || e.message)) || e) + '</span>'); console.error(e); });
 }
 /* 엑셀(작업 ROW) = 정산 기준 (대표님 2026-10-05) — 엑셀 대비로 STAR 를 점검한다.
