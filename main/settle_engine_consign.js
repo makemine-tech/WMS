@@ -55,7 +55,7 @@
   function lineRow(st, re){ var hit = 0; st.eachRow(function(row, r){ if (!hit && re.test(nsp(row.getCell(2).value))) hit = r; }); return hit; }
 
   function consign(cfg){
-    return {
+    return { needs: ['ebut_orders'],   /* 이 업체가 쓰는 파일 종류 (settle_build.js needTypes — 추천 체크) */ 
       items: cfg.items || {}, sheets: cfg.sheets || {}, verified: cfg.verified || {}, opt: {}, ruleList: cfg.ruleList,
       afterBuild: function(wb, ctx){
         var log = ctx.log, won = ctx.won, st = ctx.st;
@@ -163,7 +163,7 @@
 
   /* 디에이치 (2026-10-03): 솔루션비용 50,000(VAT 별도) 매달 고정 — 판매(박스앤캔 초콜릿·제주맥주) 주문이 없으면 솔루션비용만.
      이벗 판매처에 위탁 판매(박스앤캔·제주·초콜릿…디에이치/DH) 주문이 보이면 특이사항(룰 정해야 함) — 고객사 DH인터내셔널_부천 본 물량(판매처 DH인터내셔널 등)은 이 정산과 무관 */
-  E['디에이치'] = { items: { 8: 'fixed', 12: 'auto', 13: 'auto', 14: 'auto' }, sheets: { '박스앤캔초콜릿판매내역': 'skip', '제주맥주판매내역': 'skip' }, verified: { 8: true }, opt: {},
+  E['디에이치'] = { needs: ['ebut_orders'], items: { 8: 'fixed', 12: 'auto', 13: 'auto', 14: 'auto' }, sheets: { '박스앤캔초콜릿판매내역': 'skip', '제주맥주판매내역': 'skip' }, verified: { 8: true }, opt: {},
     ruleList: [R('솔루션비용(이벗) 50,000 VAT 별도 매달 고정'), R('박스앤캔 초콜릿판매·제주맥주판매·제주맥주 배송비 = 주문이 없으면 0 — 이벗 판매처에 디에이치/DH 주문이 있으면 특이사항(룰 필요)')],
     afterBuild: function(wb, ctx){
       var st = ctx.st, log = ctx.log;

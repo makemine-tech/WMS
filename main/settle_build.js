@@ -44,7 +44,7 @@ function setRun(path, val){ return db.ref('settlement/vendors/' + VW.vkey + '/ru
 /* 화물 청구서에서 이 업체로 보이는 업체명 후보 (괄호 앞 이름이 업체 이름에 들어 있거나 반대) */
 function freightVendors(){
   var names = {};
-  Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var ch = (FREIGHT[YM][fid] || {}).chk || {}; ((FREIGHT[YM][fid] || {}).rows || []).forEach(function(r, i){ var b = frBase(frVendor(r, ch[i])); if (b) names[b] = (names[b] || 0) + 1; }); });
+  frIds().forEach(function(fid){ var ch = (FREIGHT[YM][fid] || {}).chk || {}; ((FREIGHT[YM][fid] || {}).rows || []).forEach(function(r, i){ var b = frBase(frVendor(r, ch[i])); if (b) names[b] = (names[b] || 0) + 1; }); });
   return Object.keys(names).sort(function(a, b){ return names[b] - names[a]; });
 }
 function guessFreightVendor(){
@@ -52,10 +52,62 @@ function guessFreightVendor(){
   for (var i = 0; i < list.length; i++){ var b = nsp(list[i]); if (b && (vn.indexOf(b) >= 0 || b.indexOf(vn.replace(/\(.*$/, '')) >= 0)) return list[i]; }
   return '';
 }
+/* ── 이 업체가 쓰는 파일 (대표님 2026-10-04) ──
+   파일함 파일을 모든 업체가 다 열어 보지 않게, 업체마다 쓸 파일만 체크 → 초안은 체크한 파일만 열어서 만듦.
+   체크는 settlement/vendors/{키}/files/{파일 이름 지문} = 1(씀)|0(안 씀) — 이름에서 날짜·숫자를 뺀 지문이라 다음 달 같은 이름 파일에 그대로.
+   아직 정하지 않은 파일은 추천: 표본 데이터 시트가 쓰는 종류 중 공통 파일 · 이름에 업체 이름이 든 파일 · 그 종류가 한 개뿐인 파일 · 화물 청구서(화물 흔적) */
+function typeInfo(k){ return (typeof typeOf === 'function' ? typeOf(k) : (window.SETTLE_TYPE && SETTLE_TYPE(k))) || { key: k, cat: 'vendor', label: k, icon: '📎' }; }
+function fileSigKey(m){ return sKey(m.type + '~' + String(m.name || '').replace(/\.[a-z0-9]+$/i, '').replace(/\d+\s*(년|월|일)/g, '').replace(/[\d\s_\-().,\[\]~]/g, '').toLowerCase()); }
+function needTypes(){
+  var t = {};
+  ((VW.A && VW.A.sheets) || []).forEach(function(s){ if (s.kind) (KIND2BOX[s.kind.key] || []).forEach(function(k){ t[k] = 1; }); });
+  if (t.ebut_shiplist) t.ebut_orders = 1;   /* 택배비 시트 = 이벗 주문목록으로 제주 추가운임·판매처 판별 */
+  var e = engineOf(VW.vkey); ((e && e.needs) || []).forEach(function(k){ t[k] = 1; });
+  t.freight = 1;                            /* 화물 흔적은 모든 업체 */
+  return t;
+}
+function fileUse(){
+  var P = (VENDORS[VW.vkey] || {}).files || {}, need = needTypes(), hit = window.vendorMatcher(VW.name), out = {}, byType = {};
+  var vl = typeof samplesByVendor === 'function' ? Object.keys(samplesByVendor()) : []; if (!vl.length) vl = Object.keys(window.SETTLE_ENGINES || {});
+  var oth = vl.filter(function(n){ return n !== VW.name && !hit(n); }).map(function(n){ return window.vendorMatcher(n); });
+  var others = function(fn){ return oth.some(function(f){ return f(fn); }); };   /* 파일 이름에 다른 업체 이름이 붙었나 */
+  var ids = Object.keys(BOX).filter(function(id){ var m = BOX[id]; return m && m.type !== 'statement' && !typeInfo(m.type).output; });
+  ids.forEach(function(id){ (byType[BOX[id].type] = byType[BOX[id].type] || []).push(id); });
+  ids.forEach(function(id){ var m = BOX[id], k = fileSigKey(m);
+    if (P[k] != null){ out[id] = { on: !!P[k], saved: true }; return; }
+    var on = false;
+    if (need[m.type]) on = typeInfo(m.type).cat === 'common' || hit(m.name)
+      || (!byType[m.type].some(function(x){ return hit(BOX[x].name); }) && !others(m.name));   /* 그 종류에 이 업체 이름 파일이 없으면 → 다른 업체 이름이 붙은 파일만 빼고 */
+    out[id] = { on: on, saved: false }; });
+  return out;
+}
+function selBox(){ var U = fileUse(), o = {}; Object.keys(U).forEach(function(id){ if (U[id].on) o[id] = BOX[id]; }); return o; }
+function frIds(){ var S = selBox(); return Object.keys(FREIGHT[YM] || {}).filter(function(fid){ return !BOX[fid] || S[fid]; }); }   /* 체크 해제한 화물 청구서는 빼고 */
+function toggleFile(id, on){ var m = BOX[id]; if (m) db.ref('settlement/vendors/' + VW.vkey + '/files/' + fileSigKey(m)).set(on ? 1 : 0); }
+function saveFilePicks(){   /* 초안을 만들 때 추천 그대로인 것도 저장 → 다음 달부터 이 체크가 기본 */
+  var U = fileUse(), u = {}; Object.keys(U).forEach(function(id){ if (!U[id].saved) u[fileSigKey(BOX[id])] = U[id].on ? 1 : 0; });
+  if (Object.keys(u).length) db.ref('settlement/vendors/' + VW.vkey + '/files').update(u);
+}
+function fileCardHtml(){
+  var U = fileUse(), ids = Object.keys(U).sort(function(a, b){ return String(BOX[a].name).localeCompare(String(BOX[b].name), 'ko'); });
+  var on = ids.filter(function(id){ return U[id].on; }), off = ids.filter(function(id){ return !U[id].on; }), need = needTypes();
+  var row = function(id){ var m = BOX[id], t = typeInfo(m.type), u = U[id];
+    return '<label style="display:flex;gap:.5rem;align-items:center;padding:.28rem .2rem;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.05)">'
+      + '<input type="checkbox" style="width:17px;height:17px" ' + (u.on ? 'checked' : '') + ' onchange="toggleFile(\'' + id + '\', this.checked)">'
+      + '<span>' + (t.icon || '📎') + '</span><b style="font-weight:600">' + esc(m.name) + '</b><span class="dim sm">' + esc(t.label || m.type) + (t.cat === 'common' ? ' · 공통' : '') + '</span>'
+      + (u.saved ? '' : '<span class="chk" style="margin-left:auto;font-size:11px" title="아직 정하지 않아 추천으로 체크/해제됨 — 초안을 받으면 이대로 저장">추천</span>') + '</label>'; };
+  var miss = Object.keys(need).filter(function(k){ return k !== 'freight' && !on.some(function(id){ return BOX[id].type === k; }); });
+  return '<div style="border:1px solid var(--line, #2a3040);border-radius:10px;padding:.6rem .8rem;margin:.2rem 0 .8rem">'
+    + '<div style="font-weight:800;margin-bottom:.2rem">📂 이 업체 정산에 쓰는 파일 <span class="dim sm" style="font-weight:400">— 체크한 파일만 열어서 계산합니다 · 다음 달에도 같은 이름 파일은 이 체크 그대로</span></div>'
+    + (on.length ? on.map(row).join('') : '<div class="sm dim" style="padding:.3rem 0">체크한 파일이 없습니다</div>')
+    + (miss.length ? '<div class="sm" style="color:#fbbf24;margin-top:.35rem">⚠️ 지난달 정산서에 쓰인 종류인데 체크된 파일 없음: ' + miss.map(function(k){ return '<b>' + esc(typeInfo(k).label) + '</b>'; }).join(', ') + ' — 이번 달 파일함에 올렸으면 아래에서 체크</div>' : '')
+    + (off.length ? '<details style="margin-top:.4rem"' + (miss.length ? ' open' : '') + '><summary class="sm dim" style="cursor:pointer">안 쓰는 파일 ' + off.length + '개 (열어 보지 않음) — 필요하면 체크</summary>' + off.map(row).join('') + '</details>' : '')
+    + '</div>';
+}
 /* 데이터 시트의 이번 달 원본 후보 */
 function srcOptions(s){
-  var want = (KIND2BOX[s.kind && s.kind.key] || []), out = [];
-  Object.keys(BOX).forEach(function(id){ if (want.indexOf(BOX[id].type) >= 0) out.push({ v: id, t: '📎 ' + BOX[id].name }); });
+  var want = (KIND2BOX[s.kind && s.kind.key] || []), out = [], SB = selBox();
+  Object.keys(SB).forEach(function(id){ if (want.indexOf(SB[id].type) >= 0) out.push({ v: id, t: '📎 ' + SB[id].name }); });
   if (s.kind && s.kind.key === 'freight') freightVendors().forEach(function(n){ out.push({ v: '@freight:' + n, t: '🚚 청구서 Sheet1 · ' + n + ' 건' }); });
   return out;
 }
@@ -104,7 +156,7 @@ function buildCardHtml(A, R){
       + ' <span class="dim">비우면 지난달 값</span></td></tr>';
   }).join('');
   var yy = YM.slice(5, 7);
-  return runStateHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
+  return runStateHtml() + fileCardHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
     + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">이번 달 원본으로 바꿀 데이터 시트 — 쓸 파일 확인</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
       : '<div class="sec-note">이번 달 원본으로 바꿀 데이터 시트가 정해지지 않았습니다 (대화창에서 요청하면 업체 설정에 넣습니다).</div>')
     + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매달 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
@@ -216,7 +268,7 @@ function vendorCore(n){ return String(n || '').replace(/^메이크마인디자�
 function traceCargo(wb, log, skipFreight){
   var hit = window.vendorMatcher(VW.name), core = hit.main;   /* settle_engines.js — 제주맥주위탁_만월회 → 만월회 (제주맥주 기록을 잡지 않게) */
   var T = [];
-  if (!skipFreight) Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
+  if (!skipFreight) frIds().forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
     (F.rows || []).forEach(function(r, i){ var vn = frVendor(r, ch[i]); if (!hit(vn)) return;
       T.push(['화물·용차 청구서', r.d, (r.from || '') + ' → ' + (r.to || '') + ' · ' + (r.car || '') + (r.qty ? ' · ' + r.qty : '') + (r.item ? ' ' + r.item : ''), frFinal(r, ch[i]) + (+r.etc || 0), '청구서 업체명 「' + vn + '」' + (r.note ? ' · ' + r.note : '')]); }); });
   var C = (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : [];
@@ -288,7 +340,7 @@ function makeDraft(msg){
         if (!sel || sel === '-'){ log.push(['확인 필요', '시트 「' + s.name + '」 — 이번 달 원본을 고르지 않아 지난달 그대로']); return; }
         if (sel.indexOf('@freight:') === 0){
           var who = sel.slice(9), heads = ['일자','출발지','도착지','차종','수량','운송품목','금액','기타','합계금액','비고','업체명'], rows = [];
-          Object.keys(FREIGHT[YM] || {}).forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
+          frIds().forEach(function(fid){ var F = FREIGHT[YM][fid] || {}, ch = F.chk || {};
             (F.rows || []).forEach(function(r, i){ var vnm = frVendor(r, ch[i]); if (frBase(vnm) !== who) return; var a = frFinal(r, ch[i]);
               rows.push([r.d, r.from, r.to, r.car, r.qty === '' ? '' : (isFinite(+r.qty) ? +r.qty : r.qty), r.item, a, +r.etc || 0, a + (+r.etc || 0), [r.note, r.extra].filter(Boolean).join(' / '), vnm]); }); });
           rows.sort(function(a, b){ return String(a[0]).localeCompare(String(b[0])); });
@@ -317,7 +369,7 @@ function makeDraft(msg){
     if (!(eng && eng.afterBuild)) return;
     msg('업체 룰 적용 중…');
     /* afterBuild 는 Promise 를 돌려줘도 된다 — 이번 달 파일함(BOX)·원본 읽기(readBox → SheetJS 통합문서)·화면 메시지(msg) 제공 */
-    var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: BOX, msg: msg,
+    var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: selBox(), msg: msg,   /* 이 업체가 쓰는 파일(체크한 것)만 */
       CARGO: (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : null,   /* 입출고 화물관리 그 달 기록 */
       readBox: function(m){ return decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); } };
     return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
@@ -348,7 +400,7 @@ function makeDraft(msg){
 function buildDraft(){
   if (!VW || !VW.A) return;
   var btn = $('buildBtn'), msg = function(t){ var e = $('buildMsg'); if (e) e.textContent = t; }, log, name;
-  btn.disabled = true;
+  btn.disabled = true; saveFilePicks();
   makeDraft(msg).then(function(D){
     log = D.log; name = D.name.replace(/\.xlsx$/,'_초안.xlsx');
     msg('엑셀 쓰는 중…');

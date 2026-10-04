@@ -26,7 +26,7 @@
   }
   var cansOf = function(o){ if (o.m > 0) return o.m; if (/---\s*\d+\s*개\s*\$/.test(o.p)) return o.q; var x = o.p.match(/(\d+)\s*(캔|개)/); return x ? +x[1] * (o.q || 1) : o.q; };
 
-  E['엠에스컴퍼니_계산서미발행'] = {
+  E['엠에스컴퍼니_계산서미발행'] = { needs: ['ebut_orders'],
     items: { 16: 'auto', 17: 'auto' }, sheets: {}, verified: { 16: true, 17: true }, opt: {},
     ruleList: [R('사입업체 — 발주가 있을 때만 청구: 이벗 판매처 「제주맥주_박스앤캔」 중 수령자·주문자가 엠에스컴퍼니인 주문 (8월 10건 240캔 = 정산서와 일치)'),
       R('제주누보 355ml = 캔 수 × 1,500 · 택배비 = 송장 수 × 2,727.3 (둘 다 VAT 별도, 택배는 3,000 VAT 포함)'), R('발주가 없는 달은 0원 — 특이사항으로 알림')],
@@ -46,7 +46,7 @@
     }
   };
 
-  E['다슈코리아'] = {
+  E['다슈코리아'] = { needs: ['ebut_orders'],
     items: { 10: 'auto', 12: 'auto', 13: 'auto', 14: 'auto', 17: 'fixed' }, sheets: { '작업포장비': 'skip', '보관비': 'skip' }, verified: { 17: true }, opt: {},
     ruleList: [R('이벗 사용료 300,000 (VAT 별도)만 매달 청구'), R('보관비·다슈벤딩번들·묶음수축필름·해외배송 작업은 0 — 화물·입출고 기록에 다슈 흔적이 생기면 특이사항으로')],
     afterBuild: function(wb, ctx){

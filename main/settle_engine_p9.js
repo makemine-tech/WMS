@@ -189,7 +189,7 @@
   }
 
 
-  E['포인트나인크루'] = { traceSkip: true,   /* 화물 흔적: 용차비는 포인트나인크루_용차비 정산, 입출고는 보관비에 이미 씀 */
+  E['포인트나인크루'] = { traceSkip: true, needs: ['p9_row', 'coupang_po', 'cargo_io', 'ebut_orders'],   /* 화물 흔적: 용차비는 포인트나인크루_용차비 정산, 입출고는 보관비에 이미 씀 */
     items: { 6: 'auto', 22: 'auto', 23: 'auto', 25: 'auto', 27: 'auto', 38: 'auto' },
     sheets: { '곡_ROW데이터': 'skip', '곡_작업상세': 'skip', '곡_보관비': 'skip', '셀_ROW데이터': 'skip', '셀_작업상세': 'skip', '셀_보관비': 'skip',
               '오_ROW데이터': 'skip', '오_작업상세': 'skip', '오_보관비': 'skip', '기타작업내역': 'skip', '택배착불및기타비용': 'skip', '오포장': 'skip', '작업비정산서': 'skip' },
