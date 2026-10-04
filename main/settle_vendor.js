@@ -98,7 +98,9 @@ function renderVendors(){
         var S2 = st(n), stx = S2.cx != null ? '<small style="display:block">정산액 <b>' + (S2.total != null ? won(S2.total) + '원' : '?') + '</b> · 복잡도 <b>' + S2.cx + '</b> <span class="dim">(시트 ' + S2.sheets + ' · 항목 ' + S2.items + ' · 줄 ' + won(S2.rows) + ')</span></small>' : '<small style="display:block" class="dim">정산액·복잡도 계산 대기</small>';
         var vk = esc(vKey(n));
         return '<div class="row vrow" data-vk="' + vk + '" ondragover="vDragOver(event, this)" ondragleave="this.classList.remove(\'dropto\')" ondrop="vDrop(event, this)" ondragend="vDragEnd(this)">'
-          + '<div class="ck"><span class="vgrip" title="끌어서 순서 바꾸기" onmousedown="this.closest(\'.vrow\').draggable=true" ontouchstart="this.closest(\'.vrow\').draggable=true" ondragstart="vDragStart(event)">⠿</span>' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
+          /* 업체명 = 맨 왼쪽 칸 (대표님 2026-10-04 — 이름이 상태·룰 글자에 섞여 안 보임) */
+          + '<div class="vname"><span class="vgrip" title="끌어서 순서 바꾸기" onmousedown="this.closest(\'.vrow\').draggable=true" ontouchstart="this.closest(\'.vrow\').draggable=true" ondragstart="vDragStart(event)">⠿</span><span class="vic">' + (cnt ? '⚙️' : '🏢') + '</span><span class="vnm">' + esc(n) + '</span></div>'
+          + '<div class="lb">' + stTag + (cnt ? '<small>⚙️ 반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + memoInput(vKey(n), v) + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button>'
