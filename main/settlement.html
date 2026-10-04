@@ -103,6 +103,17 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .row .fi .miss{color:var(--mu2)}
 .row .ac{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .row.unk{background:rgba(251,191,36,.05);border-radius:8px}
+.vgrp{border-top:1px solid #1d2230}
+.vgrp:first-of-type{border-top:none}
+.vgrp>summary{display:flex;gap:.55rem;align-items:center;padding:.65rem .2rem;cursor:pointer;list-style:none;font-size:13px}
+.vgrp>summary::-webkit-details-marker{display:none}
+.vgrp>summary::before{content:'▸';color:var(--mu);width:12px;transition:transform .15s}
+.vgrp[open]>summary::before{transform:rotate(90deg)}
+.vgrp>summary:hover{background:rgba(255,255,255,.03);border-radius:8px}
+.vgrp .vg-names{color:var(--mu);font-size:11.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.vgrp[open] .vg-names{display:none}
+.vgrp.unk>summary{color:#fbbf24}
+.vgrp .row{padding-left:1rem}
 .btn{background:var(--s3);border:1px solid var(--br);color:var(--tx);border-radius:7px;padding:.32rem .65rem;font-size:12px;font-weight:700;white-space:nowrap}
 .btn:hover{border-color:var(--mu)}
 .btn.r{color:var(--r);background:none}
@@ -456,6 +467,7 @@ function actions(id, m){
     + typeSelect(id, m.type)
     + '<button class="btn r" onclick="delFile(\'' + id + '\')">삭제</button>';
 }
+var VGOPEN = {};   /* 업체용·기타 파일 묶음 펼침 상태 (다시 그려도 유지) */
 function render(){
   var ids = Object.keys(BOX).sort(function(a, b){ return (BOX[b].at || 0) - (BOX[a].at || 0); });
   /* 공통 = 이벗 주문목록(여러 개) → 박스앤캔 택배비(선택) → 화물 입출고(화물관리 페이지) → 화물 청구서(여러 개·단가 확인) + 직접 만든 공통 종류 */
@@ -481,12 +493,19 @@ function render(){
   }).join('');
   var commonTypes_n = need;
 
-  var others = ids.filter(function(id){ return typeOf(BOX[id].type).cat !== 'common'; });
-  others.sort(function(a, b){ return (BOX[a].type === 'unknown' ? 0 : 1) - (BOX[b].type === 'unknown' ? 0 : 1); });
-  $('vendorList').innerHTML = others.length ? others.map(function(id){
-    var m = BOX[id], t = typeOf(m.type);
-    return '<div class="row' + (m.type === 'unknown' ? ' unk' : '') + '"><div class="ck">' + (t.icon || '📎') + '</div>'
-      + '<div class="lb">' + esc(t.label) + '</div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>';
+  /* 업체용·기타 = 종류별 묶음, 눌러서 펼침 (대표님 2026-10-04 — 전부 펼쳐 보이면 너무 길다). ❓ 종류 모름은 확인할 것이라 처음부터 펼침 */
+  var others = ids.filter(function(id){ return typeOf(BOX[id].type).cat !== 'common'; }), grp = {};
+  others.forEach(function(id){ (grp[BOX[id].type] = grp[BOX[id].type] || []).push(id); });
+  var gks = Object.keys(grp).sort(function(a, b){ return (a === 'unknown' ? 0 : 1) - (b === 'unknown' ? 0 : 1) || typeOf(a).label.localeCompare(typeOf(b).label, 'ko'); });
+  $('vendorList').innerHTML = gks.length ? gks.map(function(k){
+    var t = typeOf(k), L = grp[k].sort(function(a, b){ return String(BOX[a].name).localeCompare(String(BOX[b].name), 'ko'); });
+    var open = VGOPEN[k] != null ? VGOPEN[k] : k === 'unknown';
+    return '<details class="vgrp' + (k === 'unknown' ? ' unk' : '') + '"' + (open ? ' open' : '') + ' ontoggle="VGOPEN[\'' + k + '\']=this.open">'
+      + '<summary><span class="vg-ic">' + (t.icon || '📎') + '</span><b>' + esc(String(t.label).replace(t.icon || '\u0000', '').trim()) + '</b><span class="pill">' + L.length + '개</span>'
+      + '<span class="vg-names">' + esc(L.slice(0, 3).map(function(id){ return BOX[id].name; }).join(' · ') + (L.length > 3 ? ' …' : '')) + '</span></summary>'
+      + L.map(function(id){ var m = BOX[id];
+        return '<div class="row' + (k === 'unknown' ? ' unk' : '') + '"><div class="ck"></div><div class="lb"></div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>'; }).join('')
+      + '</details>';
   }).join('') : '<div class="empty-s">아직 없습니다.</div>';
 
   $('ymNote').textContent = '공통 ' + done + ' / ' + commonTypes_n + ' (택배비 제외) · 파일 ' + ids.length + '개';
