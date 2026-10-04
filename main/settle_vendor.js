@@ -24,7 +24,7 @@ function stmtYm(name, boxYm){
 }
 /* 파일함 전체(모든 달)에서 표본(거래내역서) 모으기 → 업체별
    ym = 그 거래내역서의 정산월 (파일 이름의 달 — 다른 달 파일함에 잘못 올렸어도 제 달로 봄. 완료 확정본은 올린 달) */
-function samplesByVendor(){
+function samplesByVendor(all){   /* all = 목록에서 뺀 업체(vendors/{키}/hidden)도 포함 */
   var g = {};
   Object.keys(ALLBOX).forEach(function(ym){
     Object.keys(ALLBOX[ym] || {}).forEach(function(id){
@@ -34,6 +34,7 @@ function samplesByVendor(){
     });
   });
   /* 최근 달 먼저, 같은 달이면 완료 확정본 먼저 */
+  if (!all) Object.keys(g).forEach(function(n){ if ((VENDORS[vKey(n)] || {}).hidden) delete g[n]; });
   Object.keys(g).forEach(function(k){ g[k].sort(function(a, b){ return a.ym !== b.ym ? (a.ym < b.ym ? 1 : -1) : (b.m.final ? 1 : 0) - (a.m.final ? 1 : 0); }); });
   return g;
 }
@@ -97,11 +98,20 @@ function renderVendors(){
         return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + memoInput(vKey(n), v) + pickSel + '</div>'
-          + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button></div></div>';
+          + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button>'
+          + '<a class="sm dim" href="javascript:void 0" style="display:block;text-align:right;margin-top:.3rem" data-n="' + esc(n) + '" onclick="vendorHide(this.dataset.n, true)">목록에서 빼기</a></div></div>';
       }).join('') + '</div>';
   }
+  var hid = Object.keys(samplesByVendor(true)).filter(function(n){ return !g[n]; }).sort(function(a, b){ return a.localeCompare(b, 'ko'); });
+  if (hid.length) html += '<details class="card" style="padding:.6rem 1rem"><summary class="sm dim" style="cursor:pointer">목록에서 뺀 업체 ' + hid.length + '곳 — 파일은 그대로, 마감 검증에서도 빠짐</summary>'
+    + hid.map(function(n){ return '<div class="sm" style="display:flex;gap:.6rem;align-items:center;padding:.35rem 0;border-top:1px solid #1d2230">🗂 ' + esc(n) + ' <a href="javascript:void 0" style="color:var(--b)" data-n="' + esc(n) + '" onclick="vendorHide(this.dataset.n, false)">다시 보이기</a></div>'; }).join('') + '</details>';
   box.innerHTML = html;
   if (names.length) setTimeout(function(){ fillStats(g); }, 300);
+}
+/* 업체를 목록에서 빼기/다시 보이기 (대표님 2026-10-04 — 탑프레쉬_7월 미청구분 같은 일회성) · 파일은 지우지 않음 */
+function vendorHide(name, on){
+  if (on && !confirm('「' + name + '」 을(를) 업체 목록에서 뺄까요?\n\n거래내역서 파일은 그대로 두고 목록·마감 검증에서만 빠집니다. 맨 아래 「목록에서 뺀 업체」에서 다시 보이게 할 수 있습니다.')) return;
+  db.ref('settlement/vendors/' + vKey(name) + '/hidden').set(on ? true : null).then(function(){ toast(on ? '「' + name + '」 목록에서 뺐습니다' : '「' + name + '」 다시 보입니다'); });
 }
 
 /* 업체 목록 한 줄 메모 (대표님 2026-10-04) — 정산월마다 따로: 할 일·남은 것·점검사항
