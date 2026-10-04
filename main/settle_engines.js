@@ -17,7 +17,7 @@
 ============================================================ */
 var SETTLE_ENGINES = window.SETTLE_ENGINES = window.SETTLE_ENGINES || {};
 /* 화물 청구서·입출고 기록에서 업체를 다른 이름으로 적는 경우 (화물 흔적 찾기용, settle_build.js traceCargo) */
-var SETTLE_ALIASES = window.SETTLE_ALIASES = { 'HK홀세일': ['에이치케이', 'HK'], '멘소래담': ['맨소래담', '맨소래덤'] };
+var SETTLE_ALIASES = window.SETTLE_ALIASES = { 'HK홀세일': ['에이치케이', 'HK'], '멘소래담': ['맨소래담', '맨소래덤'], '포인트나인크루': ['곡물도감', '셀시어스', '오리진케어'] };
 
 (function(){
   'use strict';
