@@ -167,6 +167,13 @@
     var same = function(a, b){ if (a.total !== b.total) return false; var ks = Object.keys(a.items); return ks.length === Object.keys(b.items).length && ks.every(function(k){ return b.items[k] && b.items[k].qty === a.items[k].qty; }); };
     starOnly.forEach(function(a){ if (a.dir !== 'in' || a.offset) return;
       starOnly.forEach(function(b){ if (b.dir === 'out' && !b.offset && !a.offset && b.d0 >= a.d0 && same(a, b)){ a.offset = b; b.offset = a; } }); });
+    /* 엑셀 없는 STAR 입고인데, 그 물건이 뒤에 엑셀 있는 출고로 나갔으면 = 실제 입고 작업 → 입고 검수 엑셀 빠짐(청구 누락) (대표님 2026-10-05: 9/17 아디다스 입고 → 9/29 출고) */
+    starOnly.forEach(function(b){ if (b.dir !== 'in' || b.offset) return;   /* 같은 수량 출고로 상쇄된 입고(재고제로화 등)는 근거로 안 씀 */
+      b.usedBy = F.filter(function(f){ return f.dir === 'out' && (!f.date || f.date >= b.d0); }).map(function(f){
+        var q = 0; Object.keys(f.items).forEach(function(k){ if (b.items[k]) q += Math.min(f.items[k].qty, b.items[k].qty); });
+        return { name: f.name, date: f.date, qty: q };
+      }).filter(function(u){ return u.qty > 0; }).sort(function(x, y){ return y.qty - x.qty; });
+    });
     return {
       pairs: pairs,
       rowOnly: F.filter(function(f, i){ return !uf[i]; }),
@@ -245,6 +252,8 @@ function starHtml(R){
     + (nOnly ? '<div style="overflow-x:auto"><table class="ftbl"><thead><tr><th>날짜</th><th></th><th>STAR 기록</th><th class="n">수량</th><th class="n">줄</th><th>메모</th></tr></thead><tbody>'
       + R.starOnly.map(function(b){ return '<tr class="flag"><td style="white-space:nowrap">' + esc(span(b)) + '</td><td>' + dirL(b.dir) + '</td><td>' + esc(b.name) + '<div class="sm">' + esc(b.src) + '</div></td>'
         + '<td class="n">' + n(b.total) + '</td><td class="n">' + n(b.n) + '</td><td>' + esc(b.note || '')
+        + (b.usedBy && b.usedBy.length ? '<div class="chk warn" style="margin:.2rem 0 0;white-space:normal">💰 실제 입고 작업 — 이 입고 물건이 ' + b.usedBy.map(function(u){ return '「' + esc(u.name) + '」 ' + n(u.qty) + '개'; }).join(', ')
+          + ' 로 출고됨 → <b>입고 검수 엑셀 빠짐 = 청구 누락</b>' + (b.total > b.usedBy.reduce(function(s, u){ return s + u.qty; }, 0) ? ' (나머지 ' + n(b.total - b.usedBy.reduce(function(s, u){ return s + u.qty; }, 0)) + '개는 아직 재고)' : '') + '</div>' : '')
         + (b.offset ? '<div class="chk warn" style="margin:.2rem 0 0">↔ ' + esc(b.offset.d0) + ' ' + (b.offset.dir === 'in' ? '입고' : '출고') + ' 「' + esc(b.offset.name) + '」와 바코드·수량 똑같음 — 되돌린 업로드(임의 변동)인지, 들어와서 그대로 나간 작업(청구 대상)인지</div>' : '') + '</td></tr>'; }).join('')
       + '</tbody></table></div>' : '<div class="sm">없음 ✔</div>');
 
