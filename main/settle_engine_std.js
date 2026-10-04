@@ -32,18 +32,24 @@
   /* cfg.returns = { sheet: '반품비', who: /업체/ } — 박스앤캔 택배비 「반품」 시트에서 고객명이 이 업체인 줄로 시트를 새로 (합계 줄·거래명세표 참조는 replaceSheet 가 옮김) · 파일이 없으면 반품비 0 + 노란 칸 */
   function stdReturns(cfg, wb, ctx){
     var st = ctx.st, log = ctx.log, box = ctx.BOX || {}, ws = wb.getWorksheet(cfg.returns.sheet); if (!ws) return;
-    var L = Object.keys(box).filter(function(id){ return box[id].type === 'bnc_courier'; }), lr = 0;
+    var L = Object.keys(box).filter(function(id){ return box[id].type === 'bnc_courier' && !box[id].ref; }), lr = 0;
+    var hasRef = (ctx.REF || []).some(function(f){ return f.use === '반품'; });
     st.eachRow(function(row, r){ if (!lr && /^반품비/.test(nsp(row.getCell(2).value))) lr = r; });
-    if (!L.length){ if (lr){ var g = st.getCell('G' + lr); g.value = 0; g.style = Object.assign({}, g.style, { fill: YEL }); }
-      log.push(['확인 필요', '박스앤캔 택배비 파일이 아직 없어 반품비 0 (노란 칸) — 들어오면 초안 다시 받기']); return; }
+    if (!L.length && !hasRef){ if (lr){ var g = st.getCell('G' + lr); g.value = 0; g.style = Object.assign({}, g.style, { fill: YEL }); }
+      log.push(['확인 필요', '박스앤캔 택배비 파일·반품 참조 파일이 아직 없어 반품비 0 (노란 칸) — 들어오면 초안 다시 받기']); return; }
+    var TH = []; ws.getRow(1).eachCell(function(c, n){ TH[n - 1] = txt(c.value); }); TH = Array.prototype.slice.call(TH).map(function(h){ return h || ''; });
+    var rows = [], nB = 0, iK = TH.map(nsp).indexOf('등기번호'), seen = {};
+    var add = function(r){ var k = iK >= 0 ? nsp(r[iK]) : ''; if (k){ if (seen[k]) return false; seen[k] = 1; } rows.push(r); return true; };
     return L.reduce(function(p, id){ return p.then(function(acc){ return ctx.readBox(box[id]).then(function(x){ acc.push(x); return acc; }); }); }, Promise.resolve([])).then(function(F){
-      var TH = []; ws.getRow(1).eachCell(function(c, n){ TH[n - 1] = txt(c.value); }); TH = Array.prototype.slice.call(TH).map(function(h){ return h || ''; });
-      var rows = [];
       F.forEach(function(x){ var w = x.Sheets['반품']; if (!w) return; var a = XLSX.utils.sheet_to_json(w, { header: 1, defval: '' }), H = (a[0] || []).map(nsp), iC = H.indexOf('고객명');
-        a.slice(1).forEach(function(r){ if (cfg.returns.who.test(String(r[iC]))) rows.push(TH.map(function(h){ var i = H.indexOf(nsp(h)); return i >= 0 ? r[i] : ''; })); }); });
+        a.slice(1).forEach(function(r){ if (cfg.returns.who.test(String(r[iC])) && add(TH.map(function(h){ var i = H.indexOf(nsp(h)); return i >= 0 ? r[i] : ''; }))) nB++; }); });
+      return window.SETTLE_REF_ROWS(ctx, '반품', TH);   /* 업체 참조 파일(용도 반품) — 열 이름으로 맞춤 */
+    }).then(function(R){
+      var nR = 0; R.rows.forEach(function(r){ if (add(r)) nR++; });
       replaceSheet(wb, cfg.returns.sheet, TH, rows);
       if (lr && !rows.length){ var g2 = st.getCell('G' + lr); if (!(g2.value && g2.value.formula)) g2.value = 0; }
-      log.push(['자동 적용', cfg.returns.sheet + ' ← 박스앤캔 반품 시트 ' + rows.length + '건']);
+      log.push(['자동 적용', cfg.returns.sheet + ' ' + rows.length + '건 ← ' + [L.length ? '박스앤캔 반품 시트 ' + nB + '건' : '', R.files.length ? '참조 파일(' + R.files.join(', ') + ') ' + nR + '건' : ''].filter(Boolean).join(' + ')]);
+      if (R.miss.length) log.push(['특이사항', '반품 참조 파일 ' + R.miss.join(', ') + ' — 열 이름이 「' + cfg.returns.sheet + '」 시트(' + TH.filter(Boolean).join('·') + ')와 맞지 않아 못 넣음, 직접 확인']);
     });
   }
   window.SETTLE_STD = std;

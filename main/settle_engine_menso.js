@@ -72,7 +72,9 @@
         var Y = +ctx.YM.slice(0, 4), M = +ctx.YM.slice(5, 7), nn = ('0' + M).slice(-2) + ('0' + new Date(Date.UTC(Y, M, 0)).getUTCDate()).slice(-2) + '_전산재고';
         /* 재고 파일 = 파일함에서 이름에 맨소래담·멘소래담 + 재고가 든 파일(예: 0930_일재고마감 맨소래담, 2026-10-04 대표님) 먼저 — 다른 업체 재고 파일과 섞이지 않게.
            이름으로 못 찾으면 이벗 재고현황 종류 파일이 하나뿐일 때만 그걸 씀 */
-        var mine = Object.keys(box).filter(function(id){ return /맨소|멘소/.test(box[id].name) && /재고/.test(box[id].name); });
+        /* 참조 파일(용도 재고)이 있으면 그것부터 (업체 정산 화면 📎 참조 파일 — 2026-10-04) */
+        var mine = (ctx.REF || []).filter(function(f){ return f.use === '재고'; }).map(function(f){ return f.id; });
+        if (!mine.length) mine = Object.keys(box).filter(function(id){ return /맨소|멘소/.test(box[id].name) && /재고/.test(box[id].name); });
         if (!mine.length){ var st0 = ids('ebut_stock'); if (st0.length === 1) mine = st0;
           else if (st0.length > 1){ log.push(['확인 필요', '이벗 재고현황 파일이 ' + st0.length + '개인데 이름에 맨소래담이 든 게 없어 「' + sn + '」 시트는 지난달 그대로 — 파일 이름에 맨소래담을 넣어 주세요']); return; } }
         return mine.reduce(function(p, id){ return p.then(function(acc){ ctx.msg && ctx.msg(box[id].name + ' 읽는 중…'); return ctx.readBox(box[id]).then(function(x){ acc.push(x); return acc; }); }); }, Promise.resolve([])).then(function(F){

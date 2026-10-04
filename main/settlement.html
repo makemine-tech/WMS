@@ -410,7 +410,7 @@ function addFiles(list){
 }
 function qset(q, txt, cls, p){ var s = q.querySelector('.st'); s.textContent = txt; s.className = 'st ' + (cls || ''); if (p != null) q.querySelector('.q-prog i').style.width = Math.round(p * 100) + '%'; }
 
-function upload(file, ym, q){
+function upload(file, ym, q, extra){   /* extra = { ref: 업체키, use: 반품|재고|화물|기타 } — 업체 참조 파일 (settle_build.js addRefFiles) */
   qset(q, '읽는 중…', '', 0);
   var buf, P, type, t, summary = '', id = newId(), path = 'settlement/' + ym + '/' + id, moved = null;
   return file.arrayBuffer().then(function(b){
@@ -420,14 +420,14 @@ function upload(file, ym, q){
     try { P = profile(file.name, buf); } catch (e) { P = { f: { ext:'', name:file.name, sheets:[], sheetKey:'', headKey:'' }, wb:null }; }
     type = detect(P.f); t = typeOf(type);
     /* 다른 달 거래내역서(08월_거래내역서_… 를 9월 파일함에)는 그 달 파일함으로 — 지난 정산서 = 표본 (대표님 2026-10-04) */
-    if (type === 'statement'){ var sy = stmtYm(file.name, ym); if (sy && sy !== ym){ ym = sy; moved = sy; } }
+    if (type === 'statement' && !extra){ var sy = stmtYm(file.name, ym); if (sy && sy !== ym){ ym = sy; moved = sy; } }
     try { summary = t.summary ? t.summary(P.f, P.wb) : ''; } catch (e) { summary = ''; }
     if (!summary && P.f.sheets.length) summary = '시트 ' + P.f.sheets.map(function(s){ return s.name; }).slice(0, 4).join(' · ');
     var fr = null;
-    if (type === 'freight'){ try { fr = SETTLE_FREIGHT.parse(P.f, P.wb); } catch (e) { fr = null; } }
+    if (type === 'freight' && !extra){ try { fr = SETTLE_FREIGHT.parse(P.f, P.wb); } catch (e) { fr = null; } }
     P.wb = null;
     /* 공통 파일은 한 달에 하나 — 이미 있으면 교체할지 묻는다 (여러 개 쌓는 종류는 그냥 추가) */
-    var old = (t.cat === 'common' && !t.multi) ? Object.keys(BOX).filter(function(k){ return BOX[k].type === type; }) : [];
+    var old = (t.cat === 'common' && !t.multi && !extra) ? Object.keys(BOX).filter(function(k){ return BOX[k].type === type; }) : [];
     if (old.length && !confirm('[' + t.label + '] 이 이미 있습니다.\n\n기존: ' + BOX[old[0]].name + '\n새 파일: ' + file.name + '\n\n새 파일로 교체할까요? (취소하면 둘 다 보관)')) old = [];
     qset(q, '암호화 중…', '', .1);
     return WMS2FA.encrypt(path, buf).then(function(enc){
@@ -438,6 +438,7 @@ function upload(file, ym, q){
         sheets: P.f.sheets.map(function(s){ return { n: s.name, r: s.rows }; }).slice(0, 40),
         sheetKey: P.f.sheetKey || '', headKey: P.f.headKey || '',
         iv: iv, path: path, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' };
+      if (extra) Object.keys(extra).forEach(function(k){ meta[k] = extra[k]; });
       return db.ref('settlement/box/' + ym + '/' + id).set(meta).then(function(){
         if (fr && fr.rows.length) return db.ref('settlement/freight/' + ym + '/' + id).set({ file: file.name, sheet: fr.sheet, src: fr.src, rows: fr.rows, costOnly: fr.costOnly || [] });
       });
@@ -554,16 +555,16 @@ function render(){
     if (typeOf(m.type).cat === 'common') return false;
     if (m.type === 'statement'){ if (m.superseded) return false; var sy = m.final ? null : stmtYm(m.name, YM); if (sy && sy !== YM){ misp.push(id); return false; } }
     return true; }), grp = {};
-  others.forEach(function(id){ (grp[BOX[id].type] = grp[BOX[id].type] || []).push(id); });
+  others.forEach(function(id){ var gk = BOX[id].ref ? '@ref' : BOX[id].type; (grp[gk] = grp[gk] || []).push(id); });   /* 업체 참조 파일은 한 묶음 */
   var gks = Object.keys(grp).sort(function(a, b){ return (a === 'unknown' ? 0 : 1) - (b === 'unknown' ? 0 : 1) || typeOf(a).label.localeCompare(typeOf(b).label, 'ko'); });
   $('vendorList').innerHTML = gks.length ? gks.map(function(k){
-    var t = typeOf(k), L = grp[k].sort(function(a, b){ return String(BOX[a].name).localeCompare(String(BOX[b].name), 'ko'); });
+    var t = k === '@ref' ? { icon: '📎', label: '업체 참조 파일 (업체 정산 화면에서 올림 · 그 업체에만 씀)' } : typeOf(k), L = grp[k].sort(function(a, b){ return String(BOX[a].name).localeCompare(String(BOX[b].name), 'ko'); });
     var open = VGOPEN[k] != null ? VGOPEN[k] : k === 'unknown';
     return '<details class="vgrp' + (k === 'unknown' ? ' unk' : '') + '"' + (open ? ' open' : '') + ' ontoggle="VGOPEN[\'' + k + '\']=this.open">'
       + '<summary><span class="vg-ic">' + (t.icon || '📎') + '</span><b>' + esc(String(t.label).replace(t.icon || '\u0000', '').trim()) + '</b><span class="pill">' + L.length + '개</span>'
       + '<span class="vg-names">' + esc(L.slice(0, 3).map(function(id){ return BOX[id].name; }).join(' · ') + (L.length > 3 ? ' …' : '')) + '</span></summary>'
       + L.map(function(id){ var m = BOX[id];
-        return '<div class="row' + (k === 'unknown' ? ' unk' : '') + '"><div class="ck"></div><div class="lb"></div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>'; }).join('')
+        return '<div class="row' + (k === 'unknown' ? ' unk' : '') + '"><div class="ck"></div><div class="lb">' + (m.ref ? esc(m.ref) + '<small>용도 ' + esc(m.use || '기타') + '</small>' : '') + '</div><div class="fi">' + fileCell(id, m) + '</div><div class="ac">' + actions(id, m) + '</div></div>'; }).join('')
       + '</details>';
   }).join('') : '<div class="empty-s">아직 없습니다.</div>';
   if (misp.length){

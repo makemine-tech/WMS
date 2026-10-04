@@ -71,7 +71,7 @@ function fileUse(){
   var vl = typeof samplesByVendor === 'function' ? Object.keys(samplesByVendor()) : []; if (!vl.length) vl = Object.keys(window.SETTLE_ENGINES || {});
   var oth = vl.filter(function(n){ return n !== VW.name && !hit(n); }).map(function(n){ return window.vendorMatcher(n); });
   var others = function(fn){ return oth.some(function(f){ return f(fn); }); };   /* 파일 이름에 다른 업체 이름이 붙었나 */
-  var ids = Object.keys(BOX).filter(function(id){ var m = BOX[id]; return m && m.type !== 'statement' && !typeInfo(m.type).output; });
+  var ids = Object.keys(BOX).filter(function(id){ var m = BOX[id]; return m && m.type !== 'statement' && !typeInfo(m.type).output && !m.ref; });   /* 업체 참조 파일은 따로 (refFiles) */
   ids.forEach(function(id){ (byType[BOX[id].type] = byType[BOX[id].type] || []).push(id); });
   ids.forEach(function(id){ var m = BOX[id], k = fileSigKey(m);
     if (P[k] != null){ out[id] = { on: !!P[k], saved: true }; return; }
@@ -81,7 +81,31 @@ function fileUse(){
     out[id] = { on: on, saved: false }; });
   return out;
 }
-function selBox(){ var U = fileUse(), o = {}; Object.keys(U).forEach(function(id){ if (U[id].on) o[id] = BOX[id]; }); return o; }
+function selBox(){ var U = fileUse(), o = {}; Object.keys(U).forEach(function(id){ if (U[id].on) o[id] = BOX[id]; }); refFiles().forEach(function(id){ o[id] = BOX[id]; }); return o; }
+/* ── 업체 참조 파일 (대표님 2026-10-04): 이 업체에만 쓰는 임시 자료(반품·재고·화물…) — box/{ym}/{id}.ref = 업체키, .use = 용도 · 엔진은 ctx.REF 로 용도별로 씀 ── */
+var REF_USES = ['반품', '재고', '화물', '기타'];
+function refFiles(){ return Object.keys(BOX).filter(function(id){ return BOX[id] && BOX[id].ref === VW.vkey; }).sort(function(a, b){ return (BOX[a].at || 0) - (BOX[b].at || 0); }); }
+function refList(){ return refFiles().map(function(id){ var m = BOX[id]; return { id: id, name: m.name, use: m.use || '기타', type: m.type, m: m }; }); }
+function setRefUse(id, use){ db.ref('settlement/box/' + YM + '/' + id + '/use').set(use); }
+function addRefFiles(input){
+  var use = ($('refUse') || {}).value || '기타', box = $('refQueue'); if (!input.files.length) return;
+  Array.prototype.forEach.call(input.files, function(file){ var q = document.createElement('div'); q.className = 'q-item';
+    q.innerHTML = '<span class="nm">' + esc(file.name) + '</span><span class="q-prog"><i></i></span><span class="st">대기</span>'; if (box) box.appendChild(q);
+    queue = queue.then(function(){ return upload(file, YM, q, { ref: VW.vkey, use: use }); }).catch(function(){}); });
+  input.value = '';
+}
+function refCardHtml(){
+  var L = refList();
+  return '<div style="border:1px dashed var(--br);border-radius:10px;padding:.6rem .8rem;margin:.2rem 0 .8rem">'
+    + '<div style="font-weight:800;margin-bottom:.2rem">📎 참조 파일 <span class="dim sm" style="font-weight:400">— 이 업체 ' + esc(ymLabel(YM)) + ' 정산에만 쓰는 임시 자료 (반품·재고·화물 등). 공통 파일함에 섞이지 않고, 용도에 맞는 룰이 있으면 초안에 반영됩니다</span></div>'
+    + (L.length ? L.map(function(f){ var t = typeInfo(f.type);
+        return '<div style="display:flex;gap:.5rem;align-items:center;padding:.3rem .1rem;border-bottom:1px solid rgba(255,255,255,.05);flex-wrap:wrap"><span>' + (t.icon || '📎') + '</span><b style="font-weight:600">' + esc(f.name) + '</b>'
+          + '<select class="tsel" style="padding:.15rem .4rem" onchange="setRefUse(\'' + f.id + '\', this.value)">' + REF_USES.map(function(u){ return '<option' + (u === f.use ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>'
+          + '<span class="dim sm">' + esc(t.label || f.type) + '</span><span style="margin-left:auto"></span><button class="btn" style="padding:.15rem .55rem" onclick="downFile(\'' + f.id + '\')">내려받기</button><button class="btn r" style="padding:.15rem .55rem" onclick="delFile(\'' + f.id + '\')">삭제</button></div>'; }).join('')
+      : '<div class="sm dim" style="padding:.2rem 0">아직 없습니다</div>')
+    + '<div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap"><span class="sm">용도</span><select id="refUse" class="tsel" style="padding:.2rem .4rem">' + REF_USES.map(function(u){ return '<option>' + u + '</option>'; }).join('') + '</select>'
+    + '<label class="btn" style="cursor:pointer">＋ 참조 파일 올리기<input type="file" multiple style="display:none" onchange="addRefFiles(this)"></label></div><div id="refQueue"></div></div>';
+}
 function frIds(){ var S = selBox(); return Object.keys(FREIGHT[YM] || {}).filter(function(fid){ return !BOX[fid] || S[fid]; }); }   /* 체크 해제한 화물 청구서는 빼고 */
 function toggleFile(id, on){ var m = BOX[id]; if (m) db.ref('settlement/vendors/' + VW.vkey + '/files/' + fileSigKey(m)).set(on ? 1 : 0); }
 function saveFilePicks(){   /* 초안을 만들 때 추천 그대로인 것도 저장 → 다음 달부터 이 체크가 기본 */
@@ -156,7 +180,7 @@ function buildCardHtml(A, R){
       + ' <span class="dim">비우면 지난달 값</span></td></tr>';
   }).join('');
   var yy = YM.slice(5, 7);
-  return runStateHtml() + fileCardHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
+  return runStateHtml() + fileCardHtml() + refCardHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
     + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">이번 달 원본으로 바꿀 데이터 시트 — 쓸 파일 확인</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
       : '<div class="sec-note">이번 달 원본으로 바꿀 데이터 시트가 정해지지 않았습니다 (대화창에서 요청하면 업체 설정에 넣습니다).</div>')
     + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매달 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
@@ -369,9 +393,10 @@ function makeDraft(msg){
     if (!(eng && eng.afterBuild)) return;
     msg('업체 룰 적용 중…');
     /* afterBuild 는 Promise 를 돌려줘도 된다 — 이번 달 파일함(BOX)·원본 읽기(readBox → SheetJS 통합문서)·화면 메시지(msg) 제공 */
-    var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: selBox(), msg: msg,   /* 이 업체가 쓰는 파일(체크한 것)만 */
+    var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: selBox(), REF: refList(), msg: msg,   /* 이 업체가 쓰는 파일(체크한 것)만 */
       CARGO: (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : null,   /* 입출고 화물관리 그 달 기록 */
       readBox: function(m){ return decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); } };
+    ctx.REF.forEach(function(f){ log.push(['안내', '📎 참조 파일 「' + f.name + '」 (용도 ' + f.use + ') — 위 「자동 적용」에 이 파일이 안 보이면 이 업체 룰에 그 용도가 아직 없는 것 (직접 확인 · 룰은 대화창에서)']); });
     return Promise.resolve().then(function(){ return eng.afterBuild(wb, ctx); })
       .catch(function(e){ log.push(['확인 필요', '업체 자동 처리 중 오류: ' + ((e && e.message) || e)]); console.error(e); });
   }).then(function(){

@@ -167,3 +167,19 @@ window.shipSheetFinish = function(wb, sheetName, st, ctx, opt){
     if (nJ && st) log.push(['특이사항', '제주 추가운임 400 ' + nJ + '건 — 거래명세표 항공비/제주도 줄 단가가 400 인지 확인']);
   });
 };
+
+/* ── 업체 참조 파일 읽기 (대표님 2026-10-04): ctx.REF 중 용도(use)가 맞는 파일 → 시트 제목(TH)과 열 이름이 가장 많이 겹치는 표를 골라 TH 순서로 줄을 맞춤
+   돌려줌: Promise<{ rows, files:[이름], miss:[열이 안 맞아 못 쓴 파일] }> — 업체 엔진이 반품·재고·화물 등에 씀 */
+window.SETTLE_REF_ROWS = function(ctx, use, TH){
+  var ns = function(v){ return String(v == null ? '' : v).replace(/\s+/g, ''); };
+  var refs = (ctx.REF || []).filter(function(f){ return f.use === use; }), want = TH.map(ns), out = { rows: [], files: [], miss: [] };
+  return refs.reduce(function(p, f){ return p.then(function(){ return ctx.readBox(f.m).then(function(x){
+    var best = null;
+    x.SheetNames.forEach(function(n){ var a = XLSX.utils.sheet_to_json(x.Sheets[n], { header: 1, defval: '' });
+      for (var i = 0; i < Math.min(a.length, 12); i++){ var h = a[i].map(ns), sc = want.filter(function(w){ return w && h.indexOf(w) >= 0; }).length;
+        if (!best || sc > best.sc) best = { sc: sc, h: h, rows: a.slice(i + 1).filter(function(r){ return r.some(function(v){ return v !== '' && v != null; }); }) }; } });
+    if (!best || best.sc < 2){ out.miss.push(f.name); return; }
+    best.rows.forEach(function(r){ if (/^(합계|총합계|소계)$/.test(ns(r.join('')))) return; var row = want.map(function(w){ var i = best.h.indexOf(w); return i >= 0 ? r[i] : ''; }); if (row.filter(function(v){ return v !== '' && v != null; }).length >= 2) out.rows.push(row);   /* 합계 줄(숫자 하나) 빼고 */ });
+    out.files.push(f.name);
+  }); }); }, Promise.resolve()).then(function(){ return out; });
+};

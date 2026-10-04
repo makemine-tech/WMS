@@ -74,14 +74,19 @@
     }).then(function(){
       /* 2) 반품 = 박스앤캔 반품 시트 탑프레쉬 */
       var ws = wb.getWorksheet('반품'), r1 = lineRow(/^반품비/), r2 = r1 ? r1 + 1 : 0; if (!ws) return;
-      var L = ids('bnc_courier');
-      if (!L.length){ [r1, r2].forEach(function(r){ if (r){ var g = st.getRow(r).getCell(7); g.value = 0; g.style = Object.assign({}, g.style, { fill: YEL }); } });
-        log.push(['확인 필요', '박스앤캔 택배비 파일이 아직 없어 반품비 0 (노란 칸) — 들어오면 초안 다시 받기']); return; }
+      var L = ids('bnc_courier').filter(function(id){ return !box[id].ref; }), hasRef = (ctx.REF || []).some(function(f){ return f.use === '반품'; });
+      if (!L.length && !hasRef){ [r1, r2].forEach(function(r){ if (r){ var g = st.getRow(r).getCell(7); g.value = 0; g.style = Object.assign({}, g.style, { fill: YEL }); } });
+        log.push(['확인 필요', '박스앤캔 택배비 파일·반품 참조 파일이 아직 없어 반품비 0 (노란 칸) — 들어오면 초안 다시 받기']); return; }
+      var TH = []; ws.getRow(1).eachCell(function(c, n){ TH[n - 1] = txt(c.value); }); TH = Array.prototype.slice.call(TH).map(function(h){ return h || ''; });
+      var rows = [], iK = TH.map(ns).indexOf('등기번호'), seen = {}, add = function(r){ var k = iK >= 0 ? ns(r[iK]) : ''; if (k){ if (seen[k]) return; seen[k] = 1; } rows.push(r); };
       return read(L).then(function(F){
-        var TH = []; ws.getRow(1).eachCell(function(c, n){ TH[n - 1] = txt(c.value); }); TH = Array.prototype.slice.call(TH).map(function(h){ return h || ''; });
-        var rows = [];
         F.forEach(function(x){ var w = x.Sheets['반품']; if (!w) return; var a = XLSX.utils.sheet_to_json(w, { header: 1, defval: '' }); var H = (a[0] || []).map(ns), iC = H.indexOf('고객명');
-          a.slice(1).forEach(function(r){ if (/탑프레쉬/.test(String(r[iC]))) rows.push(TH.map(function(h){ var i = H.indexOf(ns(h)); return i >= 0 ? r[i] : ''; })); }); });
+          a.slice(1).forEach(function(r){ if (/탑프레쉬/.test(String(r[iC]))) add(TH.map(function(h){ var i = H.indexOf(ns(h)); return i >= 0 ? r[i] : ''; })); }); });
+        return window.SETTLE_REF_ROWS(ctx, '반품', TH);   /* 업체 참조 파일(용도 반품) */
+      }).then(function(RF){
+        RF.rows.forEach(add);
+        if (RF.files.length) log.push(['자동 적용', '반품 참조 파일 ' + RF.files.join(', ') + ' ' + RF.rows.length + '줄 더함']);
+        if (RF.miss.length) log.push(['특이사항', '반품 참조 파일 ' + RF.miss.join(', ') + ' — 열 이름이 반품 시트와 맞지 않아 못 넣음, 직접 확인']);
         replaceSheet(wb, '반품', TH, rows);
         var iZ = TH.indexOf('박스크기'), n = { 극소: 0, 소: 0 }, odd = 0; rows.forEach(function(r){ var z = String(r[iZ]).trim(); if (n[z] != null) n[z]++; else odd++; });
         var Lz = String.fromCharCode(65 + iZ), last = Math.max(2, rows.length + 1);
