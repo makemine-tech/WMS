@@ -45,7 +45,7 @@ function defaultSample(list){ for (var i = 0; i < list.length; i++) if (list[i].
    정산액·복잡성은 표본(지난달 거래내역서)을 한 번 열어 계산해 settlement/vendors/{키}/stat 에 저장 → 목록은 저장값으로 정렬
    복잡도 = 데이터 시트 수 × 10 + 청구 항목 수(0원 제외) + 데이터 줄 수 ÷ 1,000 */
 var VSORT = (function(){ try { return JSON.parse(localStorage.getItem('settleVSort')) || { k: 'cx', d: -1 }; } catch (x) { return { k: 'cx', d: -1 }; } })();
-function setVSort(k){ VSORT = VSORT.k === k ? { k: k, d: -VSORT.d } : { k: k, d: k === 'name' || k === 'todo' ? 1 : -1 }; try { localStorage.setItem('settleVSort', JSON.stringify(VSORT)); } catch (x) {} renderVendors(); }
+function setVSort(k){ VSORT = VSORT.k === k ? { k: k, d: -VSORT.d } : { k: k, d: k === 'name' || k === 'todo' || k === 'my' ? 1 : -1 }; try { localStorage.setItem('settleVSort', JSON.stringify(VSORT)); } catch (x) {} renderVendors(); }
 function statOf(A, sid){
   var items = (A.items || []).filter(function(it){ return !it.zero; }).length, sh = (A.sheets || []), rows = sh.reduce(function(s, x){ return s + (x.rows || 0); }, 0);
   var t = A.totals || {}, total = t.total != null ? t.total : t.sub != null ? Math.round(t.sub * 1.1) : null;
@@ -75,6 +75,7 @@ function renderVendors(){
   var names = Object.keys(g).sort(function(a, b){
     if (VSORT.k === 'name') return VSORT.d * a.localeCompare(b, 'ko');
     if (VSORT.k === 'todo') return VSORT.d * (stage(a) - stage(b)) || a.localeCompare(b, 'ko');
+    if (VSORT.k === 'my'){ var oa = ordOf(a), ob = ordOf(b); return VSORT.d * (oa - ob) || a.localeCompare(b, 'ko'); }
     var x = st(a)[VSORT.k], y = st(b)[VSORT.k];
     if (x == null && y == null) return a.localeCompare(b, 'ko'); if (x == null) return 1; if (y == null) return -1;
     return VSORT.d * (x - y) || a.localeCompare(b, 'ko'); });
@@ -85,7 +86,7 @@ function renderVendors(){
   } else {
     var sb = function(k, t){ var on = VSORT.k === k; return '<button class="btn' + (on ? ' p' : '') + '" style="padding:.3rem .7rem" onclick="setVSort(\'' + k + '\')">' + t + (on ? (VSORT.d > 0 ? ' ▲' : ' ▼') : '') + '</button>'; };
     html += '<div class="card"><div class="card-h"><span class="card-t">업체 ' + names.length + '곳</span><span class="card-s">룰이 코드에 반영된 업체는 ⚙️ 표시 · 룰은 대화창에서 요청</span></div>'
-      + '<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:-.2rem 0 .6rem"><span class="sm dim">정렬</span>' + sb('todo', '미작성순') + sb('cx', '복잡성') + sb('total', '정산액') + sb('name', '이름')
+      + '<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:-.2rem 0 .6rem"><span class="sm dim">정렬</span>' + sb('my', '내 순서') + sb('todo', '미작성순') + sb('cx', '복잡성') + sb('total', '정산액') + sb('name', '이름')
       + (function(){ var c = [0, 0, 0]; names.forEach(function(n){ c[stage(n)]++; }); return '<span class="sm" style="margin:0 .2rem"><b style="color:#fbbf24">미작성 ' + c[0] + '</b> · 초안 ' + c[1] + ' · <span style="color:var(--g)">완료 ' + c[2] + '</span></span>'; })()
       + '<span class="sm dim">· 같은 버튼을 다시 누르면 오름/내림 · 정산액·복잡성 = 지난달 표본 기준</span><span class="sm" id="vstatMsg" style="color:#fbbf24"></span></div>'
       + names.map(function(n){
@@ -95,12 +96,16 @@ function renderVendors(){
         var sc = v && v.score, pc = sc ? sc.pct : null, dn = doneOf(vKey(n), YM);
         var stTag = dn ? '<span class="chk okk">✅ ' + esc(ymLabel(YM)) + ' 완료 확정 ' + esc(ftime(dn.at)) + '</span>' : '<span class="chk warn">⏳ ' + esc(ymLabel(YM)) + ' 작업 중</span>';
         var S2 = st(n), stx = S2.cx != null ? '<small style="display:block">정산액 <b>' + (S2.total != null ? won(S2.total) + '원' : '?') + '</b> · 복잡도 <b>' + S2.cx + '</b> <span class="dim">(시트 ' + S2.sheets + ' · 항목 ' + S2.items + ' · 줄 ' + won(S2.rows) + ')</span></small>' : '<small style="display:block" class="dim">정산액·복잡도 계산 대기</small>';
-        return '<div class="row"><div class="ck">' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
+        var vk = esc(vKey(n));
+        return '<div class="row vrow" data-vk="' + vk + '" ondragover="vDragOver(event, this)" ondragleave="this.classList.remove(\'dropto\')" ondrop="vDrop(event, this)" ondragend="vDragEnd(this)">'
+          + '<div class="ck"><span class="vgrip" title="끌어서 순서 바꾸기" onmousedown="this.closest(\'.vrow\').draggable=true" ontouchstart="this.closest(\'.vrow\').draggable=true" ondragstart="vDragStart(event)">⠿</span>' + (cnt ? '⚙️' : '🏢') + '</div><div class="lb">' + esc(n) + ' ' + stTag + (cnt ? '<small>반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + memoInput(vKey(n), v) + pickSel + '</div>'
           + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button>'
-          + '<a class="sm dim" href="javascript:void 0" style="display:block;text-align:right;margin-top:.3rem" data-n="' + esc(n) + '" onclick="vendorHide(this.dataset.n, true)">목록에서 빼기</a></div></div>';
+          + '<a class="sm dim" href="javascript:void 0" style="display:block;text-align:right;margin-top:.3rem" data-n="' + esc(n) + '" onclick="vendorHide(this.dataset.n, true)">목록에서 빼기</a></div>'
+          + '<div class="vmove"><button title="위로" onclick="vMove(\'' + vk + '\', -1)">▲</button><button title="아래로" onclick="vMove(\'' + vk + '\', 1)">▼</button></div></div>';
       }).join('') + '</div>';
+    VLIST = names.map(vKey);
   }
   var hid = Object.keys(samplesByVendor(true)).filter(function(n){ return !g[n]; }).sort(function(a, b){ return a.localeCompare(b, 'ko'); });
   if (hid.length) html += '<details class="card" style="padding:.6rem 1rem"><summary class="sm dim" style="cursor:pointer">목록에서 뺀 업체 ' + hid.length + '곳 — 파일은 그대로, 마감 검증에서도 빠짐</summary>'
@@ -298,4 +303,28 @@ function renderWork(){
     + '<div class="card rulecard">' + ruleListHtml() + '</div>'
     + '<div class="card" id="finalCard">' + finalCardHtml() + '</div>';
   saveScore(S.pct);
+}
+
+/* ── 내 순서 (대표님 2026-10-04): 줄 오른쪽 ▲▼ 또는 왼쪽 ⠿ 끌어서 → settlement/vendors/{키}/ord ──
+   정렬이 「내 순서」가 아닐 때 움직이면 지금 보이는 순서를 기준으로 내 순서를 만들고 「내 순서」로 바꿈 */
+var VLIST = [], VDRAG = null;
+function ordOf(n){ var o = (VENDORS[vKey(n)] || {}).ord; return o == null ? 1e6 : +o; }
+function vSaveOrder(list){
+  var u = {}; list.forEach(function(k, i){ u[k + '/ord'] = i; if (VENDORS[k]) VENDORS[k].ord = i; else VENDORS[k] = { ord: i }; });
+  if (VSORT.k !== 'my' || VSORT.d !== 1){ VSORT = { k: 'my', d: 1 }; try { localStorage.setItem('settleVSort', JSON.stringify(VSORT)); } catch (x) {} }
+  renderVendors();   /* 먼저 화면, 저장은 뒤에 */
+  db.ref('settlement/vendors').update(u).catch(function(e){ toast('순서 저장 실패: ' + ((e && (e.code || e.message)) || e)); });
+}
+function vMove(vk, d){
+  var L = VLIST.slice(), i = L.indexOf(vk), j = i + d; if (i < 0 || j < 0 || j >= L.length) return;
+  L.splice(i, 1); L.splice(j, 0, vk); vSaveOrder(L);
+  setTimeout(function(){ var el = document.querySelector('.vrow[data-vk="' + CSS.escape(vk) + '"]'); if (el){ el.classList.add('moved'); setTimeout(function(){ el.classList.remove('moved'); }, 700); } }, 30);
+}
+function vDragStart(e){ var row = e.target.closest('.vrow'); VDRAG = row && row.dataset.vk; try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', VDRAG || ''); } catch (x) {} if (row) row.classList.add('dragging'); }
+function vDragOver(e, row){ if (!VDRAG || row.dataset.vk === VDRAG) return; e.preventDefault(); row.classList.add('dropto'); }
+function vDragEnd(row){ row.draggable = false; row.classList.remove('dragging'); document.querySelectorAll('.vrow.dropto').forEach(function(x){ x.classList.remove('dropto'); }); VDRAG = null; }
+function vDrop(e, row){
+  e.preventDefault(); row.classList.remove('dropto'); var from = VDRAG, to = row.dataset.vk; VDRAG = null; if (!from || from === to) return;
+  var L = VLIST.slice(), i = L.indexOf(from), j = L.indexOf(to); if (i < 0 || j < 0) return;
+  L.splice(i, 1); L.splice(j, 0, from); vSaveOrder(L);   /* 놓은 줄 자리로 (그 줄은 한 칸 밀림) */
 }
