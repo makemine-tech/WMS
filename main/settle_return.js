@@ -62,9 +62,9 @@ function retTrace(id){
     T.rows.forEach(function(r){ var no = rtNo(r[c('등기번호')]); if (no.length < 10) return;
       rows.push({ d: String(r[c('배달일자')] || '').slice(0, 10), no: no, cust: String(r[c('고객명')] || '').trim(), size: String(r[c('박스크기')] || ''), pay: String(r[c('납부방법')] || ''), sender: String(r[c('발송인')] || '') }); });
     /* ① 우체국 조회 — 기록에 원송장이 없는 것만 (조회 실패·확인불가는 하루 지나면 다시) */
-    var need = rows.filter(function(x){ var t = RETTRACE[x.no]; return !t || (!t.orig && Date.now() - (t.at || 0) > 864e5); }).map(function(x){ return x.no; });
-    var fn = firebase.app().functions('asia-southeast1').httpsCallable('epostReturnOrigin'), done = 0, ups = {};
-    var chunks = []; for (var i = 0; i < need.length; i += 40) chunks.push(need.slice(i, i + 40));
+    var need = rows.filter(function(x){ var t = RETTRACE[x.no]; return !t || (!t.orig && (t.err || !t.result || Date.now() - (t.at || 0) > 864e5)); })   /* 조회 실패(오류·응답 없음)는 바로 다시, 「반품원등기번호 없음」은 하루 뒤 */.map(function(x){ return x.no; });
+    var fn = firebase.app().functions('asia-northeast3').httpsCallable('epostReturnOrigin', { timeout: 300000 }), done = 0, ups = {};
+    var chunks = []; for (var i = 0; i < need.length; i += 15) chunks.push(need.slice(i, i + 15));
     return chunks.reduce(function(p, ch){ return p.then(function(){
       body('우체국 조회 중 ' + done + ' / ' + need.length + ' (반품 ' + rows.length + '건 중 새로 조회할 것)');
       return fn({ nos: ch }).then(function(res){ (res.data.rows || []).forEach(function(r){ var o = Object.assign({}, RETTRACE[r.no] || {}, { orig: r.orig || null, origDate: r.origDate || null, sender: r.sender || null, recvDate: r.recvDate || null, err: r.err || null, at: Date.now() });
