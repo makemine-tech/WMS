@@ -414,51 +414,86 @@ function lgExportXlRun(ym, H, T){
    관리표 가져오기 때 아래 비용표(임대료·인건비·보험…)를 그 달 「고정」으로 넣음 */
 var LCOST = {};
 function lgCostListen(){ db.ref('settlement/ledgerCost').on('value', function(s){ LCOST = s.val() || {}; if (document.getElementById('lgCostOv')) lgCostDraw(); if ($('tabLedger') && !$('tabLedger').classList.contains('hide') && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('#tabLedger input, #lgCostOv input'))) renderLedger(); }); }
+/* 계정과목(지출 코드) — 일반 기업 판매비와관리비·영업외비용 기준 (대표님 2026-10-05: 고정/일시 대신 지출 코드로 묶기) */
+var LG_ACCT = [
+  ['801', '임원급여'], ['802', '직원급여'], ['805', '잡급(아르바이트)'], ['806', '퇴직급여'], ['811', '복리후생비'], ['812', '여비교통비'], ['813', '접대비'],
+  ['814', '통신비'], ['815', '수도광열비'], ['817', '세금과공과'], ['818', '감가상각비'], ['819', '임차료'], ['820', '수선비'], ['821', '보험료'], ['822', '차량유지비'],
+  ['824', '운반비'], ['826', '도서인쇄비'], ['830', '소모품비'], ['831', '지급수수료'], ['833', '광고선전비'], ['837', '건물관리비'], ['840', '외주용역비'],
+  ['931', '이자비용'], ['999', '기타 (분류 필요)']
+];
+var LG_ACCT_NAME = {}; LG_ACCT.forEach(function(a){ LG_ACCT_NAME[a[0]] = a[1]; });
+/* 항목 이름 → 계정과목 추정 (사용자가 바꾼 게 우선) */
+function lgAcctGuess(n){
+  var s = String(n || '').replace(/\s/g, '');
+  var R = [[/^대표|임원/, '801'], [/알바|아르바이트|일용/, '805'], [/퇴직/, '806'], [/인건비|급여|월급|상여/, '802'], [/식대|식비|복리|간식|회식/, '811'], [/출장|교통|주차/, '812'], [/접대|경조/, '813'],
+    [/인터넷|케이티|^kt|통신|휴대폰|전화|lg유플|sk브로드/i, '814'], [/전기|관리비|수도|가스|난방/, '815'], [/세금|공과|재산세|면허/, '817'], [/수리|수선|보수/, '820'], [/보험/, '821'],
+    [/차량|주유|유류|하이패스|렌탈차|리스차/, '822'], [/파렛트|팔레트|임대료|임차|월세|렌탈|리스/, '819'], [/운반|택배|퀵|화물|운송/, '824'], [/인쇄|도서/, '826'], [/소모품|비품|사무용품|박스구매|테이프/, '830'],
+    [/광고|홍보|마케팅/, '833'], [/청소|경비|방역/, '837'], [/도급|용역|외주/, '840'], [/이자/, '931'], [/세무|기장|노무|수수료|운용|컨설팅|법무/, '831']];
+  for (var i = 0; i < R.length; i++) if (R[i][0].test(s)) return R[i][1];
+  return '999';
+}
 function lgCosts(ym){
-  var cur = LCOST[ym] || {}, rows = Object.keys(cur).map(function(id){ var c = cur[id]; return { id: id, kind: c.kind || '고정', name: c.name || '', amount: +c.amount || 0, ok: !!c.ok, ord: c.ord || 0 }; });
+  var cur = LCOST[ym] || {}, rows = Object.keys(cur).map(function(id){ var c = cur[id]; return { id: id, kind: c.kind || '고정', name: c.name || '', amount: +c.amount || 0, ok: !!c.ok, ord: c.ord || 0, acct: c.acct || null, skip: !!c.skip }; });
   /* 지난달(기록 있는 가장 가까운 달) 고정 항목 중 이번 달에 없는 것 = 예상 */
-  var have = {}, xl = false; rows.forEach(function(r){ have[r.kind + '|' + r.name] = 1; if (cur[r.id] && cur[r.id].xl) xl = true; });
-  rows = rows.filter(function(r){ return !(cur[r.id] && cur[r.id].skip); });   /* 그만둔 고정 항목(빼기) */
+  var have = {}, xl = false; rows.forEach(function(r){ have[r.name] = 1; if (cur[r.id] && cur[r.id].xl) xl = true; });
+  rows = rows.filter(function(r){ return !r.skip; });   /* 그만둔 고정 항목(빼기) */
   var p = ym; for (var i = 0; i < 12; i++){ p = lgPrev(p); if (LCOST[p] && Object.keys(LCOST[p]).length) break; }
   var prev = LCOST[p] || {};
-  if (!xl) Object.keys(prev).forEach(function(id){ var c = prev[id]; if ((c.kind || '고정') !== '고정' || have['고정|' + c.name] || c.skip) return;
-    rows.push({ id: null, kind: '고정', name: c.name || '', amount: +c.amount || 0, ok: false, est: true, ord: c.ord || 0, from: p }); });
-  rows.sort(function(a, b){ return (a.kind === b.kind ? 0 : a.kind === '고정' ? -1 : 1) || (a.ord || 0) - (b.ord || 0) || a.name.localeCompare(b.name, 'ko'); });
+  if (!xl) Object.keys(prev).forEach(function(id){ var c = prev[id]; if ((c.kind || '고정') !== '고정' || have[c.name] || c.skip) return;
+    rows.push({ id: null, kind: '고정', name: c.name || '', amount: +c.amount || 0, ok: false, est: true, ord: c.ord || 0, acct: c.acct || null, from: p }); });
+  rows.forEach(function(r){ r.ac = r.acct || lgAcctGuess(r.name); r.guess = !r.acct; });
+  var ai = {}; LG_ACCT.forEach(function(a, k){ ai[a[0]] = k; });
+  rows.sort(function(a, b){ return (ai[a.ac] - ai[b.ac]) || (a.ord || 0) - (b.ord || 0) || a.name.localeCompare(b.name, 'ko'); });
   var total = 0, est = 0, nEst = 0; rows.forEach(function(r){ total += r.amount; if (!r.ok){ est += r.amount; nEst++; } });
   return { rows: rows, total: total, est: est, nEst: nEst };
 }
 function lgCostSave(ym, row, patch){   /* 예상 줄을 고치거나 확정하면 그 달 기록으로 만듦 */
-  var base = { kind: row.kind, name: row.name, amount: row.amount, ok: !!row.ok, ord: row.ord || Date.now() % 100000 };
-  var rec = Object.assign(base, patch || {});
   if (row.id) return db.ref('settlement/ledgerCost/' + ym + '/' + row.id).update(patch || {});
-  return db.ref('settlement/ledgerCost/' + ym).push(rec);
+  return db.ref('settlement/ledgerCost/' + ym).push(Object.assign({ kind: row.kind, name: row.name, amount: row.amount, ok: !!row.ok, ord: row.ord || 0, acct: row.acct || null }, patch || {}));
 }
 function lgCostOpen(){ var ov = document.getElementById('lgCostOv'); if (ov) ov.remove();
   ov = document.createElement('div'); ov.id = 'lgCostOv'; ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);display:flex;justify-content:flex-end';
-  ov.innerHTML = '<div class="card" id="lgCostBox" style="width:min(560px,100%);height:100%;margin:0;border-radius:0;overflow:auto"></div>';
+  ov.innerHTML = '<div class="card" id="lgCostBox" style="width:min(640px,100%);height:100%;margin:0;border-radius:0;overflow:auto"></div>';
   ov.addEventListener('click', function(e){ if (e.target === ov) ov.remove(); }); document.body.appendChild(ov); lgCostDraw(); }
 function lgCostDraw(){
   var box = document.getElementById('lgCostBox'); if (!box) return;
   var ym = lgYM(), C = lgCosts(ym); window._lgCost = C.rows;
-  var rowH = function(r, i){
-    return '<tr' + (r.ok ? '' : ' style="background:rgba(251,191,36,.06)"') + '><td><select class="tsel" style="font-size:12px;padding:.1rem .3rem" onchange="lgCostEdit(' + i + ',{kind:this.value})">' + ['고정', '일시'].map(function(k){ return '<option' + (k === r.kind ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select></td>'
-      + '<td><input type="text" class="famt" style="width:150px" value="' + esc(r.name) + '" onchange="lgCostEdit(' + i + ',{name:this.value.trim()})"></td>'
-      + '<td class="n"><input type="number" class="famt" style="width:120px;text-align:right" value="' + (r.amount || '') + '" onchange="lgCostEdit(' + i + ',{amount:+this.value||0, ok:false})"></td>'
+  var acSel = function(i, cur){ return '<select class="tsel" style="font-size:11.5px;padding:.1rem .25rem;max-width:130px" onchange="lgCostEdit(' + i + ',{acct:this.value})">' + LG_ACCT.map(function(a){ return '<option value="' + a[0] + '"' + (a[0] === cur ? ' selected' : '') + '>' + a[0] + ' ' + a[1] + '</option>'; }).join('') + '</select>'; };
+  var rowH = function(r, i, first, lastIn){
+    return '<tr' + (r.ok ? '' : ' style="background:rgba(251,191,36,.06)"') + '>'
+      + '<td style="white-space:nowrap"><button class="btn" style="padding:0 .3rem;font-size:11px" ' + (first ? 'disabled' : '') + ' onclick="lgCostMove(' + i + ',-1)" title="위로">▲</button><button class="btn" style="padding:0 .3rem;font-size:11px" ' + (lastIn ? 'disabled' : '') + ' onclick="lgCostMove(' + i + ',1)" title="아래로">▼</button></td>'
+      + '<td><input type="text" class="famt" style="width:140px" value="' + esc(r.name) + '" onchange="lgCostEdit(' + i + ',{name:this.value.trim()})"></td>'
+      + '<td class="n"><input type="number" class="famt" style="width:115px;text-align:right" value="' + (r.amount || '') + '" onchange="lgCostEdit(' + i + ',{amount:+this.value||0, ok:false})"></td>'
+      + '<td>' + acSel(i, r.ac) + (r.guess ? '<div class="sm dim">자동 분류</div>' : '') + '</td>'
+      + '<td><select class="tsel" style="font-size:11.5px;padding:.1rem .25rem" onchange="lgCostEdit(' + i + ',{kind:this.value})" title="고정 = 다음 달에 예상으로 넘어감 · 일시 = 이번 달만">' + ['고정', '일시'].map(function(k){ return '<option' + (k === r.kind ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select></td>'
       + '<td style="white-space:nowrap">' + (r.ok ? '<b style="color:var(--g)">✔ 확정</b>' : '<button class="btn p" style="padding:.1rem .5rem;font-size:12px" onclick="lgCostEdit(' + i + ',{ok:true})">확정</button>' + (r.est ? '<div class="sm dim">' + esc(r.from) + ' 금액 예상</div>' : '<div class="sm" style="color:#fbbf24">예상</div>')) + '</td>'
       + '<td><button class="btn r" style="padding:.05rem .4rem" title="' + (r.id ? '지우기' : '이번 달부터 이 고정 항목 빼기') + '" onclick="lgCostDel(' + i + ')">×</button></td></tr>'; };
-  var sec = function(k){ var L = C.rows.map(function(r, i){ return [r, i]; }).filter(function(x){ return x[0].kind === k; }), t = L.reduce(function(s, x){ return s + x[0].amount; }, 0);
-    return '<div class="sec-note" style="margin:.8rem 0 .3rem"><b>' + k + '</b> ' + L.length + '개 · ₩' + won0(t) + '</div><table class="ftbl" style="min-width:0"><tbody>' + L.map(function(x){ return rowH(x[0], x[1]); }).join('') + '</tbody></table>'; };
-  box.innerHTML = '<div class="card-h"><span class="card-t">💸 ' + esc(ymLabel(ym)) + ' 고정비 · 지출</span><button class="btn" style="margin-left:auto" onclick="document.getElementById(\'lgCostOv\').remove()">닫기</button></div>'
+  var groups = []; C.rows.forEach(function(r, i){ var g = groups[groups.length - 1]; if (!g || g.ac !== r.ac){ g = { ac: r.ac, list: [] }; groups.push(g); } g.list.push([r, i]); });
+  var body = groups.map(function(g){ var t = g.list.reduce(function(s, x){ return s + x[0].amount; }, 0);
+    return '<tr><td colspan="7" style="background:var(--s2);padding:.35rem .5rem"><b>' + g.ac + ' ' + esc(LG_ACCT_NAME[g.ac] || g.ac) + '</b> <span class="sm dim">' + g.list.length + '개</span><span style="float:right;font-weight:800">₩' + won0(t) + (C.total ? ' <span class="sm dim">(' + (t / C.total * 100).toFixed(1) + '%)</span>' : '') + '</span></td></tr>'
+      + g.list.map(function(x, k){ return rowH(x[0], x[1], k === 0, k === g.list.length - 1); }).join(''); }).join('');
+  box.innerHTML = '<div class="card-h"><span class="card-t">💸 ' + esc(ymLabel(ym)) + ' 지출 (계정과목별)</span><button class="btn" style="margin-left:auto" onclick="document.getElementById(\'lgCostOv\').remove()">닫기</button></div>'
     + '<div style="font-size:15px;margin:.2rem 0 .4rem">지출 합계 <b>₩' + won0(C.total) + '</b>' + (C.nEst ? ' <span class="sm" style="color:#fbbf24">(예상 ' + C.nEst + '개 ₩' + won0(C.est) + ' 포함)</span>' : ' <span class="sm" style="color:var(--g)">모두 확정</span>') + '</div>'
-    + '<div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn" onclick="lgCostAdd(\'고정\')">＋ 고정</button><button class="btn" onclick="lgCostAdd(\'일시\')">＋ 일시 (퀵비 등)</button>' + (C.nEst ? '<button class="btn p" onclick="lgCostAllOk()">예상 ' + C.nEst + '개 모두 확정</button>' : '') + '</div>'
-    + sec('고정') + sec('일시')
-    + '<div class="sec-note" style="margin-top:.8rem">· 고정 = 매달 나가는 돈(임대료·급여·기업카드·보험…) — 다음 달에 이번 금액으로 「예상」이 미리 나옴, 그대로 확정하거나 숫자를 바꿔 확정<br>· 일시 = 그 달에만(퀵비 등) · 수익 = 청구 합계 − 송금·토스 − 지출 (삼자물류정산관리 위 카드)</div>';
+    + '<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem"><button class="btn" onclick="lgCostAdd()">＋ 지출 추가</button>' + (C.nEst ? '<button class="btn p" onclick="lgCostAllOk()">예상 ' + C.nEst + '개 모두 확정</button>' : '')
+    + (C.rows.some(function(r){ return r.guess && r.id; }) ? '<button class="btn" onclick="lgCostFixGuess()" title="자동 분류를 이 달 기록에 저장 — 다음 달에도 그 계정으로">자동 분류 저장</button>' : '') + '</div>'
+    + '<table class="ftbl" style="min-width:0"><tbody>' + body + '</tbody></table>'
+    + '<div class="sec-note" style="margin-top:.8rem">· 계정과목 = 일반 기업 지출 코드(판매비와관리비 8xx · 이자비용 931) — 줄마다 바꿀 수 있고, 처음엔 항목 이름으로 자동 분류<br>· ▲▼ = 같은 계정 안에서 순서 · 고정 = 다음 달에 이번 금액으로 「예상」, 그대로 확정하거나 고쳐 확정 · 일시 = 이번 달만<br>· 수익 = 청구 합계 − 송금·토스 − 지출 (삼자물류정산관리 위 카드)</div>';
 }
-function lgCostEdit(i, patch){ var r = (window._lgCost || [])[i]; if (!r) return; lgCostSave(lgYM(), r, patch); }
+function lgCostEdit(i, patch){ var r = (window._lgCost || [])[i]; if (!r) return; if (patch.acct === undefined && !r.acct && r.guess) patch.acct = r.ac; lgCostSave(lgYM(), r, patch); }
+function lgCostMove(i, d){   /* 같은 계정 안에서 위·아래 — 그 계정 줄들 순서를 다시 매김 */
+  var L = window._lgCost || [], r = L[i]; if (!r) return; var same = L.filter(function(x){ return x.ac === r.ac; }), k = same.indexOf(r), j = k + d; if (j < 0 || j >= same.length) return;
+  var t = same[k]; same[k] = same[j]; same[j] = t;
+  var ym = lgYM(), u = {}, P = [];
+  same.forEach(function(x, n){ var ord = (n + 1) * 10; if (x.id){ u[ym + '/' + x.id + '/ord'] = ord; if (!x.acct) u[ym + '/' + x.id + '/acct'] = x.ac; }
+    else { var key = db.ref('settlement/ledgerCost/' + ym).push().key; u[ym + '/' + key] = { kind: x.kind, name: x.name, amount: x.amount, ok: false, ord: ord, acct: x.ac }; } });
+  db.ref('settlement/ledgerCost').update(u);
+}
 function lgCostDel(i){ var r = (window._lgCost || [])[i]; if (!r) return;
-  if (!r.id){ if (confirm('「' + r.name + '」 고정 항목을 이번 달부터 뺄까요? (다음 달에도 안 나옴)')) db.ref('settlement/ledgerCost/' + lgYM()).push({ kind: '고정', name: r.name, amount: 0, ok: true, skip: true }); return; }
+  if (!r.id){ if (confirm('「' + r.name + '」 고정 항목을 이번 달부터 뺄까요? (다음 달에도 안 나옴)')) db.ref('settlement/ledgerCost/' + lgYM()).push({ kind: '고정', name: r.name, amount: 0, ok: true, skip: true, acct: r.ac }); return; }
   if (confirm('「' + r.name + '」 지출을 지울까요?')) db.ref('settlement/ledgerCost/' + lgYM() + '/' + r.id).set(null); }
-function lgCostAdd(k){ var n = prompt(k + ' 지출 항목 이름 (예: ' + (k === '고정' ? '임대료, 급여, 기업카드' : '퀵비, 수리비') + ')', ''); if (!n || !n.trim()) return; var a = prompt('금액', ''); if (a == null) return;
-  db.ref('settlement/ledgerCost/' + lgYM()).push({ kind: k, name: n.trim(), amount: +String(a).replace(/[^\d.-]/g, '') || 0, ok: false, ord: Date.now() % 100000 }); }
-function lgCostAllOk(){ var ym = lgYM(), u = {}; (window._lgCost || []).forEach(function(r){ if (r.ok) return; if (r.id) u[ym + '/' + r.id + '/ok'] = true; else { var k = db.ref('settlement/ledgerCost/' + ym).push().key; u[ym + '/' + k] = { kind: r.kind, name: r.name, amount: r.amount, ok: true, ord: r.ord || 0 }; } });
+function lgCostAdd(){ var n = prompt('지출 항목 이름 (예: 임대료, 급여, 기업카드, 퀵비)', ''); if (!n || !n.trim()) return; var a = prompt('금액', ''); if (a == null) return;
+  var k = confirm('매달 나가는 고정 지출인가요?\n\n확인 = 고정 (다음 달에 예상으로 넘어감)\n취소 = 일시 (이번 달만)') ? '고정' : '일시';
+  db.ref('settlement/ledgerCost/' + lgYM()).push({ kind: k, name: n.trim(), amount: +String(a).replace(/[^\d.-]/g, '') || 0, ok: false, ord: 9990, acct: lgAcctGuess(n) }); }
+function lgCostAllOk(){ var ym = lgYM(), u = {}; (window._lgCost || []).forEach(function(r){ if (r.ok) return; if (r.id) u[ym + '/' + r.id + '/ok'] = true; else { var k = db.ref('settlement/ledgerCost/' + ym).push().key; u[ym + '/' + k] = { kind: r.kind, name: r.name, amount: r.amount, ok: true, ord: r.ord || 0, acct: r.ac }; } });
   db.ref('settlement/ledgerCost').update(u); }
+function lgCostFixGuess(){ var ym = lgYM(), u = {}; (window._lgCost || []).forEach(function(r){ if (r.id && !r.acct) u[ym + '/' + r.id + '/acct'] = r.ac; }); db.ref('settlement/ledgerCost').update(u).then(function(){ toast('계정과목 저장'); }); }
