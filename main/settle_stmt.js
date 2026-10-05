@@ -103,7 +103,13 @@
         /* 맺음 줄 — 소계·공급가액 = 공급가, 합계·포함가 = 부가세 포함. 하나라도 나오면 항목은 끝 */
         var lastNum = own.filter(function(x){ return typeof x.c.v === 'number'; }).pop();
         if (/(^|\|)(소계|공급가액)(\||$)/.test(lineTxt)){ ended = true; var sc = cellOf(ws, R, H.amt); out.totals.sub = num(sc) != null ? num(sc) : (lastNum ? lastNum.c.v : null); continue; }
-        if (/(^|\|)(합계|포함가)(\||$)/.test(lineTxt)){ ended = true; if (lastNum && out.totals.total == null) out.totals.total = lastNum.c.v; continue; }
+        if (/(^|\|)(합계|포함가)(\||$)/.test(lineTxt)){ ended = true;
+          if (out.totals.total == null){
+            /* 합계 줄에 공급가액·세액 칸이 따로 있으면 둘을 더함 (엠에스컴퍼니 거래내역서: 「합 계 | 387,273 | 38,727」 — 마지막 숫자 = 세액을 합계로 읽던 것) */
+            var ta = num(cellOf(ws, R, H.amt)), tt = H.tax != null ? num(cellOf(ws, R, H.tax)) : null;
+            out.totals.total = ta != null && tt != null && tt < ta ? ta + tt : (lastNum ? lastNum.c.v : null);
+            if (ta != null && tt != null && tt < ta && out.totals.sub == null) out.totals.sub = ta; }
+          continue; }
         if (/(^|\|)(세액|전잔금|입금|잔금)(\||$)/.test(lineTxt)){ ended = true; continue; }
         if (ended) continue;
         var gC = cellOf(ws, R, H.grp), iC = cellOf(ws, R, H.item), dC = H.grp != null ? cellOf(ws, R, H.item + 1) : null;

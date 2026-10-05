@@ -447,6 +447,18 @@ function makeDraft(msg){
     return { wb: wb, log: log, name: yy + '월_거래내역서_' + VW.name + '.xlsx' };
   });
 }
+/* 초안 포함가 추정: 초안 거래명세표 항목마다 수량×단가(둘 다 숫자일 때, 아니면 금액칸) 합 — 엑셀이 다시 계산하기 전이라 금액·합계 칸 저장값은 지난달 것일 수 있어서.
+   부가세: 표본(지난달 확정본)의 항목 금액 합이 합계와 같으면 이미 포함(포인트나인크루 청구내역서), 아니면 ×1.1 */
+function draftTotal(buf, A0){
+  var A = SETTLE_STMT.analyze(XLSX.read(buf, { type: 'array', cellFormula: true }));
+  var sum = 0, n = 0;
+  A.items.forEach(function(it){ var q = it.qty.v, p = it.price.v, a = it.amt.v;
+    var v = (typeof q === 'number' && typeof p === 'number') ? q * p : (typeof a === 'number' ? a : 0); if (v){ sum += v; n++; } });
+  if (!n) return null;
+  var raw0 = (A0 && A0.items || []).reduce(function(s, it){ return s + (it.amt.v || 0); }, 0), t0 = A0 && A0.totals && A0.totals.total;
+  var vatIn = A0 && A0.header && A0.header.tax == null && t0 != null && Math.abs(t0 - raw0) <= 2;
+  return Math.round(vatIn ? sum : sum * 1.1);
+}
 function buildDraft(){
   if (!VW || !VW.A) return;
   var btn = $('buildBtn'), msg = function(t){ var e = $('buildMsg'); if (e) e.textContent = t; }, log, name;
@@ -462,8 +474,9 @@ function buildDraft(){
     VW._lastLog = { log: log, name: name, at: Date.now() };
     msg('✔ ' + name + ' 내려받음 — ⚠️ 특이사항·확인 필요 ' + nCheck + '건 (아래)');
     var box = $('buildLog'); if (box) box.innerHTML = buildLogHtml();
-    var tl = log.map(function(l){ return l[1]; }).join(' '), tm = tl.match(/포함가 ([\d,]+)/), tot = tm ? +tm[1].replace(/,/g, '') : null;
-    var dr = { at: Date.now(), total: tot, nCheck: nCheck, name: name };
+    var tl = log.map(function(l){ return l[1]; }).join(' '), tm = tl.match(/포함가 ([\d,]+)/), tot = tm ? +tm[1].replace(/,/g, '') : null, est = false;
+    if (tot == null){ try { tot = draftTotal(buf, VW.A); est = tot != null; } catch (e) { console.warn(e); } }   /* 엔진이 포함가를 안 적으면 초안 거래명세표에서 셈 → 삼자물류정산관리 「미확정(초안)」 금액 */
+    var dr = { at: Date.now(), total: tot, est: est || null, nCheck: nCheck, name: name };
     if (!VENDORS[VW.vkey]) VENDORS[VW.vkey] = {}; var V2 = VENDORS[VW.vkey]; V2.run = V2.run || {}; V2.run[YM] = V2.run[YM] || {}; V2.run[YM].draft = dr;
     refreshRunState(false); setRun('draft', dr);
   }).catch(function(e){ msg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e); })

@@ -34,16 +34,19 @@ function lgStmt(name, ym){
 }
 /* 정산금액 = 확정본 합계 → 그 달 거래내역서 합계(표본 분석값) → 직접 */
 function lgAuto(vk, name, ym){
+  /* 미확정(초안) = 업체 정산 탭에서 「초안 내려받기」 한 포함가 (run/{ym}/draft.total) — 확정 전이라도 금액은 들어감 (대표님 2026-10-05) */
+  var dr = ((((VENDORS[vk] || {}).run) || {})[ym] || {}).draft, dv = dr && +dr.total ? +dr.total : null;
   var d = doneOf(vk, ym); if (d && +d.total) return { v: +d.total, src: '확정본' };
-  if (d && d.id) return { v: null, src: '', reread: true };   /* 확정했는데 합계가 0·없음 → 「합계 다시 읽기」 */
+  if (d && d.id) return { v: dv, src: dv ? '미확정(초안)' : '', reread: true };   /* 확정했는데 합계가 0·없음 → 「합계 다시 읽기」 */
   var st = (VENDORS[vk] || {}).stat, S = lgStmt(name, ym);
   if (st && st.total != null && S && st.sid && String(st.sid).indexOf(S.id) >= 0) return { v: +st.total, src: '거래내역서' };
+  if (dv) return { v: dv, src: '미확정(초안)' };
   return null;
 }
 function lgState(kind, key, ym, depth, name){
   var rec = kind === 'v' ? ((LEDGER[ym] || {})[key] || {}) : ((LEXTRA[ym] || {})[key] || {});
   var A = kind === 'v' ? lgAuto(key, name || key, ym) : null, man = rec.amount != null && rec.amount !== '' ? +rec.amount : null;
-  var reread = !!(A && A.reread); if (reread) A = null;
+  var reread = !!(A && A.reread); if (reread && A.v == null) A = null;
   var amt = A ? A.v : man, src = A ? A.src : (man != null ? '직접' : '');
   var carry = rec.carry != null && rec.carry !== '' ? +rec.carry : (depth > 24 || kind !== 'v' ? 0 : lgState('v', key, lgPrev(ym), (depth || 0) + 1, name).unpaid);
   var due = (carry || 0) + (amt || 0);
@@ -65,6 +68,8 @@ function lgMonthBar(ym){
     + '<input type="month" value="' + ym + '" style="font-size:12px;padding:.1rem .3rem" onchange="lgSetYM(this.value)"></div>';
 }
 /* 진행 단계 = 1 전달완료 · 2 계산서발행완료 · 3 체크완료 (예전 sent·inv·chk 칸과 같은 값) — 입금은 입금액으로만 */
+function lgTh(k, t, cls){ var S = LG_OPT.sort || {}, on = S.k === k; return '<th' + (cls ? ' class="' + cls + '"' : '') + ' style="cursor:pointer;user-select:none;white-space:nowrap' + (on ? ';color:var(--b)' : '') + '" onclick="lgSort(\'' + k + '\')" title="눌러서 정렬 (한 번 더 = 반대로)">' + t + (on ? (S.d > 0 ? ' ▲' : ' ▼') : ' <span style="opacity:.35">↕</span>') + '</th>'; }
+function lgSort(k){ var S = LG_OPT.sort || {}; lgOpt('sort', S.k === k ? { k: k, d: -S.d } : { k: k, d: k === 'amt' || k === 'unpaid' ? -1 : 1 }); renderLedger(); }
 function lgStage(rec){ return rec.chk ? 3 : rec.inv ? 2 : rec.sent ? 1 : 0; }
 function lgSetStage(base, n){ n = +n; var u = {}; u[base + '/sent'] = n >= 1 || null; u[base + '/inv'] = n >= 2 || null; u[base + '/chk'] = n >= 3 || null; return db.ref('settlement').update(u); }
 function lgBulk(n){
@@ -89,6 +94,9 @@ function renderLedger(){
   var rows = V.map(function(v){ var s = lgState('v', v.vk, ym, 0, v.name), I = LINFO[v.vk] || {}; return { kind: 'v', key: v.vk, name: v.name, skip: v.skip, I: I, s: s, group: I.group || '', file: lgFinal(v.vk, v.name, ym) }; })
     .concat(Object.keys(X).map(function(id){ var s = lgState('x', id, ym, 0); return { kind: 'x', key: id, name: X[id].name || '(이름 없음)', I: X[id], s: s, group: X[id].group || '' }; }));
   rows.sort(function(a, b){ return (a.kind === b.kind ? 0 : a.kind === 'v' ? -1 : 1) || String(a.group).localeCompare(String(b.group), 'ko') || a.name.localeCompare(b.name, 'ko'); });
+  /* 제목 눌러 정렬 (대표님 2026-10-05): 업체명·관리업체·정산금액·진행·미수 — 같은 칸 다시 누르면 반대로 */
+  var SO = LG_OPT.sort; if (SO && SO.k){ var kv = { name: function(r){ return r.name; }, group: function(r){ return r.group || ''; }, amt: function(r){ return r.s.amt || 0; }, stage: function(r){ return lgStage(r.s.rec); }, unpaid: function(r){ return r.s.unpaid || 0; } }[SO.k];
+    if (kv) rows.sort(function(a, b){ var x = kv(a), y = kv(b), c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'ko'); return c * SO.d || a.name.localeCompare(b.name, 'ko'); }); }
   window._lgRows = rows;
   var act = rows.filter(function(r){ return !r.skip && (r.s.amt || r.s.carry || r.s.rec.send); });
   var S = { amt: 0, paid: 0, unpaid: 0, send: 0, n: act.length, st: [0, 0, 0, 0], pd: 0 };
@@ -114,8 +122,8 @@ function renderLedger(){
     + card('진행', '전달 ' + S.st[1] + ' · 계산서 ' + S.st[2], '체크 ' + S.st[3] + ' / ' + S.n) + '</div>'
     + '<div style="display:flex;gap:.45rem;align-items:center;margin:0 0 .4rem;flex-wrap:wrap"><button class="btn" style="font-size:12px" onclick="lgBulk(1)">✉️ 일괄 전달완료</button><button class="btn" style="font-size:12px" onclick="lgBulk(2)">🧾 일괄 계산서발행완료</button>'
     + '<span class="sp" style="flex:1"></span><span class="sm dim">내려받기 모양</span> ' + dsel + ' <label class="sm"><input type="checkbox" ' + (LG_OPT.hideZero ? 'checked' : '') + ' onchange="lgOpt(\'hideZero\', this.checked)"> 0원 줄 숨기기</label></div>'
-    + '<div id="lgScroll"><table class="ftbl lgt"><thead><tr><th class="stk">업체명</th><th>관리업체</th><th class="n">전미수</th><th class="n">정산금액</th><th class="n">송금·토스</th><th class="n">입금액</th>'
-    + '<th>진행</th><th class="n">미수</th><th>거래내역서</th><th>메모</th><th></th></tr></thead><tbody>';
+    + '<div id="lgScroll"><table class="ftbl lgt"><thead><tr>' + lgTh('name', '업체명', 'stk') + lgTh('group', '관리업체') + '<th class="n">전미수</th>' + lgTh('amt', '정산금액', 'n') + '<th class="n">송금·토스</th><th class="n">입금액</th>'
+    + lgTh('stage', '진행') + lgTh('unpaid', '미수', 'n') + '<th>거래내역서</th><th>메모</th><th></th></tr></thead><tbody>';
   var P = function(r, k){ return (r.kind === 'v' ? 'ledger/' + ym + '/' + r.key : 'ledgerExtra/' + ym + '/' + r.key) + (k ? '/' + k : ''); };
   rows.forEach(function(r){
     var s = r.s, rec = s.rec, I = r.I || {}, stg = lgStage(rec);
