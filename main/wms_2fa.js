@@ -169,7 +169,7 @@
       (function wait(){
         var A = window.WMSAccess;
         if (A && A.ready && A.level >= 3){
-          if (!opt.remember){ ask(); return; }
+          if (!opt.remember){ keyDel(); ask(); return; }   /* 기억하기를 끈 뒤에는 예전에 보관한 키도 지움 (2026-10-05 정산관리 다시 잠금) */
           keyGet().then(function(k){ if (!k){ ask(); return; }
             /* 보관한 키가 지금 vault 와 맞는지 확인할 방법이 없으니 그대로 쓰고, 복호화가 실패하면 그때 다시 묻는다 */
             DEK = k; audit(opt.page + '-unlock-remembered'); opened(); });
