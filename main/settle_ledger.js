@@ -58,10 +58,27 @@ function lgMonthBar(ym){
   Object.keys(LEDGER).concat(Object.keys(LEXTRA)).forEach(function(k){ if (chips.indexOf(k) < 0) chips.push(k); });
   chips.sort().reverse();
   var has = function(k){ return !!(LEDGER[k] && Object.keys(LEDGER[k]).length) || !!(LEXTRA[k] && Object.keys(LEXTRA[k]).length); };
-  return '<div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin:.1rem 0 .8rem"><span class="sm dim" style="margin-right:.2rem">달</span>'
-    + chips.map(function(k){ var on = k === ym; return '<button class="btn' + (on ? ' p' : '') + '" style="padding:.2rem .6rem;font-size:12px' + (has(k) || on ? '' : ';opacity:.55') + '" onclick="lgSetYM(\'' + k + '\')">' + (+k.slice(2, 4)) + '.' + k.slice(5, 7) + (has(k) ? ' •' : '') + '</button>'; }).join('')
-    + '<input type="month" value="' + ym + '" style="margin-left:.3rem" onchange="lgSetYM(this.value)"><span class="sm dim" style="margin-left:.4rem">• = 기록 있는 달</span></div>';
+  return '<div class="lg-months"><span class="sm dim" style="white-space:nowrap">• 기록 있는 달</span>'
+    + chips.map(function(k){ var on = k === ym; return '<button class="btn' + (on ? ' p' : '') + '" style="padding:.15rem .5rem;font-size:11.5px;white-space:nowrap' + (has(k) || on ? '' : ';opacity:.5') + '" onclick="lgSetYM(\'' + k + '\')">' + (+k.slice(2, 4)) + '.' + k.slice(5, 7) + (has(k) ? '•' : '') + '</button>'; }).join('')
+    + '<input type="month" value="' + ym + '" style="font-size:12px;padding:.1rem .3rem" onchange="lgSetYM(this.value)"></div>';
 }
+/* 진행 단계 = 1 전달완료 · 2 계산서발행완료 · 3 체크완료 (예전 sent·inv·chk 칸과 같은 값) — 입금은 입금액으로만 */
+function lgStage(rec){ return rec.chk ? 3 : rec.inv ? 2 : rec.sent ? 1 : 0; }
+function lgSetStage(base, n){ n = +n; var u = {}; u[base + '/sent'] = n >= 1 || null; u[base + '/inv'] = n >= 2 || null; u[base + '/chk'] = n >= 3 || null; return db.ref('settlement').update(u); }
+function lgBulk(n){
+  var ym = lgYM(), L = window._lgRows || [], u = {}, c = 0;
+  L.forEach(function(r){ if (r.skip || !(r.s.amt || r.s.carry)) return; if (lgStage(r.s.rec) >= n) return; var base = (r.kind === 'v' ? 'ledger/' : 'ledgerExtra/') + ym + '/' + r.key;
+    u[base + '/sent'] = true; if (n >= 2) u[base + '/inv'] = true; c++; });
+  if (!c){ toast('바꿀 업체가 없습니다'); return; }
+  if (!confirm(ymLabel(ym) + ' 정산금액이 있는 업체 ' + c + '곳을 「' + (n >= 2 ? '2 계산서발행완료' : '1 전달완료') + '」로 바꿀까요?')) return;
+  db.ref('settlement').update(u).then(function(){ toast('✔ ' + c + '곳 바꿈'); });
+}
+/* 화면 고정: 이 탭에서는 페이지가 안 움직이고 목록 안에서만 위아래·좌우 스크롤 */
+function lgFit(){
+  var w = document.getElementById('lgScroll'); if (!w || $('tabLedger').classList.contains('hide')) return;
+  var top = w.getBoundingClientRect().top; w.style.maxHeight = Math.max(220, window.innerHeight - top - 14) + 'px';
+}
+window.addEventListener('resize', lgFit);
 
 function renderLedger(){
   var el = $('tabLedger'); if (!el) return;
@@ -70,44 +87,54 @@ function renderLedger(){
   var rows = V.map(function(v){ var s = lgState('v', v.vk, ym, 0, v.name), I = LINFO[v.vk] || {}; return { kind: 'v', key: v.vk, name: v.name, skip: v.skip, I: I, s: s, group: I.group || '', file: lgFinal(v.vk, v.name, ym) }; })
     .concat(Object.keys(X).map(function(id){ var s = lgState('x', id, ym, 0); return { kind: 'x', key: id, name: X[id].name || '(이름 없음)', I: X[id], s: s, group: X[id].group || '' }; }));
   rows.sort(function(a, b){ return (a.kind === b.kind ? 0 : a.kind === 'v' ? -1 : 1) || String(a.group).localeCompare(String(b.group), 'ko') || a.name.localeCompare(b.name, 'ko'); });
+  window._lgRows = rows;
   var act = rows.filter(function(r){ return !r.skip && (r.s.amt || r.s.carry || r.s.rec.send); });
-  var S = { amt: 0, paid: 0, unpaid: 0, send: 0, n: act.length, sent: 0, inv: 0, chk: 0, pd: 0 };
-  act.forEach(function(r){ S.amt += r.s.amt || 0; S.paid += r.s.paid || 0; S.send += +r.s.rec.send || 0; S.unpaid += r.s.unpaid > 0 ? r.s.unpaid : 0; ['sent', 'inv', 'chk'].forEach(function(k){ if (r.s.rec[k]) S[k]++; }); if (r.s.rec.paid) S.pd++; });
-  var card = function(t, v, s, c){ return '<div style="flex:1;min-width:150px;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem .9rem"><div class="sm dim">' + t + '</div><div style="font-size:20px;font-weight:800;margin-top:.15rem' + (c ? ';color:' + c : '') + '">' + v + '</div>' + (s ? '<div class="sm dim">' + s + '</div>' : '') + '</div>'; };
-  var dsel = '<select class="tsel" onchange="lgOpt(\'design\', this.value)">' + [{ id: 'orig', name: '원본 양식' }].concat(SETTLE_DESIGN.list).map(function(d){ return '<option value="' + d.id + '"' + (LG_OPT.design === d.id ? ' selected' : '') + '>' + esc(d.name) + '</option>'; }).join('') + '</select>';
-  var h = '<div class="bar"><span class="bar-t">' + esc(ymLabel(ym)) + ' 삼자물류정산관리</span><span class="sec-note">정산금액 = 확정본 → 그 달 거래내역서 → 직접 입력</span><span class="sp"></span>'
-    + '<label class="btn" style="cursor:pointer">📥 관리표 엑셀에서 가져오기<input type="file" accept=".xlsx,.xls" style="display:none" onchange="lgImport(this)"></label>'
-    + '<button class="btn" onclick="lgExport()">📤 관리표 엑셀로 내보내기</button><button class="btn" onclick="lgAddExtra()">＋ 기타 거래처</button></div>'
-    + lgMonthBar(ym)
-    + '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.2rem 0 1rem">'
-    + card('정산 업체', S.n + '곳', '금액이 있는 곳') + card('청구 합계 (VAT 포함)', '₩' + won0(S.amt), '공급가 ₩' + won0(S.amt / 1.1))
-    + card('송금·토스 (보낼 돈)', '₩' + won0(S.send), '관리표 송금토스금액') + card('입금 확인', '₩' + won0(S.paid), S.pd + ' / ' + S.n + '곳', 'var(--g)') + card('미수 합계', '₩' + won0(S.unpaid), '전미수 포함', S.unpaid ? '#f87171' : 'var(--g)')
-    + card('진행', '전달 ' + S.sent + ' · 계산서 ' + S.inv, '체크 ' + S.chk + ' · 입금 ' + S.pd + ' / ' + S.n) + '</div>'
-    + '<div class="card"><div class="card-h"><span class="card-t">업체별 정산 진행</span><span class="card-s">체크·입력하면 바로 저장 · 내려받기 모양 ' + dsel
-    + ' <label class="sm" style="margin-left:.4rem"><input type="checkbox" ' + (LG_OPT.hideZero ? 'checked' : '') + ' onchange="lgOpt(\'hideZero\', this.checked)"> 0원 줄 숨기기(디자인)</label></span></div>'
-    + '<div style="overflow-x:auto"><table class="ftbl lgt"><thead><tr><th>관리업체</th><th>업체명</th><th>정산서전달메일</th><th class="n">전미수</th><th class="n">정산금액</th><th class="n">송금·토스</th><th class="n">입금액</th>'
-    + '<th>1.전달</th><th>2.계산서</th><th>3.체크</th><th>4.입금</th><th class="n">미수</th><th>거래내역서</th><th>메모</th><th></th></tr></thead><tbody>';
-  var P = function(r, k){ return (r.kind === 'v' ? 'ledger/' + ym + '/' + r.key : 'ledgerExtra/' + ym + '/' + r.key) + '/' + k; };
+  var S = { amt: 0, paid: 0, unpaid: 0, send: 0, n: act.length, st: [0, 0, 0, 0], pd: 0 };
+  act.forEach(function(r){ S.amt += r.s.amt || 0; S.paid += r.s.paid || 0; S.send += +r.s.rec.send || 0; S.unpaid += r.s.unpaid > 0 ? r.s.unpaid : 0; for (var k = 1; k <= lgStage(r.s.rec); k++) S.st[k]++; if ((r.s.amt || r.s.carry) && r.s.unpaid <= 0) S.pd++; });
+  var card = function(t, v, s, c){ return '<div class="lg-card"><span class="lg-ct">' + t + '</span><b' + (c ? ' style="color:' + c + '"' : '') + '>' + v + '</b>' + (s ? '<span class="lg-cs">' + s + '</span>' : '') + '</div>'; };
+  var dsel = '<select class="tsel" style="font-size:12px" onchange="lgOpt(\'design\', this.value)">' + [{ id: 'orig', name: '원본 양식' }].concat(SETTLE_DESIGN.list).map(function(d){ return '<option value="' + d.id + '"' + (LG_OPT.design === d.id ? ' selected' : '') + '>' + esc(d.name) + '</option>'; }).join('') + '</select>';
+  var h = '<style>'
+    + '.lg-top{display:flex;align-items:center;gap:.5rem;flex-wrap:nowrap;margin:0 0 .45rem}.lg-top .bar-t{white-space:nowrap}'
+    + '.lg-months{display:flex;gap:.3rem;align-items:center;overflow-x:auto;flex:1;min-width:0;padding:.1rem 0;scrollbar-width:thin}'
+    + '.lg-cards{display:flex;gap:.45rem;margin:0 0 .5rem}.lg-card{flex:1;min-width:0;background:var(--s2);border:1px solid var(--br);border-radius:9px;padding:.3rem .6rem;display:flex;flex-direction:column;line-height:1.25}'
+    + '.lg-ct{font-size:10.5px;color:var(--mu);white-space:nowrap}.lg-card b{font-size:14px;white-space:nowrap}.lg-cs{font-size:10px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '#lgScroll{overflow:auto;border:1px solid var(--br);border-radius:10px}'
+    + '.lgt{min-width:1180px;margin:0}.lgt thead th{position:sticky;top:0;z-index:2;background:var(--s1)}'
+    + '.lgt .stk{position:sticky;left:0;z-index:1;background:var(--s1);box-shadow:1px 0 0 var(--br)}.lgt thead th.stk{z-index:3}'
+    + '.lgt td{padding:.3rem .4rem}.lgt input.famt{padding:.15rem .35rem}'
+    + '</style>'
+    + '<div class="lg-top"><span class="bar-t">' + esc(ymLabel(ym)) + ' 삼자물류정산관리</span>' + lgMonthBar(ym)
+    + '<label class="btn" style="cursor:pointer;white-space:nowrap;font-size:12px">📥 관리표 가져오기<input type="file" accept=".xlsx,.xls" style="display:none" onchange="lgImport(this)"></label>'
+    + '<button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgExport()">📤 내보내기</button><button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgAddExtra()">＋ 기타 거래처</button></div>'
+    + '<div class="lg-cards">'
+    + card('정산 업체', S.n + '곳', '금액 있는 곳') + card('청구 합계 (VAT 포함)', '₩' + won0(S.amt), '공급가 ₩' + won0(S.amt / 1.1))
+    + card('송금·토스 (보낼 돈)', '₩' + won0(S.send), '관리표 송금토스') + card('입금 완료', '₩' + won0(S.paid), S.pd + ' / ' + S.n + '곳', 'var(--g)') + card('미수 합계', '₩' + won0(S.unpaid), '전미수 포함', S.unpaid ? '#f87171' : 'var(--g)')
+    + card('진행', '전달 ' + S.st[1] + ' · 계산서 ' + S.st[2], '체크 ' + S.st[3] + ' / ' + S.n) + '</div>'
+    + '<div style="display:flex;gap:.45rem;align-items:center;margin:0 0 .4rem;flex-wrap:wrap"><button class="btn" style="font-size:12px" onclick="lgBulk(1)">✉️ 일괄 전달완료</button><button class="btn" style="font-size:12px" onclick="lgBulk(2)">🧾 일괄 계산서발행완료</button>'
+    + '<span class="sp" style="flex:1"></span><span class="sm dim">내려받기 모양</span> ' + dsel + ' <label class="sm"><input type="checkbox" ' + (LG_OPT.hideZero ? 'checked' : '') + ' onchange="lgOpt(\'hideZero\', this.checked)"> 0원 줄 숨기기</label></div>'
+    + '<div id="lgScroll"><table class="ftbl lgt"><thead><tr><th class="stk">업체명</th><th>관리업체</th><th class="n">전미수</th><th class="n">정산금액</th><th class="n">송금·토스</th><th class="n">입금액</th>'
+    + '<th>진행</th><th class="n">미수</th><th>거래내역서</th><th>메모</th><th></th></tr></thead><tbody>';
+  var P = function(r, k){ return (r.kind === 'v' ? 'ledger/' + ym + '/' + r.key : 'ledgerExtra/' + ym + '/' + r.key) + (k ? '/' + k : ''); };
   rows.forEach(function(r){
-    var s = r.s, rec = s.rec, I = r.I || {}, mail = r.kind === 'v' ? (I.mail || '') : (rec.mail || '');
-    var ck = function(k){ return '<td style="text-align:center"><input type="checkbox" ' + (rec[k] ? 'checked' : '') + ' onchange="lgSet(\'' + P(r, k) + '\', this.checked)"></td>'; };
-    var num = function(k, v, ph){ return '<input type="number" class="famt" style="width:110px" value="' + (v != null && v !== '' ? v : '') + '" placeholder="' + (ph || '') + '" onchange="lgSet(\'' + P(r, k) + '\', this.value === \'\' ? null : +this.value)">'; };
-    var dl = r.file ? '<button class="btn p" style="padding:.15rem .6rem" onclick="lgDownload(\'' + esc(r.key) + '\')" title="' + esc(r.file.m.name) + '">📄 ' + (r.file.m.final ? '확정본' : '거래내역서') + '</button>' : r.kind === 'v' ? '<span class="sm dim">' + (r.skip ? '이번 달 없음' : '파일 없음') + '</span>' : '';
-    /* 정산금액: 확정본·거래내역서면 자동(굵게, 출처), 없으면 직접 입력 */
+    var s = r.s, rec = s.rec, I = r.I || {}, stg = lgStage(rec);
+    var num = function(k, v, ph, red){ return '<input type="number" class="famt" style="width:105px' + (red ? ';color:#f87171;font-weight:700' : '') + '" value="' + (v != null && v !== '' ? v : '') + '" placeholder="' + (ph || '') + '" onchange="lgSet(\'' + P(r, k) + '\', this.value === \'\' ? null : +this.value)">'; };
+    var dl = r.file ? '<button class="btn p" style="padding:.1rem .5rem;font-size:12px" onclick="lgDownload(\'' + esc(r.key) + '\')" title="' + esc(r.file.m.name) + '">📄 ' + (r.file.m.final ? '확정본' : '거래내역서') + '</button>' : r.kind === 'v' ? '<span class="sm dim">' + (r.skip ? '이번 달 없음' : '파일 없음') + '</span>' : '';
     var amtCell = r.kind === 'v' && s.src && s.src !== '직접' ? '<b>' + won0(s.amt) + '</b><div class="sm dim">' + s.src + (s.man != null && Math.abs(s.man - s.amt) > 1 ? ' · <span style="color:#fbbf24">관리표 ' + won0(s.man) + '</span>' : '') + '</div>' : num('amount', rec.amount, '정산금액');
-    h += '<tr' + (r.skip ? ' style="opacity:.45"' : '') + '><td><input type="text" class="famt" style="width:90px" value="' + esc(r.group) + '" onchange="lgSet(\'' + (r.kind === 'v' ? 'ledgerInfo/' + r.key + '/group' : P(r, 'group')) + '\', this.value.trim())"></td>'
-      + '<td style="min-width:210px"><b>' + esc(r.name) + '</b>' + (r.kind === 'v' ? ' <a href="javascript:void 0" class="sm" title="세금계산서용 업체 정보" onclick="lgInfo(\'' + esc(r.key) + '\')">⚙ 정보' + (I.biz ? '' : ' <span style="color:#fbbf24">(없음)</span>') + '</a>' : '') + (rec.xlName && rec.xlName !== r.name ? '<div class="sm dim">관리표: ' + esc(rec.xlName) + '</div>' : '') + '</td>'
-      + '<td><input type="text" class="famt" style="width:170px" value="' + esc(mail) + '" onchange="lgSet(\'' + (r.kind === 'v' ? 'ledgerInfo/' + r.key + '/mail' : P(r, 'mail')) + '\', this.value.trim())"></td>'
-      + '<td class="n">' + num('carry', rec.carry, won0(s.carry)) + '</td><td class="n">' + amtCell + '</td><td class="n">' + num('send', rec.send, '보낼 돈') + '</td><td class="n">' + num('paidAmt', rec.paidAmt, rec.paid ? won0(s.carry + (s.amt || 0)) : '') + '</td>'
-      + ck('sent') + ck('inv') + ck('chk') + ck('paid')
+    var sel = '<select class="tsel" style="font-size:12px;padding:.1rem .3rem' + (stg ? ';color:var(--g)' : '') + '" onchange="lgSetStage(\'' + P(r) + '\', this.value)">' + ['대기', '1 전달완료', '2 계산서발행완료', '3 체크완료'].map(function(t, k){ return '<option value="' + k + '"' + (k === stg ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select>';
+    var carryRed = s.carry > 0;
+    h += '<tr' + (r.skip ? ' style="opacity:.45"' : '') + '>'
+      + '<td class="stk" style="min-width:200px;max-width:240px"><b>' + esc(r.name) + '</b>' + (r.kind === 'v' ? ' <a href="javascript:void 0" class="sm" title="정산서 전달메일 · 세금계산서용 정보" onclick="lgInfo(\'' + esc(r.key) + '\')">⚙' + (I.biz && I.mail ? '' : '<span style="color:#fbbf24">!</span>') + '</a>' : '') + (rec.xlName && rec.xlName !== r.name ? '<div class="sm dim" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">관리표: ' + esc(rec.xlName) + '</div>' : '') + '</td>'
+      + '<td><input type="text" class="famt" style="width:80px" value="' + esc(r.group) + '" onchange="lgSet(\'' + (r.kind === 'v' ? 'ledgerInfo/' + r.key + '/group' : P(r, 'group')) + '\', this.value.trim())"></td>'
+      + '<td class="n">' + num('carry', rec.carry, s.carry ? won0(s.carry) : '', carryRed) + (carryRed && (rec.carry == null || rec.carry === '') ? '<div class="sm" style="color:#f87171">미수 ' + won0(s.carry) + '</div>' : '') + '</td>'
+      + '<td class="n">' + amtCell + '</td><td class="n">' + num('send', rec.send, '보낼 돈') + '</td><td class="n">' + num('paidAmt', rec.paidAmt, rec.paid && rec.paidAmt == null ? '관리표 입금' : '입금액') + '</td>'
+      + '<td>' + sel + '</td>'
       + '<td class="n"><b style="color:' + (s.unpaid > 0 ? '#f87171' : s.unpaid < 0 ? '#60a5fa' : 'var(--g)') + '">' + (s.unpaid ? won0(s.unpaid) + (s.unpaid < 0 ? ' (초과)' : '') : (s.amt || s.carry ? '완료' : '')) + '</b></td>'
-      + '<td>' + dl + '</td><td><input type="text" class="famt" style="width:160px" value="' + esc(rec.memo || '') + '" onchange="lgSet(\'' + P(r, 'memo') + '\', this.value.trim())"></td>'
-      + '<td>' + (r.kind === 'x' ? '<button class="btn r" style="padding:.1rem .45rem" onclick="lgDelExtra(\'' + r.key + '\')">×</button>' : '') + '</td></tr>';
+      + '<td>' + dl + '</td><td><input type="text" class="famt" style="width:150px" value="' + esc(rec.memo || '') + '" onchange="lgSet(\'' + P(r, 'memo') + '\', this.value.trim())"></td>'
+      + '<td>' + (r.kind === 'x' ? '<button class="btn r" style="padding:.05rem .4rem" onclick="lgDelExtra(\'' + r.key + '\')">×</button>' : '') + '</td></tr>';
   });
-  h += '</tbody></table></div></div>'
-    + '<div class="sec-note" style="margin-top:.6rem">· 정산금액: ✅ 완료 확정본 합계 → 없으면 그 달 파일함 거래내역서 합계 → 없으면 칸에 직접(관리표 가져오기로도 채워짐) · 전미수는 지난달 미수가 자동으로 넘어옴(칸에 직접 넣으면 그 값) · 「4.입금」만 체크하고 입금액이 비면 전액 입금<br>'
-    + '· 관리표 가져오기는 시트 「YY_MM월정산분」을 모두 또는 보는 달만 — 관리표 이름(법인명)과 정산서 업체 연결은 기억해서 지난달 시트에도 씀 · 내려받기: 원본 양식 = 파일 그대로, 디자인 = 맨 앞 「거래명세서」 + 데이터 시트 그대로</div>';
+  h += '</tbody></table></div>';
   el.innerHTML = h;
+  setTimeout(lgFit, 0);
 }
 function lgFinal(vk, name, ym){
   ym = ym || lgYM(); var d = doneOf(vk, ym);
@@ -131,9 +158,9 @@ function lgDownload(vk){
 }
 function lgInfo(vk){
   var I = LINFO[vk] || {}, ov = document.getElementById('lgOv'); if (ov) ov.remove();
-  var F = [['biz', '사업자번호'], ['corp', '공급받는자 상호'], ['ceo', '공급받는자 성명'], ['addr', '사업장 주소'], ['btype', '업태'], ['bitem', '종목'], ['mail1', '이메일1 (계산서)'], ['mail2', '이메일2']];
+  var F = [['mail', '정산서 전달메일'], ['biz', '사업자번호'], ['corp', '공급받는자 상호'], ['ceo', '공급받는자 성명'], ['addr', '사업장 주소'], ['btype', '업태'], ['bitem', '종목'], ['mail1', '이메일1 (계산서)'], ['mail2', '이메일2']];
   ov = document.createElement('div'); ov.id = 'lgOv'; ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:60px 16px;overflow:auto';
-  ov.innerHTML = '<div class="card" style="max-width:560px;width:100%;margin:0"><div class="card-h"><span class="card-t">⚙ ' + esc(vk) + ' — 세금계산서용 정보</span><button class="btn" style="margin-left:auto" onclick="document.getElementById(\'lgOv\').remove()">닫기</button></div>'
+  ov.innerHTML = '<div class="card" style="max-width:560px;width:100%;margin:0"><div class="card-h"><span class="card-t">⚙ ' + esc(vk) + ' — 전달메일 · 세금계산서용 정보</span><button class="btn" style="margin-left:auto" onclick="document.getElementById(\'lgOv\').remove()">닫기</button></div>'
     + F.map(function(f){ return '<div style="display:flex;gap:.6rem;align-items:center;margin:.35rem 0"><span class="sm" style="width:120px">' + f[1] + '</span><input type="text" class="famt" style="flex:1" value="' + esc(I[f[0]] || '') + '" onchange="lgSet(\'ledgerInfo/' + esc(vk) + '/' + f[0] + '\', this.value.trim())"></div>'; }).join('')
     + '<div class="sm dim" style="margin-top:.5rem">고치면 바로 저장 · 다음 달에도 그대로 · 디자인 거래명세서의 공급받는자 상호로도 씀</div></div>';
   ov.addEventListener('click', function(e){ if (e.target === ov) ov.remove(); }); document.body.appendChild(ov);
