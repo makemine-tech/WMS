@@ -42,6 +42,8 @@
 <script src="/settle_final.js"></script>
 <script src="/settle_bronte.js"></script>
 <script src="/settle_return.js"></script>
+<script src="/settle_design.js"></script>
+<script src="/settle_ledger.js"></script>
 <script src="/settle_close.js"></script>
 <style>
 :root{
@@ -287,6 +289,7 @@ td.src{max-width:300px;font-size:12px;line-height:1.5}
     <div class="tabs">
       <button class="tab on" data-tab="box">📂 파일함</button>
       <button class="tab" data-tab="vendors">🏢 업체 정산</button>
+      <button class="tab" data-tab="ledger">🗂️ 삼자물류정산관리</button>
     </div>
 
     <!-- ═══ 파일함 ═══ -->
@@ -320,6 +323,9 @@ td.src{max-width:300px;font-size:12px;line-height:1.5}
 
     <!-- ═══ 업체 정산 (다음 단계) ═══ -->
     <div id="tabVendors" class="hide"></div>
+
+    <!-- ═══ 삼자물류정산관리 (settle_ledger.js) ═══ -->
+    <div id="tabLedger" class="hide"></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -664,13 +670,14 @@ function start(){
   $('ym').addEventListener('change', function(){ if ($('ym').value) setYM($('ym').value); });
   document.querySelectorAll('.tab').forEach(function(b){ b.addEventListener('click', function(){
     document.querySelectorAll('.tab').forEach(function(x){ x.classList.toggle('on', x === b); });
-    $('tabBox').classList.toggle('hide', b.dataset.tab !== 'box'); $('tabVendors').classList.toggle('hide', b.dataset.tab !== 'vendors');
+    $('tabBox').classList.toggle('hide', b.dataset.tab !== 'box'); $('tabVendors').classList.toggle('hide', b.dataset.tab !== 'vendors'); $('tabLedger').classList.toggle('hide', b.dataset.tab !== 'ledger');
     if (b.dataset.tab === 'vendors') renderVendors();
+    if (b.dataset.tab === 'ledger') renderLedger();
   }); });
   /* 업체 탭: 모든 달 파일함(표본 찾기)·업체 룰 — 룰 입력 중이면 다시 그리지 않는다(커서 유지) */
   var vtabRedraw = function(){ var a = document.activeElement; if ($('tabVendors').classList.contains('hide')) return; if (a && a.classList && a.classList.contains('rule')){ refreshScore(); return; } renderVendors(); };
   db.ref('settlement/box').on('value', function(s){ ALLBOX = s.val() || {}; vtabRedraw(); renderCloseBar(); });
-  closeListen(); rtListen();
+  closeListen(); rtListen(); ledgerListen();
   db.ref('settlement/vendors').on('value', function(s){ VENDORS = s.val() || {}; vtabRedraw(); renderCloseBar(); });
   var drop = $('drop'), fin = $('fileIn');
   drop.addEventListener('click', function(){ fin.click(); });

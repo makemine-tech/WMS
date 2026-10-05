@@ -310,18 +310,8 @@ function traceCargo(wb, log, skipFreight){
   T.forEach(function(t){ var r = ws.addRow(t); r.getCell(4).numFmt = '#,##0'; for (var c = 1; c <= 5; c++) r.getCell(c).fill = YEL; });
   log.push(['특이사항', '화물 청구서·입출고 기록에 이 업체 흔적 ' + T.length + '건 — 맨 앞 「점검_화물흔적」 시트 (예: ' + T.slice(0, 3).map(function(t){ return t[1] + ' ' + t[2].slice(0, 30) + (t[3] ? ' ' + won(t[3]) + '원' : ''); }).join(' / ') + ')']);
 }
-function makeDraft(msg){
-  msg = msg || function(){};
-  var A = VW.A, R = cfgOf(VW.vkey), run = runOf(), eng = engineOf(VW.vkey), log = [], wb;
-  var yy = YM.slice(5, 7), dd = lastDay(YM);
-  msg('표본 여는 중…');
-  return decryptBox(VW.meta).then(function(bytes){
-    if (/\.xls$/i.test(VW.meta.name)){   /* 옛 xls 는 xlsx 로 바꿔서 연다 (서식 일부 빠질 수 있음) */
-      var x = XLSX.read(bytes, { type: 'array', cellStyles: true }); bytes = XLSX.write(x, { type: 'array', bookType: 'xlsx' });
-      log.push(['확인 필요', '표본이 옛 xls 형식이라 테두리·글꼴·도장 같은 서식이 빠집니다 — 엑셀에서 「다른 이름으로 저장 → xlsx」로 바꿔 파일함(표본 달)에 다시 올리면 다음부터 그대로 나옵니다 (확정본도 xlsx 로 저장해 올려 주세요)']);
-    }
-    wb = new ExcelJS.Workbook(); return wb.xlsx.load(bytes);
-  }).then(function(){
+/* ExcelJS 로 다시 쓸 때 엑셀이 파일을 못 여는 모양 고치기 — 초안·디자인 내려받기 공용 */
+function fixForWrite(wb){
     /* 기본 행 높이가 빠진 시트(xls 에서 바꾼 것 등)는 그대로 저장하면 엑셀이 파일을 못 엶 → 채움 (2026-10-03 엠에스컴퍼니 초안이 안 열리던 것) */
     wb.eachSheet(function(ws){ if (!ws.properties || !ws.properties.defaultRowHeight) ws.properties = Object.assign({ defaultRowHeight: 15, dyDescent: 0.55, outlineLevelRow: 0, outlineLevelCol: 0 }, ws.properties || {}); });
     /* 조건부 서식 중 ExcelJS 가 못 쓰는 종류(중복 값 강조 등)는 빈 칸으로 저장돼 엑셀이 파일을 못 엶 (2026-10-05 스타 온라인세일즈 「기타」 시트)
@@ -334,6 +324,21 @@ function makeDraft(msg){
           if (r.type === 'duplicateValues' || r.type === 'uniqueValues') return { type: 'expression', priority: r.priority, style: r.style, formulae: ['COUNTIF(' + abs + ',' + tl + ')' + (r.type === 'duplicateValues' ? '>1' : '=1')] };
           return CF_OK[r.type] ? r : null; }).filter(Boolean);
         return cf; }).filter(function(cf){ return cf.rules.length; }); });
+}
+window.fixForWrite = fixForWrite;
+function makeDraft(msg){
+  msg = msg || function(){};
+  var A = VW.A, R = cfgOf(VW.vkey), run = runOf(), eng = engineOf(VW.vkey), log = [], wb;
+  var yy = YM.slice(5, 7), dd = lastDay(YM);
+  msg('표본 여는 중…');
+  return decryptBox(VW.meta).then(function(bytes){
+    if (/\.xls$/i.test(VW.meta.name)){   /* 옛 xls 는 xlsx 로 바꿔서 연다 (서식 일부 빠질 수 있음) */
+      var x = XLSX.read(bytes, { type: 'array', cellStyles: true }); bytes = XLSX.write(x, { type: 'array', bookType: 'xlsx' });
+      log.push(['확인 필요', '표본이 옛 xls 형식이라 테두리·글꼴·도장 같은 서식이 빠집니다 — 엑셀에서 「다른 이름으로 저장 → xlsx」로 바꿔 파일함(표본 달)에 다시 올리면 다음부터 그대로 나옵니다 (확정본도 xlsx 로 저장해 올려 주세요)']);
+    }
+    wb = new ExcelJS.Workbook(); return wb.xlsx.load(bytes);
+  }).then(function(){
+    fixForWrite(wb);   /* 엑셀이 못 여는 모양 고치기 (아래 함수) */
     var st = wb.getWorksheet(A.sheet) || wb.worksheets[0];
     /* 1) 날짜 */
     st.eachRow(function(row){ row.eachCell(function(c){
