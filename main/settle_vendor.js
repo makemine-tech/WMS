@@ -156,7 +156,7 @@ function startVendor(name){
 function closeWork(){ VW = null; renderVendors(); }
 
 /* 표본 시트 종류 → 이번 달 파일함에서 찾을 종류 */
-var KIND2BOX = { ebut_shiplist:['ebut_shiplist'], ebut_orders:['ebut_orders'], bnc_return:['bnc_courier'], bnc_courier:['bnc_courier'],
+var KIND2BOX = { ebut_shiplist:['ebut_shiplist'], ebut_instock:['ebut_instock'], ebut_orders:['ebut_orders'], bnc_return:['bnc_courier'], bnc_courier:['bnc_courier'],
   freight:['freight'], coupang_po:['coupang_po'], p9_row:['p9_row'], ebut_stock:['ebut_stock'], jeju_stock:['jeju_stock'] };
 function candidates(kind){
   if (!kind) return '';

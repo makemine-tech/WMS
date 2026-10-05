@@ -324,6 +324,16 @@ function makeDraft(msg){
   }).then(function(){
     /* 기본 행 높이가 빠진 시트(xls 에서 바꾼 것 등)는 그대로 저장하면 엑셀이 파일을 못 엶 → 채움 (2026-10-03 엠에스컴퍼니 초안이 안 열리던 것) */
     wb.eachSheet(function(ws){ if (!ws.properties || !ws.properties.defaultRowHeight) ws.properties = Object.assign({ defaultRowHeight: 15, dyDescent: 0.55, outlineLevelRow: 0, outlineLevelCol: 0 }, ws.properties || {}); });
+    /* 조건부 서식 중 ExcelJS 가 못 쓰는 종류(중복 값 강조 등)는 빈 칸으로 저장돼 엑셀이 파일을 못 엶 (2026-10-05 스타 온라인세일즈 「기타」 시트)
+       → 중복/고유 값은 같은 뜻의 수식 규칙으로 바꾸고, 나머지 못 쓰는 종류는 뺌 */
+    var CF_OK = { expression: 1, cellIs: 1, top10: 1, aboveAverage: 1, colorScale: 1, iconSet: 1, containsText: 1, timePeriod: 1, dataBar: 1 };
+    wb.eachSheet(function(ws){ if (!ws.conditionalFormattings || !ws.conditionalFormattings.length) return;
+      ws.conditionalFormattings = ws.conditionalFormattings.map(function(cf){
+        var ref = String(cf.ref || '').split(/\s+/)[0], tl = ref.split(':')[0].replace(/\$/g, ''), abs = ref.replace(/([A-Z]+)(\d+)/g, '$$$1$$$2');
+        cf.rules = (cf.rules || []).map(function(r){
+          if (r.type === 'duplicateValues' || r.type === 'uniqueValues') return { type: 'expression', priority: r.priority, style: r.style, formulae: ['COUNTIF(' + abs + ',' + tl + ')' + (r.type === 'duplicateValues' ? '>1' : '=1')] };
+          return CF_OK[r.type] ? r : null; }).filter(Boolean);
+        return cf; }).filter(function(cf){ return cf.rules.length; }); });
     var st = wb.getWorksheet(A.sheet) || wb.worksheets[0];
     /* 1) 날짜 */
     st.eachRow(function(row){ row.eachCell(function(c){
