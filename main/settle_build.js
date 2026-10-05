@@ -408,6 +408,8 @@ function makeDraft(msg){
       var name = (txt0(row.getCell(2).value) + ' ' + txt0(row.getCell(6).value)).trim();
       c.value = c.result != null ? c.result : (c.value && c.value.result != null ? c.value.result : 0); c.fill = YEL;
       log.push(['확인 필요', (name || c.address) + ' — 지난달 피벗 수식이 남아 있어 지난달 값 ' + won(+c.value || 0) + ' 으로 바꿈, 이번 달 값 직접 확인']); }); });
+    /* 반품 시트 원송장·원송장 고객사 ← 🔁 반품비 역추적 기록 (settle_return.js) */
+    if (window.retTraceFill) try { window.retTraceFill(wb, log, VW.name); } catch (e) { console.error(e); }
     /* 화물 흔적 — 업체 초안마다 (엔진 traceSkip 이면 건너뜀, 표본에 화물 청구서 시트가 있으면 청구서는 그 시트로 이미 들어가므로 입출고만) */
     if (!(eng && eng.traceSkip)) try { traceCargo(wb, log, A.sheets.some(function(s){ return s.kind && s.kind.key === 'freight'; })); } catch (e) { console.error(e); log.push(['확인 필요', '화물 흔적 찾기 오류: ' + ((e && e.message) || e)]); }
     /* 그대로 둔 시트 */

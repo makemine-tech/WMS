@@ -12,6 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
 <script src="/wms_access.js" data-page="settlement" data-floor="3"></script>
 <!-- 2차 인증: 급여관리와 같은 2차 비밀번호 (파일 암호화 키도 여기서) -->
 <script src="/wms_2fa.js"></script>
@@ -38,6 +39,7 @@
 <script src="/settle_build.js"></script>
 <script src="/settle_final.js"></script>
 <script src="/settle_bronte.js"></script>
+<script src="/settle_return.js"></script>
 <script src="/settle_close.js"></script>
 <style>
 :root{
@@ -530,6 +532,7 @@ function fileCell(id, m){
 }
 function actions(id, m){
   return (m.type === 'bronte_pdf' ? '<button class="btn p" onclick="bronteCheck(\'' + id + '\')">🔍 이벗과 대조</button>' : '')
+    + (m.type === 'bnc_courier' ? '<button class="btn p" onclick="retTrace(\'' + id + '\')" title="반품 등기번호 → 우체국 반품원등기번호(원송장) → 이벗 주문목록·박스앤캔 발송에서 원송장 주인">🔁 반품비 역추적</button>' : '')
     + '<button class="btn" onclick="downFile(\'' + id + '\')">내려받기</button>'
     + typeSelect(id, m.type)
     + '<button class="btn r" onclick="delFile(\'' + id + '\')">삭제</button>';
@@ -665,7 +668,7 @@ function start(){
   /* 업체 탭: 모든 달 파일함(표본 찾기)·업체 룰 — 룰 입력 중이면 다시 그리지 않는다(커서 유지) */
   var vtabRedraw = function(){ var a = document.activeElement; if ($('tabVendors').classList.contains('hide')) return; if (a && a.classList && a.classList.contains('rule')){ refreshScore(); return; } renderVendors(); };
   db.ref('settlement/box').on('value', function(s){ ALLBOX = s.val() || {}; vtabRedraw(); renderCloseBar(); });
-  closeListen();
+  closeListen(); rtListen();
   db.ref('settlement/vendors').on('value', function(s){ VENDORS = s.val() || {}; vtabRedraw(); renderCloseBar(); });
   var drop = $('drop'), fin = $('fileIn');
   drop.addEventListener('click', function(){ fin.click(); });

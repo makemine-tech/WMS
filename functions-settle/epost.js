@@ -1,0 +1,59 @@
+/* ===========================================================
+   정산관리 — 반품비 역추적 (대표님 2026-10-05)
+   박스앤캔 택배비 「반품」 시트의 반품 등기번호 → 우체국 배송조회(공개 페이지) 맨 아래
+   「반품원등기번호:6077486468911 (2026-07-27)」 = 원송장 → 정산관리 화면이 이벗 주문목록에서 고객사를 찾음.
+
+   브라우저는 우체국 페이지를 직접 못 읽어서(다른 사이트) 이 함수가 대신 조회한다.
+   호출: firebase.app().functions('asia-southeast1').httpsCallable('epostReturnOrigin')
+     입력  { nos: ['7077480532049', …] }  (한 번에 최대 40개)
+     출력  { ok, rows: [{ no, orig, origDate, sender, recvDate, result, err }] }
+   슈퍼관리자만. 우체국에 부담 안 주게 한 건씩 차례로(동시 3개).
+=========================================================== */
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { logger } = require('firebase-functions/v2');
+const admin = require('firebase-admin');
+if (!admin.apps.length) admin.initializeApp();
+
+const MAX = 40;
+const URL = 'https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm?displayHeader=N&sid1=';
+
+function text(html) {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(td|th|tr|p|div|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ').replace(/\n\s*/g, '\n');
+}
+
+async function lookup(no) {
+  const out = { no };
+  try {
+    const r = await fetch(URL + encodeURIComponent(no), { headers: { 'User-Agent': 'Mozilla/5.0 (makewon WMS settlement)', 'Accept-Language': 'ko' } });
+    if (!r.ok) { out.err = 'http ' + r.status; return out; }
+    const t = text(await r.text());
+    const m = t.match(/반품\s*원\s*등기번호\s*[:：]?\s*(\d{10,15})(?:\s*\(?\s*(\d{4}-\d{2}-\d{2})\s*\)?)?/);
+    if (m) { out.orig = m[1]; if (m[2]) out.origDate = m[2]; }
+    /* 기본정보 줄: 등기번호 보내는분 접수일 받는분 수령인 배달일 … 배달결과 */
+    const b = t.match(new RegExp(no + '\\s*\\n?\\s*([^\\n]*?)\\s*\\n?\\s*(\\d{4}\\.\\d{2}\\.\\d{2})'));
+    if (b) { out.sender = b[1].trim().slice(0, 30); }
+    const done = t.match(/(\d{4}\.\d{2}\.\d{2})\s+\d{2}:\d{2}\s+\S+\s+배달완료/);
+    if (done) out.recvDate = done[1].replace(/\./g, '-');
+    if (/배달완료/.test(t)) out.result = '배달완료'; else if (/조회.*없|존재하지/.test(t)) out.result = '조회 없음';
+  } catch (e) { out.err = String((e && e.message) || e).slice(0, 120); }
+  return out;
+}
+
+exports.epostReturnOrigin = onCall({ region: 'asia-southeast1', timeoutSeconds: 120, memory: '256MiB' }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다');
+  const sa = await admin.database().ref('superadmins/' + uid).once('value');
+  if (!sa.exists()) throw new HttpsError('permission-denied', '슈퍼관리자만 쓸 수 있습니다');
+  const nos = [...new Set(((req.data && req.data.nos) || []).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 10 && x.length <= 15))].slice(0, MAX);
+  const rows = [];
+  for (let i = 0; i < nos.length; i += 3) {
+    const part = await Promise.all(nos.slice(i, i + 3).map(lookup));
+    rows.push(...part);
+  }
+  logger.info('epostReturnOrigin', { n: nos.length, found: rows.filter((r) => r.orig).length });
+  return { ok: true, rows };
+});
