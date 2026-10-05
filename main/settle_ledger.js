@@ -34,7 +34,8 @@ function lgStmt(name, ym){
 }
 /* 정산금액 = 확정본 합계 → 그 달 거래내역서 합계(표본 분석값) → 직접 */
 function lgAuto(vk, name, ym){
-  var d = doneOf(vk, ym); if (d && d.total != null) return { v: +d.total, src: '확정본' };
+  var d = doneOf(vk, ym); if (d && +d.total) return { v: +d.total, src: '확정본' };
+  if (d && d.id) return { v: null, src: '', reread: true };   /* 확정했는데 합계가 0·없음 → 「합계 다시 읽기」 */
   var st = (VENDORS[vk] || {}).stat, S = lgStmt(name, ym);
   if (st && st.total != null && S && st.sid && String(st.sid).indexOf(S.id) >= 0) return { v: +st.total, src: '거래내역서' };
   return null;
@@ -42,11 +43,12 @@ function lgAuto(vk, name, ym){
 function lgState(kind, key, ym, depth, name){
   var rec = kind === 'v' ? ((LEDGER[ym] || {})[key] || {}) : ((LEXTRA[ym] || {})[key] || {});
   var A = kind === 'v' ? lgAuto(key, name || key, ym) : null, man = rec.amount != null && rec.amount !== '' ? +rec.amount : null;
+  var reread = !!(A && A.reread); if (reread) A = null;
   var amt = A ? A.v : man, src = A ? A.src : (man != null ? '직접' : '');
   var carry = rec.carry != null && rec.carry !== '' ? +rec.carry : (depth > 24 || kind !== 'v' ? 0 : lgState('v', key, lgPrev(ym), (depth || 0) + 1, name).unpaid);
   var due = (carry || 0) + (amt || 0);
   var paid = rec.paidAmt != null && rec.paidAmt !== '' ? +rec.paidAmt : (rec.paid ? due : 0);
-  return { rec: rec, amt: amt, src: src, man: man, carry: carry || 0, paid: paid, unpaid: Math.round(due - paid) };
+  return { rec: rec, amt: amt, src: src, man: man, reread: reread, carry: carry || 0, paid: paid, unpaid: Math.round(due - paid) };
 }
 function lgSet(path, v){ return db.ref('settlement/' + path).set(v === '' || v == null || v === false ? null : v).catch(function(e){ toast('저장 실패: ' + ((e && e.code) || e)); }); }
 function lgOpt(k, v){ LG_OPT[k] = v; try { localStorage.setItem('ledgerOpt', JSON.stringify(LG_OPT)); } catch (e) {} }
@@ -119,7 +121,8 @@ function renderLedger(){
     var s = r.s, rec = s.rec, I = r.I || {}, stg = lgStage(rec);
     var num = function(k, v, ph, red){ return '<input type="number" class="famt" style="width:105px' + (red ? ';color:#f87171;font-weight:700' : '') + '" value="' + (v != null && v !== '' ? v : '') + '" placeholder="' + (ph || '') + '" onchange="lgSet(\'' + P(r, k) + '\', this.value === \'\' ? null : +this.value)">'; };
     var dl = r.file ? '<button class="btn p" style="padding:.1rem .5rem;font-size:12px" onclick="lgDownload(\'' + esc(r.key) + '\')" title="' + esc(r.file.m.name) + '">📄 ' + (r.file.m.final ? '확정본' : '거래내역서') + '</button>' : r.kind === 'v' ? '<span class="sm dim">' + (r.skip ? '이번 달 없음' : '파일 없음') + '</span>' : '';
-    var amtCell = r.kind === 'v' && s.src && s.src !== '직접' ? '<b>' + won0(s.amt) + '</b><div class="sm dim">' + s.src + (s.man != null && Math.abs(s.man - s.amt) > 1 ? ' · <span style="color:#fbbf24">관리표 ' + won0(s.man) + '</span>' : '') + '</div>' : num('amount', rec.amount, '정산금액');
+    var rr = s.reread ? '<div><button class="btn" style="padding:.05rem .45rem;font-size:11px;color:#fbbf24" onclick="lgReread(\'' + esc(r.key) + '\')" title="완료 확정 때 합계를 못 읽어 0 으로 저장됨 — 확정본 파일에서 다시 읽기">↻ 확정본 합계 다시 읽기</button></div>' : '';
+    var amtCell = rr + (r.kind === 'v' && s.src && s.src !== '직접' ? '<b>' + won0(s.amt) + '</b><div class="sm dim">' + s.src + (s.man != null && Math.abs(s.man - s.amt) > 1 ? ' · <span style="color:#fbbf24">관리표 ' + won0(s.man) + '</span>' : '') + '</div>' : num('amount', rec.amount, '정산금액'));
     var sel = '<select class="tsel" style="font-size:12px;padding:.1rem .3rem' + (stg ? ';color:var(--g)' : '') + '" onchange="lgSetStage(\'' + P(r) + '\', this.value)">' + ['대기', '1 전달완료', '2 계산서발행완료', '3 체크완료'].map(function(t, k){ return '<option value="' + k + '"' + (k === stg ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select>';
     var carryRed = s.carry > 0;
     h += '<tr' + (r.skip ? ' style="opacity:.45"' : '') + '>'
@@ -140,6 +143,16 @@ function lgFinal(vk, name, ym){
   ym = ym || lgYM(); var d = doneOf(vk, ym);
   if (d && d.id){ var m = ((ALLBOX || {})[ym] || {})[d.id]; if (m) return { m: m, d: d }; }
   return lgStmt(name || vk, ym);
+}
+/* 확정본 합계 다시 읽기 — 완료 확정 때 합계를 0 으로 읽은 기록(2026-10-05 스타 온라인세일즈: 오른쪽 옆 표 「합계」를 읽던 것)을 확정본 파일에서 다시 */
+function lgReread(vk){
+  var ym = lgYM(), d = doneOf(vk, ym), m = d && d.id ? ((ALLBOX || {})[ym] || {})[d.id] : null; if (!m){ toast('확정본 파일을 못 찾았습니다'); return; }
+  toast('확정본 여는 중…');
+  decryptBox(m).then(function(b){ var A = SETTLE_STMT.analyze(XLSX.read(b, { type: 'array', cellFormula: true })), t = A.totals.total != null ? A.totals.total : (A.totals.sub != null ? A.totals.sub * 1.1 : null);
+    if (!t){ alert('확정본에서도 합계를 못 읽었습니다 — 정산금액 칸에 직접 넣어 주세요'); return; }
+    t = Math.round(t); if (!confirm(vk + ' ' + ymLabel(ym) + ' 확정본 합계 ' + t.toLocaleString() + '원 — 이 값으로 고칠까요?')) return;
+    return db.ref('settlement/vendors/' + vk + '/done/' + ym + '/total').set(t).then(function(){ if (VENDORS[vk] && VENDORS[vk].done && VENDORS[vk].done[ym]) VENDORS[vk].done[ym].total = t; renderLedger(); toast('✔ 합계 ' + t.toLocaleString() + '원'); });
+  }).catch(function(e){ alert('다시 읽기 실패: ' + ((e && (e.code || e.message)) || e)); });
 }
 function lgDownload(vk){
   var ym = lgYM(), V = monthVendors(ym).filter(function(v){ return v.vk === vk; })[0] || { name: vk }, F = lgFinal(vk, V.name, ym); if (!F){ toast('거래내역서 파일을 못 찾았습니다'); return; }

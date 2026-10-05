@@ -92,13 +92,16 @@
     var rng = U().decode_range(ws['!ref']);
     if (H){
       var grp = '', ended = false;
+      /* 맺음 줄(소계·합계) 글자는 명세표 칸(금액·세액·비고 열까지)에서만 — 오른쪽 옆 표의 「합계」를 명세표 합계로 읽지 않게 (2026-10-05 스타 온라인세일즈 합계 0) */
+      var lastC = Math.max(H.amt != null ? H.amt : 0, H.tax != null ? H.tax : 0, H.note != null ? H.note : 0) + 3;
       for (var R = H.R + 1; R <= rng.e.r; R++){
         /* 줄 전체 글자 — 소계·합계·포함가 줄이면 끝 */
         var line = [];
         for (var C = 0; C <= Math.min(rng.e.c, 30); C++){ var cc = ws[U().encode_cell({ r: R, c: C })]; if (cc && cc.v !== '' && cc.v != null) line.push({ C: C, c: cc }); }
-        var lineTxt = line.map(function(x){ return typeof x.c.v === 'string' ? nospace(x.c.v) : ''; }).join('|');
+        var own = line.filter(function(x){ return x.C <= lastC; });
+        var lineTxt = own.map(function(x){ return typeof x.c.v === 'string' ? nospace(x.c.v) : ''; }).join('|');
         /* 맺음 줄 — 소계·공급가액 = 공급가, 합계·포함가 = 부가세 포함. 하나라도 나오면 항목은 끝 */
-        var lastNum = line.filter(function(x){ return typeof x.c.v === 'number'; }).pop();
+        var lastNum = own.filter(function(x){ return typeof x.c.v === 'number'; }).pop();
         if (/(^|\|)(소계|공급가액)(\||$)/.test(lineTxt)){ ended = true; var sc = cellOf(ws, R, H.amt); out.totals.sub = num(sc) != null ? num(sc) : (lastNum ? lastNum.c.v : null); continue; }
         if (/(^|\|)(합계|포함가)(\||$)/.test(lineTxt)){ ended = true; if (lastNum && out.totals.total == null) out.totals.total = lastNum.c.v; continue; }
         if (/(^|\|)(세액|전잔금|입금|잔금)(\||$)/.test(lineTxt)){ ended = true; continue; }

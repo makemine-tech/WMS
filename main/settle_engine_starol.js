@@ -175,7 +175,13 @@
       var supply = 0; st.eachRow(function(row, r){ if (r < 8) return; var b = ns(row.getCell(2).value); if (!b || /소계|합계/.test(b)) return; var g = row.getCell(7).value, h = row.getCell(8).value;
         var gv = g && typeof g === 'object' ? +g.result || 0 : +g || 0, hv = h && typeof h === 'object' ? +h.result || 0 : +h || 0; supply += gv * hv; });
       log.push(['자동 적용', '거래명세표: 오른쪽 피벗 → 수식 표(발송레이블·반품레이블·피킹 총수량·입고작업, COUNTIFS/SUMIFS 로 시트를 바로 셈) · 명세표 수량 칸은 그 표를 가리킴 — 시트를 고치면 명세표가 따라 바뀜']);
-      log.push(['자동 적용', '거래명세표 공급가 약 ' + won(supply) + ' · 포함가 약 ' + won(Math.round(supply * 1.1)) + ' (엑셀을 열면 정확히 다시 계산)']);
+      /* 소계·합계·총계 칸에 이번 달 값을 넣어 둠 — 엑셀로 안 열고 그대로 완료 확정에 올려도 합계가 맞게 읽힘 (2026-10-05: 지난달 값·0 으로 읽히던 것) */
+      var setRes = function(addr, v){ var c = st.getCell(addr), f = c.value && c.value.formula; if (f) c.value = { formula: f, result: v }; };
+      var rSub = 0, rTot = 0; st.eachRow(function(row, r){ if (!rSub && ns(row.getCell(8).value) === '소계') rSub = r; if (!rTot && ns(row.getCell(7).value) === '합계') rTot = r; });
+      if (rSub){ setRes('K' + rSub, supply); setRes('O' + rSub, supply * 0.1); }
+      if (rTot) setRes('H' + rTot, supply * 1.1);
+      ['M6', 'N6', 'O6', 'P6'].forEach(function(a){ setRes(a, supply * 1.1); });
+      log.push(['자동 적용', '거래명세표 공급가 ' + won(supply) + ' · 포함가 ' + won(Math.round(supply * 1.1))]);
     });
   }
 
