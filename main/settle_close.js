@@ -63,15 +63,19 @@ var SETTLE_CLOSE = (function(){
     { type: 'p9_row',        label: '포인트나인크루 출고 ROW', key: '송장번호', need: ['송장번호', '관리번호'], grp: null },
     { type: 'bnc_courier',   label: '박스앤캔 택배비 · 발송', key: '등기번호', need: ['등기번호', '발송인명'], grp: ['발송인명'], sheet: /발송/ },
     { type: 'bnc_courier',   label: '박스앤캔 택배비 · 반품', key: '등기번호', need: ['등기번호', '고객명'], grp: ['고객명'], sheet: /반품/ },
-    { type: 'coupang_po',    label: '쿠팡 발주서', key: '발주번호', need: ['발주번호', '물류센터'], grp: null }
+    { type: 'coupang_po',    label: '쿠팡 발주서', key: '발주번호', need: ['발주번호', '물류센터'], grp: null },
+    /* 스타 작업 엑셀 (2026-10-05): 쿠팡출고 = 발주번호, 입고(약식)·이관(재고출고양식) = 바코드 — 확정본 작업 시트에 그대로 들어감 */
+    { type: 'star_row',      label: '스타 작업 엑셀 · 쿠팡출고', key: '발주번호', need: ['발주번호', '확정수량'], grp: null, owner: '스타인터내셔널(쿠팡대행)' },
+    { type: 'star_row',      label: '스타 작업 엑셀 · 입고·이관', key: '바코드', need: ['바코드', '수량'], grp: null, owner: '스타인터내셔널(쿠팡대행)' }
   ];
+  SRC[2].owner = '포인트나인크루';
   /* in = { finals:[{name, vendor, wb}], sources:[{type, name, wb}], freight:[{d, amt, etc, vendor, item}], cargo:[{date, kind, vendor, aj, etc}], ignore:{src:{gk:{why}}} }
      → { groups:[{src, label, gk, name, total, miss, sample[], ign}], total, used, ignored, missing } */
   function check(inp){
     var IX = indexFinals(inp.finals), G = {}, ign = inp.ignore || {};
-    var add = function(src, label, name, hit, sample){
+    var add = function(src, label, name, hit, sample, owner){
       var gk = (src + '|' + (name || '(이름 없음)')).replace(/[.#$\/\[\]]/g, '_');
-      var g = G[gk] || (G[gk] = { src: src, label: label, gk: gk, name: name || '(이름 없음)', total: 0, miss: 0, sample: [] });
+      var g = G[gk] || (G[gk] = { src: src, label: label, gk: gk, name: name || '(이름 없음)', total: 0, miss: 0, sample: [], owner: owner || null });
       g.total++; if (!hit){ g.miss++; if (g.sample.length < 30) g.sample.push(sample); } };
     var seen = {};
     (inp.sources || []).forEach(function(s){
@@ -81,14 +85,14 @@ var SETTLE_CLOSE = (function(){
           T.rows.forEach(function(r){ var k = ns(r[iK]); if (!k || /합계|소계/.test(k)) return;
             var kk = keyOf(r[iK]), uk = D.label + '|' + kk[kk.length - 1]; if (seen[uk]) return; seen[uk] = 1;   /* 같은 번호 여러 줄(주문 여러 개) = 한 건 */
             var hit = kk.some(function(t){ return IX.all.has(t); });
-            add(D.label, D.label, gi != null && gi >= 0 ? String(r[gi] || '').trim() : s.name, hit, k); });
+            add(D.label, D.label, gi != null && gi >= 0 ? String(r[gi] || '').trim() : s.name, hit, k, D.owner); });
         }); });
     });
     /* 화물·용차 청구서: 같은 줄에 날짜 + 금액(합계·부가세 포함) */
     (inp.freight || []).forEach(function(r){
       var d = keyOf(r.d)[1] || keyOf(r.d)[0], a = Math.round(+r.amt || 0), e = Math.round(+r.etc || 0), amts = [a, a + e, Math.round(a * 1.1), Math.round((a + e) * 1.1)].map(String);
       var hit = !a || IX.rows.some(function(x){ return x.set.has(d) && amts.some(function(m){ return x.set.has(m); }); });
-      add('화물·용차 청구서', '화물·용차 청구서', r.vendor, hit, r.d + ' ' + (r.from || '') + (r.to ? '→' + r.to : '') + ' ' + a.toLocaleString('ko-KR') + '원');
+      add('화물·용차 청구서', '화물·용차 청구서', r.vendor, hit, r.d + ' ' + (r.from || '') + (r.to ? '→' + r.to : '') + ' ' + a.toLocaleString('ko-KR') + '원', r.vendor);
     });
     /* 입출고 화물관리: 그 업체 확정본에 그 날짜 줄 */
     var KN = { parcel: '택배출고', in: '입고', out: '출고', ret: '반품양품화', etc: '기타' };
@@ -97,7 +101,7 @@ var SETTLE_CLOSE = (function(){
       vs.forEach(function(v){
         var mine = inp.finals.filter(function(f){ return window.vendorMatcher(f.vendor)(v) || window.vendorMatcher(v)(f.vendor); });
         var hit = mine.length && IX.rows.some(function(x){ return mine.indexOf(x.f) >= 0 && x.set.has(d); });
-        add('입출고 화물관리', '입출고 화물관리', v + ' · ' + (KN[c.kind] || c.kind || ''), !!hit, d + ' 파렛트 ' + ((+c.aj || 0) + (+c.etc || 0)) + (mine.length ? '' : ' (이 업체 확정본 없음)'));
+        add('입출고 화물관리', '입출고 화물관리', v + ' · ' + (KN[c.kind] || c.kind || ''), !!hit, d + ' 파렛트 ' + ((+c.aj || 0) + (+c.etc || 0)) + (c.memo ? ' ' + c.memo : '') + (mine.length ? '' : ' (이 업체 확정본 없음)'), v);
       });
     });
     var groups = Object.keys(G).map(function(k){ var g = G[k]; g.ign = ((ign[sKeyC(g.src)] || {})[sKeyC(g.name)]) || null; return g; });
@@ -135,8 +139,8 @@ function closeBarHtml(){
   }
   var V = monthVendors(YM), done = V.filter(function(v){ return v.done || v.skip; }).length;
   return '<div class="closebar"><span class="cb-ic">📅</span><div class="cb-t"><b>' + esc(lab) + ' 정산 마감</b>'
-    + '<small>업체 완료 확정 ' + done + ' / ' + V.length + ' · 다 끝나면 무결성 검증(원본 자료가 모두 어느 확정본에 들어갔는지) → 100% 면 마감확정</small></div>'
-    + '<button class="btn p" onclick="closeToggle()">' + (CLOSE.open ? '접기' : '마감 검증 ▸') + '</button></div>'
+    + '<small>업체 완료 확정 ' + done + ' / ' + V.length + ' · 🧪 사전검증은 언제든(빠진 것·빠질 가능성) → 다 끝나면 ② 마감검증(최종) 100% 면 마감확정</small></div>'
+    + '<button class="btn p" onclick="closeToggle()">' + (CLOSE.open ? '접기' : '🧪 사전검증 · 마감 검증 ▸') + '</button></div>'
     + (CLOSE.open ? closePanelHtml() : '');
 }
 function renderCloseBar(){ var el = $('closeBar'); if (el) el.innerHTML = closeBarHtml(); }
@@ -150,7 +154,7 @@ function closePanelHtml(){
         return '<span class="cp-v ' + (v.done ? 'ok' : v.skip ? 'sk' : 'no') + '">' + (v.done ? '✅' : v.skip ? '➖' : '⏳') + ' ' + esc(v.name)
           + (v.done ? '' : ' <a href="javascript:void 0" onclick="closeSkip(\'' + esc(v.vk) + '\',' + (v.skip ? 'false' : 'true') + ')">' + (v.skip ? '되돌림' : '이번 달 없음') + '</a>') + '</span>'; }).join('') + '</div></div>';
   var R = CLOSE.res && CLOSE.ym === YM ? CLOSE.res : null;
-  var rh = '<div class="cp-sec"><div class="cp-h">② 무결성 검증 <span class="dim">원본 자료가 모두 어느 업체 확정본에 들어갔는지</span></div>';
+  var rh = '<div class="cp-sec"><div class="cp-h">② 마감검증 (최종) <span class="dim">원본 자료가 모두 어느 업체 확정본에 들어갔는지 — 100% 여야 마감확정</span></div>';
   if (CLOSE.busy) rh += '<div class="sm">⏳ ' + esc(CLOSE.msg) + '</div>';
   else if (CLOSE.err) rh += '<div class="sm" style="color:#f87171">검증 실패: ' + esc(CLOSE.err) + '</div><button class="btn" onclick="closeRun()">다시 검증</button>';
   else if (!R) rh += '<button class="btn p" onclick="closeRun()">🔍 검증 시작</button> <span class="sm dim">확정본과 원본을 모두 열어 봅니다 (1~2분)</span>';
@@ -172,7 +176,7 @@ function closePanelHtml(){
   var fh = '<div class="cp-sec" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">'
     + '<button class="btn p" ' + (okV && okR ? '' : 'disabled') + ' onclick="closeConfirm()">🔒 ' + esc(ymLabel(YM)) + ' 정산 마감확정</button>'
     + '<span class="sm dim">' + (okV && okR ? '업체 확정 완료 · 무결성 100% — 마감할 수 있습니다' : !okV ? '확정 안 된 업체가 남아 있습니다' : !R ? '무결성 검증을 먼저 하세요' : '남은 것을 모두 처리하면 마감할 수 있습니다') + '</span></div>';
-  return '<div class="closepanel">' + vh + rh + (c ? '' : fh) + '</div>';
+  return '<div class="closepanel">' + vh + (c ? '' : preHtml()) + rh + (c ? '' : fh) + '</div>';
 }
 function closeGrpHtml(g){
   var gk = esc(g.gk);
@@ -192,24 +196,31 @@ function closeIgnore(gk, on){
 }
 function closeSkip(vk, on){ db.ref('settlement/closeSkip/' + YM + '/' + vk).set(on ? true : null); }
 
-function closeRun(){
-  if (CLOSE.busy) return;
-  var ym = YM; CLOSE.ym = ym; CLOSE.busy = true; CLOSE.err = ''; CLOSE.res = null;
-  var msg = function(t){ CLOSE.msg = t; renderCloseBar(); };
+/* 그 달 확정본·원본·화물 청구서·화물관리 읽기 (마감검증·사전검증 공용) → { finals, sources, noFile, fr, cg } */
+function closeLoad(ym, msg){
   var dec = function(m){ return getBytes(m.path).then(function(ab){ return WMS2FA.decrypt(m.path, m.iv, ab); }).then(function(b){ return XLSX.read(b, { type: 'array', dense: true }); }); };
   var box = ALLBOX[ym] || {}, fin = Object.keys(box).filter(function(id){ var m = box[id]; return m.type === 'statement' && m.final && !m.superseded; });
   var srcTypes = {}; SETTLE_CLOSE.SRC.forEach(function(d){ srcTypes[d.type] = 1; });
-  var srcIds = Object.keys(box).filter(function(id){ return srcTypes[box[id].type]; }), finals = [], sources = [], noFile = [], i = 0;
+  var srcIds = Object.keys(box).filter(function(id){ return srcTypes[box[id].type]; }), out = { finals: [], sources: [], noFile: [] }, i = 0;
   var n = fin.length + srcIds.length;
-  fin.reduce(function(p, id){ return p.then(function(){ msg('확정본 여는 중 ' + (++i) + '/' + n + ' — ' + box[id].name);
-    return dec(box[id]).then(function(wb){ finals.push({ name: box[id].name, vendor: SETTLE_STMT.vendorFromFile(box[id].name), wb: wb }); }).catch(function(){ noFile.push(box[id].name); }); }); }, Promise.resolve())
+  return fin.reduce(function(p, id){ return p.then(function(){ msg('확정본 여는 중 ' + (++i) + '/' + n + ' — ' + box[id].name);
+    return dec(box[id]).then(function(wb){ out.finals.push({ name: box[id].name, vendor: SETTLE_STMT.vendorFromFile(box[id].name), wb: wb }); }).catch(function(){ out.noFile.push(box[id].name); }); }); }, Promise.resolve())
   .then(function(){ return srcIds.reduce(function(p, id){ return p.then(function(){ msg('원본 여는 중 ' + (++i) + '/' + n + ' — ' + box[id].name);
-    return dec(box[id]).then(function(wb){ sources.push({ type: box[id].type, name: box[id].name, wb: wb }); }).catch(function(){ noFile.push(box[id].name); }); }); }, Promise.resolve()); })
+    return dec(box[id]).then(function(wb){ out.sources.push({ type: box[id].type, name: box[id].name, wb: wb }); }).catch(function(){ out.noFile.push(box[id].name); }); }); }, Promise.resolve()); })
   .then(function(){
+    out.fr = []; Object.keys((FREIGHT || {})[ym] || {}).forEach(function(fid){ var F = FREIGHT[ym][fid] || {}, ch = F.chk || {};
+      (F.rows || []).forEach(function(r, k){ out.fr.push({ d: r.d, from: r.from, to: r.to, amt: frFinal(r, ch[k]), etc: r.etc, vendor: frVendor(r, ch[k]) }); }); });
+    out.cg = (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows.filter(function(r){ return String(r.date || '').slice(0, 7) === ym; }) : [];
+    return out;
+  });
+}
+function closeRun(){
+  if (CLOSE.busy) return;
+  var ym = YM; CLOSE.ym = ym; CLOSE.busy = true; CLOSE.err = ''; CLOSE.res = null;
+  var msg = function(t){ CLOSE.msg = t; renderCloseBar(); }, finals, noFile;
+  closeLoad(ym, msg).then(function(L){
+    finals = L.finals; noFile = L.noFile; var sources = L.sources, fr = L.fr, cg = L.cg;
     msg('맞춰 보는 중…');
-    var fr = []; Object.keys((FREIGHT || {})[ym] || {}).forEach(function(fid){ var F = FREIGHT[ym][fid] || {}, ch = F.chk || {};
-      (F.rows || []).forEach(function(r, k){ fr.push({ d: r.d, from: r.from, to: r.to, amt: frFinal(r, ch[k]), etc: r.etc, vendor: frVendor(r, ch[k]) }); }); });
-    var cg = (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows.filter(function(r){ return String(r.date || '').slice(0, 7) === ym; }) : [];
     return new Promise(function(res){ setTimeout(res, 30); }).then(function(){
       var R = SETTLE_CLOSE.check({ finals: finals, sources: sources, freight: fr, cargo: cg, ignore: CLOSE_IGN });
       R.nFinals = finals.length; R.noFile = noFile; R.at = Date.now(); CLOSE.res = R;
@@ -232,6 +243,108 @@ function closeUndo(){
 }
 function closeListen(){
   db.ref('settlement/close').on('value', function(s){ CLOSE_REC = s.val() || {}; renderCloseBar(); });
-  db.ref('settlement/closeIgnore').on('value', function(s){ CLOSE_IGN = s.val() || {}; renderCloseBar(); });
+  db.ref('settlement/closeIgnore').on('value', function(s){ CLOSE_IGN = s.val() || {}; if (typeof preBucket === 'function') preBucket(); renderCloseBar(); });
   db.ref('settlement/closeSkip').on('value', function(s){ CLOSE_SKIP = s.val() || {}; renderCloseBar(); });
+}
+
+/* ═══════════ 🧪 사전검증 (대표님 2026-10-05) ═══════════
+   마감검증과 같은 무결성 검사를 업체 확정이 다 끝나기 전에 언제든 — 원본에서 확정본에 안 들어간 건을 「주인 업체」로 나눠
+     🔴 확정본 누락 의심 = 이미 ✅ 확정한 업체 몫인데 확정본에 없음 → 그 업체 정산을 고쳐 다시 확정
+     🟡 빠질 가능성      = 아직 확정 안 한 업체 몫인데 지금 룰로 만든 초안에도 없음 → 룰 보강 또는 직접 넣기
+     🟢 초안에 들어감    = 아직 확정 안 한 업체 몫, 초안에 있음 → 그대로 확정하면 해결
+     ⏳ 아직 정산 전     = 초안 비교 없이 돌렸을 때 확정 안 한 업체 몫
+     ⚫ 주인 없음        = 어느 업체와도 이름이 안 맞음 → 누락인지 「청구 대상 아님」인지
+   「초안까지」 = 확정 안 된 업체마다 지금 룰로 초안을 만들어(화면 「초안 내려받기」와 같은 makeDraft) 확정본처럼 맞춰 봄.
+   마감검증(②)이 최종 — 사전검증은 기록을 남기지 않음 (「청구 대상 아님」만 마감검증과 같은 closeIgnore 에 저장). */
+var PRE = { ym: null, busy: false, msg: '', res: null, err: '' };
+function preOwner(g, V){
+  var cands = [g.owner, g.name].filter(Boolean).map(function(x){ return String(x).split(' · ')[0]; });
+  return V.filter(function(v){ var f = window.vendorMatcher(v.name); return cands.some(function(c){ return c === v.name || f(c); }); });
+}
+function preBucket(){
+  var P = PRE.res; if (!P) return; var V = monthVendors(PRE.ym), by2 = {}; P.R2.groups.forEach(function(g){ by2[g.gk] = g; });
+  var B = { red: [], yel: [], grn: [], wait: [], none: [], ign: [] };
+  P.R1.groups.forEach(function(g1){ if (!g1.miss) return;
+    var g2 = by2[g1.gk] || g1, ign = ((CLOSE_IGN[SETTLE_CLOSE.sKeyC(g1.src)] || {})[SETTLE_CLOSE.sKeyC(g1.name)]) || null;
+    var own = preOwner(g1, V), done = own.filter(function(v){ return v.done; }), open = own.filter(function(v){ return !v.done && !v.skip; }), item = { g: g1, own: own, ign: ign };
+    if (ign){ item.n = g1.miss; B.ign.push(item); return; }
+    if (!own.length){ item.n = g2.miss; item.s = g2.sample; if (g2.miss) B.none.push(item); return; }
+    if (done.length && !open.length){ item.n = g1.miss; item.s = g1.sample; B.red.push(item); return; }
+    if (!P.nDrafts){ item.n = g1.miss; item.s = g1.sample; B.wait.push(item); return; }
+    if (g2.miss){ item.n = g2.miss; item.s = g2.sample; B.yel.push(item); }
+    if (g1.miss > g2.miss) B.grn.push({ g: g1, own: own, n: g1.miss - g2.miss }); });
+  Object.keys(B).forEach(function(k){ B[k].sort(function(a, b){ return (b.n || 0) - (a.n || 0); }); });
+  P.B = B;
+}
+function preRun(withDrafts){
+  if (PRE.busy || CLOSE.busy) return;
+  var ym = YM; PRE = { ym: ym, busy: true, msg: '', res: null, err: '' };
+  var msg = function(t){ PRE.msg = t; renderCloseBar(); }, V = monthVendors(ym), L, drafts = [], dErr = [];
+  var origDec = window.decryptBox, memo = {}, save = VW;
+  closeLoad(ym, msg).then(function(x){ L = x;
+    if (!withDrafts) return;
+    /* 같은 파일을 업체마다 다시 풀지 않게 (이벗 주문목록 26MB 등) */
+    window.decryptBox = function(m){ var k = m.path || m.p || m.name; if (!memo[k]) memo[k] = origDec(m); return memo[k].then(function(b){ return b && b.slice ? b.slice(0) : b; }); };
+    var todo = V.filter(function(v){ return !v.done && !v.skip; }), k = 0;
+    return todo.reduce(function(p, v){ return p.then(function(){
+      k++; var g = samplesByVendor()[v.name]; if (!g || !g.length){ dErr.push(v.name + ' (표본 없음)'); return; }
+      var pick = defaultSample(g);
+      msg('초안 만드는 중 ' + k + '/' + todo.length + ' — ' + v.name);
+      return window.decryptBox(pick.m).then(function(bytes){
+        var A = SETTLE_STMT.analyze(XLSX.read(bytes, { type: 'array', cellFormula: true }));
+        VW = { vkey: v.vk, name: v.name, fileId: pick.id, ym: pick.ym, meta: pick.m, A: A, pre: true };
+        return makeDraft(function(t){ msg('초안 ' + k + '/' + todo.length + ' — ' + v.name + ' · ' + t); });
+      }).then(function(D){ return D.wb.xlsx.writeBuffer(); })
+        .then(function(buf){ drafts.push({ name: v.name + ' (초안)', vendor: v.name, wb: XLSX.read(buf, { type: 'array', dense: true }) }); })
+        .catch(function(e){ dErr.push(v.name + ' (' + ((e && e.message) || e) + ')'); console.error(e); })
+        .then(function(){ VW = save; });
+    }); }, Promise.resolve());
+  }).then(function(){
+    window.decryptBox = origDec;
+    msg('맞춰 보는 중…');
+    return new Promise(function(res){ setTimeout(res, 30); }).then(function(){
+      var base = { sources: L.sources, freight: L.fr, cargo: L.cg, ignore: CLOSE_IGN };
+      var R1 = SETTLE_CLOSE.check(Object.assign({ finals: L.finals }, base));
+      var R2 = drafts.length ? SETTLE_CLOSE.check(Object.assign({ finals: L.finals.concat(drafts) }, base)) : R1;
+      PRE.res = { R1: R1, R2: R2, nFinals: L.finals.length, nDrafts: drafts.length, dErr: dErr, noFile: L.noFile, at: Date.now() };
+      preBucket();
+    });
+  }).catch(function(e){ PRE.err = (e && (e.code || e.message)) || String(e); console.error(e); })
+    .then(function(){ window.decryptBox = origDec; VW = save; PRE.busy = false; renderCloseBar(); });
+}
+function preHtml(){
+  var h = '<div class="cp-sec"><div class="cp-h">🧪 사전검증 <span class="dim">마감 전 언제든 — 원본 자료가 확정본(과 초안)에 들어갔는지, 빠진 건 누구 몫인지 · 최종은 아래 ② 마감검증</span></div>';
+  if (PRE.busy) return h + '<div class="sm">⏳ ' + esc(PRE.msg) + '</div></div>';
+  var btns = '<button class="btn p" onclick="preRun(true)">🧪 사전검증 — 확정 안 된 업체는 초안까지 만들어 비교</button> <button class="btn" onclick="preRun(false)">확정본만 (빠름)</button>';
+  if (PRE.err) return h + '<div class="sm" style="color:#f87171">사전검증 실패: ' + esc(PRE.err) + '</div>' + btns + '</div>';
+  var P = PRE.res && PRE.ym === YM ? PRE.res : null;
+  if (!P || !P.B) return h + btns + ' <span class="sm dim">초안까지 = 업체마다 「초안 내려받기」와 같은 계산이라 몇 분 걸림</span></div>';
+  var S = P.R2, B = P.B, sum = function(L){ return L.reduce(function(s, x){ return s + (x.n || 0); }, 0); };
+  var left = sum(B.red) + sum(B.yel) + sum(B.wait) + sum(B.none), pct = S.total ? Math.floor((S.total - left) / S.total * 1000) / 10 : 100;
+  h += '<div class="cp-pct" style="color:' + (pct >= 100 ? 'var(--g)' : '#fbbf24') + '">' + pct + '<small>%</small></div>'
+    + '<div class="sm">원본 ' + S.total.toLocaleString() + '건 · 확정본 ' + P.nFinals + '개' + (P.nDrafts ? ' + 초안 ' + P.nDrafts + '개' : ' (초안 비교 안 함)') + ' · ' + esc(ftime(P.at))
+    + ' <button class="btn" style="padding:.2rem .6rem" onclick="preRun(' + (P.nDrafts ? 'true' : 'false') + ')">다시</button>' + (P.nDrafts ? '' : ' <button class="btn" style="padding:.2rem .6rem" onclick="preRun(true)">초안까지</button>') + '</div>'
+    + (P.dErr.length ? '<div class="sm" style="color:#fbbf24">⚠️ 초안을 못 만든 업체: ' + esc(P.dErr.join(', ')) + '</div>' : '')
+    + (P.noFile.length ? '<div class="sm" style="color:#fbbf24">⚠️ 못 읽은 파일: ' + esc(P.noFile.join(', ')) + '</div>' : '');
+  var sec = function(L, ic, t, d){ if (!L.length) return '';
+    return '<div class="cp-h" style="margin-top:.7rem">' + ic + ' ' + t + ' <span class="pill">' + L.length + '묶음 · ' + sum(L).toLocaleString() + '건</span> <span class="dim">— ' + d + '</span></div>' + L.map(preGrpHtml).join(''); };
+  h += sec(B.red, '🔴', '확정본 누락 의심', '이미 확정한 업체 몫인데 확정본에 없음 → 그 업체 정산 고쳐 다시 확정 (또는 청구 대상 아님)')
+    + sec(B.yel, '🟡', '빠질 가능성', '아직 확정 안 한 업체 몫인데 지금 룰로 만든 초안에도 없음 → 룰 보강(대화창) 또는 정산서에 직접')
+    + sec(B.wait, '⏳', '아직 정산 전', '확정 안 한 업체 몫 — 「초안까지」로 돌리면 초안에 들어가는지 확인')
+    + sec(B.none, '⚫', '주인 없음', '어느 업체 이름과도 안 맞음 → 누락인지 청구 대상 아님인지')
+    + (B.grn.length ? '<div class="sm" style="margin-top:.6rem;color:var(--g)">🟢 초안에 들어감 ' + sum(B.grn).toLocaleString() + '건 — ' + esc(B.grn.map(function(x){ return x.own.map(function(v){ return v.name; }).join('·') + ' ' + x.n; }).join(' · ')) + ' (그대로 확정하면 해결)</div>' : '')
+    + (!left ? '<div class="sm" style="color:var(--g);margin-top:.4rem">✔ 빠질 것 없음 — 업체를 모두 확정한 뒤 아래 ② 마감검증으로 최종 확인</div>' : '')
+    + (B.ign.length ? '<details style="margin-top:.5rem"><summary class="sm dim" style="cursor:pointer">청구 대상 아님으로 뺀 묶음 ' + B.ign.length + '개</summary>' + B.ign.map(preGrpHtml).join('') + '</details>' : '');
+  return h + '</div>';
+}
+function preGrpHtml(x){
+  var g = x.g, gk = esc(g.gk), n = x.n || g.miss, smp = x.s || g.sample, own = (x.own || []).map(function(v){ return (v.done ? '✅' : v.skip ? '➖' : '⏳') + v.name; }).join(' ');
+  return '<details class="cp-g' + (x.ign ? ' ig' : '') + '"><summary><b>' + esc(g.src) + '</b> · ' + esc(g.name) + ' <span class="pill">' + n.toLocaleString() + (g.total !== n ? ' / ' + g.total.toLocaleString() : '') + '건</span>'
+    + (own ? ' <span class="sm dim">' + esc(own) + '</span>' : '') + (x.ign ? ' <span class="sm dim">청구 대상 아님: ' + esc(x.ign.why || '') + '</span>' : '')
+    + '<span style="margin-left:auto"></span><button class="btn" style="padding:.15rem .55rem" onclick="event.preventDefault();preIgnore(\'' + gk + '\',' + (x.ign ? 'false' : 'true') + ')">' + (x.ign ? '빼기 취소' : '청구 대상 아님') + '</button></summary>'
+    + '<div class="sm dim" style="padding:.3rem .2rem .5rem;line-height:1.7">' + smp.map(esc).join(' · ') + (n > smp.length ? ' … 외 ' + (n - smp.length) + '건' : '') + '</div></details>';
+}
+function preIgnore(gk, on){   /* 마감검증과 같은 「청구 대상 아님」 기록 — 사전검증에서 뺀 것은 마감검증에서도 빠짐 */
+  var P = PRE.res; if (!P) return;
+  var save = CLOSE.res; CLOSE.res = P.R1; closeIgnore(gk, on); CLOSE.res = save;
 }

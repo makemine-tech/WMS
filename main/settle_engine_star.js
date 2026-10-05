@@ -124,11 +124,11 @@
           left.some(function(x, j){ if (x.date === c.date && ftOf(memo(x)) === ft){ i = j; return true; } return false; });
           var hit = i >= 0 ? left.splice(i, 1)[0] : null;
           if (!hit) log.push(['특이사항', c.date + ' 「' + c.memo + '」 (' + c.what + ') — 대표님 기록에만 있고 화물관리엔 없음 → 대표님 기록대로 넣음 (화물관리에도 적어 두기)']);
-          return { date: c.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: c.what + (c.file ? ' · ' + c.file : '') + (hit ? '' : ' · 화물관리 기록 없음') }; });
+          return { date: c.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: c.date + ' · ' + c.what + (c.file ? ' · ' + c.file : '') + (hit ? '' : ' · 화물관리 기록 없음') }; });
         left.forEach(function(x){ log.push(['확인 필요', x.date + ' 화물관리 「' + memo(x) + '」 ' + pl(x) + '팔 — 대표님 기록에 없어 정산서에 안 넣음 (빠진 거면 대화창에 알려 주세요)']); });
         log.push(['자동 적용', '컨테이너 까대기 = 대표님 기록 ' + mine.length + '건 (화물관리 ' + CK.length + '건과 크로스 체크): ' + mine.map(function(c){ return c.date.slice(5) + ' ' + ftOf(c.memo) + '피트 ' + c.what.split(' ')[0]; }).join(' / ')]);
       } else K = CK.map(function(x){ var ft = ftOf(memo(x));
-        return { date: x.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: '화물관리 ' + x.date + ' 「' + memo(x) + '」 ' + pl(x) + '팔' }; });
+        return { date: x.date, name: ft + '피트까대기', spec: ft + '피트', q: 1, p: ft === 40 ? P.ft40 : P.ft20, note: x.date + ' · 화물관리 「' + memo(x) + '」 ' + pl(x) + '팔' }; });
 
       /* 3) 거래명세표 다시 쓰기 */
       var find = function(re, col){ var hit = 0; st.eachRow(function(row, r){ if (!hit && re.test(ns(row.getCell(col || 2).value))) hit = r; }); return hit; };
