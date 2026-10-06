@@ -167,9 +167,40 @@
         /* ── 박스앤캔 택배·반품 ── */
         if (k === 'bnc_return' || k === 'bnc_courier'){
           return readAll(ctx, 'bnc_courier').then(function(F){
+            F = F.filter(function(f){ var m = (ctx.BOX || {})[f.id]; return !(m && m.ref); });
             if (!F.length){ replaceSheet(wb, s.name, T.heads.slice(1), []); log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 택배비 파일이 아직 없어 비워 둠 (들어오면 초안 다시 받기)']);
               stRow(st, function(b){ return /반품/.test(b); }).forEach(function(r){ var g = st.getCell('G' + r); if (g.value != null && g.value !== 0){ g.value = 0; g.style = Object.assign({}, g.style, { fill: YEL }); } }); return; }
-            log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 파일은 있지만 이 업체 고르는 룰이 아직 없어 지난달 그대로']);
+            /* 2026-10-06 대표님: 박스앤캔 택배비 원본 105건인데 초안 76건(= 8월 거래명세표 값 그대로) → 룰 추가.
+               지난달 시트가 「발송」 모양(발송인명)이면 발송 시트에서, 「반품」 모양(고객명)이면 반품 시트에서
+               지난달 시트에 있던 발송인명/고객명(예: 메이크창고(박스앤캔))과 같은 줄만 → 등기번호로 중복 제거 */
+            var hd = T.heads, isRet = hd.indexOf('발송인명') < 0 && hd.indexOf('고객명') >= 0, who = isRet ? '고객명' : '발송인명';
+            if (hd.indexOf(who) < 0 || hd.indexOf('박스크기') < 0){ log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 모양(발송인명·고객명·박스크기)이 아니라 지난달 그대로']); return; }
+            var LW = learn(T, [who]), names = Object.keys(LW).map(function(x){ return x.split('\u0001')[1]; });
+            var rows = [], heads = null, seenR = {}, other = {};
+            F.forEach(function(f){ var D = aoaOf(f.wb, [who, '등기번호', '박스크기']); if (!D) return; heads = heads || D.heads;
+              var H = D.heads.map(ns), iW = H.indexOf(who), iR = H.indexOf('등기번호');
+              D.rows.forEach(function(r){ var w = ns(r[iW]), mine = names.length ? LW[who + '\u0001' + w] : hit(w);
+                if (!mine){ if (hit(w)) other[w] = (other[w] || 0) + 1; return; }
+                var kk = ns(r[iR]) || JSON.stringify(r); if (seenR[kk]) return; seenR[kk] = 1; rows.push(r); }); });
+            if (!heads){ log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 택배비에서 「' + (isRet ? '반품' : '발송') + '」 시트(' + who + '·등기번호·박스크기)를 못 찾아 지난달 그대로']); return; }
+            var rs = replaceSheet(wb, s.name, heads, rows), H2 = heads.map(ns), iZ = H2.indexOf('박스크기');
+            var cnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, odd = 0;
+            rows.forEach(function(r){ var z = String(r[iZ] || '').trim(); if (cnt[z] != null) cnt[z]++; else odd++; });
+            log.push(['자동 적용', '시트 「' + s.name + '」 ← 박스앤캔 택배비 「' + (isRet ? '반품' : '발송') + '」 중 ' + who + ' ' + (names.length ? names.join('·') : core(vname) + '(업체 이름)') + ' ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대]);
+            Object.keys(other).forEach(function(w){ log.push(['특이사항', '시트 「' + s.name + '」 — 지난달에 없던 ' + who + ' 「' + w + '」 ' + other[w] + '건은 뺌 (업체 이름이 들어 있음 — 이 업체 것이면 알려 주세요)']); });
+            if (odd) log.push(['특이사항', '시트 「' + s.name + '」 — 박스크기가 극소·소·중·대가 아닌 줄 ' + odd + '건']);
+            rs.warn.forEach(function(w){ log.push(['확인 필요', '시트 「' + s.name + '」 — ' + w]); });
+            /* 거래명세표: 발송 → 택배발송 극소·소·중·대, 반품 → 반품 줄 (박스크기별, 하나뿐이면 합계) = 시트 박스크기 COUNTIF */
+            var nws = wb.getWorksheet(s.name), zc = -1; nws.getRow(T.H).eachCell(function(c, n){ if (ns(c.value) === '박스크기') zc = n; });
+            if (zc < 0) return;
+            var ZL = nws.getColumn(zc).letter, ref = "'" + s.name + "'!" + ZL + (T.H + 1) + ':' + ZL + (T.H + Math.max(rows.length, 1));
+            var setG = function(r, z){ var g = st.getCell('G' + r), v = z ? cnt[z] : rows.length;
+              g.value = { formula: z ? 'COUNTIF(' + ref + ',"' + z + '")' : 'COUNTA(' + ref + ')', result: v }; g.style = Object.assign({}, g.style, { fill: NOFILL });
+              var lb = ns(st.getCell('B' + r).value) || ns(st.getCell('C' + r).value);   /* B·C 병합이면 같은 글자가 두 번 */
+              for (var q = log.length - 1; q >= 0; q--) if (/피벗 계산이라|직접 입력|지난달 .* 그대로/.test(log[q][1]) && String(log[q][1]).replace(/\s+/g, '').indexOf(lb) === 0) log.splice(q, 1); };
+            if (!isRet) stRow(st, function(b){ return !!sizeOf(b) && !/반품/.test(b); }).forEach(function(r){ setG(r, sizeOf(ns(st.getCell('B' + r).value) + ns(st.getCell('C' + r).value))); });
+            else { var rr2 = stRow(st, function(b){ return /반품/.test(b) && !/타택배/.test(b); });
+              rr2.forEach(function(r){ var b = ns(st.getCell("B" + r).value) + ns(st.getCell("C" + r).value), z = /극소/.test(b) ? '극소' : /\(소\)|소$/.test(b) ? '소' : /\(중\)|중$/.test(b) ? '중' : /\(대\)|대$/.test(b) ? '대' : null; if (rr2.length > 1 && !z) return; setG(r, rr2.length > 1 ? z : null); }); }
           });
         }
         /* ── 재고표 ── */
