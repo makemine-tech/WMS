@@ -33,6 +33,10 @@ h1 em{color:var(--g);font-style:normal}
 .step:last-child{border-right:none}
 .step.on{background:rgba(74,240,168,.08);color:var(--g)}
 .step.done{color:var(--g);background:rgba(74,240,168,.03)}
+.step{cursor:pointer;transition:background .15s}
+.step:hover{background:rgba(74,240,168,.12);color:var(--g)}
+.cur-job{margin:0 0 .9rem;padding:.65rem .85rem;border:1px solid rgba(74,240,168,.35);border-radius:7px;background:rgba(74,240,168,.06);font-size:.78rem;line-height:1.55}
+.cur-job b{color:var(--g)}
 .step-n{font-family:var(--mo);font-size:.56rem;display:block;margin-bottom:.05rem;opacity:.6}
 /* PAGES */
 .pg{display:none}.pg.on{display:block}
@@ -252,9 +256,9 @@ h1 em{color:var(--g);font-style:normal}
 </div>
 
 <div class="steps">
-  <div class="step on" id="st0"><span class="step-n">STEP 1</span>업로드</div>
-  <div class="step"   id="st1"><span class="step-n">STEP 2</span>피킹리스트</div>
-  <div class="step"   id="st2"><span class="step-n">STEP 3</span>그룹 인쇄</div>
+  <div class="step on" id="st0" onclick="goStep(0)" title="업로드 화면 — 작업이 있으면 PDF 를 올릴 때 ➕추가 / 교체 선택"><span class="step-n">STEP 1</span>업로드</div>
+  <div class="step"   id="st1" onclick="goStep(1)"><span class="step-n">STEP 2</span>피킹리스트</div>
+  <div class="step"   id="st2" onclick="goStep(2)"><span class="step-n">STEP 3</span>그룹 인쇄</div>
 </div>
 <div id="pkStatus" style="display:none;text-align:center;font-size:.7rem;font-family:var(--mo);color:var(--mu);margin:-.6rem 0 .5rem;letter-spacing:.02em">☁ 연결 중...</div>
 <div id="pkWarehouse" style="display:none;text-align:center;font-size:.72rem;font-family:var(--mo);margin:0 0 1rem;letter-spacing:.02em"></div>
@@ -263,6 +267,7 @@ h1 em{color:var(--g);font-style:normal}
 <div class="pg on" id="pg0">
   <div class="pg-t">전체 송장 PDF 업로드</div>
   <div class="pg-s">이지어드민 출력 PDF를 한 번에 업로드하세요</div>
+  <div class="cur-job" id="curJob" style="display:none"></div>
   <div class="dz" id="dz0">
     <input type="file" id="f0" accept=".pdf">
     <span class="dz-i">📦</span>
@@ -329,7 +334,7 @@ h1 em{color:var(--g);font-style:normal}
 
   <div class="brow">
     <button class="btn btn-g" onclick="goTo(2)">그룹 인쇄 →</button>
-    <button class="btn btn-s" onclick="goTo(0);resetAll()">← 다시 업로드</button>
+    <button class="btn btn-s" onclick="goTo(0)" title="업로드 화면으로 — 지금 작업은 그대로, PDF 를 올리면 ➕추가 / 교체 선택">← 업로드 (추가 등록)</button>
   </div>
 </div>
 
@@ -400,7 +405,7 @@ h1 em{color:var(--g);font-style:normal}
 
   <div class="brow" style="margin-top:1.2rem;border-top:1px solid var(--br);padding-top:1.1rem">
     <button class="btn btn-s" onclick="goTo(1)">← 피킹리스트</button>
-    <button class="btn btn-s" onclick="location.reload()">처음부터</button>
+    <button class="btn btn-s" onclick="goTo(0)" title="1단계 업로드 화면으로 — 지금 작업·인쇄 기록은 그대로, PDF 를 올리면 ➕추가 / 교체 선택">처음부터 (업로드)</button>
     <button onclick="clearSession()" style="margin-left:auto;padding:.45rem 1rem;border-radius:6px;border:1.5px solid var(--r);background:transparent;color:var(--r);font-size:.78rem;font-weight:700;cursor:pointer">🗑 세션 완전삭제</button>
   </div>
 </div>
@@ -597,14 +602,37 @@ function loadPdfLib(cb) {
 }
 
 /* ─────────────── 네비게이션 ─────────────── */
+var curStep = 0;
 function goTo(n) {
+  curStep = n;
   ['pg0','pg1','pg2'].forEach(function(id,i){
     document.getElementById(id).className = 'pg' + (i===n?' on':'');
   });
   ['st0','st1','st2'].forEach(function(id,i){
     document.getElementById(id).className = 'step' + (i===n?' on':i<n?' done':'');
   });
+  if (n===0) renderCurJob();
+  if (n===1 && typeof renderPick === 'function') renderPick();
   if (n===2) renderGrpPage();
+}
+/* 상단 1·2·3단계 클릭 — 2·3단계는 송장이 있을 때만 */
+function goStep(n) {
+  if (n > 0 && !invoices.length) { goTo(0); setMsg('m0','warn','⚠️ 등록된 송장이 없습니다 — 먼저 PDF 를 올려 주세요'); return; }
+  goTo(n);
+  try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(e){}
+}
+/* 1단계 화면 위 「현재 작업」 — 작업이 있으면 PDF 를 올릴 때 추가/교체를 고른다는 안내 */
+function renderCurJob() {
+  var el = document.getElementById('curJob');
+  if (!el) return;
+  if (!invoices.length) { el.style.display = 'none'; return; }
+  var left = invoices.filter(function(i){ return !printedInvNums[i.invNum]; }).length;
+  var parts = (pkMeta && pkMeta.parts) ? pkMeta.parts.length : 1;
+  el.innerHTML = '📋 현재 작업 <b>송장 ' + invoices.length + '건</b> · 인쇄완료 ' + (invoices.length - left) + ' · <b>남음 ' + left + '건</b>'
+    + (parts > 1 ? ' · 추가 등록 ' + (parts - 1) + '회' : '')
+    + '<br><span style="color:var(--mu)">PDF 를 올리면 <b>➕ 추가 등록</b>(남은 송장과 합침 · 인쇄 기록 유지) 또는 교체를 고릅니다</span>'
+    + ' <a href="#" onclick="goStep(2);return false" style="color:var(--g);margin-left:.4rem">그룹 인쇄로 →</a>';
+  el.style.display = '';
 }
 function setMsg(id, cls, html) {
   var el = document.getElementById(id);
@@ -2124,6 +2152,7 @@ var pkBase = null;        /* firebase ref (job 노드) */
 var pkLoadingRemote = false;
 var pkSuppressPublish = false;  /* 원격 로드 중 재발행 방지 */
 var pkPdfState = null;          /* 현재 작업 job/pdf 노드 최신값 (창고 배지 표시용) */
+var pkFirstJobShown = false;    /* 페이지를 연 뒤 원격 작업을 한 번 보여 줬는지 (처음만 3단계로 자동 이동) */
 var pkMeta = null;              /* 현재 작업 job/meta (pageCount 로 원본 PDF 맞는지 확인, parts = 추가 등록 이력) */
 
 /* ── 창고 배지: 원본이 창고에 있는지 + 이 PC 인쇄 가능 여부 한 줄 표시 ── */
@@ -2453,8 +2482,10 @@ function pkLoadRemoteJob(meta){
     pkPdfState = pdf || {};   /* 창고 배지 즉시 반영 */
     var afterState = function(){
       pkLoadingRemote = false;
-      /* printed/batches 는 각 리스너가 곧 채움 */
-      if (typeof goTo === 'function') goTo(2);
+      /* printed/batches 는 각 리스너가 곧 채움
+         처음 열 때만 그룹 인쇄로. 이미 화면을 쓰는 중(다른 PC 가 추가 등록 등)이면 지금 단계 그대로 — 1단계에서 PDF 고르다 튕기지 않게 */
+      if (typeof goTo === 'function') { if (!pkFirstJobShown) goTo(2); else goTo(curStep); }
+      pkFirstJobShown = true;
       if (typeof renderGrpPage === 'function') renderGrpPage();
       pkRerender();
       if (typeof updateDoneSection === 'function') updateDoneSection();
@@ -2662,6 +2693,7 @@ function pkRerender(){
   if (typeof renderInvoiceProgress === 'function') renderInvoiceProgress();
   if (typeof renderPick === 'function') renderPick();
   if (typeof updateDoneSection === 'function') updateDoneSection();  /* 인쇄완료 목록도 함께 갱신 */
+  if (typeof renderCurJob === 'function' && curStep === 0) renderCurJob();
 }
 
 /* 현재 작업 비우기 (원격 포함) — 새 업로드 없이 초기화하고 싶을 때 */
