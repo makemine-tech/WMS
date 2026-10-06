@@ -118,7 +118,7 @@ function renderLedger(){
     + '</style>'
     + '<div class="lg-top"><span class="bar-t">' + esc(ymLabel(ym)) + ' 삼자물류정산관리</span>' + lgMonthBar(ym)
     + '<label class="btn" style="cursor:pointer;white-space:nowrap;font-size:12px">📥 관리표 가져오기<input type="file" accept=".xlsx,.xls" style="display:none" onchange="lgImport(this)"></label>'
-    + '<button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgExportXl()">📤 내보내기</button><button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgAddExtra()">＋ 기타 거래처</button><button class="btn p" style="white-space:nowrap;font-size:12px" onclick="lgCostOpen()">💸 고정비·지출</button></div>'
+    + '<button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgExportMenu(this)">📤 내보내기 ▾</button><button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgAddExtra()">＋ 기타 거래처</button><button class="btn p" style="white-space:nowrap;font-size:12px" onclick="lgCostOpen()">💸 고정비·지출</button></div>'
     + '<div class="lg-cards">'
     + card('정산 업체', S.n + '곳', '금액 있는 곳') + card('청구 합계 (VAT 포함)', '₩' + won0(S.amt), '공급가 ₩' + won0(S.amt / 1.1))
     + card('송금·토스 (보낼 돈)', '₩' + won0(S.send), '관리표 송금토스') + card('입금 완료', '₩' + won0(S.paid), S.pd + ' / ' + S.n + '곳', 'var(--g)') + card('미수 합계', '₩' + won0(S.unpaid), '전미수 포함', S.unpaid ? '#f87171' : 'var(--g)')
@@ -264,6 +264,159 @@ function lgImport(input){
       return db.ref('settlement').update(up).then(function(){ toast('📥 ' + pick.length + '개 달 가져옴 (모양 포함)'); });
     });
   }).catch(function(e){ alert('가져오기 실패: ' + ((e && e.message) || e)); console.error(e); });
+}
+/* ── 📤 내보내기 고르기: 디자인 리스트(보기 좋게) · 관리표 모양(원래 엑셀 그대로) ── */
+function lgExportMenu(btn){
+  var old = document.getElementById('lgExMenu'); if (old){ old.remove(); return; }
+  var r = btn.getBoundingClientRect(), m = document.createElement('div'); m.id = 'lgExMenu';
+  m.style.cssText = 'position:fixed;z-index:9500;top:' + (r.bottom + 4) + 'px;left:' + Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px;width:290px;background:var(--s1);border:1px solid var(--br);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45);padding:.35rem';
+  var it = function(ic, t, d, fn){ return '<button class="btn" style="display:block;width:100%;text-align:left;margin:.15rem 0;padding:.5rem .6rem;line-height:1.35" onclick="document.getElementById(\'lgExMenu\').remove();' + fn + '()"><b>' + ic + ' ' + t + '</b><br><span class="sm dim">' + d + '</span></button>'; };
+  m.innerHTML = it('🎨', '디자인 리스트', '요약 카드 · 업체별 정산(묶음·소계·상태 색) · 지출 · 세금계산서 정보 — 보기 좋게', 'lgExportDesign')
+    + it('📋', '관리표 모양 그대로', '원래 00_삼자물류정산관리 엑셀의 색·열 그대로', 'lgExportXl');
+  document.body.appendChild(m);
+  setTimeout(function(){ document.addEventListener('click', function off(e){ if (!m.contains(e.target) && e.target !== btn){ m.remove(); document.removeEventListener('click', off); } }); }, 0);
+}
+/* ═══ 🎨 디자인 리스트 내보내기 (대표님 2026-10-06: 「최대한 디자인된 형태로 이쁘게 알아볼 수 있게 리스트로」) ═══ */
+function lgExportDesign(){
+  if (typeof ExcelJS === 'undefined'){ alert('엑셀 도구(ExcelJS)를 아직 못 불러왔습니다 — 잠시 뒤 다시 눌러 주세요'); return; }
+  var ym = lgYM(), lab = ymLabel(ym), V = monthVendors(ym), X = LEXTRA[ym] || {};
+  var rows = V.map(function(v){ var s = lgState('v', v.vk, ym, 0, v.name), I = LINFO[v.vk] || {}; return { kind: 'v', name: v.name, skip: v.skip, I: I, s: s, group: I.group || '' }; })
+    .concat(Object.keys(X).map(function(id){ var s = lgState('x', id, ym, 0); return { kind: 'x', name: X[id].name || '(이름 없음)', I: X[id], s: s, group: X[id].group || '' }; }))
+    .filter(function(r){ return !r.skip && (r.s.amt || r.s.carry || +r.s.rec.send || r.s.rec.sent); });
+  rows.sort(function(a, b){ return (a.group ? 0 : 1) - (b.group ? 0 : 1) || String(a.group).localeCompare(String(b.group), 'ko') || a.name.localeCompare(b.name, 'ko', { numeric: true }); });
+  var S = { amt: 0, paid: 0, unpaid: 0, send: 0, carry: 0, n: rows.length, st: [0, 0, 0, 0], pd: 0 };
+  rows.forEach(function(r){ var s = r.s; S.amt += s.amt || 0; S.paid += s.paid || 0; S.send += +s.rec.send || 0; S.carry += s.carry || 0; S.unpaid += s.unpaid > 0 ? s.unpaid : 0;
+    for (var k = 1; k <= lgStage(s.rec); k++) S.st[k]++; if ((s.amt || s.carry) && s.unpaid <= 0) S.pd++; });
+  var CO = lgCosts(ym), PF = S.amt - S.send - CO.total;
+
+  /* 색 · 글꼴 */
+  var C = { ink: 'FF1E293B', sub: 'FF64748B', line: 'FFE2E8F0', zebra: 'FFF8FAFC', head: 'FF1E293B', accent: 'FF10B981', red: 'FFDC2626', redBg: 'FFFEE2E2', grnBg: 'FFD1FAE5', grn: 'FF047857', amb: 'FFB45309', ambBg: 'FFFEF3C7', blueBg: 'FFDBEAFE', indBg: 'FFE0E7FF', grpBg: 'FFF1F5F9', white: 'FFFFFFFF' };
+  var F = 'Malgun Gothic', MON = '#,##0;[Red]-#,##0;"-"';
+  var fill = function(a){ return { type: 'pattern', pattern: 'solid', fgColor: { argb: a } }; };
+  var thin = { style: 'thin', color: { argb: C.line } }, box = { top: thin, bottom: thin, left: thin, right: thin };
+  var font = function(o){ return Object.assign({ name: F, size: 10, color: { argb: C.ink } }, o || {}); };
+  var wb = new ExcelJS.Workbook(); wb.creator = '메이크마인디자인 WMS'; wb.created = new Date();
+  var pageSet = function(ws, land){ ws.pageSetup = { paperSize: 9, orientation: land ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: .4, right: .4, top: .5, bottom: .5, header: .25, footer: .25 } };
+    ws.headerFooter = { oddFooter: '&L&8메이크마인디자인㈜ · ' + lab + ' 삼자물류정산&R&8&P / &N' }; };
+  var title = function(ws, cols, t, sub){
+    ws.mergeCells(1, 1, 1, cols); var a = ws.getCell(1, 1); a.value = t; a.font = font({ size: 18, bold: true, color: { argb: C.white } }); a.fill = fill(C.head); a.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }; ws.getRow(1).height = 36;
+    ws.mergeCells(2, 1, 2, cols); var b = ws.getCell(2, 1); b.value = sub; b.font = font({ size: 9.5, color: { argb: 'FFCBD5E1' } }); b.fill = fill(C.head); b.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }; ws.getRow(2).height = 20;
+    ws.mergeCells(3, 1, 3, cols); ws.getCell(3, 1).fill = fill(C.accent); ws.getRow(3).height = 4; };
+  var now = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ');
+  var stName = ['대기', '① 전달완료', '② 계산서발행', '③ 체크완료'], stBg = ['FFF1F5F9', C.blueBg, C.indBg, C.grnBg];
+
+  /* ─── 1) 요약 ─── */
+  var w1 = wb.addWorksheet('요약', { views: [{ showGridLines: false }], properties: { tabColor: { argb: C.accent } } });
+  w1.columns = [{ width: 2 }, { width: 22 }, { width: 22 }, { width: 22 }, { width: 22 }, { width: 2 }];
+  title(w1, 6, '📦 ' + lab + ' 삼자물류 정산 요약', '메이크마인디자인㈜ · 만든 시각 ' + now + ' (한국시간) · 정산 업체 ' + S.n + '곳');
+  var kpi = function(r, c, t, v, s, color, bg){
+    var a = w1.getCell(r, c); a.value = t; a.font = font({ size: 9, color: { argb: C.sub } }); a.fill = fill(bg || C.zebra); a.alignment = { indent: 1, vertical: 'bottom' };
+    var pct = v && typeof v === 'object' && v.pct != null; if (pct) v = v.pct;
+    var b = w1.getCell(r + 1, c); b.value = v; if (typeof v === 'number') b.numFmt = pct ? '0.0%' : '₩#,##0'; b.font = font({ size: typeof v === 'number' ? 16 : 12.5, bold: true, color: { argb: color || C.ink } }); b.fill = fill(bg || C.zebra); b.alignment = { indent: 1, vertical: 'middle' };
+    var d = w1.getCell(r + 2, c); d.value = s || ''; d.font = font({ size: 8.5, color: { argb: C.sub } }); d.fill = fill(bg || C.zebra); d.alignment = { indent: 1, vertical: 'top' };
+    [a, b, d].forEach(function(x, i){ x.border = { left: { style: 'medium', color: { argb: color || C.accent } }, top: i === 0 ? thin : undefined, bottom: i === 2 ? thin : undefined, right: thin }; }); };
+  w1.getRow(5).height = 18; w1.getRow(6).height = 30; w1.getRow(7).height = 18; w1.getRow(9).height = 18; w1.getRow(10).height = 30; w1.getRow(11).height = 18;
+  kpi(5, 2, '청구 합계 (VAT 포함)', S.amt, '공급가 ₩' + won0(S.amt / 1.1) + ' · 세액 ₩' + won0(S.amt - S.amt / 1.1), C.ink);
+  kpi(5, 3, '입금 완료', S.paid, S.pd + ' / ' + S.n + '곳 입금 완료', C.grn, 'FFF0FDF4');
+  kpi(5, 4, '미수 합계', S.unpaid, '전미수 ₩' + won0(S.carry) + ' 포함', S.unpaid ? C.red : C.grn, S.unpaid ? 'FFFEF2F2' : 'FFF0FDF4');
+  kpi(5, 5, '송금·토스 (보낼 돈)', S.send, '업체에 보낼 돈', C.amb, 'FFFFFBEB');
+  kpi(9, 2, '지출 (계정과목 합계)', CO.total, CO.nEst ? '예상 ' + CO.nEst + '개 포함' : '모두 확정', C.ink);
+  kpi(9, 3, '수익', PF, '청구 − 송금·토스 − 지출', PF >= 0 ? C.grn : C.red, PF >= 0 ? 'FFF0FDF4' : 'FFFEF2F2');
+  kpi(9, 4, '수익률', S.amt ? { pct: PF / S.amt } : '-', '수익 ÷ 청구 합계', PF >= 0 ? C.grn : C.red);
+  kpi(9, 5, '진행', '전달 ' + S.st[1] + ' · 계산서 ' + S.st[2], '체크완료 ' + S.st[3] + ' / ' + S.n + '곳', 'FF4F46E5', 'FFEEF2FF');
+  /* 진행 막대 */
+  var r0 = 13; w1.getCell(r0, 2).value = '진행 현황'; w1.getCell(r0, 2).font = font({ size: 11, bold: true });
+  [['① 정산서 전달', S.st[1]], ['② 계산서 발행', S.st[2]], ['③ 체크 완료', S.st[3]], ['④ 입금 완료', S.pd]].forEach(function(x, i){ var r = r0 + 1 + i, p = S.n ? x[1] / S.n : 0;
+    w1.getCell(r, 2).value = x[0]; w1.getCell(r, 2).font = font();
+    w1.mergeCells(r, 3, r, 4); var bar = w1.getCell(r, 3); var n = Math.round(p * 20); bar.value = '█'.repeat(n) + '░'.repeat(20 - n); bar.font = font({ color: { argb: p >= 1 ? C.accent : 'FF6366F1' } });
+    var v = w1.getCell(r, 5); v.value = x[1] + ' / ' + S.n + '곳 (' + Math.round(p * 100) + '%)'; v.font = font({ bold: true }); });
+  /* 미수 업체 */
+  var dbt = rows.filter(function(r){ return r.s.unpaid > 0; }).sort(function(a, b){ return b.s.unpaid - a.s.unpaid; });
+  var r1 = r0 + 6; w1.getCell(r1, 2).value = '미수 업체 ' + dbt.length + '곳'; w1.getCell(r1, 2).font = font({ size: 11, bold: true, color: { argb: dbt.length ? C.red : C.grn } });
+  if (!dbt.length){ w1.getCell(r1 + 1, 2).value = '✔ 미수 없음'; w1.getCell(r1 + 1, 2).font = font({ color: { argb: C.grn } }); }
+  else { ['업체명', '관리업체', '미수', '진행'].forEach(function(h, i){ var c = w1.getCell(r1 + 1, 2 + i); c.value = h; c.font = font({ bold: true, color: { argb: C.white } }); c.fill = fill(C.head); c.alignment = { horizontal: i === 2 ? 'right' : 'left', indent: 1 }; });
+    dbt.forEach(function(r, i){ var rr = r1 + 2 + i, z = i % 2 ? fill(C.zebra) : fill(C.white);
+      [[r.name, null], [r.group || '-', null], [r.s.unpaid, MON], [stName[lgStage(r.s.rec)], null]].forEach(function(x, k){ var c = w1.getCell(rr, 2 + k); c.value = x[0]; if (x[1]) c.numFmt = x[1]; c.fill = z; c.border = { bottom: thin }; c.font = font(k === 2 ? { bold: true, color: { argb: C.red } } : {}); c.alignment = { horizontal: k === 2 ? 'right' : 'left', indent: 1 }; }); }); }
+  pageSet(w1, false);
+
+  /* ─── 2) 업체별 정산 ─── */
+  var w2 = wb.addWorksheet('업체별 정산', { views: [{ state: 'frozen', ySplit: 5, xSplit: 3, showGridLines: false }], properties: { tabColor: { argb: 'FF6366F1' } } });
+  var COLS = [['No', 5, 'c'], ['관리업체', 12, 'l'], ['업체명', 30, 'l'], ['정산금액\n(VAT 포함)', 15, 'm'], ['공급가', 13, 'm'], ['세액', 11, 'm'], ['전미수', 13, 'm'], ['송금·토스\n(보낼 돈)', 13, 'm'], ['입금액', 14, 'm'], ['미수', 14, 'm'], ['진행', 14, 'c'], ['입금 상태', 11, 'c'], ['금액 출처', 11, 'c'], ['메모', 30, 'l']];
+  w2.columns = COLS.map(function(c){ return { width: c[1] }; });
+  title(w2, COLS.length, '📋 ' + lab + ' 업체별 정산 리스트', '정산 업체 ' + S.n + '곳 · 청구 ₩' + won0(S.amt) + ' · 입금 ₩' + won0(S.paid) + ' · 미수 ₩' + won0(S.unpaid) + ' · 만든 시각 ' + now);
+  var hr = 5, hrow = w2.getRow(hr); hrow.height = 32;
+  COLS.forEach(function(c, i){ var x = hrow.getCell(i + 1); x.value = c[0]; x.font = font({ bold: true, color: { argb: C.white }, size: 9.5 }); x.fill = fill(C.head); x.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; x.border = { bottom: { style: 'medium', color: { argb: C.accent } } }; });
+  var r = hr + 1, no = 0, grpStart = null, sumRows = [], groups = [];
+  rows.forEach(function(it){ var g = it.group || '(관리업체 없음)'; var last = groups[groups.length - 1]; if (!last || last.g !== g){ last = { g: g, list: [] }; groups.push(last); } last.list.push(it); });
+  var L = function(i){ return w2.getColumn(i).letter; };
+  groups.forEach(function(G){
+    /* 묶음 머리줄 */
+    var gr = w2.getRow(r); w2.mergeCells(r, 1, r, 3); var gc = gr.getCell(1);
+    var gAmt = G.list.reduce(function(s, x){ return s + (x.s.amt || 0); }, 0), gUn = G.list.reduce(function(s, x){ return s + (x.s.unpaid > 0 ? x.s.unpaid : 0); }, 0);
+    gc.value = '■ ' + G.g + '  ·  ' + G.list.length + '곳'; gc.font = font({ bold: true, size: 10.5 }); gc.alignment = { indent: 1, vertical: 'middle' };
+    for (var c = 1; c <= COLS.length; c++){ gr.getCell(c).fill = fill(C.grpBg); gr.getCell(c).border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } } }; }
+    gr.getCell(4).value = gAmt; gr.getCell(4).numFmt = MON; gr.getCell(4).font = font({ bold: true }); gr.getCell(10).value = gUn || null; gr.getCell(10).numFmt = MON; gr.getCell(10).font = font({ bold: true, color: { argb: gUn ? C.red : C.sub } });
+    gr.height = 20; r++;
+    var first = r;
+    G.list.forEach(function(it, k){ no++; var s = it.s, rec = s.rec, stg = lgStage(rec), amt = s.amt != null ? s.amt : null, row = w2.getRow(r), z = k % 2 ? C.zebra : C.white;
+      var status = (amt || s.carry) ? (s.unpaid > 0 ? (s.paid ? '일부 입금' : '미수') : s.unpaid < 0 ? '초과 입금' : '입금 완료') : '-';
+      var vals = [no, it.group || '', it.name, amt, amt != null ? { formula: L(4) + r + '/1.1', result: amt / 1.1 } : null, amt != null ? { formula: L(4) + r + '-' + L(5) + r, result: amt - amt / 1.1 } : null,
+        s.carry || null, +rec.send || null, s.paid || null, { formula: L(7) + r + '+' + L(4) + r + '-' + L(9) + r, result: s.unpaid }, stName[stg], status, s.src || (it.kind === 'x' ? '기타 거래처' : ''), rec.memo || ''];
+      vals.forEach(function(v, i){ var x = row.getCell(i + 1); x.value = v; x.fill = fill(z); x.border = { bottom: thin }; x.font = font(); x.alignment = { vertical: 'middle', horizontal: COLS[i][2] === 'c' ? 'center' : COLS[i][2] === 'm' ? 'right' : 'left', indent: COLS[i][2] === 'l' ? 1 : 0, wrapText: i === 13 };
+        if (COLS[i][2] === 'm') x.numFmt = MON; });
+      row.getCell(3).font = font({ bold: true });
+      row.getCell(4).font = font({ bold: true });
+      var un = row.getCell(10); un.font = font({ bold: true, color: { argb: s.unpaid > 0 ? C.red : s.unpaid < 0 ? 'FF2563EB' : C.grn } });
+      var sc = row.getCell(11); sc.fill = fill(stBg[stg]); sc.font = font({ size: 9, bold: stg === 3, color: { argb: stg === 3 ? C.grn : stg ? 'FF3730A3' : C.sub } });
+      var ps = row.getCell(12); if (status === '미수' || status === '일부 입금'){ ps.fill = fill(C.redBg); ps.font = font({ bold: true, size: 9, color: { argb: C.red } }); } else if (status === '입금 완료'){ ps.fill = fill(C.grnBg); ps.font = font({ bold: true, size: 9, color: { argb: C.grn } }); } else if (status === '초과 입금'){ ps.fill = fill(C.blueBg); ps.font = font({ size: 9, color: { argb: 'FF1D4ED8' } }); }
+      var src = row.getCell(13); src.font = font({ size: 8.5, color: { argb: s.src === '확정본' ? C.grn : s.src === '미확정(초안)' ? C.amb : C.sub } });
+      row.height = 20; r++; });
+    sumRows.push([first, r - 1]);
+  });
+  /* 합계 줄 */
+  var tr = w2.getRow(r); tr.height = 26; w2.mergeCells(r, 1, r, 3); tr.getCell(1).value = '합계  ·  ' + S.n + '곳';
+  [4, 5, 6, 7, 8, 9, 10].forEach(function(c){ var refs = sumRows.map(function(p){ return L(c) + p[0] + ':' + L(c) + p[1]; }).join(','); tr.getCell(c).value = { formula: 'SUM(' + (refs || '0') + ')' }; tr.getCell(c).numFmt = MON; });
+  for (var c2 = 1; c2 <= COLS.length; c2++){ var x = tr.getCell(c2); x.fill = fill(C.head); x.font = font({ bold: true, size: 10.5, color: { argb: C.white } }); x.alignment = { vertical: 'middle', horizontal: c2 >= 4 && c2 <= 10 ? 'right' : 'left', indent: c2 < 4 ? 1 : 0 }; x.border = { top: { style: 'double', color: { argb: C.accent } } }; }
+  tr.getCell(10).font = font({ bold: true, size: 10.5, color: { argb: 'FFFCA5A5' } });
+  w2.autoFilter = { from: { row: hr, column: 1 }, to: { row: r - 1, column: COLS.length } };
+  var nr = r + 2; w2.mergeCells(nr, 1, nr, COLS.length); var note = w2.getCell(nr, 1);
+  note.value = '· 공급가 = 정산금액 ÷ 1.1 · 미수 = 전미수 + 정산금액 − 입금액 · 진행 = ① 정산서 전달 → ② 계산서 발행 → ③ 체크 완료 · 금액 출처: 확정본(✅ 완료 확정) / 미확정(초안) / 거래내역서 / 직접 입력';
+  note.font = font({ size: 8.5, color: { argb: C.sub } }); note.alignment = { wrapText: true }; w2.getRow(nr).height = 28;
+  w2.pageSetup.printTitlesRow = hr + ':' + hr; pageSet(w2, true); w2.pageSetup.printTitlesRow = hr + ':' + hr;
+
+  /* ─── 3) 지출 ─── */
+  var w3 = wb.addWorksheet('지출', { views: [{ state: 'frozen', ySplit: 5, showGridLines: false }], properties: { tabColor: { argb: C.amb } } });
+  w3.columns = [{ width: 12 }, { width: 30 }, { width: 16 }, { width: 10 }, { width: 10 }, { width: 10 }];
+  title(w3, 6, '💸 ' + lab + ' 지출 (계정과목별)', '지출 합계 ₩' + won0(CO.total) + (CO.nEst ? ' · 예상 ' + CO.nEst + '개 ₩' + won0(CO.est) + ' 포함' : ' · 모두 확정') + ' · 수익 ₩' + won0(PF));
+  var h3 = w3.getRow(5); h3.height = 24; ['계정', '항목', '금액', '비율', '구분', '확정'].forEach(function(t, i){ var x = h3.getCell(i + 1); x.value = t; x.font = font({ bold: true, color: { argb: C.white } }); x.fill = fill(C.head); x.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  var r3 = 6, ag = []; CO.rows.forEach(function(c){ var g = ag[ag.length - 1]; if (!g || g.ac !== c.ac){ g = { ac: c.ac, list: [] }; ag.push(g); } g.list.push(c); });
+  ag.forEach(function(g){ var t = g.list.reduce(function(s, x){ return s + x.amount; }, 0), gr = w3.getRow(r3);
+    w3.mergeCells(r3, 1, r3, 2); gr.getCell(1).value = g.ac + '  ' + (LG_ACCT_NAME[g.ac] || '') + '  ·  ' + g.list.length + '개'; gr.getCell(3).value = t; gr.getCell(3).numFmt = MON; gr.getCell(4).value = CO.total ? t / CO.total : 0; gr.getCell(4).numFmt = '0.0%';
+    for (var c = 1; c <= 6; c++){ gr.getCell(c).fill = fill(C.grpBg); gr.getCell(c).font = font({ bold: true }); gr.getCell(c).alignment = { horizontal: c >= 3 ? 'right' : 'left', indent: c < 3 ? 1 : 0 }; } r3++;
+    g.list.forEach(function(c, k){ var row = w3.getRow(r3), z = fill(k % 2 ? C.zebra : C.white);
+      [g.ac, c.name, c.amount, CO.total ? c.amount / CO.total : 0, c.kind, c.ok ? '✔ 확정' : '예상'].forEach(function(v, i){ var x = row.getCell(i + 1); x.value = v; x.fill = z; x.border = { bottom: thin }; x.font = font(i === 0 ? { color: { argb: C.sub }, size: 9 } : {}); x.alignment = { horizontal: i === 2 || i === 3 ? 'right' : i >= 4 ? 'center' : 'left', indent: i < 2 ? 1 : 0 }; });
+      row.getCell(3).numFmt = MON; row.getCell(4).numFmt = '0.0%';
+      row.getCell(6).font = font({ size: 9, bold: true, color: { argb: c.ok ? C.grn : C.amb } }); if (!c.ok) row.getCell(6).fill = fill(C.ambBg); r3++; }); });
+  var t3 = w3.getRow(r3); t3.height = 24; w3.mergeCells(r3, 1, r3, 2); t3.getCell(1).value = '지출 합계'; t3.getCell(3).value = CO.total; t3.getCell(3).numFmt = MON; t3.getCell(4).value = CO.total ? 1 : 0; t3.getCell(4).numFmt = '0.0%';
+  for (var c3 = 1; c3 <= 6; c3++){ var y = t3.getCell(c3); y.fill = fill(C.head); y.font = font({ bold: true, color: { argb: C.white } }); y.alignment = { horizontal: c3 >= 3 ? 'right' : 'left', indent: c3 < 3 ? 1 : 0, vertical: 'middle' }; }
+  pageSet(w3, false);
+
+  /* ─── 4) 세금계산서 정보 ─── */
+  var w4 = wb.addWorksheet('세금계산서 정보', { views: [{ state: 'frozen', ySplit: 5, xSplit: 2, showGridLines: false }], properties: { tabColor: { argb: 'FF0EA5E9' } } });
+  var C4 = [['관리업체', 12], ['업체명', 28], ['사업자번호', 15], ['상호', 24], ['대표', 10], ['사업장 주소', 42], ['업태', 14], ['종목', 16], ['정산서 메일', 26], ['계산서 이메일1', 26], ['계산서 이메일2', 26], ['공급가', 13], ['세액', 11]];
+  w4.columns = C4.map(function(c){ return { width: c[1] }; });
+  title(w4, C4.length, '🧾 ' + lab + ' 세금계산서 발행 정보', '업체 정보(⚙)에 넣은 값 · 빈 칸은 노란색 — 정산관리 업체 줄 ⚙ 에서 채우기');
+  var h4 = w4.getRow(5); h4.height = 24; C4.forEach(function(c, i){ var x = h4.getCell(i + 1); x.value = c[0]; x.font = font({ bold: true, color: { argb: C.white } }); x.fill = fill(C.head); x.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  var r4 = 6; rows.filter(function(r){ return r.kind === 'v' && r.s.amt; }).forEach(function(it, k){ var I = it.I || {}, a = it.s.amt, row = w4.getRow(r4), z = fill(k % 2 ? C.zebra : C.white);
+    [it.group || '', it.name, I.biz, I.corp, I.ceo, I.addr, I.btype, I.bitem, I.mail, I.mail1, I.mail2, Math.round(a / 1.1), Math.round(a - a / 1.1)].forEach(function(v, i){ var x = row.getCell(i + 1); x.value = v || (i >= 11 ? 0 : null); x.fill = (i >= 2 && i <= 9 && i !== 8 && !v) ? fill(C.ambBg) : z; x.border = { bottom: thin }; x.font = font(i === 1 ? { bold: true } : {}); x.alignment = { horizontal: i >= 11 ? 'right' : 'left', indent: i < 11 ? 1 : 0, vertical: 'middle' }; if (i >= 11) x.numFmt = MON; });
+    row.height = 19; r4++; });
+  w4.autoFilter = { from: { row: 5, column: 1 }, to: { row: Math.max(5, r4 - 1), column: C4.length } };
+  pageSet(w4, true);
+
+  wb.calcProperties = { fullCalcOnLoad: true };
+  wb.xlsx.writeBuffer().then(function(buf){ var aEl = document.createElement('a'); aEl.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    aEl.download = '삼자물류정산_' + ym.slice(0, 4) + '년' + ym.slice(5, 7) + '월_리스트.xlsx'; document.body.appendChild(aEl); aEl.click(); setTimeout(function(){ URL.revokeObjectURL(aEl.href); aEl.remove(); }, 2000); toast('🎨 디자인 리스트 내려받음'); })
+    .catch(function(e){ alert('내보내기 실패: ' + ((e && e.message) || e)); console.error(e); });
 }
 /* ── 엑셀로 내보내기: 원래 관리표 열 그대로 ── */
 function lgExport(){
