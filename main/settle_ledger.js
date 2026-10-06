@@ -300,9 +300,9 @@ function lgExportTax(){
   L.sort(function(a, b){ var o = function(r){ return r.I.ord != null ? +r.I.ord : 9000; }; return o(a) - o(b) || a.name.localeCompare(b.name, 'ko', { numeric: true }); });
   if (!L.length){ alert(ymLabel(ym) + ' — 「1 전달완료」 이상이면서 정산금액이 있는 업체가 없습니다.' + (skip.length ? '\n\n아직 전달 전: ' + skip.join(', ') : '')); return; }
   var rows = L.map(function(r){ var I = r.I, sup = Math.round(r.amt / 1.1), tax = Math.round(r.amt) - sup, a = new Array(59);
-    if (!num(I.biz) || !String(I.corp || '').trim() || !String(I.ceo || '').trim() || !String(I.mail1 || '').trim()) bad.push(r.name + ' (' + [!num(I.biz) && '사업자번호', !String(I.corp || '').trim() && '상호', !String(I.ceo || '').trim() && '성명', !String(I.mail1 || '').trim() && '이메일1'].filter(Boolean).join('·') + ')');
+    if (!num(I.biz) || !String(I.corp || '').trim() || !String(I.ceo || '').trim() || !String(I.mail1 || '').trim()) bad.push(r.name + ' (' + [!num(I.biz) && '사업자번호', !String(I.corp || '').trim() && '상호(업체명으로 넣음)', !String(I.ceo || '').trim() && '성명', !String(I.mail1 || '').trim() && '이메일1'].filter(Boolean).join('·') + ')');
     a[0] = '01'; a[1] = date; a[2] = LG_SUP.biz; a[3] = ''; a[4] = LG_SUP.corp; a[5] = LG_SUP.ceo; a[6] = LG_SUP.addr; a[7] = LG_SUP.btype; a[8] = LG_SUP.bitem; a[9] = LG_SUP.mail;
-    a[10] = num(I.biz); a[11] = ''; a[12] = String(I.corp || '').trim(); a[13] = String(I.ceo || '').trim(); a[14] = String(I.addr || '').trim(); a[15] = String(I.btype || '').trim(); a[16] = String(I.bitem || '').trim();
+    a[10] = num(I.biz); a[11] = ''; a[12] = String(I.corp || '').trim() || r.name;   /* 상호가 비면 업체명이라도 — 어느 업체 줄인지 알아보게 (대표님 2026-10-06) */ a[13] = String(I.ceo || '').trim(); a[14] = String(I.addr || '').trim(); a[15] = String(I.btype || '').trim(); a[16] = String(I.bitem || '').trim();
     a[17] = String(I.mail1 || '').trim(); a[18] = String(I.mail2 || '').trim(); a[19] = sup; a[20] = tax; a[21] = '';
     a[22] = String(dd); a[23] = r.item; a[24] = ''; a[25] = ''; a[26] = ''; a[27] = sup; a[28] = tax;
     a[58] = '02'; return a; });
