@@ -541,6 +541,33 @@ function pushLog(entry){
   return dbRef.push(rec);
 }
 
+/* 출고지시(쿠팡)에서 「발주수량대로 입고 잡기」로 이미 입고된 바코드인지 — 최근 30일.
+   같은 물건을 여기서 또 입고하면 재고가 두 번 잡힘 → 경고 문구 반환 (없으면 '') */
+function crossdockWarn(bcList){
+  var since = Date.now() - 30 * 86400000, hit = {};
+  var want = {};
+  bcList.forEach(function(b){ var n = normBarcode(b); if (n) want[n] = 1; });
+  logs.forEach(function(lg){
+    if (lg.source !== 'crossdock' || lg.type !== 'in' || (lg.ts||0) < since) return;
+    var b1 = normBarcode(lg.barcode), b2 = normBarcode(lg.altBarcode);
+    var b = want[b1] ? b1 : (want[b2] ? b2 : '');
+    if (!b) return;
+    var h = hit[b] || (hit[b] = { name: lg.name || b, qty: 0, ts: 0 });
+    h.qty += (+lg.qty || 0);
+    if ((lg.ts||0) > h.ts) h.ts = lg.ts || 0;
+  });
+  var ks = Object.keys(hit);
+  if (!ks.length) return '';
+  var lines = ['⚠ 동시입출고로 이미 입고된 바코드 ' + ks.length + '개 (출고지시 「발주수량대로 입고 잡기」, 최근 30일)'];
+  ks.slice(0, 8).forEach(function(b){
+    var h = hit[b], d = new Date(h.ts);
+    lines.push('  • ' + h.name + ' — ' + (d.getMonth()+1) + '/' + d.getDate() + ' 입고 ' + h.qty + '개');
+  });
+  if (ks.length > 8) lines.push('  … 외 ' + (ks.length - 8) + '개');
+  lines.push('', '같은 물건을 여기서 또 입고하면 재고가 두 번 잡힙니다.');
+  return lines.join('\n');
+}
+
 /* ─────────────── 엑셀 일괄 입고 ─────────────── */
 function handleExcel(file){
   if (!file) return;
@@ -577,6 +604,8 @@ function handleExcel(file){
         });
       }
       if (!entries.length) { setMsg('m0','er','❌ 바코드가 있는 행이 없습니다'); return; }
+      var cdW = crossdockWarn(entries.map(function(en){ return en.barcode; }));
+      if (cdW && !confirm(cdW + '\n\n그래도 엑셀 입고를 진행할까요?')) { setMsg('m0','warn','⚠️ 엑셀 입고 취소 — 동시입출고 중복 확인'); return; }
       /* 세션 표시 — 방금 업로드한 항목이 '최근 작업'에 바로 보이게 */
       entries.forEach(function(en){ markSessionBarcode(en.barcode); });
       /* 일괄 push */
@@ -1558,6 +1587,10 @@ function onScanKey(ev){
   /* 기존 재고에서 메타 찾기 (있으면 메타 동봉) */
   var known = stockGroups.find(function(g){ return normBarcode(g.barcode) === bcNorm; });
   var meta = known && known.meta ? known.meta : {};
+  if (scanMode === 'in') {
+    var cdW = crossdockWarn([val]);
+    if (cdW && !confirm(cdW + '\n\n그래도 입고할까요?')) { flashScan('warn', '입고 취소 — 동시입출고로 이미 입고된 바코드 · ' + escH(val)); return; }
+  }
   var entry = {
     type: scanMode, source:'scan',
     box: meta.box || '', brand: meta.brand || '', code: meta.code || '',

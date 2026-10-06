@@ -226,6 +226,10 @@ tr.cp-row-short td{background:rgba(240,196,74,.03)}
 /* 이대로 확정 버튼 */
 .cp-asis-btn{background:rgba(74,240,168,.1);color:var(--g);border:1px solid rgba(74,240,168,.4);border-radius:5px;font-size:.66rem;font-weight:700;padding:.16rem .45rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
 .cp-asis-btn:hover{background:rgba(74,240,168,.18)}
+/* 동시입출고 — 발주수량대로 입고 잡기 */
+.cp-cd-btn{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.45);border-radius:5px;font-size:.66rem;font-weight:700;padding:.16rem .45rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
+.cp-cd-btn:hover{background:rgba(96,165,250,.2)}
+.cp-cd-badge{display:inline-flex;align-items:center;font-size:.6rem;font-weight:800;color:#60a5fa;background:rgba(96,165,250,.14);border:1px solid rgba(96,165,250,.4);border-radius:4px;padding:.06rem .32rem;margin-left:.32rem;vertical-align:middle;cursor:help;white-space:nowrap}
 /* 확정됨 표시 */
 .cp-chip.asis{background:rgba(124,131,153,.2);color:var(--mu);border:1px solid var(--mu)}
 tr.cp-row-asis td{opacity:.55}
@@ -1364,7 +1368,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <span class="pg-count"><span id="cpPgDone">0</span> / <span id="cpPgTotal">0</span></span>
       <div class="pg-bar"><div class="pg-fill" id="cpPgFill" style="width:0%"></div></div>
       <span id="cpPgHint" style="font-size:.72rem;color:var(--mu)"></span>
-      <button class="cp-asis-btn" id="cpAsIsAllBtn" onclick="cpConfirmAsIsAll()" style="display:none;margin-left:auto" title="남은 부족·없음 행을 모두 이대로 확정 (출고가능한 만큼만 진행)">✓ 전체 이대로</button>
+      <button class="cp-cd-btn" id="cpCdBtn" onclick="cpCrossdockReceive()" style="display:none;margin-left:auto" title="입고와 동시에 출고하는 작업 — 모자란 만큼만 입고로 잡고, 작업 종료 때 덜 나간 수량은 그 입고에서 자동으로 줄임">📥 발주수량대로 입고 잡기</button>
+      <button class="cp-asis-btn" id="cpAsIsAllBtn" onclick="cpConfirmAsIsAll()" style="display:none" title="남은 부족·없음 행을 모두 이대로 확정 (출고가능한 만큼만 진행)">✓ 전체 이대로</button>
     </div>
 
     <div class="items-sec">
@@ -1702,6 +1707,7 @@ var logsRef = null;       /* star_instock/logs — 메타 조회 + 출고 실행
 var allOrders = [];       /* 저장된 지시서 전체 */
 var stockMeta = {};       /* 바코드(normalized) → 가장 최근 in-log 메타 */
 var stockQty = {};        /* 바코드(normalized) → 현재고 (입고합 - 출고합) */
+var crossdockLogs = [];   /* 동시입출고 입고 기록 [{key, lg}] — lg.cdPoAt = 그 발주 업로드 시각, lg.cdSettled = 작업 종료 때 정리됨 */
 var stockBoxes = {};      /* 바코드(normalized) → 이 바코드가 들어있는 박스ID 배열 (입고 기준, 중복 제거) */
 var boxIndex = {};        /* 박스ID(원본 케이스) → { barcode: 입고합계, ... } — 박스 일괄 스캔에 사용 */
 var stockByAlt = {};      /* 정규화된 altBarcode → 원본 barcode (입고 로그 + altMap 병합) */
@@ -1825,10 +1831,12 @@ function attachRefs(){
     var byAlt = {};     /* altBarcode → 원본 barcode (입고 로그 기준) */
     var boxes = {};     /* barcode → Set 처럼 사용할 객체 {boxId: true} */
     var bIdx = {};      /* boxIndex: boxId → { barcode: 누적입고qty } */
+    var cdl = [];       /* 동시입출고로 잡은 입고 기록 */
     Object.keys(v).forEach(function(k){
       var lg = v[k] || {};
       var bc = normBarcode(lg.barcode);
       if (!bc) return;
+      if (lg.source === 'crossdock' && lg.type === 'in') cdl.push({ key: k, lg: lg });
       var q = +lg.qty || 0;
       if (lg.type === 'out') {
         qty[bc] = (qty[bc] || 0) - q;
@@ -1854,6 +1862,7 @@ function attachRefs(){
     Object.keys(boxes).forEach(function(bc){ boxList[bc] = Object.keys(boxes[bc]); });
     stockMeta = byBc;
     stockQty = qty;
+    crossdockLogs = cdl;
     stockBoxes = boxList;
     boxIndex = bIdx;
     try { cpBoxListRender(); } catch(e){}   /* 박스 목록 갱신 */
@@ -2363,6 +2372,11 @@ function cpRender(){
     if (m.matchedVia === 'alt') {
       altBadge = '<span class="cp-alt-badge" title="대체바코드 매칭: 원본 ' + escH(m.matchedBc) + ' 의 재고를 사용">ALT</span>';
     }
+    /* 이 발주로 잡은 동시입고 표시 */
+    var cdBcSet = {}; cdBcSet[normBarcode(m.matchedBc)] = 1;
+    var cdQty = cpCrossdockOpenLogs(cpState.uploadedAt, cdBcSet).filter(function(e){ return normBarcode(e.lg.barcode) === normBarcode(m.matchedBc); })
+                  .reduce(function(s,e){ return s + (+e.lg.qty||0); }, 0);
+    if (cdQty) altBadge += '<span class="cp-cd-badge" title="동시입출고로 잡은 입고 — 작업 종료 때 덜 나간 만큼 자동으로 줄어듦">📥 동시입고 ' + cdQty + '</span>';
     var asIsChip = '';
     var findBtn = '', asIsBtn = '', undoBtn = '';
     if (asIs) {
@@ -2413,6 +2427,14 @@ function cpRender(){
   tb.innerHTML = html;
   cpUpdateSummary(sum);
   cpUpdateProgress(rows.length - pendingCount, rows.length);
+  /* 동시입출고 버튼 — 모자란 재고가 있고 스캔 작업 전일 때만 */
+  var cdBtn = document.getElementById('cpCdBtn');
+  if (cdBtn) {
+    var cdPlan = rows.length && !cpHasActiveSession() ? cpCrossdockPlan() : { items: [] };
+    var cdTot = cdPlan.items.reduce(function(s,x){ return s + x.add; }, 0);
+    cdBtn.style.display = cdPlan.items.length ? '' : 'none';
+    cdBtn.textContent = '📥 발주수량대로 입고 잡기 (' + cdPlan.items.length + '개 상품 · ' + cdTot + '개)';
+  }
 }
 
 /* ── 카운터 카드 active 표시 ── */
@@ -2450,6 +2472,115 @@ function cpConfirmAsIsAll(){
   cpExpandedRow = -1;
   cpSavePersist();
   cpRender();
+}
+/* ═══════════ 동시입출고 — 입고와 동시에 출고하는 작업 ═══════════
+ * ① 「발주수량대로 입고 잡기」: 바코드별 (발주 합계 − 현재고) 만큼만 입고 기록(source:'crossdock') 추가
+ *    → 재고가 발주수량까지만 올라가니 그 이상은 지금처럼 초과로 막힘
+ * ② 작업 종료(cpEndScan) 때: 덜 나간 수량만큼 그 입고 기록의 수량을 줄임 → 이 작업분 재고는 0.
+ *    원래 있던 재고는 건드리지 않음 (이 발주로 잡은 입고 안에서만 줄임) */
+function cpCrossdockPlan(){
+  var groups = {}, order = [], skipped = 0;
+  (cpState.rows || []).forEach(function(r, i){
+    if (cpState.asIs[i]) return;   /* 이대로 확정한 줄은 제외 */
+    var m = cpClassify(r);
+    var bc = normBarcode(m.matchedBc);
+    if (!bc) { skipped++; return; }
+    if (!groups[bc]) { groups[bc] = { bc: bc, need: 0, rows: [], row: r }; order.push(bc); }
+    groups[bc].need += (+r.qty || 0);
+    groups[bc].rows.push(i);
+  });
+  var items = [];
+  order.forEach(function(bc){
+    var g = groups[bc];
+    var have = stockQty[bc] || 0;
+    var add = g.need - Math.max(0, have);
+    if (add <= 0) return;
+    var meta = stockMeta[bc] || {};
+    items.push({ bc: bc, need: g.need, have: have, add: add, rows: g.rows,
+                 name: meta.name || g.row.skuName || '', meta: meta, poRow: g.row });
+  });
+  return { items: items, skipped: skipped };
+}
+function cpCrossdockReceive(){
+  if (!groupId || typeof firebase === 'undefined') { setMsg('cpMsg','er','❌ Firebase 연결 안 됨 — 로그인 확인'); return; }
+  if (!cpState.uploadedAt || !(cpState.rows||[]).length) { setMsg('cpMsg','er','❌ 먼저 발주 엑셀을 업로드하세요'); return; }
+  if (cpHasActiveSession()) { alert('스캔 작업 중에는 입고를 잡을 수 없습니다.\n작업을 종료하거나 일시정지한 뒤 발주 화면에서 다시 눌러주세요.'); return; }
+  var plan = cpCrossdockPlan();
+  if (!plan.items.length) { setMsg('cpMsg','inf','모자란 재고가 없습니다 — 입고로 잡을 것이 없습니다'); return; }
+  var totAdd = plan.items.reduce(function(s,x){ return s + x.add; }, 0);
+  var neg = plan.items.filter(function(x){ return x.have < 0; });
+  var lines = ['📥 발주수량대로 입고 잡기 (동시입출고)', '',
+               '모자란 만큼만 입고로 잡습니다: ' + plan.items.length + '개 상품 · ' + totAdd + '개', ''];
+  plan.items.slice(0, 15).forEach(function(x){
+    lines.push('• ' + (x.name || x.bc) + ' — 발주 ' + x.need + ' · 현재고 ' + x.have + ' → +' + x.add);
+  });
+  if (plan.items.length > 15) lines.push('… 외 ' + (plan.items.length - 15) + '개');
+  if (neg.length) {
+    lines.push('', '⚠ 특이사항: 현재고가 마이너스인 상품 ' + neg.length + '개 — 발주수량만큼만 잡으므로 여전히 부족으로 남습니다');
+    neg.slice(0, 5).forEach(function(x){ lines.push('   ' + (x.name || x.bc) + ' 현재고 ' + x.have); });
+  }
+  if (plan.skipped) lines.push('', '※ 바코드가 없는 줄 ' + plan.skipped + '개는 제외');
+  lines.push('', '작업 종료 때 덜 나간 수량은 이 입고에서 자동으로 줄어듭니다.', '진행할까요?');
+  if (!confirm(lines.join('\n'))) return;
+
+  var base = 'wms_sync/groups/' + groupId + '/star_instock/logs/';
+  var logsBase = firebase.database().ref(base);
+  var by = getUserId(), ts0 = Date.now(), upd = {};
+  plan.items.forEach(function(x, k){
+    var meta = x.meta || {}, r = x.poRow || {};
+    upd[base + logsBase.push().key] = {
+      type: 'in', source: 'crossdock',
+      ts: ts0 + k, by: by,
+      batchId: 'CD' + cpState.uploadedAt,
+      batchName: '동시입출고 ' + (cpState.fileName || ''),
+      box: '',
+      barcode: x.bc,
+      altBarcode: (r.altBarcode || meta.altBarcode || ''),
+      name: x.name, brand: meta.brand || '', code: meta.code || '',
+      color: meta.color || '', size: meta.size || '', origin: meta.origin || '', material: meta.material || '',
+      qty: x.add,
+      note: '동시입출고(입고와 동시에 출고) · ' + (cpState.vendor || '') + ' · ' + (cpState.fileName || ''),
+      cdPoAt: cpState.uploadedAt,
+      cdPoFile: cpState.fileName || '',
+      cdOrigQty: x.add,
+      cdSettled: false
+    };
+  });
+  setMsg('cpMsg','inf','<span>입고 잡는 중...</span>');
+  firebase.database().ref().update(upd).then(function(){
+    setMsg('cpMsg','ok','✓ 동시입출고 입고 ' + plan.items.length + '개 상품 · ' + totAdd + '개 잡음 — 이제 스캔 시작하면 됩니다 (상품 스캔 모드로)');
+  }).catch(function(err){
+    setMsg('cpMsg','er','❌ 입고 잡기 실패: ' + (err && err.message || err));
+  });
+}
+/* 아직 정리 안 된 동시입고 — 이 발주(poAt)로 잡은 것 + (발주를 다시 올려 시각이 바뀐 경우 대비) 이 발주에 있는 바코드 것 */
+function cpCrossdockOpenLogs(poAt, bcSet){
+  return crossdockLogs.filter(function(e){
+    if (e.lg.cdSettled) return false;
+    if (poAt && e.lg.cdPoAt === poAt) return true;
+    return !!(bcSet && bcSet[normBarcode(e.lg.barcode)]);
+  });
+}
+/* 작업 종료 때 정리 계획 — 바코드별 (현재고 − 이번 출고) 가 남으면 그만큼 동시입고에서 줄임 */
+function cpCrossdockSettlePlan(scans, poAt, rows){
+  var bcSet = {};
+  (rows || []).forEach(function(r){ var b = normBarcode(r.srcBarcode); if (b) bcSet[b] = 1; });
+  var open = cpCrossdockOpenLogs(poAt, bcSet);
+  if (!open.length) return [];
+  var shipped = {};
+  scans.forEach(function(s){ var b = normBarcode(s.barcode); if (b) shipped[b] = (shipped[b]||0) + (+s.qty||0); });
+  var byBc = {};
+  open.forEach(function(e){ var b = normBarcode(e.lg.barcode); (byBc[b] = byBc[b] || []).push(e); });
+  var out = [];
+  Object.keys(byBc).forEach(function(b){
+    var left = Math.max(0, (stockQty[b] || 0) - (shipped[b] || 0));   /* 출고 후 남을 재고 */
+    byBc[b].sort(function(a, c){ return (c.lg.ts||0) - (a.lg.ts||0); }).forEach(function(e){
+      var q = +e.lg.qty || 0, red = Math.min(q, left);
+      left -= red;
+      out.push({ key: e.key, bc: b, name: e.lg.name || '', qty: q, reduced: red, newQty: q - red, shipped: shipped[b] || 0 });
+    });
+  });
+  return out;
 }
 function cpUndoAsIs(i){
   if (!cpState.asIs[i]) return;
@@ -3255,7 +3386,17 @@ function cpEndScan(){
   var totalQty = scans.reduce(function(s,x){return s+(+x.qty||0);},0);
   var shipBoxes = (workSession.shipBoxes||[]);
   var ordSummary = '출고 ' + scans.length + '건 · 총 ' + totalQty + '개 · 출고박스 ' + shipBoxes.length + '개 · 파렛트 ' + pallets.length + '개';
-  if (!confirm('이 세션을 종료할까요?\n\n• ' + ordSummary + '\n• 실재고 즉시 차감\n• 저장된 지시서로 변환\n• 다음 단계: 출고적재리스트 인쇄 (E-2)\n\n계속하시겠습니까?')) return;
+  /* 동시입출고 정리 — 덜 나간 수량만큼 이 발주로 잡은 입고를 줄임 */
+  var cdSettle = cpCrossdockSettlePlan(scans, workSession.uploadedAt, workSession.rows);
+  var cdReduced = cdSettle.reduce(function(s,x){ return s + x.reduced; }, 0);
+  var cdLine = '';
+  if (cdSettle.length) {
+    cdLine = '\n• 동시입출고 입고 ' + cdSettle.length + '건 정리' + (cdReduced ? ' — 덜 나간 ' + cdReduced + '개만큼 입고를 줄임' : ' — 전부 출고됨');
+    cdSettle.filter(function(x){ return x.reduced; }).slice(0, 8).forEach(function(x){
+      cdLine += '\n   ' + (x.name || x.bc) + ' 입고 ' + x.qty + ' → ' + x.newQty;
+    });
+  }
+  if (!confirm('이 세션을 종료할까요?\n\n• ' + ordSummary + '\n• 실재고 즉시 차감' + cdLine + '\n• 저장된 지시서로 변환\n• 다음 단계: 출고적재리스트 인쇄 (E-2)\n\n계속하시겠습니까?')) return;
 
   if (!groupId || typeof firebase === 'undefined') { cpFlash('er','❌ Firebase 연결 안 됨'); return; }
 
@@ -3358,6 +3499,17 @@ function cpEndScan(){
   Object.keys(stockUpdates).forEach(function(k){
     bigUpdate['wms_sync/groups/' + groupId + '/star_instock/logs/' + k] = stockUpdates[k];
   });
+  cdSettle.forEach(function(x){
+    var p = 'wms_sync/groups/' + groupId + '/star_instock/logs/' + x.key;
+    bigUpdate[p + '/qty'] = x.newQty;
+    bigUpdate[p + '/cdSettled'] = true;
+    bigUpdate[p + '/cdReduced'] = x.reduced;
+    bigUpdate[p + '/cdOrderId'] = orderId;
+    bigUpdate[p + '/cdSettledAt'] = nowTs;
+  });
+  if (cdSettle.length) orderRec.coupang.crossdock = cdSettle.map(function(x){
+    return { logKey: x.key, barcode: x.bc, name: x.name, inQty: x.qty, reduced: x.reduced, finalQty: x.newQty };
+  });
   bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/orders/' + orderId] = orderRec;
   bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/status'] = 'completed';
   bigUpdate['wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + workSession.sessionId + '/completedAt'] = nowTs;
@@ -3369,7 +3521,9 @@ function cpEndScan(){
   setMsg('cpScanMsg','inf','⏳ 처리 중 — 재고 차감 + 지시서 저장 중...');
   firebase.database().ref().update(bigUpdate).then(function(){
     cpFlash('ok','✓ 작업종료 완료 — 지시서 ' + orderId + ' 생성, 재고 ' + pushedKeys.length + '건 차감');
-    setMsg('cpMsg','ok','✓ 출고 완료 — 저장된 지시서 탭에서 확인. (출고적재리스트 인쇄는 다음 단계)');
+    setMsg('cpMsg','ok','✓ 출고 완료 — 저장된 지시서 탭에서 확인. (출고적재리스트 인쇄는 다음 단계)'
+      + (cdSettle.length ? '<br>📥 동시입출고 정리: ' + cdSettle.length + '건' + (cdReduced ? ' · 덜 나간 ' + cdReduced + '개만큼 입고 줄임 ('
+          + cdSettle.filter(function(x){ return x.reduced; }).map(function(x){ return escH(x.name || x.bc) + ' ' + x.qty + '→' + x.newQty; }).join(', ') + ')' : ' · 전부 출고됨') : ''));
     cpDetachSession();
     cpSetSubView('po');
     cpHideResumeBanner();

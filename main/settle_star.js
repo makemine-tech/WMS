@@ -121,7 +121,7 @@
       if (d < from || d > to || !q || l.source === 'closing' || l.source === 'memo') return;
       var dir = l.type === 'out' ? 'out' : 'in', id, nm, src;
       if (l.coupangSessionId){ id = 'C:' + l.coupangSessionId; var s = sess[l.coupangSessionId] || {}; nm = s.file || ('쿠팡 출고 세션 ' + l.coupangSessionId); src = '쿠팡 출고 작업'; }
-      else if (l.batchId){ id = 'B:' + l.batchId; nm = l.batchName || l.batchId; src = '엑셀 일괄 ' + (dir === 'in' ? '입고' : '출고'); }
+      else if (l.batchId){ id = 'B:' + l.batchId; nm = l.batchName || l.batchId; src = l.source === 'crossdock' ? '동시입출고 입고(출고지시)' : '엑셀 일괄 ' + (dir === 'in' ? '입고' : '출고'); }
       else { id = 'S:' + dir + ':' + d + ':' + (l.source || ''); nm = ({ scan: '바코드 스캔', adjust: '재고 수정(조정)' }[l.source] || (l.source || '기타')) + ' ' + d.slice(5); src = '수동'; }
       var b = B[id] || (B[id] = { id: id, dir: dir, name: nm, src: src, manual: id.charAt(0) === 'S', d0: d, d1: d, items: {}, total: 0, def: 0, n: 0, note: '' });
       if (!b.note && l.note && !l.coupangSessionId) b.note = String(l.note).trim();
