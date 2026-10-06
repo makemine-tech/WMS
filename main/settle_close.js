@@ -34,6 +34,8 @@ var SETTLE_CLOSE = (function(){
     var s = ns(v); if (!s) return; out.push(s);
     var d = s.match(/^(\d{4})[-.\/년](\d{1,2})[-.\/월](\d{1,2})/); if (d) out.push(d[1] + '-' + ('0' + d[2]).slice(-2) + '-' + ('0' + d[3]).slice(-2));
     var g = s.replace(/[^\d]/g, ''); if (g.length >= 8 && g !== s) out.push(g);
+    /* 문장 안 송장번호 (P9 「로켓쉽먼트 전라광주4 · … · 송장 6077486838202」) — 10자리 이상 숫자 덩어리마다 */
+    if (g !== s){ var m2 = s.match(/\d{10,}/g); if (m2) m2.forEach(function(x){ out.push(x); }); }
     if (/^-?[\d,]+(\.\d+)?$/.test(s)) out.push(String(Math.round(+s.replace(/,/g, ''))));
   }
   function keyOf(v){ var t = []; toks(v, t); return t; }
@@ -44,7 +46,7 @@ var SETTLE_CLOSE = (function(){
     finals.forEach(function(f){
       f.wb.SheetNames.forEach(function(sn){
         var a = XLSX.utils.sheet_to_json(f.wb.Sheets[sn], { header: 1, defval: '', raw: true });
-        a.forEach(function(r){ var t = []; r.forEach(function(v){ toks(v, t); }); if (!t.length) return; t.forEach(function(x){ all.add(x); }); rows.push({ f: f, set: new Set(t) }); });
+        a.forEach(function(r){ var t = []; r.forEach(function(v){ toks(v, t); }); if (!t.length) return; t.forEach(function(x){ all.add(x); }); rows.push({ f: f, set: new Set(t), txt: r.map(ns).join('|') }); });
       });
     });
     return { all: all, rows: rows };
@@ -74,10 +76,18 @@ var SETTLE_CLOSE = (function(){
      택배 관련 원본 줄의 날짜가 그 달 마지막 EDGE_DAYS 일 또는 그 달 밖이면 「날짜 편차」로 따로 빼고 남은 것(검증 목록)에 넣지 않음 */
   var EDGE_DAYS = 3, EDGE_DATE = ['송장출력일', '출력일', '배송일', '접수일자', '배달일자', '등록일', '주문일', '일자', '날짜'];
   [0, 1, 2, 3, 4].forEach(function(i){ SRC[i].edge = true; });
+  /* 칸 값 → 'YYYY-MM-DD' — 엑셀 날짜(+시각 46295.6) · 2026-09-30 · 20260930(이벗 택배비 리스트) */
+  function dateOf(v){
+    if (v == null || v === '') return null;
+    if (typeof v === 'number' && v > 40000 && v < 60000) return serialDate(Math.floor(v));
+    var s = ns(v), m8 = s.match(/^(20\d{2})(\d{2})(\d{2})$/);
+    if (m8) return m8[1] + '-' + m8[2] + '-' + m8[3];
+    var d = null; keyOf(v).forEach(function(t){ if (!d && /^\d{4}-\d{2}-\d{2}$/.test(t)) d = t; });
+    return d;
+  }
   function edgeOf(v, ym){
     if (!ym) return false;
-    var d = (typeof v === 'number' && v > 40000 && v < 60000) ? serialDate(Math.floor(v)) : null;   /* 엑셀 날짜+시각(46295.6) */
-    if (!d) keyOf(v).forEach(function(t){ if (!d && /^\d{4}-\d{2}-\d{2}$/.test(t)) d = t; });
+    var d = dateOf(v);
     if (!d) return false;
     if (d.slice(0, 7) !== ym) return d;
     var last = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate();
@@ -87,30 +97,56 @@ var SETTLE_CLOSE = (function(){
      → { groups:[{src, label, gk, name, total, miss, sample[], ign}], total, used, ignored, missing } */
   function check(inp){
     var IX = indexFinals(inp.finals), G = {}, ign = inp.ignore || {};
+    /* 지난달 확정본 — 지난달 말일 송장이 이번 달 우체국 청구에 들어옴(접수일자 9/1) → 지난달 이미 청구 (대표님 2026-10-06) */
+    var IXP = (inp.prevFinals && inp.prevFinals.length) ? indexFinals(inp.prevFinals) : null;
+    /* 이벗 전체주문목록으로 송장번호마다 사정 — 취소(전부 취소 = 출고 안 됨) · 교환/오배송(다시 보낸 것, 청구 안 함) · 브론테(PDF 정산) */
+    var EB = {};
+    (inp.sources || []).forEach(function(s){ if (s.type !== 'ebut_orders') return;
+      table(s.wb, ['송장번호', '고객사'], null).forEach(function(T){
+        var iS = T.head.indexOf('송장번호'), iSt = T.head.indexOf('상태'), iG = T.head.indexOf('구분'), iP = T.head.indexOf('판매처');
+        T.rows.forEach(function(r){ var k = ns(r[iS]); if (!k) return; var e = EB[k] || (EB[k] = { n: 0, cancel: 0, exch: false, bronte: false });
+          e.n++; if (iSt >= 0 && /취소/.test(ns(r[iSt]))) e.cancel++;
+          if (iG >= 0 && /오배송|교환|재발송/.test(ns(r[iG]))) e.exch = true;
+          if (iP >= 0 && /브론테/.test(ns(r[iP]))) e.bronte = true; }); }); });
+    /* 확정본에 없을 때 빼는 이유 (남은 것에 안 셈) — 없으면 false */
+    var whyOut = function(D, kk, r, iD){
+      if (IXP && kk.some(function(t){ return IXP.all.has(t); })) return '지난달 확정본에 있음';
+      var e = null; kk.some(function(t){ return (e = EB[t]); });
+      if (e && e.bronte) return '브론테 정산(PDF)';
+      if (e && e.exch) return '교환·오배송 재발송';
+      if (e && e.cancel && e.cancel === e.n && /^ebut_/.test(D.type)) return '이벗 취소(출고 안 됨)';
+      if (/반품/.test(D.label) && /^70/.test(kk[0] || '')) return '반품(원송장 지난달·확인만)';
+      return iD != null && iD.length ? edgeOf(iD.map(function(i){ return r[i]; }).filter(function(v){ return v !== '' && v != null; })[0], inp.ym) : false;
+    };
     var add = function(src, label, name, hit, sample, owner, edge){
       var gk = (src + '|' + (name || '(이름 없음)')).replace(/[.#$\/\[\]]/g, '_');
       var g = G[gk] || (G[gk] = { src: src, label: label, gk: gk, name: name || '(이름 없음)', total: 0, miss: 0, sample: [], owner: owner || null, edge: 0, edgeSample: [] });
       g.total++; if (hit) return;
-      if (edge){ g.edge++; if (g.edgeSample.length < 30) g.edgeSample.push(sample + ' (' + edge + ')'); return; }   /* 날짜 편차 — 남은 것에 안 셈 */
+      if (edge){ g.edge++; if (g.edgeSample.length < 30) g.edgeSample.push(sample + ' (' + edge + ')');   /* 날짜 편차·자동 제외 — 남은 것에 안 셈 */
+        var wk = /^d{4}-d{2}-d{2}$/.test(edge) ? '날짜 편차(월말·월초)' : edge; g.why = g.why || {}; g.why[wk] = (g.why[wk] || 0) + 1; return; }
       g.miss++; if (g.sample.length < 30) g.sample.push(sample); };
     var seen = {};
     (inp.sources || []).forEach(function(s){
       SRC.forEach(function(D){ if (D.type !== s.type) return;
         table(s.wb, D.need, D.sheet).forEach(function(T){
           var iK = T.head.indexOf(D.key), gi = (D.grp || []).map(function(c){ return T.head.indexOf(c); }).filter(function(i){ return i >= 0; })[0];
-          var iD = D.edge ? EDGE_DATE.map(function(c){ return T.head.indexOf(c); }).filter(function(i){ return i >= 0; })[0] : -1;
+          var iD = D.edge ? EDGE_DATE.map(function(c){ return T.head.indexOf(c); }).filter(function(i){ return i >= 0; }) : null;   /* 날짜 칸 후보 전부 — 빈 칸이면 다음 칸 */
           T.rows.forEach(function(r){ var k = ns(r[iK]); if (!k || /합계|소계/.test(k)) return;
             var kk = keyOf(r[iK]), uk = D.label + '|' + kk[kk.length - 1]; if (seen[uk]) return; seen[uk] = 1;   /* 같은 번호 여러 줄(주문 여러 개) = 한 건 */
             var hit = kk.some(function(t){ return IX.all.has(t); });
-            var edge = !hit && iD != null && iD >= 0 ? edgeOf(r[iD], inp.ym) : false;
+            var edge = hit ? false : whyOut(D, kk, r, iD);
             add(D.label, D.label, gi != null && gi >= 0 ? String(r[gi] || '').trim() : s.name, hit, k, D.owner, edge); });
         }); });
     });
-    /* 화물·용차 청구서: 같은 줄에 날짜 + 금액(합계·부가세 포함) */
+    /* 화물·용차 청구서: 같은 줄에 금액(합계·부가세 포함) + 날짜 또는 도착지 글자
+       — HK홀세일 「하남화물비 180,000 … 김포 대포리 → 하남시 풍산동」처럼 날짜 칸이 일(10)만 있어도 */
     (inp.freight || []).forEach(function(r){
       var d = keyOf(r.d)[1] || keyOf(r.d)[0], a = Math.round(+r.amt || 0), e = Math.round(+r.etc || 0), amts = [a, a + e, Math.round(a * 1.1), Math.round((a + e) * 1.1)].map(String);
-      var hit = !a || IX.rows.some(function(x){ return x.set.has(d) && amts.some(function(m){ return x.set.has(m); }); });
-      add('화물·용차 청구서', '화물·용차 청구서', r.vendor, hit, r.d + ' ' + (r.from || '') + (r.to ? '→' + r.to : '') + ' ' + a.toLocaleString('ko-KR') + '원', r.vendor);
+      var to = ns(r.to);
+      var hit = !a || IX.rows.some(function(x){ return amts.some(function(m){ return x.set.has(m); }) && (x.set.has(d) || (to.length >= 3 && x.txt.indexOf(to) >= 0)); });
+      /* 우리 회사(메이크마인디자인) 자체 퀵·용차 = 어느 업체에도 청구 안 함 (대표님 2026-10-06) */
+      var self = !hit && /^((주)|㈜)?메이크마인(디자인)?(㈜|(주))?$/.test(ns(r.vendor)) ? '자체 비용(메이크마인디자인)' : false;
+      add('화물·용차 청구서', '화물·용차 청구서', r.vendor, hit, r.d + ' ' + (r.from || '') + (r.to ? '→' + r.to : '') + ' ' + a.toLocaleString('ko-KR') + '원', r.vendor, self);
     });
     /* 입출고 화물관리: 그 업체 확정본에 그 날짜 줄 */
     var KN = { parcel: '택배출고', in: '입고', out: '출고', ret: '반품양품화', etc: '기타' };
@@ -181,7 +217,7 @@ function closePanelHtml(){
     var miss = S.groups.filter(function(g){ return g.miss && !g.ign; }).sort(function(a, b){ return b.miss - a.miss; }), ig = S.groups.filter(function(g){ return g.miss && g.ign; });
     var bySrc = {}; S.groups.forEach(function(g){ var b = bySrc[g.src] || (bySrc[g.src] = { t: 0, m: 0 }); b.t += g.total; if (!g.ign) b.m += g.miss; });
     rh += '<div class="cp-pct" style="color:' + (S.pct >= 100 ? 'var(--g)' : '#fbbf24') + '">' + S.pct + '<small>%</small></div>'
-      + '<div class="sm">원본 ' + S.total.toLocaleString() + '건 · 확정본에 있음 ' + S.used.toLocaleString() + ' · 청구 대상 아님 ' + S.ignored.toLocaleString() + (S.edge ? ' · 📅 날짜 편차 ' + S.edge.toLocaleString() : '') + ' · <b style="color:' + (S.missing ? '#f87171' : 'var(--g)') + '">남음 ' + S.missing.toLocaleString() + '</b>'
+      + '<div class="sm">원본 ' + S.total.toLocaleString() + '건 · 확정본에 있음 ' + S.used.toLocaleString() + ' · 청구 대상 아님 ' + S.ignored.toLocaleString() + (S.edge ? ' · 📅 날짜 편차·자동 제외 ' + S.edge.toLocaleString() : '') + ' · <b style="color:' + (S.missing ? '#f87171' : 'var(--g)') + '">남음 ' + S.missing.toLocaleString() + '</b>'
       + ' <span class="dim">· 확정본 ' + R.nFinals + '개 · 검증 ' + esc(ftime(R.at)) + '</span> <button class="btn" style="padding:.2rem .6rem" onclick="closeRun()">다시 검증</button></div>'
       + '<div class="sm dim" style="margin:.3rem 0 .5rem">' + Object.keys(bySrc).map(function(k){ return esc(k) + ' ' + (bySrc[k].t - bySrc[k].m).toLocaleString() + '/' + bySrc[k].t.toLocaleString(); }).join(' · ') + '</div>'
       + (R.noFile.length ? '<div class="sm" style="color:#fbbf24">⚠️ 원본 파일을 못 읽음: ' + esc(R.noFile.join(', ')) + '</div>' : '')
@@ -229,9 +265,11 @@ function closeMemoSave(src, name, el){
 function closeEdgeHtml(groups){
   var E = groups.filter(function(g){ return g.edge; }).sort(function(a, b){ return b.edge - a.edge; });
   if (!E.length) return '';
-  var n = E.reduce(function(s, g){ return s + g.edge; }, 0);
-  return '<details style="margin-top:.5rem"><summary class="sm" style="cursor:pointer;color:#93c5fd">📅 날짜 편차(월말·월초) ' + n.toLocaleString() + '건 · ' + E.length + '묶음 — 검증 목록에서 뺌 '
-    + '<span class="dim">(그 달 마지막 ' + SETTLE_CLOSE.EDGE_DAYS + '일 또는 그 달 밖 날짜 = 이벗 송장은 이번 달·우체국 청구는 다음 달처럼 서로 어긋나는 건)</span></summary>'
+  var n = E.reduce(function(s, g){ return s + g.edge; }, 0), W = {};
+  E.forEach(function(g){ Object.keys(g.why || {}).forEach(function(k){ W[k] = (W[k] || 0) + g.why[k]; }); });
+  return '<details style="margin-top:.5rem"><summary class="sm" style="cursor:pointer;color:#93c5fd">📅 날짜 편차·자동 제외 ' + n.toLocaleString() + '건 · ' + E.length + '묶음 — 검증 목록에서 뺌 '
+    + '<span class="dim">(' + Object.keys(W).map(function(k){ return esc(k) + ' ' + W[k]; }).join(' · ') + ')</span></summary>'
+    + '<div class="sm dim" style="padding:.2rem .3rem">날짜 편차 = 그 달 마지막 ' + SETTLE_CLOSE.EDGE_DAYS + '일 또는 그 달 밖 · 지난달 확정본에 있음 = 지난달 말일 송장이 이번 달 우체국 청구로 넘어온 것 · 이벗 취소 = 송장만 붙고 출고 안 됨 · 교환·오배송 재발송 · 브론테 = PDF 정산 · 반품 7077/7097 = 원송장 확인만 · 자체 비용 = 메이크마인디자인 퀵·용차</div>'
     + E.map(function(g){ return '<div class="sm" style="padding:.25rem .3rem;line-height:1.6"><b>' + esc(g.src) + '</b> · ' + esc(g.name) + ' <span class="pill">' + g.edge.toLocaleString() + '건</span><br><span class="dim">'
       + g.edgeSample.map(esc).join(' · ') + (g.edge > g.edgeSample.length ? ' … 외 ' + (g.edge - g.edgeSample.length) + '건' : '') + '</span></div>'; }).join('') + '</details>';
 }
@@ -251,7 +289,7 @@ function closePromptText(){
   var withMemo = L.filter(function(x){ return closeMemoOf(x.g); }).length;
   var out = ['정산관리 ' + ymLabel(ym) + ' 마감 무결성 검증(' + src + ') 결과야. 원본 자료 중 어느 업체 확정본에도 안 들어간 묶음과 내가 적은 「빠진 이유」 메모야.',
     '메모를 보고 묶음마다 처리해 줘: 업체 룰(main/settle_engine_*.js)에 반영할 건 반영해서 다음 초안부터 들어가게, 청구 대상이 아닌 건 그렇게 정리하고, 메모가 없거나 애매한 건 나한테 하나씩 물어봐.',
-    '날짜 편차(월말·월초, 그 달 마지막 ' + SETTLE_CLOSE.EDGE_DAYS + '일·그 달 밖)는 검증에서 이미 뺐어.', '',
+    '날짜 편차(월말·월초, 그 달 마지막 ' + SETTLE_CLOSE.EDGE_DAYS + '일·그 달 밖)와 자동 제외(지난달 확정본에 있음·이벗 취소·교환오배송·브론테·반품 70…·자체 비용)는 검증에서 이미 뺐어.', '',
     '묶음 ' + L.length + '개 · 메모 ' + withMemo + '개', ''];
   L.forEach(function(x, i){ var g = x.g, m = closeMemoOf(g);
     out.push((i + 1) + '. [' + x.kind + '] ' + g.src + ' · ' + g.name + ' — ' + x.n + '건' + (g.total !== x.n ? ' / 전체 ' + g.total : '') + (x.own ? ' · 주인 업체 ' + x.own : (g.owner ? ' · 주인 업체 ' + g.owner : '')));
@@ -290,12 +328,19 @@ function closeLoad(ym, msg){
   var dec = function(m){ return getBytes(m.path).then(function(ab){ return WMS2FA.decrypt(m.path, m.iv, ab); }).then(function(b){ return XLSX.read(b, { type: 'array', dense: true }); }); };
   var box = ALLBOX[ym] || {}, fin = Object.keys(box).filter(function(id){ var m = box[id]; return m.type === 'statement' && m.final && !m.superseded; });
   var srcTypes = {}; SETTLE_CLOSE.SRC.forEach(function(d){ srcTypes[d.type] = 1; });
-  var srcIds = Object.keys(box).filter(function(id){ return srcTypes[box[id].type]; }), out = { finals: [], sources: [], noFile: [] }, i = 0;
-  var n = fin.length + srcIds.length;
+  var srcIds = Object.keys(box).filter(function(id){ return srcTypes[box[id].type]; }), out = { finals: [], sources: [], noFile: [], prevFinals: [] }, i = 0;
+  /* 지난달 확정본(없으면 지난달 정산서) — 지난달 말일 송장이 이번 달 우체국 청구로 넘어온 건 찾기 */
+  var py = +ym.slice(0, 4), pm = +ym.slice(5, 7) - 1; if (!pm){ pm = 12; py--; }
+  var pym = py + '-' + String(pm).padStart(2, '0'), pbox = ALLBOX[pym] || {};
+  var pst = Object.keys(pbox).filter(function(id){ var m = pbox[id]; return m.type === 'statement' && !m.superseded; });
+  var pfin = pst.filter(function(id){ return pbox[id].final; }); if (!pfin.length) pfin = pst;
+  var n = fin.length + srcIds.length + pfin.length;
   return fin.reduce(function(p, id){ return p.then(function(){ msg('확정본 여는 중 ' + (++i) + '/' + n + ' — ' + box[id].name);
     return dec(box[id]).then(function(wb){ out.finals.push({ name: box[id].name, vendor: SETTLE_STMT.vendorFromFile(box[id].name), wb: wb }); }).catch(function(){ out.noFile.push(box[id].name); }); }); }, Promise.resolve())
   .then(function(){ return srcIds.reduce(function(p, id){ return p.then(function(){ msg('원본 여는 중 ' + (++i) + '/' + n + ' — ' + box[id].name);
     return dec(box[id]).then(function(wb){ out.sources.push({ type: box[id].type, name: box[id].name, wb: wb }); }).catch(function(){ out.noFile.push(box[id].name); }); }); }, Promise.resolve()); })
+  .then(function(){ return pfin.reduce(function(p, id){ return p.then(function(){ msg('지난달 확정본 여는 중 ' + (++i) + '/' + n + ' — ' + pbox[id].name);
+    return dec(pbox[id]).then(function(wb){ out.prevFinals.push({ name: pbox[id].name, vendor: SETTLE_STMT.vendorFromFile(pbox[id].name), wb: wb }); }).catch(function(){}); }); }, Promise.resolve()); })
   .then(function(){
     out.fr = []; Object.keys((FREIGHT || {})[ym] || {}).forEach(function(fid){ var F = FREIGHT[ym][fid] || {}, ch = F.chk || {};
       (F.rows || []).forEach(function(r, k){ out.fr.push({ d: r.d, from: r.from, to: r.to, amt: frFinal(r, ch[k]), etc: r.etc, vendor: frVendor(r, ch[k]) }); }); });
@@ -311,7 +356,7 @@ function closeRun(){
     finals = L.finals; noFile = L.noFile; var sources = L.sources, fr = L.fr, cg = L.cg;
     msg('맞춰 보는 중…');
     return new Promise(function(res){ setTimeout(res, 30); }).then(function(){
-      var R = SETTLE_CLOSE.check({ ym: ym, finals: finals, sources: sources, freight: fr, cargo: cg, ignore: CLOSE_IGN });
+      var R = SETTLE_CLOSE.check({ ym: ym, finals: finals, prevFinals: L.prevFinals, sources: sources, freight: fr, cargo: cg, ignore: CLOSE_IGN });
       R.nFinals = finals.length; R.noFile = noFile; R.at = Date.now(); CLOSE.res = R;
       if (!finals.length) CLOSE.err = ymLabel(ym) + ' 완료 확정본이 없습니다';
     });
@@ -394,7 +439,7 @@ function preRun(withDrafts){
     window.decryptBox = origDec;
     msg('맞춰 보는 중…');
     return new Promise(function(res){ setTimeout(res, 30); }).then(function(){
-      var base = { ym: ym, sources: L.sources, freight: L.fr, cargo: L.cg, ignore: CLOSE_IGN };
+      var base = { ym: ym, prevFinals: L.prevFinals, sources: L.sources, freight: L.fr, cargo: L.cg, ignore: CLOSE_IGN };
       var R1 = SETTLE_CLOSE.check(Object.assign({ finals: L.finals }, base));
       var R2 = drafts.length ? SETTLE_CLOSE.check(Object.assign({ finals: L.finals.concat(drafts) }, base)) : R1;
       PRE.res = { R1: R1, R2: R2, nFinals: L.finals.length, nDrafts: drafts.length, dErr: dErr, noFile: L.noFile, at: Date.now() };
@@ -413,7 +458,7 @@ function preHtml(){
   var S = P.R2, B = P.B, sum = function(L){ return L.reduce(function(s, x){ return s + (x.n || 0); }, 0); };
   var left = sum(B.red) + sum(B.yel) + sum(B.wait) + sum(B.none), pct = S.total ? Math.floor((S.total - left) / S.total * 1000) / 10 : 100;
   h += '<div class="cp-pct" style="color:' + (pct >= 100 ? 'var(--g)' : '#fbbf24') + '">' + pct + '<small>%</small></div>'
-    + '<div class="sm">원본 ' + S.total.toLocaleString() + '건' + (S.edge ? ' · 📅 날짜 편차 ' + S.edge.toLocaleString() + '(뺌)' : '') + ' · 확정본 ' + P.nFinals + '개' + (P.nDrafts ? ' + 초안 ' + P.nDrafts + '개' : ' (초안 비교 안 함)') + ' · ' + esc(ftime(P.at))
+    + '<div class="sm">원본 ' + S.total.toLocaleString() + '건' + (S.edge ? ' · 📅 날짜 편차·자동 제외 ' + S.edge.toLocaleString() + '(뺌)' : '') + ' · 확정본 ' + P.nFinals + '개' + (P.nDrafts ? ' + 초안 ' + P.nDrafts + '개' : ' (초안 비교 안 함)') + ' · ' + esc(ftime(P.at))
     + ' <button class="btn" style="padding:.2rem .6rem" onclick="preRun(' + (P.nDrafts ? 'true' : 'false') + ')">다시</button>' + (P.nDrafts ? '' : ' <button class="btn" style="padding:.2rem .6rem" onclick="preRun(true)">초안까지</button>') + '</div>'
     + (P.dErr.length ? '<div class="sm" style="color:#fbbf24">⚠️ 초안을 못 만든 업체: ' + esc(P.dErr.join(', ')) + '</div>' : '')
     + (P.noFile.length ? '<div class="sm" style="color:#fbbf24">⚠️ 못 읽은 파일: ' + esc(P.noFile.join(', ')) + '</div>' : '');

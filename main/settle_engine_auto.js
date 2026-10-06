@@ -100,10 +100,12 @@
           var L2 = learn(T, ['판매처']), L3 = Object.keys(L2).length ? null : LC;
           return readAll(ctx, 'ebut_orders').then(function(F){
             if (!F.length){ log.push(['확인 필요', '시트 「' + s.name + '」 — 이벗 전체주문목록이 파일함에 없음, 지난달 그대로']); return; }
-            var rows = [], heads = null, seen = {};
+            var rows = [], heads = null, seen = {}, nCancel = 0;
             F.forEach(function(f){ var D = aoaOf(f.wb, ['판매처', '송장번호']); if (!D) return; heads = heads || D.heads; var H = D.heads.map(ns), iS = H.indexOf('판매처'), iC = H.indexOf('고객사');
-              var iM = H.indexOf('매칭상품명');
+              var iM = H.indexOf('매칭상품명'), iSt = H.indexOf('상태');
               D.rows.forEach(function(r){ var sv = ns(r[iS]), cv = ns(r[iC]);
+                /* 이벗 상태 「취소」 = 송장만 붙고 출고 안 됨 → 청구 목록에서 뺌 (대표님 2026-10-06) */
+                if (iSt >= 0 && /취소/.test(ns(r[iSt]))){ if (hit(sv) || hit(cv)) nCancel++; return; }
                 var mine = L3 == null ? L2['판매처\u0001' + sv] : (Object.keys(L3).length ? L3['고객사\u0001' + cv] : (hit(sv) || hit(cv)));
                 if (mine && L3 == null && Object.keys(LC).length && !LC['고객사\u0001' + cv]) mine = false;
                 if (mine && Object.keys(LP).length && iM >= 0 && !LP[pre(r[iM])]) mine = false;
@@ -112,6 +114,7 @@
             var rs = replaceSheet(wb, s.name, heads, rows);
             log.push([rows.length ? '자동 적용' : '특이사항', '시트 「' + s.name + '」 ← 이벗 주문 ' + rows.length + '줄 (지난달 ' + (L3 == null ? '판매처 ' + Object.keys(L2).map(function(x){ return x.split('\u0001')[1]; }).slice(0, 4).join('·') : '고객사 기준') + (Object.keys(LP).length ? ' · 상품 ' + Object.keys(LP).slice(0, 4).join('·') : '') + ')' + (rows.length ? '' : ' — 이번 달 0줄')]);
             if (rows.length) log.push(['특이사항', '시트 「' + s.name + '」 — 오른쪽 계산 열(공급가 등)은 지난달 수식이 줄 수만큼 따라오지 않을 수 있음, 금액 확인']);
+            if (nCancel) log.push(['안내', '시트 「' + s.name + '」 — 이벗 상태 「취소」 ' + nCancel + '줄은 뺌 (송장만 붙고 출고 안 됨)']);
             rs.warn.forEach(function(w){ log.push(['확인 필요', '시트 「' + s.name + '」 — ' + w]); });
           });
         }
