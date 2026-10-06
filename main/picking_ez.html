@@ -1678,6 +1678,14 @@ function stampSeq(page, box, img, size) {
     width: size.w, height: size.h
   });
 }
+/* 선택 전체 출력: 송장 오른쪽 끝 위쪽에 세로로 '전체 n / N' (한 묶음 전체 기준 순번) */
+function stampTotal(page, box, img, size, topMm) {
+  page.drawImage(img, {
+    x: box.W_PT - 3 * MM_PT - size.w,
+    y: box.origH + (topMm || 0) * MM_PT - 3 * MM_PT - size.h,
+    width: size.w, height: size.h
+  });
+}
 
 /* ─────────────── 인쇄 공통 유틸 ─────────────── */
 /* 카드 element 한 개에서 invNum/pages 추출. 박제된 dataset 사용. */
@@ -1764,12 +1772,18 @@ function buildPdfFromPages(pages, cb, errCb, opts) {
           var s = seq[pg] || { n: i + 1, total: list.length };
           return seqPng(boxLabel(boxes[pg]) + (kinds[pg] ? kinds[pg] + '종 ' : ''), s.n + ' / ' + s.total + (opts.reprint ? ' (재출력)' : ''));
         });
-        return Promise.all([out.copyPages(src, list)].concat(labels.map(function(l){ return out.embedPng(l.url); })))
+        /* opts.overall: 선택 전체 출력 → 위쪽에 묶음 전체 순번 '전체 1 / 1000' */
+        var totals = opts.overall ? list.map(function(pg, i){
+          return seqPng('전체 ', (i + 1) + ' / ' + list.length);
+        }) : [];
+        var n = labels.length;
+        return Promise.all([out.copyPages(src, list)].concat(labels.concat(totals).map(function(l){ return out.embedPng(l.url); })))
           .then(function(r){
             var ps = r[0];
             ps.forEach(function(p, i){
               var box = cropToInvoice(p, topMm);
               stampSeq(p, box, r[i + 1], labels[i]);
+              if (totals.length) stampTotal(p, box, r[n + i + 1], totals[i], topMm);
               out.addPage(p);
             });
             return out.save();
@@ -1858,7 +1872,7 @@ function reprintPages(batch, label) {
       var w=window.open(url,'_blank');
       if(w) w.onload=function(){w.print();setTimeout(function(){URL.revokeObjectURL(url);},3000);};
     }
-  }, null, { reprint: true,
+  }, null, { reprint: true, overall: true,
              /* 묶음 재출력도 그룹(카드)별로 순번 */
              segments: batch.batches ? batch.batches.map(function(b){ return b.pages || []; }) : null });
 }
@@ -1929,7 +1943,7 @@ function printChecked() {
       }
     }, function(e){ pkReleasePrint(allClaimed); msg.className='msg er';msg.textContent='❌ '+e.message;},
        /* 순번은 선택한 그룹(카드)별로 1부터 */
-       { segments: kept.map(function(k){ return k.pages; }) });
+       { segments: kept.map(function(k){ return k.pages; }), overall: true });
   });
 }
 
