@@ -273,13 +273,13 @@ function lgExportMenu(btn){
   m.style.cssText = 'position:fixed;z-index:9500;top:' + (r.bottom + 4) + 'px;left:' + Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px;width:290px;background:var(--s1);border:1px solid var(--br);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45);padding:.35rem';
   var it = function(ic, t, d, fn){ return '<button class="btn" style="display:block;width:100%;text-align:left;margin:.15rem 0;padding:.5rem .6rem;line-height:1.35" onclick="document.getElementById(\'lgExMenu\').remove();' + fn + '()"><b>' + ic + ' ' + t + '</b><br><span class="sm dim">' + d + '</span></button>'; };
   m.innerHTML = it('🎨', '디자인 리스트', '요약 카드 · 업체별 정산(묶음·소계·상태 색) · 지출 · 세금계산서 정보 — 보기 좋게', 'lgExportDesign')
-    + it('🧾', '세금계산서 일괄발행 양식', '「1 전달완료」 이상 업체만 · 홈택스 엑셀 업로드 양식(.xls) 그대로 7행부터', 'lgExportTax')
+    + it('🧾', '세금계산서 일괄발행 양식', '진행 「1 전달완료」 업체만 (계산서발행·체크완료 = 이미 발행이라 뺌) · 홈택스 엑셀 업로드 양식(.xls) 그대로 7행부터', 'lgExportTax')
     + it('📋', '관리표 모양 그대로', '원래 00_삼자물류정산관리 엑셀의 색·열 그대로', 'lgExportXl');
   document.body.appendChild(m);
   setTimeout(function(){ document.addEventListener('click', function off(e){ if (!m.contains(e.target) && e.target !== btn){ m.remove(); document.removeEventListener('click', off); } }); }, 0);
 }
 /* ═══ 🧾 세금계산서 일괄발행 양식 (대표님 2026-10-06) ═══
-   홈택스 엑셀 업로드 양식(main/tpl/tax_invoice_form.xls = 8월 양식에서 업체 줄만 지운 것)을 그대로 두고 7행부터 「1 전달완료」 이상 업체를 채움
+   홈택스 엑셀 업로드 양식(main/tpl/tax_invoice_form.xls = 8월 양식에서 업체 줄만 지운 것)을 그대로 두고 7행부터 진행이 「1 전달완료」인 업체만 채움 (2 계산서발행·3 체크완료 = 이미 발행 → 중복 발행 막으려고 뺌, 대표님 2026-10-06)
    (settle_taxform.js 가 .xls 를 직접 고침 — 색·칸 모양·안내 시트 그대로)
    공급자 = 메이크마인디자인 고정 · 작성일자 = 그 달 말일 · 공급가액 = 정산금액(VAT 포함) ÷ 1.1 반올림 · 세액 = 정산금액 − 공급가액 · 영수/청구 = 02(청구) */
 var LG_SUP = { biz: 1198694602, corp: '메이크마인디자인주식회사', ceo: '박경우', addr: '경기도 김포시 양촌읍 황금3로7번길 42 1층', btype: '서비스업', bitem: '기타도급(운수/일반창고업)', mail: 'dmzoot@hanmail.net' };
@@ -289,16 +289,18 @@ function lgTaxItem(vk, I){ I = I || LINFO[vk] || {}; return I.titem || LG_TAX_IT
 function lgExportTax(){
   if (typeof SETTLE_TAXFORM === 'undefined' || typeof XLSX === 'undefined' || !XLSX.CFB){ alert('양식 도구를 아직 못 불러왔습니다 — 잠시 뒤 다시 눌러 주세요'); return; }
   var ym = lgYM(), V = monthVendors(ym), X = LEXTRA[ym] || {}, y = +ym.slice(0, 4), m = +ym.slice(5, 7), dd = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  var date = ym.slice(0, 4) + ym.slice(5, 7) + String(dd).padStart(2, '0'), L = [], skip = [], bad = [];
+  var date = ym.slice(0, 4) + ym.slice(5, 7) + String(dd).padStart(2, '0'), L = [], skip = [], done = [], bad = [];
   var num = function(v){ var d = String(v == null ? '' : v).replace(/\D/g, ''); return d ? (d.length <= 15 ? +d : d) : ''; };
   V.forEach(function(v){ var s = lgState('v', v.vk, ym, 0, v.name), I = LINFO[v.vk] || {};
     if (v.skip || !s.amt) return;
-    if (lgStage(s.rec) < 1){ skip.push(v.name); return; }
+    var stg = lgStage(s.rec);
+    if (stg < 1){ skip.push(v.name); return; }
+    if (stg >= 2){ done.push(v.name); return; }   /* 이미 계산서 발행 → 중복 발행 막기 */
     L.push({ name: v.name, I: I, amt: s.amt, item: lgTaxItem(v.vk, I) }); });
   Object.keys(X).forEach(function(id){ var x = X[id], s = lgState('x', id, ym, 0);   /* 기타 거래처는 사업자번호를 넣은 곳만 */
-    if (!s.amt || lgStage(x) < 1 || !x.biz) return; L.push({ name: x.name || '', I: x, amt: s.amt, item: x.titem || '포장재 외' }); });
+    if (!s.amt || lgStage(x) !== 1 || !x.biz) return; L.push({ name: x.name || '', I: x, amt: s.amt, item: x.titem || '포장재 외' }); });
   L.sort(function(a, b){ var o = function(r){ return r.I.ord != null ? +r.I.ord : 9000; }; return o(a) - o(b) || a.name.localeCompare(b.name, 'ko', { numeric: true }); });
-  if (!L.length){ alert(ymLabel(ym) + ' — 「1 전달완료」 이상이면서 정산금액이 있는 업체가 없습니다.' + (skip.length ? '\n\n아직 전달 전: ' + skip.join(', ') : '')); return; }
+  if (!L.length){ alert(ymLabel(ym) + ' — 진행이 「1 전달완료」이면서 정산금액이 있는 업체가 없습니다.' + (done.length ? '\n\n이미 계산서 발행(2·3단계): ' + done.join(', ') : '') + (skip.length ? '\n\n아직 전달 전: ' + skip.join(', ') : '')); return; }
   var rows = L.map(function(r){ var I = r.I, sup = Math.round(r.amt / 1.1), tax = Math.round(r.amt) - sup, a = new Array(59);
     if (!num(I.biz) || !String(I.corp || '').trim() || !String(I.ceo || '').trim() || !String(I.mail1 || '').trim()) bad.push(r.name + ' (' + [!num(I.biz) && '사업자번호', !String(I.corp || '').trim() && '상호(업체명으로 넣음)', !String(I.ceo || '').trim() && '성명', !String(I.mail1 || '').trim() && '이메일1'].filter(Boolean).join('·') + ')');
     a[0] = '01'; a[1] = date; a[2] = LG_SUP.biz; a[3] = ''; a[4] = LG_SUP.corp; a[5] = LG_SUP.ceo; a[6] = LG_SUP.addr; a[7] = LG_SUP.btype; a[8] = LG_SUP.bitem; a[9] = LG_SUP.mail;
@@ -306,9 +308,10 @@ function lgExportTax(){
     a[17] = String(I.mail1 || '').trim(); a[18] = String(I.mail2 || '').trim(); a[19] = sup; a[20] = tax; a[21] = '';
     a[22] = String(dd); a[23] = r.item; a[24] = ''; a[25] = ''; a[26] = ''; a[27] = sup; a[28] = tax;
     a[58] = '02'; return a; });
-  var msg = ymLabel(ym) + ' 세금계산서 일괄발행 양식 — ' + rows.length + '건 (「1 전달완료」 이상)\n작성일자 ' + date + ' · 공급가액 합계 ' + won0(rows.reduce(function(s, a){ return s + a[19]; }, 0)) + ' · 세액 ' + won0(rows.reduce(function(s, a){ return s + a[20]; }, 0));
+  var msg = ymLabel(ym) + ' 세금계산서 일괄발행 양식 — ' + rows.length + '건 (진행 「1 전달완료」만)\n작성일자 ' + date + ' · 공급가액 합계 ' + won0(rows.reduce(function(s, a){ return s + a[19]; }, 0)) + ' · 세액 ' + won0(rows.reduce(function(s, a){ return s + a[20]; }, 0));
   if (rows.length > 100) msg += '\n\n⚠ 양식은 100건까지 — 앞 100건만 넣습니다';
   if (bad.length) msg += '\n\n⚠ 필수 정보가 빈 업체 ' + bad.length + '곳 (업체 줄 ⚙ 에서 채우기):\n  ' + bad.join('\n  ');
+  if (done.length) msg += '\n\n이미 계산서 발행(2 계산서발행·3 체크완료)이라 뺀 업체 ' + done.length + '곳: ' + done.join(', ');
   if (skip.length) msg += '\n\n아직 전달 전이라 뺀 업체 ' + skip.length + '곳: ' + skip.join(', ');
   if (!confirm(msg + '\n\n내려받을까요?')) return;
   fetch('/tpl/tax_invoice_form.xls', { cache: 'no-store' }).then(function(r){ if (!r.ok) throw new Error('양식 파일 ' + r.status); return r.arrayBuffer(); })
