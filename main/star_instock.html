@@ -91,6 +91,16 @@ h1 em{color:var(--g);font-style:normal}
 .cell-stock{text-align:right;font-family:var(--mo);font-weight:900;font-size:1rem}
 .cell-stock.zero{color:var(--mu)}
 .cell-stock.neg{color:var(--r)}
+/* 재고 칸 눌러 입출고 기록 */
+td.cell-stock.hist{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
+#histModal{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.65);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto}
+#histModal .hm-box{background:var(--s1,#151a24);border:1px solid var(--br);border-radius:12px;width:min(760px,100%);padding:1rem 1.1rem;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+#histModal table{width:100%;border-collapse:collapse;font-size:.82rem}
+#histModal th{position:sticky;top:0;background:#0f141d;color:var(--mu);font-weight:700;text-align:left;padding:.45rem .5rem;border-bottom:1px solid var(--br);white-space:nowrap}
+#histModal td{padding:.4rem .5rem;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+#histModal td.n{text-align:right;font-family:var(--mo);white-space:nowrap}
+#histModal .hm-scroll{max-height:60vh;overflow:auto;border:1px solid var(--br);border-radius:8px;margin-top:.6rem}
 .cell-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cell-note{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mu);font-size:.74rem}
 .cell-note:not(:empty)::before{content:'';display:none}
@@ -1546,7 +1556,7 @@ function renderStock(){
       '<td class="cell-box">'+escH(g.boxList.join(', '))+'</td>'+
       '<td class="cell-num" style="color:var(--b)">'+g.inQty+'</td>'+
       '<td class="cell-num" style="color:var(--r)">'+g.outQty+'</td>'+
-      '<td class="cell-stock '+stockCls+'">'+g.stock+'</td>'+
+      '<td class="cell-stock hist '+stockCls+'" title="눌러서 입출고 기록 보기" onclick="openStockHistory(\''+escH(normBarcode(g.barcode))+'\')">'+g.stock+'</td>'+
       '<td class="cell-num" style="color:'+((g.defQty||0)>0?'#ff6b6b':'var(--mu)')+'">'+(g.defQty||0)+'</td>'+
       '<td class="cell-note" title="'+escH(note)+'">'+escH(note)+'</td>'+
     '</tr>';
@@ -1558,6 +1568,46 @@ function renderStock(){
       '검색이나 「최근 작업」 모드로 좁혀 보세요.</td></tr>';
   }
 }
+
+/* ─────────────── 재고 칸 → 그 바코드 입출고 기록 (대표님 2026-10-06) ───────────────
+   입출고일 / 수량(+입고 −출고) / 잔량재고(그 시점까지 누계) / 비고 — 최근 것이 위 */
+function openStockHistory(bc){
+  var g = stockGroups.filter(function(x){ return normBarcode(x.barcode) === bc; })[0], m = (g && g.meta) || {};
+  var L = logs.filter(function(lg){ return normBarcode(lg.barcode) === bc; }).slice().sort(function(a, b){ return (a.ts||0) - (b.ts||0); });
+  var SRC = { excel: '엑셀', scan: '스캔', adjust: '재고 수정', memo: '메모', closing: '마감', 'coupang-out': '쿠팡 출고', crossdock: '동시입출고' };
+  var bal = 0, rows = L.map(function(lg){
+    var q = +lg.qty || 0, out = lg.type === 'out';
+    bal += out ? -q : q;
+    var tags = [];
+    if (SRC[lg.source] || lg.source) tags.push(SRC[lg.source] || lg.source);
+    if (lg.box) tags.push('박스 ' + lg.box);
+    if (+lg.defQty) tags.push('불량 ' + lg.defQty);
+    if (lg.batchName && lg.source !== 'crossdock') tags.push(lg.batchName);
+    return { ts: lg.ts || 0, q: q, out: out, bal: bal, note: (lg.note == null ? '' : String(lg.note).trim()), tags: tags, by: lg.by || '' };
+  }).reverse();
+  var inT = 0, outT = 0; L.forEach(function(lg){ var q = +lg.qty || 0; if (lg.type === 'out') outT += q; else inT += q; });
+  var old = document.getElementById('histModal'); if (old) old.remove();
+  var ov = document.createElement('div'); ov.id = 'histModal';
+  ov.innerHTML = '<div class="hm-box">'
+    + '<div style="display:flex;align-items:flex-start;gap:.6rem"><div style="flex:1;min-width:0">'
+    + '<div style="font-size:1.02rem;font-weight:900">📒 입출고 기록 — <span style="font-family:var(--mo)">' + escH(g ? g.barcode : bc) + '</span></div>'
+    + '<div style="color:var(--mu);font-size:.8rem;margin-top:.2rem">' + escH([m.name, m.code, m.color, m.size].filter(Boolean).join(' · ')) + '</div></div>'
+    + '<button class="btn btn-s" onclick="document.getElementById(\'histModal\').remove()">닫기</button></div>'
+    + '<div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.6rem;font-size:.82rem">'
+    + '<span>입고 <b style="color:var(--b)">' + inT + '</b></span><span>출고 <b style="color:var(--r)">' + outT + '</b></span>'
+    + '<span>현재고 <b style="color:var(--g);font-size:.95rem">' + (inT - outT) + '</b></span><span style="color:var(--mu)">기록 ' + L.length + '건 · 최근 것이 위</span></div>'
+    + '<div class="hm-scroll"><table><thead><tr><th>입출고일</th><th style="text-align:right">수량</th><th style="text-align:right">잔량재고</th><th>비고</th></tr></thead><tbody>'
+    + (rows.length ? rows.map(function(r){
+        var qs = r.q === 0 ? '<span style="color:var(--mu)">0</span>' : r.out ? '<span style="color:var(--r);font-weight:800">−' + r.q + '</span>' : '<span style="color:var(--b);font-weight:800">+' + r.q + '</span>';
+        return '<tr><td style="white-space:nowrap;font-family:var(--mo);font-size:.78rem">' + escH(fmtDt(r.ts).slice(0, 16)) + '<div style="color:var(--mu);font-size:.7rem">' + (r.q === 0 ? '기록' : r.out ? '출고' : '입고') + '</div></td>'
+          + '<td class="n">' + qs + '</td><td class="n" style="font-weight:800;color:' + (r.bal < 0 ? 'var(--r)' : 'var(--tx)') + '">' + r.bal + '</td>'
+          + '<td>' + (r.note ? escH(r.note) : '') + (r.tags.length ? '<div style="color:var(--mu);font-size:.72rem">' + escH(r.tags.join(' · ')) + (r.by ? ' · ' + escH(String(r.by).split('@')[0]) : '') + '</div>' : '') + '</td></tr>'; }).join('')
+      : '<tr><td colspan="4" style="text-align:center;color:var(--mu);padding:1.2rem">기록 없음</td></tr>')
+    + '</tbody></table></div></div>';
+  ov.addEventListener('click', function(e){ if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape'){ var h = document.getElementById('histModal'); if (h) h.remove(); } });
 
 /* ─────────────── 입출고 스캔 ─────────────── */
 function setMode(m){
