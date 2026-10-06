@@ -219,6 +219,15 @@
               var lb = ns(st.getCell('B' + r).value) || ns(st.getCell('C' + r).value);   /* B·C 병합이면 같은 글자가 두 번 */
               for (var q = log.length - 1; q >= 0; q--) if (/피벗 계산이라|직접 입력|지난달 .* 그대로/.test(log[q][1]) && String(log[q][1]).replace(/\s+/g, '').indexOf(lb) === 0) log.splice(q, 1); };
             if (!isRet) stRow(st, function(b){ return !!sizeOf(b) && !/반품/.test(b); }).forEach(function(r){ setG(r, sizeOf(ns(st.getCell('B' + r).value) + ns(st.getCell('C' + r).value))); });
+            /* 도서행(제주·도서 추가운임, 값 400 등) 칸이 있으면 → 거래명세표 「제주도」(항공·도서) 줄 = 도서행이 찬 건수 (2026-10-06 대표님) */
+            var dc = -1; nws.getRow(T.H).eachCell(function(c, n){ if (ns(c.value) === '도서행') dc = n; });
+            if (!isRet && dc > 0){
+              var iDs = H2.indexOf('도서행'), nIs = rows.filter(function(r){ var v = String(r[iDs] == null ? '' : r[iDs]).trim(); return v !== '' && v !== '0'; }).length;
+              var DL = nws.getColumn(dc).letter, dref = "'" + s.name + "'!" + DL + (T.H + 1) + ':' + DL + (T.H + Math.max(rows.length, 1));
+              var jr = stRow(st, function(b){ return /제주|도서|항공/.test(b) && !/반품/.test(b); });
+              jr.forEach(function(r){ var g = st.getCell('G' + r); g.value = { formula: 'COUNTIF(' + dref + ',"<>")-COUNTIF(' + dref + ',0)', result: nIs }; g.style = Object.assign({}, g.style, { fill: NOFILL }); });
+              if (nIs) log.push([jr.length ? '자동 적용' : '확인 필요', '도서행(제주) ' + nIs + '건' + (jr.length ? ' → 거래명세표 「' + (ns(st.getCell('B' + jr[0]).value) || ns(st.getCell('C' + jr[0]).value)) + '」' : ' — 거래명세표에 제주도 줄이 없음, 직접 넣기')]);
+            }
             else { var rr2 = stRow(st, function(b){ return /반품/.test(b) && !/타택배/.test(b); });
               rr2.forEach(function(r){ var b = ns(st.getCell("B" + r).value) + ns(st.getCell("C" + r).value), z = /극소/.test(b) ? '극소' : /\(소\)|소$/.test(b) ? '소' : /\(중\)|중$/.test(b) ? '중' : /\(대\)|대$/.test(b) ? '대' : null; if (rr2.length > 1 && !z) return; setG(r, rr2.length > 1 ? z : null); }); }
           });
