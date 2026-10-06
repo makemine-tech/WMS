@@ -69,23 +69,41 @@ var SETTLE_CLOSE = (function(){
     { type: 'star_row',      label: '스타 작업 엑셀 · 입고·이관', key: '바코드', need: ['바코드', '수량'], grp: null, owner: '스타인터내셔널(쿠팡대행)' }
   ];
   SRC[2].owner = '포인트나인크루';
+  /* 날짜 편차(월말·월초) — 대표님 2026-10-06: 이벗은 송장 출력 즉시 기록되지만 우체국 택배비는 배송 완료 뒤 청구 →
+     월말(예: 31일 1000건) 송장은 이번 달 주문목록엔 있어도 택배비 청구는 다음 달, 반대로 지난달 말 송장이 이번 달 청구에 들어옴.
+     택배 관련 원본 줄의 날짜가 그 달 마지막 EDGE_DAYS 일 또는 그 달 밖이면 「날짜 편차」로 따로 빼고 남은 것(검증 목록)에 넣지 않음 */
+  var EDGE_DAYS = 3, EDGE_DATE = ['송장출력일', '출력일', '배송일', '접수일자', '배달일자', '등록일', '주문일', '일자', '날짜'];
+  [0, 1, 2, 3, 4].forEach(function(i){ SRC[i].edge = true; });
+  function edgeOf(v, ym){
+    if (!ym) return false;
+    var d = (typeof v === 'number' && v > 40000 && v < 60000) ? serialDate(Math.floor(v)) : null;   /* 엑셀 날짜+시각(46295.6) */
+    if (!d) keyOf(v).forEach(function(t){ if (!d && /^\d{4}-\d{2}-\d{2}$/.test(t)) d = t; });
+    if (!d) return false;
+    if (d.slice(0, 7) !== ym) return d;
+    var last = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate();
+    return +d.slice(8, 10) > last - EDGE_DAYS ? d : false;
+  }
   /* in = { finals:[{name, vendor, wb}], sources:[{type, name, wb}], freight:[{d, amt, etc, vendor, item}], cargo:[{date, kind, vendor, aj, etc}], ignore:{src:{gk:{why}}} }
      → { groups:[{src, label, gk, name, total, miss, sample[], ign}], total, used, ignored, missing } */
   function check(inp){
     var IX = indexFinals(inp.finals), G = {}, ign = inp.ignore || {};
-    var add = function(src, label, name, hit, sample, owner){
+    var add = function(src, label, name, hit, sample, owner, edge){
       var gk = (src + '|' + (name || '(이름 없음)')).replace(/[.#$\/\[\]]/g, '_');
-      var g = G[gk] || (G[gk] = { src: src, label: label, gk: gk, name: name || '(이름 없음)', total: 0, miss: 0, sample: [], owner: owner || null });
-      g.total++; if (!hit){ g.miss++; if (g.sample.length < 30) g.sample.push(sample); } };
+      var g = G[gk] || (G[gk] = { src: src, label: label, gk: gk, name: name || '(이름 없음)', total: 0, miss: 0, sample: [], owner: owner || null, edge: 0, edgeSample: [] });
+      g.total++; if (hit) return;
+      if (edge){ g.edge++; if (g.edgeSample.length < 30) g.edgeSample.push(sample + ' (' + edge + ')'); return; }   /* 날짜 편차 — 남은 것에 안 셈 */
+      g.miss++; if (g.sample.length < 30) g.sample.push(sample); };
     var seen = {};
     (inp.sources || []).forEach(function(s){
       SRC.forEach(function(D){ if (D.type !== s.type) return;
         table(s.wb, D.need, D.sheet).forEach(function(T){
           var iK = T.head.indexOf(D.key), gi = (D.grp || []).map(function(c){ return T.head.indexOf(c); }).filter(function(i){ return i >= 0; })[0];
+          var iD = D.edge ? EDGE_DATE.map(function(c){ return T.head.indexOf(c); }).filter(function(i){ return i >= 0; })[0] : -1;
           T.rows.forEach(function(r){ var k = ns(r[iK]); if (!k || /합계|소계/.test(k)) return;
             var kk = keyOf(r[iK]), uk = D.label + '|' + kk[kk.length - 1]; if (seen[uk]) return; seen[uk] = 1;   /* 같은 번호 여러 줄(주문 여러 개) = 한 건 */
             var hit = kk.some(function(t){ return IX.all.has(t); });
-            add(D.label, D.label, gi != null && gi >= 0 ? String(r[gi] || '').trim() : s.name, hit, k, D.owner); });
+            var edge = !hit && iD != null && iD >= 0 ? edgeOf(r[iD], inp.ym) : false;
+            add(D.label, D.label, gi != null && gi >= 0 ? String(r[gi] || '').trim() : s.name, hit, k, D.owner, edge); });
         }); });
     });
     /* 화물·용차 청구서: 같은 줄에 날짜 + 금액(합계·부가세 포함) */
@@ -109,11 +127,11 @@ var SETTLE_CLOSE = (function(){
   }
   function sKeyC(s){ return String(s || '').replace(/[.#$\/\[\]]/g, '_') || '_'; }
   function summarize(groups){
-    var t = 0, u = 0, ig = 0, mi = 0;
-    groups.forEach(function(g){ t += g.total; if (g.ign){ ig += g.miss; u += g.total - g.miss; } else { u += g.total - g.miss; mi += g.miss; } });
-    return { groups: groups, total: t, used: u, ignored: ig, missing: mi, pct: t ? Math.floor((u + ig) / t * 1000) / 10 : 100 };
+    var t = 0, u = 0, ig = 0, mi = 0, ed = 0;
+    groups.forEach(function(g){ var e = g.edge || 0; t += g.total; ed += e; if (g.ign){ ig += g.miss; u += g.total - g.miss - e; } else { u += g.total - g.miss - e; mi += g.miss; } });
+    return { groups: groups, total: t, used: u, ignored: ig, missing: mi, edge: ed, pct: t ? Math.floor((u + ig + ed) / t * 1000) / 10 : 100 };
   }
-  return { check: check, summarize: summarize, sKeyC: sKeyC, SRC: SRC };
+  return { check: check, summarize: summarize, sKeyC: sKeyC, SRC: SRC, EDGE_DAYS: EDGE_DAYS };
 })();
 
 /* ───────── 화면 ───────── */
@@ -163,15 +181,17 @@ function closePanelHtml(){
     var miss = S.groups.filter(function(g){ return g.miss && !g.ign; }).sort(function(a, b){ return b.miss - a.miss; }), ig = S.groups.filter(function(g){ return g.miss && g.ign; });
     var bySrc = {}; S.groups.forEach(function(g){ var b = bySrc[g.src] || (bySrc[g.src] = { t: 0, m: 0 }); b.t += g.total; if (!g.ign) b.m += g.miss; });
     rh += '<div class="cp-pct" style="color:' + (S.pct >= 100 ? 'var(--g)' : '#fbbf24') + '">' + S.pct + '<small>%</small></div>'
-      + '<div class="sm">원본 ' + S.total.toLocaleString() + '건 · 확정본에 있음 ' + S.used.toLocaleString() + ' · 청구 대상 아님 ' + S.ignored.toLocaleString() + ' · <b style="color:' + (S.missing ? '#f87171' : 'var(--g)') + '">남음 ' + S.missing.toLocaleString() + '</b>'
+      + '<div class="sm">원본 ' + S.total.toLocaleString() + '건 · 확정본에 있음 ' + S.used.toLocaleString() + ' · 청구 대상 아님 ' + S.ignored.toLocaleString() + (S.edge ? ' · 📅 날짜 편차 ' + S.edge.toLocaleString() : '') + ' · <b style="color:' + (S.missing ? '#f87171' : 'var(--g)') + '">남음 ' + S.missing.toLocaleString() + '</b>'
       + ' <span class="dim">· 확정본 ' + R.nFinals + '개 · 검증 ' + esc(ftime(R.at)) + '</span> <button class="btn" style="padding:.2rem .6rem" onclick="closeRun()">다시 검증</button></div>'
       + '<div class="sm dim" style="margin:.3rem 0 .5rem">' + Object.keys(bySrc).map(function(k){ return esc(k) + ' ' + (bySrc[k].t - bySrc[k].m).toLocaleString() + '/' + bySrc[k].t.toLocaleString(); }).join(' · ') + '</div>'
       + (R.noFile.length ? '<div class="sm" style="color:#fbbf24">⚠️ 원본 파일을 못 읽음: ' + esc(R.noFile.join(', ')) + '</div>' : '')
       + (miss.length ? '<div class="cp-h" style="margin-top:.6rem">남은 것 ' + miss.length + '묶음 <span class="dim">— 누락이면 그 업체 정산을 고쳐 다시 확정, 아니면 「청구 대상 아님」</span></div>' + miss.map(closeGrpHtml).join('') : '<div class="sm" style="color:var(--g);margin-top:.4rem">✔ 남은 것 없음</div>')
-      + (ig.length ? '<details style="margin-top:.5rem"><summary class="sm dim" style="cursor:pointer">청구 대상 아님으로 뺀 묶음 ' + ig.length + '개</summary>' + ig.map(closeGrpHtml).join('') + '</details>' : '');
+      + (ig.length ? '<details style="margin-top:.5rem"><summary class="sm dim" style="cursor:pointer">청구 대상 아님으로 뺀 묶음 ' + ig.length + '개</summary>' + ig.map(closeGrpHtml).join('') + '</details>' : '')
+      + closeEdgeHtml(S.groups);
     R.S = S;
   }
   rh += '</div>';
+  if (!c) rh += closePromptBar();
   var okV = !left.length, okR = R && R.S && R.S.missing === 0;
   var fh = '<div class="cp-sec" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">'
     + '<button class="btn p" ' + (okV && okR ? '' : 'disabled') + ' onclick="closeConfirm()">🔒 ' + esc(ymLabel(YM)) + ' 정산 마감확정</button>'
@@ -184,7 +204,76 @@ function closeGrpHtml(g){
     + (g.ign ? ' <span class="sm dim">청구 대상 아님: ' + esc(g.ign.why || '') + '</span>' : '')
     + '<span style="margin-left:auto"></span>' + (g.ign ? '<button class="btn" style="padding:.15rem .55rem" onclick="event.preventDefault();closeIgnore(\'' + gk + '\',false)">빼기 취소</button>'
       : '<button class="btn" style="padding:.15rem .55rem" onclick="event.preventDefault();closeIgnore(\'' + gk + '\',true)">청구 대상 아님</button>') + '</summary>'
-    + '<div class="sm dim" style="padding:.3rem .2rem .5rem;line-height:1.7">' + g.sample.map(esc).join(' · ') + (g.miss > g.sample.length ? ' … 외 ' + (g.miss - g.sample.length) + '건' : '') + '</div></details>';
+    + '<div class="sm dim" style="padding:.3rem .2rem .5rem;line-height:1.7">' + g.sample.map(esc).join(' · ') + (g.miss > g.sample.length ? ' … 외 ' + (g.miss - g.sample.length) + '건' : '') + '</div>'
+    + closeMemoInput(g) + '</details>';
+}
+/* ── 묶음별 메모 (대표님 2026-10-06): 왜 빠졌는지 적어 두면 「클로드 명령 프롬프트」로 한꺼번에 룰 반영 ──
+   settlement/closeMemo/{ym}/{원본종류}/{묶음} = { memo, at, by } */
+var CLOSE_MEMO = {};
+function closeMemoOf(g){ return (((CLOSE_MEMO[YM] || {})[SETTLE_CLOSE.sKeyC(g.src)] || {})[SETTLE_CLOSE.sKeyC(g.name)] || {}).memo || ''; }
+function closeMemoInput(g){
+  var m = closeMemoOf(g);
+  return '<div style="display:flex;gap:.4rem;align-items:center;padding:0 .2rem .55rem"><span class="sm" style="white-space:nowrap">📝 빠진 이유</span>'
+    + '<input type="text" value="' + esc(m) + '" placeholder="예: 월말 송장이라 다음 달 청구 · 샘플 발송 · ○○ 업체 정산에 넣어야 함 · 룰에서 판매처 빠짐" '
+    + 'style="flex:1;min-width:0;padding:.3rem .5rem;border:1px solid ' + (m ? 'var(--g)' : 'var(--br,#2a3142)') + ';border-radius:5px;background:transparent;color:inherit;font-size:.78rem" '
+    + 'onclick="event.stopPropagation()" onkeydown="if(event.key===\'Enter\')this.blur()" '
+    + 'onchange="closeMemoSave(\'' + esc(g.src).replace(/'/g, "\\'") + '\',\'' + esc(g.name).replace(/'/g, "\\'") + '\',this)"></div>';
+}
+function closeMemoSave(src, name, el){
+  var v = String(el.value || '').trim();
+  db.ref('settlement/closeMemo/' + YM + '/' + SETTLE_CLOSE.sKeyC(src) + '/' + SETTLE_CLOSE.sKeyC(name))
+    .set(v ? { memo: v, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' } : null)
+    .then(function(){ el.style.borderColor = v ? 'var(--g)' : ''; toast(v ? '📝 메모 저장' : '메모 지움'); });
+}
+/* 날짜 편차(월말·월초) 묶음 — 남은 것에서 뺀 건들을 접어서 보여 줌 */
+function closeEdgeHtml(groups){
+  var E = groups.filter(function(g){ return g.edge; }).sort(function(a, b){ return b.edge - a.edge; });
+  if (!E.length) return '';
+  var n = E.reduce(function(s, g){ return s + g.edge; }, 0);
+  return '<details style="margin-top:.5rem"><summary class="sm" style="cursor:pointer;color:#93c5fd">📅 날짜 편차(월말·월초) ' + n.toLocaleString() + '건 · ' + E.length + '묶음 — 검증 목록에서 뺌 '
+    + '<span class="dim">(그 달 마지막 ' + SETTLE_CLOSE.EDGE_DAYS + '일 또는 그 달 밖 날짜 = 이벗 송장은 이번 달·우체국 청구는 다음 달처럼 서로 어긋나는 건)</span></summary>'
+    + E.map(function(g){ return '<div class="sm" style="padding:.25rem .3rem;line-height:1.6"><b>' + esc(g.src) + '</b> · ' + esc(g.name) + ' <span class="pill">' + g.edge.toLocaleString() + '건</span><br><span class="dim">'
+      + g.edgeSample.map(esc).join(' · ') + (g.edge > g.edgeSample.length ? ' … 외 ' + (g.edge - g.edgeSample.length) + '건' : '') + '</span></div>'; }).join('') + '</details>';
+}
+/* ── 🤖 클로드 명령 프롬프트 — 남은 묶음 + 메모를 한 번에 붙여 넣을 명령문으로 ── */
+function closePromptBar(){
+  var has = (CLOSE.res && CLOSE.ym === YM) || (PRE.res && PRE.ym === YM && PRE.res.B);
+  return '<div class="cp-sec" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap"><button class="btn p" ' + (has ? '' : 'disabled') + ' onclick="closePromptOpen()">🤖 클로드 명령 프롬프트 만들기</button>'
+    + '<span class="sm dim">' + (has ? '남은 묶음마다 📝 빠진 이유를 적은 뒤 누르면, 대화창에 그대로 붙여 넣을 명령문이 만들어집니다 (룰 반영·청구 대상 아님 처리를 한꺼번에)' : '사전검증 또는 마감검증을 먼저 돌리세요') + '</span></div>';
+}
+function closePromptText(){
+  var ym = YM, L = [], src;
+  if (CLOSE.res && CLOSE.ym === ym){ src = '② 마감검증'; var S = SETTLE_CLOSE.summarize(CLOSE.res.groups);
+    S.groups.filter(function(g){ return g.miss; }).sort(function(a, b){ return b.miss - a.miss; }).forEach(function(g){ L.push({ g: g, n: g.miss, s: g.sample, ign: g.ign, kind: g.ign ? '청구 대상 아님' : '남음' }); });
+  } else if (PRE.res && PRE.ym === ym && PRE.res.B){ src = '🧪 사전검증'; var B = PRE.res.B, K = { red: '🔴 확정본 누락 의심', yel: '🟡 빠질 가능성', wait: '⏳ 아직 정산 전', none: '⚫ 주인 없음', ign: '청구 대상 아님' };
+    Object.keys(K).forEach(function(k){ (B[k] || []).forEach(function(x){ L.push({ g: x.g, n: x.n || x.g.miss, s: x.s || x.g.sample, ign: x.ign, kind: K[k], own: (x.own || []).map(function(v){ return v.name; }).join('·') }); }); });
+  }
+  var withMemo = L.filter(function(x){ return closeMemoOf(x.g); }).length;
+  var out = ['정산관리 ' + ymLabel(ym) + ' 마감 무결성 검증(' + src + ') 결과야. 원본 자료 중 어느 업체 확정본에도 안 들어간 묶음과 내가 적은 「빠진 이유」 메모야.',
+    '메모를 보고 묶음마다 처리해 줘: 업체 룰(main/settle_engine_*.js)에 반영할 건 반영해서 다음 초안부터 들어가게, 청구 대상이 아닌 건 그렇게 정리하고, 메모가 없거나 애매한 건 나한테 하나씩 물어봐.',
+    '날짜 편차(월말·월초, 그 달 마지막 ' + SETTLE_CLOSE.EDGE_DAYS + '일·그 달 밖)는 검증에서 이미 뺐어.', '',
+    '묶음 ' + L.length + '개 · 메모 ' + withMemo + '개', ''];
+  L.forEach(function(x, i){ var g = x.g, m = closeMemoOf(g);
+    out.push((i + 1) + '. [' + x.kind + '] ' + g.src + ' · ' + g.name + ' — ' + x.n + '건' + (g.total !== x.n ? ' / 전체 ' + g.total : '') + (x.own ? ' · 주인 업체 ' + x.own : (g.owner ? ' · 주인 업체 ' + g.owner : '')));
+    out.push('   번호 예: ' + (x.s || []).slice(0, 8).join(', ') + (x.n > 8 ? ' …' : ''));
+    if (x.ign) out.push('   청구 대상 아님 이유: ' + (x.ign.why || ''));
+    out.push('   📝 메모: ' + (m || '(없음)'));
+  });
+  return out.join('\n');
+}
+function closePromptOpen(){
+  var t = closePromptText(), ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = '<div style="background:var(--s1,#151a24);border:1px solid var(--br,#2a3142);border-radius:10px;max-width:860px;width:100%;max-height:90vh;display:flex;flex-direction:column;padding:1rem;gap:.6rem">'
+    + '<div style="display:flex;align-items:center;gap:.5rem"><b>🤖 클로드 명령 프롬프트</b><span class="sm dim">복사해서 클로드 대화창에 붙여 넣으세요</span><button class="btn" style="margin-left:auto" id="cpPromptX">닫기</button></div>'
+    + '<textarea id="cpPromptT" style="flex:1;min-height:50vh;width:100%;box-sizing:border-box;padding:.7rem;border-radius:7px;border:1px solid var(--br,#2a3142);background:transparent;color:inherit;font-size:.8rem;line-height:1.55;font-family:inherit"></textarea>'
+    + '<div style="display:flex;gap:.5rem"><button class="btn p" id="cpPromptC">📋 복사</button></div></div>';
+  document.body.appendChild(ov);
+  var ta = ov.querySelector('#cpPromptT'); ta.value = t;
+  ov.querySelector('#cpPromptX').onclick = function(){ ov.remove(); };
+  ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+  ov.querySelector('#cpPromptC').onclick = function(){ ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch(e){}
+    if (navigator.clipboard) navigator.clipboard.writeText(ta.value).then(function(){ toast('📋 복사됨 — 클로드 대화창에 붙여 넣으세요'); }, function(){ if (ok) toast('📋 복사됨'); }); else if (ok) toast('📋 복사됨'); };
 }
 function closeIgnore(gk, on){
   var R = CLOSE.res; if (!R) return; var g = R.groups.filter(function(x){ return x.gk === gk; })[0]; if (!g) return;
@@ -222,7 +311,7 @@ function closeRun(){
     finals = L.finals; noFile = L.noFile; var sources = L.sources, fr = L.fr, cg = L.cg;
     msg('맞춰 보는 중…');
     return new Promise(function(res){ setTimeout(res, 30); }).then(function(){
-      var R = SETTLE_CLOSE.check({ finals: finals, sources: sources, freight: fr, cargo: cg, ignore: CLOSE_IGN });
+      var R = SETTLE_CLOSE.check({ ym: ym, finals: finals, sources: sources, freight: fr, cargo: cg, ignore: CLOSE_IGN });
       R.nFinals = finals.length; R.noFile = noFile; R.at = Date.now(); CLOSE.res = R;
       if (!finals.length) CLOSE.err = ymLabel(ym) + ' 완료 확정본이 없습니다';
     });
@@ -245,6 +334,8 @@ function closeListen(){
   db.ref('settlement/close').on('value', function(s){ CLOSE_REC = s.val() || {}; renderCloseBar(); });
   db.ref('settlement/closeIgnore').on('value', function(s){ CLOSE_IGN = s.val() || {}; if (typeof preBucket === 'function') preBucket(); renderCloseBar(); });
   db.ref('settlement/closeSkip').on('value', function(s){ CLOSE_SKIP = s.val() || {}; renderCloseBar(); });
+  /* 메모는 다시 그리지 않음 — 적는 중인 칸이 날아가지 않게 (값은 프롬프트 만들 때 읽음) */
+  db.ref('settlement/closeMemo').on('value', function(s){ CLOSE_MEMO = s.val() || {}; });
 }
 
 /* ═══════════ 🧪 사전검증 (대표님 2026-10-05) ═══════════
@@ -303,7 +394,7 @@ function preRun(withDrafts){
     window.decryptBox = origDec;
     msg('맞춰 보는 중…');
     return new Promise(function(res){ setTimeout(res, 30); }).then(function(){
-      var base = { sources: L.sources, freight: L.fr, cargo: L.cg, ignore: CLOSE_IGN };
+      var base = { ym: ym, sources: L.sources, freight: L.fr, cargo: L.cg, ignore: CLOSE_IGN };
       var R1 = SETTLE_CLOSE.check(Object.assign({ finals: L.finals }, base));
       var R2 = drafts.length ? SETTLE_CLOSE.check(Object.assign({ finals: L.finals.concat(drafts) }, base)) : R1;
       PRE.res = { R1: R1, R2: R2, nFinals: L.finals.length, nDrafts: drafts.length, dErr: dErr, noFile: L.noFile, at: Date.now() };
@@ -322,7 +413,7 @@ function preHtml(){
   var S = P.R2, B = P.B, sum = function(L){ return L.reduce(function(s, x){ return s + (x.n || 0); }, 0); };
   var left = sum(B.red) + sum(B.yel) + sum(B.wait) + sum(B.none), pct = S.total ? Math.floor((S.total - left) / S.total * 1000) / 10 : 100;
   h += '<div class="cp-pct" style="color:' + (pct >= 100 ? 'var(--g)' : '#fbbf24') + '">' + pct + '<small>%</small></div>'
-    + '<div class="sm">원본 ' + S.total.toLocaleString() + '건 · 확정본 ' + P.nFinals + '개' + (P.nDrafts ? ' + 초안 ' + P.nDrafts + '개' : ' (초안 비교 안 함)') + ' · ' + esc(ftime(P.at))
+    + '<div class="sm">원본 ' + S.total.toLocaleString() + '건' + (S.edge ? ' · 📅 날짜 편차 ' + S.edge.toLocaleString() + '(뺌)' : '') + ' · 확정본 ' + P.nFinals + '개' + (P.nDrafts ? ' + 초안 ' + P.nDrafts + '개' : ' (초안 비교 안 함)') + ' · ' + esc(ftime(P.at))
     + ' <button class="btn" style="padding:.2rem .6rem" onclick="preRun(' + (P.nDrafts ? 'true' : 'false') + ')">다시</button>' + (P.nDrafts ? '' : ' <button class="btn" style="padding:.2rem .6rem" onclick="preRun(true)">초안까지</button>') + '</div>'
     + (P.dErr.length ? '<div class="sm" style="color:#fbbf24">⚠️ 초안을 못 만든 업체: ' + esc(P.dErr.join(', ')) + '</div>' : '')
     + (P.noFile.length ? '<div class="sm" style="color:#fbbf24">⚠️ 못 읽은 파일: ' + esc(P.noFile.join(', ')) + '</div>' : '');
@@ -334,7 +425,8 @@ function preHtml(){
     + sec(B.none, '⚫', '주인 없음', '어느 업체 이름과도 안 맞음 → 누락인지 청구 대상 아님인지')
     + (B.grn.length ? '<div class="sm" style="margin-top:.6rem;color:var(--g)">🟢 초안에 들어감 ' + sum(B.grn).toLocaleString() + '건 — ' + esc(B.grn.map(function(x){ return x.own.map(function(v){ return v.name; }).join('·') + ' ' + x.n; }).join(' · ')) + ' (그대로 확정하면 해결)</div>' : '')
     + (!left ? '<div class="sm" style="color:var(--g);margin-top:.4rem">✔ 빠질 것 없음 — 업체를 모두 확정한 뒤 아래 ② 마감검증으로 최종 확인</div>' : '')
-    + (B.ign.length ? '<details style="margin-top:.5rem"><summary class="sm dim" style="cursor:pointer">청구 대상 아님으로 뺀 묶음 ' + B.ign.length + '개</summary>' + B.ign.map(preGrpHtml).join('') + '</details>' : '');
+    + (B.ign.length ? '<details style="margin-top:.5rem"><summary class="sm dim" style="cursor:pointer">청구 대상 아님으로 뺀 묶음 ' + B.ign.length + '개</summary>' + B.ign.map(preGrpHtml).join('') + '</details>' : '')
+    + closeEdgeHtml(S.groups);
   return h + '</div>';
 }
 function preGrpHtml(x){
@@ -342,7 +434,8 @@ function preGrpHtml(x){
   return '<details class="cp-g' + (x.ign ? ' ig' : '') + '"><summary><b>' + esc(g.src) + '</b> · ' + esc(g.name) + ' <span class="pill">' + n.toLocaleString() + (g.total !== n ? ' / ' + g.total.toLocaleString() : '') + '건</span>'
     + (own ? ' <span class="sm dim">' + esc(own) + '</span>' : '') + (x.ign ? ' <span class="sm dim">청구 대상 아님: ' + esc(x.ign.why || '') + '</span>' : '')
     + '<span style="margin-left:auto"></span><button class="btn" style="padding:.15rem .55rem" onclick="event.preventDefault();preIgnore(\'' + gk + '\',' + (x.ign ? 'false' : 'true') + ')">' + (x.ign ? '빼기 취소' : '청구 대상 아님') + '</button></summary>'
-    + '<div class="sm dim" style="padding:.3rem .2rem .5rem;line-height:1.7">' + smp.map(esc).join(' · ') + (n > smp.length ? ' … 외 ' + (n - smp.length) + '건' : '') + '</div></details>';
+    + '<div class="sm dim" style="padding:.3rem .2rem .5rem;line-height:1.7">' + smp.map(esc).join(' · ') + (n > smp.length ? ' … 외 ' + (n - smp.length) + '건' : '') + '</div>'
+    + closeMemoInput(g) + '</details>';
 }
 function preIgnore(gk, on){   /* 마감검증과 같은 「청구 대상 아님」 기록 — 사전검증에서 뺀 것은 마감검증에서도 빠짐 */
   var P = PRE.res; if (!P) return;
