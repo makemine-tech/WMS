@@ -494,8 +494,20 @@ function reloadPDF(input) {
   loadPdfjs(function(){
     var reader = new FileReader();
     reader.onload = function(e){
-      rawBuffer = e.target.result.slice(0);
+      var buf = e.target.result.slice(0);
       pdfjsLib.getDocument({data: new Uint8Array(e.target.result.slice(0))}).promise.then(function(doc){
+        /* 다른 PDF 를 열면 페이지가 어긋나 엉뚱한 송장이 찍힘 → 페이지 수로 확인 (추가 등록 작업은 합본 PDF 여야 함) */
+        var maxPg = -1;
+        invoices.forEach(function(i){ (i.pages||[]).forEach(function(p){ if (p > maxPg) maxPg = p; }); });
+        var expect = (pkMeta && pkMeta.pageCount) || 0;
+        if ((expect && doc.numPages !== expect) || doc.numPages <= maxPg) {
+          status.style.color = 'var(--r)';
+          status.textContent = '❌ 이 작업의 원본이 아닙니다 — 선택한 PDF ' + doc.numPages + '페이지, 작업 원본 ' + (expect || ('최소 ' + (maxPg + 1))) + '페이지'
+            + ((pkMeta && pkMeta.parts && pkMeta.parts.length > 1) ? ' (추가 등록된 작업은 합본 PDF 가 필요 — [☁ 창고에서 받기] 를 쓰세요)' : '');
+          try { doc.destroy(); } catch(_){}
+          return;
+        }
+        rawBuffer = buf;
         pdfDoc = doc;
         /* 이 PC 캐시 — 대용량이라 클라우드에 없던 원본을 여기 저장하면 다음부턴 안 열어도 됨 */
         if (pkJobKey) pkIdbReplace(pkJobKey, rawBuffer);
@@ -607,7 +619,8 @@ function resetAll() {
 /* ─────────────── 드롭존 ─────────────── */
 (function(){
   var dz = document.getElementById('dz0');
-  document.getElementById('f0').onchange = function(e){ if(e.target.files[0]) loadFile(e.target.files[0]); };
+  /* value 비움 — 추가/교체를 취소한 뒤 같은 파일을 다시 골라도 동작하게 */
+  document.getElementById('f0').onchange = function(e){ var f = e.target.files[0]; e.target.value = ''; if(f) loadFile(f); };
   dz.ondragover  = function(e){ e.preventDefault(); dz.classList.add('drag'); };
   dz.ondragleave = function(){ dz.classList.remove('drag'); };
   dz.ondrop = function(e){
@@ -619,7 +632,24 @@ function resetAll() {
 
 /* ─────────────── PDF 로딩 ─────────────── */
 var pkCurrentFileName = '';   /* 마지막 업로드 파일명 — DB 발행 메타용 */
+var pkAppendCtx = null;       /* 추가 등록 중일 때 { oldBuf, oldInvoices, fileName } — processAllPages 가 교체 대신 합치기 */
 function loadFile(file) {
+  /* 이미 작업이 있으면 「추가」 / 「교체」 선택 */
+  if (invoices.length) {
+    var left = invoices.filter(function(i){ return !printedInvNums[i.invNum]; }).length;
+    var addIt = confirm('현재 작업: 송장 ' + invoices.length + '건 (인쇄완료 ' + (invoices.length - left) + ' · 남음 ' + left + ')\n\n'
+      + '[확인] = ➕ 추가 등록\n'
+      + '   남은 송장에 새 PDF 송장을 합칩니다.\n'
+      + '   인쇄완료 기록·재출력 목록은 그대로, 이미 있거나 이미 출력한 송장번호는 제외합니다.\n\n'
+      + '[취소] = 교체 여부를 다시 묻습니다');
+    if (addIt) {
+      if (!rawBuffer) { alert('이 PC 에 현재 작업의 PDF 원본이 없어 추가할 수 없습니다.\n원본을 먼저 받거나(창고에서 받기) 열어 준 뒤 다시 추가해 주세요.'); return; }
+      pkAppendStart(file);
+      return;
+    }
+    if (!confirm('🔄 교체하면 현재 작업(송장 ' + invoices.length + '건 · 남은 ' + left + '건 · 인쇄완료 기록·재출력 목록)이 모두 지워지고 새로 시작합니다.\n\n교체할까요?')) return;
+  }
+  pkAppendCtx = null;
   pkCurrentFileName = (file && file.name) || '';
   var pw=document.getElementById('pw0'), pf=document.getElementById('pf0'), pl=document.getElementById('pl0');
   pw.style.display='block'; pf.style.width='0%';
@@ -638,6 +668,80 @@ function loadFile(file) {
       });
     };
     reader.readAsArrayBuffer(file);
+  });
+}
+
+/* ─────────────── ➕ 추가 등록 ───────────────
+   기존 작업에 새 PDF 의 송장을 합친다. 몇 번이고 계속 추가 가능.
+   ★ 절대 조건: 같은 송장번호는 재출력 말고는 두 번 출력되지 않는다
+     ① 기존 송장 · 인쇄완료(printed) · 인쇄이력(batches) 에 있는 번호는 새 PDF 에서 제외
+     ② 인쇄 시 송장번호 단위 선점 트랜잭션은 그대로 (printed 는 지우지 않음)
+     ③ PDF 는 기존 원본 뒤에 새 송장 페이지만 이어 붙임 → 기존 페이지 번호·재출력 그대로 유효 */
+function pkAppendStart(file){
+  var go = function(){
+    pkAppendCtx = { oldBuf: rawBuffer.slice(0), oldInvoices: invoices, fileName: (file && file.name) || '' };
+    var pw=document.getElementById('pw0'), pf=document.getElementById('pf0'), pl=document.getElementById('pl0');
+    pw.style.display='block'; pf.style.width='0%';
+    setMsg('m0','inf','<span class="sp"></span>추가 PDF 로딩 중...');
+    loadPdfjs(function(){
+      pl.textContent='추가 PDF 파싱 중...'; pf.style.width='30%';
+      var reader = new FileReader();
+      reader.onload = function(e){
+        pkAppendCtx.newBuf = e.target.result.slice(0);
+        pdfjsLib.getDocument({data: new Uint8Array(e.target.result.slice(0))}).promise.then(function(doc){
+          pf.style.width='60%'; pl.textContent='페이지 분석 중...';
+          processAllPages(doc, pw, pf, pl);
+        }).catch(function(err){
+          pkAppendCtx = null; pw.style.display='none'; setMsg('m0','er','❌ '+err.message);
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  };
+  /* 다른 PC 가 방금 작업을 바꿨으면(추가/교체) 최신을 받은 뒤 다시 — 서로 덮어쓰기 방지 */
+  if (pkReady && pkBase) {
+    pkBase.child('meta/jobKey').once('value').then(function(s){
+      if ((s.val() || null) !== pkJobKey) { alert('다른 PC 에서 방금 작업이 바뀌었습니다.\n최신 작업을 불러온 뒤 다시 추가해 주세요.'); return; }
+      go();
+    }).catch(function(err){ alert('작업 확인 실패: ' + (err && err.message || err)); });
+  } else go();
+}
+/* 새 PDF 에서 읽은 송장(newInv, 새 PDF 기준 페이지)을 기존 작업에 합침 */
+function pkAppendMerge(newInv, done){
+  var ctx = pkAppendCtx;
+  /* ① 이미 있는 송장번호 — 기존 목록 + 인쇄완료 + 인쇄이력 전부 */
+  var seen = {};
+  (ctx.oldInvoices || []).forEach(function(i){ seen[i.invNum] = 'list'; });
+  Object.keys(printedInvNums || {}).forEach(function(n){ seen[n] = 'printed'; });
+  (printedBatches || []).forEach(function(b){ (b.invNums || []).forEach(function(n){ seen[n] = 'printed'; }); });
+  var keep = [], dupList = 0, dupPrinted = 0;
+  newInv.forEach(function(inv){
+    var s = seen[inv.invNum];
+    if (s === 'printed') { dupPrinted++; return; }
+    if (s) { dupList++; return; }
+    seen[inv.invNum] = 'list';
+    keep.push(inv);
+  });
+  if (!keep.length) { done(null, { added: 0, dupList: dupList, dupPrinted: dupPrinted }); return; }
+  /* ③ 새 송장 페이지만 기존 PDF 뒤에 이어 붙이고 페이지 번호를 옮김 */
+  var need = {};
+  keep.forEach(function(inv){ (inv.pages || []).forEach(function(p){ need[p] = 1; }); });
+  var newPages = Object.keys(need).map(Number).sort(function(a,b){ return a-b; });
+  loadPdfLib(function(){
+    Promise.all([
+      PDFLib.PDFDocument.load(new Uint8Array(ctx.oldBuf.slice(0))),
+      PDFLib.PDFDocument.load(new Uint8Array(ctx.newBuf.slice(0)))
+    ]).then(function(r){
+      var base = r[0], add = r[1], offset = base.getPageCount(), map = {};
+      return base.copyPages(add, newPages).then(function(cp){
+        cp.forEach(function(p, i){ base.addPage(p); map[newPages[i]] = offset + i; });
+        keep.forEach(function(inv){ inv.pages = (inv.pages || []).map(function(p){ return map[p]; }); });
+        return base.save();
+      });
+    }).then(function(bytes){
+      done(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+           { added: keep.length, keep: keep, dupList: dupList, dupPrinted: dupPrinted, newPageCount: newPages.length });
+    }).catch(function(err){ done(null, { error: err }); });
   });
 }
 
@@ -672,6 +776,8 @@ function processAllPages(doc, pw, pf, pl) {
     pf.style.width='100%'; pl.textContent='완료!';
     setTimeout(function(){ pw.style.display='none'; }, 300);
 
+    if (pkAppendCtx) { pkAppendFinish(pageTexts, doc); return; }
+
     buildInvoices(pageTexts);
     buildLocGroups();
     /* 새 분석 시작 → 인쇄 추적 초기화 */
@@ -700,6 +806,39 @@ function processAllPages(doc, pw, pf, pl) {
     }, 400);
   }).catch(function(err){
     pw.style.display='none'; setMsg('m0','er','❌ '+err.message); console.error(err);
+  });
+}
+
+/* 추가 등록 마무리 — 새 PDF 송장 파싱 → 합치기 → 저장·발행 (인쇄완료 기록은 건드리지 않음) */
+function pkAppendFinish(pageTexts, newDoc){
+  var ctx = pkAppendCtx;
+  var oldInv = invoices;
+  buildInvoices(pageTexts);          /* 새 PDF 송장 (새 PDF 기준 페이지) */
+  var newInv = invoices;
+  invoices = oldInv;                 /* 합치기 전까지 기존 그대로 */
+  setMsg('m0','inf','<span class="sp"></span>송장 '+newInv.length+'건 인식 — 중복 확인·합치는 중...');
+  pkAppendMerge(newInv, function(buf, res){
+    pkAppendCtx = null;
+    try { newDoc.destroy(); } catch(e){}
+    if (res.error) { setMsg('m0','er','❌ 추가 실패 (기존 작업은 그대로): ' + (res.error.message || res.error)); console.error(res.error); return; }
+    var dupTxt = (res.dupPrinted ? ' · 이미 출력한 송장 ' + res.dupPrinted + '건 제외' : '')
+               + (res.dupList ? ' · 이미 목록에 있는 송장 ' + res.dupList + '건 제외' : '');
+    if (!buf) { setMsg('m0','warn','⚠️ 추가할 새 송장이 없습니다 — 새 PDF ' + newInv.length + '건 모두 중복' + dupTxt + ' (기존 작업은 그대로)'); return; }
+    pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise.then(function(doc){
+      rawBuffer = buf;
+      pdfDoc = doc;
+      invoices = oldInv.concat(res.keep);
+      buildLocGroups();
+      pkCurrentFileName = ctx.fileName;
+      saveSession();
+      pkPublishJob({ append: true, added: res.added, fileName: ctx.fileName });
+      var left = invoices.filter(function(i){ return !printedInvNums[i.invNum]; }).length;
+      setMsg('m0','ok','➕ 추가 등록 완료 — 새 송장 ' + res.added + '건 추가' + dupTxt
+        + ' · 전체 ' + invoices.length + '건 · 출력할 송장 ' + left + '건 (같은 구성끼리 자동으로 합쳐 묶음)');
+      if (typeof renderGrpPage === 'function') renderGrpPage();
+      pkRerender();
+      setTimeout(function(){ goTo(1); renderPick(); renderRawDbg(pageTexts); }, 400);
+    }).catch(function(err){ setMsg('m0','er','❌ 합본 PDF 확인 실패 (기존 작업은 그대로): ' + err.message); });
   });
 }
 
@@ -1757,8 +1896,12 @@ function buildPdfFromPages(pages, cb, errCb, opts) {
     PDFLib.PDFDocument.load(new Uint8Array(rawBuffer)).then(function(src){
       return PDFLib.PDFDocument.create().then(function(out){
         var tot=src.getPageCount(), added={}, list=[];
+        /* 송장 페이지가 PDF 에 없으면(원본이 다른 파일·추가 등록 전 PDF) 조용히 빼지 말고 중단
+           → 인쇄 안 된 송장이 인쇄완료로 찍히는 것 방지 (선점은 errCb 가 되돌림) */
+        var missing = pages.filter(function(pg){ return !(pg < tot); });
+        if (missing.length) throw new Error('PDF 원본과 송장 목록이 맞지 않습니다 (없는 페이지 ' + missing.length + '개). 최신 원본을 다시 받은 뒤 인쇄하세요');
         pages.forEach(function(pg){
-          if (pg<tot && !added[pg]) { added[pg]=1; list.push(pg); }
+          if (!added[pg]) { added[pg]=1; list.push(pg); }
         });
         var topMm = getTopMarginMm(), kinds = kindsByPage(), boxes = boxByPage();
         /* 순번은 그룹(카드)별로 따로: opts.segments = [[그룹1 페이지들], [그룹2 페이지들], ...]
@@ -1789,7 +1932,7 @@ function buildPdfFromPages(pages, cb, errCb, opts) {
             return out.save();
           });
       });
-    }).then(cb).catch(errCb || function(e){ console.error(e); });
+    }).then(cb).catch(errCb || function(e){ console.error(e); alert('❌ ' + (e && e.message || e)); });
   });
 }
 
@@ -1981,6 +2124,7 @@ var pkBase = null;        /* firebase ref (job 노드) */
 var pkLoadingRemote = false;
 var pkSuppressPublish = false;  /* 원격 로드 중 재발행 방지 */
 var pkPdfState = null;          /* 현재 작업 job/pdf 노드 최신값 (창고 배지 표시용) */
+var pkMeta = null;              /* 현재 작업 job/meta (pageCount 로 원본 PDF 맞는지 확인, parts = 추가 등록 이력) */
 
 /* ── 창고 배지: 원본이 창고에 있는지 + 이 PC 인쇄 가능 여부 한 줄 표시 ── */
 function pkUpdateWarehouseBadge(){
@@ -2299,10 +2443,13 @@ function pkLoadRemoteJob(meta){
     var st = s.val() || {};
     invoices  = st.invoices  || [];
     locGroups = st.locGroups || [];
+    /* 작업이 바뀌면(교체·추가) 옛 PDF 는 즉시 버림 — 새 송장 목록을 옛 PDF 로 인쇄하는 틈 차단 */
+    rawBuffer = null; pdfDoc = null;
     return pkBase.child('pdf').once('value');
   }).then(function(p){
     var pdf = p.val();
     pkJobKey = meta.jobKey;
+    pkMeta = meta;
     pkPdfState = pdf || {};   /* 창고 배지 즉시 반영 */
     var afterState = function(){
       pkLoadingRemote = false;
@@ -2374,7 +2521,8 @@ function pkLoadRemoteJob(meta){
 /* ── 업로드 시 작업 발행 (이전 작업 전체 교체) ──
    상태(meta/static)는 크기 무관 항상 발행. PDF 는 작을 때만 클라우드(base64),
    크면 상태만 공유하고 각 PC 는 IndexedDB 캐시 + 1회 열기로 처리. */
-function pkPublishJob(){
+function pkPublishJob(opts){
+  opts = opts || {};
   if (!pkReady || !pkBase || pkSuppressPublish) return;
   if (!rawBuffer || !invoices.length){ return; }
   var jobKey = 'J' + Date.now() + '_' + pkSafeKey((pkCurrentFileName||'').slice(0,40));
@@ -2382,14 +2530,22 @@ function pkPublishJob(){
   var rawSize = rawBuffer.byteLength;
   pkIdbReplace(jobKey, rawBuffer);  /* 이 PC 캐시 — 새로고침 시 재업로드 불필요 */
 
+  /* 추가 등록 이력 — 어떤 파일들이 합쳐졌는지 */
+  var parts = (opts.append && pkMeta && pkMeta.parts) ? pkMeta.parts.slice()
+            : (opts.append && pkMeta ? [{ fileName: pkMeta.fileName || '', at: pkMeta.uploadedAt || 0, by: pkMeta.uploadedBy || '', added: pkMeta.invCount || 0 }] : []);
+  if (opts.append) parts.push({ fileName: opts.fileName || '', at: Date.now(), by: pkUid, added: opts.added || 0 });
   var payload = {
-    meta:   { jobKey: jobKey, fileName: pkCurrentFileName||'', uploadedAt: Date.now(),
+    meta:   { jobKey: jobKey,
+              fileName: opts.append ? ((parts[0] && parts[0].fileName || '') + ' 외 추가 ' + (parts.length - 1) + '회') : (pkCurrentFileName||''),
+              uploadedAt: Date.now(),
               uploadedBy: pkUid, invCount: invoices.length, pageCount: (pdfDoc?pdfDoc.numPages:0),
               pdfSize: rawSize },
-    static: { invoices: JSON.parse(JSON.stringify(invoices)), locGroups: JSON.parse(JSON.stringify(locGroups)) },
-    printed: null,
-    batches: null
+    static: { invoices: JSON.parse(JSON.stringify(invoices)), locGroups: JSON.parse(JSON.stringify(locGroups)) }
   };
+  if (parts.length) payload.meta.parts = parts;
+  /* 교체만 인쇄 기록을 비움. 추가 등록은 printed/batches 를 절대 건드리지 않음 (update 로 meta/static/pdf 만) */
+  if (!opts.append) { payload.printed = null; payload.batches = null; }
+  pkMeta = payload.meta;
   var mb = (rawSize/1048576).toFixed(1);
   var small = rawSize <= PK_PDF_CLOUD_MAX;
   var b64 = null;
@@ -2403,7 +2559,7 @@ function pkPublishJob(){
   pkPdfState = payload.pdf; pkUpdateWarehouseBadge();  /* 업로더 즉시 배지 반영 */
 
   pkSetStatus('☁ 작업 업로드 중...', 'warn');
-  pkBase.set(payload).then(function(){
+  (opts.append ? pkBase.update(payload) : pkBase.set(payload)).then(function(){
     if (small){
       pkSetStatus('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨 (' + mb + 'MB)', 'ok');
       return;
@@ -2420,6 +2576,12 @@ function pkPublishJob(){
       /* Storage 미설정/실패 → 상태만 공유, PDF 는 각 PC 1회 열기 */
       pkBase.child('pdf').set({ tooBig: true, raw: rawSize });
       var code = (err && (err.code || err.message)) || '알수없음';
+      if (opts.append) {
+        /* 추가 등록은 합본이 어디에도 파일로 없음 → 다른 PC 가 열 수 있게 합본을 내려받을 링크 제공 */
+        var url = URL.createObjectURL(new Blob([rawBuffer], { type: 'application/pdf' }));
+        pkSetStatus('☁ 창고 업로드 실패(' + code + ') · 다른 PC 는 합본으로 열어야 함 → '
+          + '<a href="' + url + '" download="합본_' + invoices.length + '건.pdf" style="color:var(--b);text-decoration:underline">💾 합본 PDF 저장</a>', 'warn', true);
+      } else
       pkSetStatus('☁ 상태는 공유됨 · 창고 업로드 실패(' + code + ') · ' + mb + 'MB — 각 PC 원본 1회 열기', 'warn');
       console.warn('[picking] Storage 업로드 실패(폴백):', code, err);
     });
