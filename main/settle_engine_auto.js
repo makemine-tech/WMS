@@ -135,9 +135,33 @@
           return readAll(ctx, 'coupang_po').then(function(F){
             var mine = F.filter(function(f){ return hit(f.name.replace(/\.\w+$/, '')); });
             if (!mine.length){ replaceSheet(wb, s.name, T.heads.slice(1), []); log.push(['확인 필요', '시트 「' + s.name + '」 — 이번 달 ' + core(vname) + ' 쿠팡 발주서가 파일함에 없어 비워 둠' + (F.length ? ' (다른 업체 쿠팡 발주서 ' + F.length + '개는 있음)' : '')]); return; }
-            var D = null; mine.forEach(function(f){ var d = aoaOf(f.wb, ['발주번호']); if (d && (!D || d.rows.length > D.rows.length)) D = d; });
-            if (!D){ log.push(['확인 필요', '시트 「' + s.name + '」 — 쿠팡 발주서에서 발주번호 열을 못 찾음']); return; }
-            replaceSheet(wb, s.name, D.heads, D.rows); log.push(['자동 적용', '시트 「' + s.name + '」 ← ' + mine[0].name + ' ' + D.rows.length + '줄']);
+            /* 그 달 쿠팡 입고작업이 여러 번(7일·14일·21일…)이면 발주서 파일도 여러 개 → 전부 합침 (예전엔 줄 많은 파일 1개만 넣던 것)
+               열 순서가 파일마다 달라도 제목 이름으로 맞추고, 앞 파일과 줄이 전부 똑같은 파일(같은 발주서를 두 번 올림)만 뺌 */
+            mine.sort(function(a, b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+            var heads = null, rows = [], seen = {}, used = [], noHead = [], dupFile = [];
+            mine.forEach(function(f){
+              var d = aoaOf(f.wb, ['발주번호']);
+              if (!d){ noHead.push(f.name); return; }
+              if (!heads) heads = d.heads.slice();
+              var hn = heads.map(ns), map = d.heads.map(function(h){ var i = hn.indexOf(ns(h)); if (i < 0 && ns(h)){ heads.push(h); hn.push(ns(h)); i = heads.length - 1; } return i; });
+              var mineRows = d.rows.map(function(r){ var o = []; r.forEach(function(v, j){ if (map[j] >= 0) o[map[j]] = v; }); return o; });
+              var keys = mineRows.map(function(o){ return JSON.stringify(o); });
+              if (keys.length && keys.every(function(k){ return seen[k]; })){ dupFile.push(f.name); return; }
+              keys.forEach(function(k){ seen[k] = 1; });
+              rows = rows.concat(mineRows);
+              used.push(f.name + ' ' + mineRows.length + '줄');
+            });
+            if (dupFile.length) log.push(['특이사항', '시트 「' + s.name + '」 — 앞 파일과 내용이 똑같은 쿠팡 발주서라 뺌(같은 파일 두 번 올림): ' + dupFile.join(', ')]);
+            if (!heads){ log.push(['확인 필요', '시트 「' + s.name + '」 — 쿠팡 발주서에서 발주번호 열을 못 찾음']); return; }
+            rows = rows.map(function(o){ var a = []; for (var j = 0; j < heads.length; j++) a[j] = o[j] == null ? '' : o[j]; return a; });
+            var rs = replaceSheet(wb, s.name, heads, rows);
+            log.push(['자동 적용', '시트 「' + s.name + '」 ← 쿠팡 발주서 ' + used.length + '개 합침 · ' + rows.length + '줄 (' + used.join(' / ') + ')']);
+            if (noHead.length) log.push(['확인 필요', '시트 「' + s.name + '」 — 발주번호 열을 못 찾아 뺀 파일: ' + noHead.join(', ')]);
+            (rs && rs.warn || []).forEach(function(w){ log.push(['확인 필요', '시트 「' + s.name + '」 — ' + w]); });
+            /* 거래명세표 쿠팡 줄이 시트를 수식으로 안 보고 숫자면 지난달 값 그대로 → 알려 줌 */
+            stRow(st, function(b){ return /쿠팡/.test(b); }).forEach(function(r){ var g = st.getCell('G' + r).value;
+              if (g != null && g !== '' && !(g && typeof g === 'object' && g.formula))
+                log.push(['확인 필요', '거래명세표 「' + ns(st.getCell('B' + r).value) + ns(st.getCell('C' + r).value) + '」 수량 ' + txt(g) + ' = 지난달 숫자 그대로 — 이번 달 쿠팡 발주서 ' + used.length + '개(입고 ' + used.length + '회) · ' + rows.length + '줄 보고 맞추기']); });
           });
         }
         /* ── 박스앤캔 택배·반품 ── */
