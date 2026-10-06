@@ -37,6 +37,19 @@
     x.SheetNames.forEach(function(n){ var a = XLSX.utils.sheet_to_json(x.Sheets[n], { header: 1, defval: '' }); for (var i = 0; i < Math.min(a.length, 12); i++){ var h = a[i].map(ns); if (need.every(function(k){ return h.indexOf(k) >= 0; })){ if (!best || a.length > best.a.length) best = { a: a, i: i }; break; } } });
     return best ? { heads: best.a[best.i].map(String), rows: best.a.slice(best.i + 1).filter(function(r){ return r.some(function(v){ return v !== ''; }); }) } : null;
   }
+  /* 시트를 다른 모양(원본 제목줄 그대로)으로 새로 짬 — 지난달 시트와 원본 종류가 바뀔 때 (replaceSheet 는 지난달 제목줄에 맞춰 넣음) */
+  function rebuildSheet(wb, name, heads, rows){
+    var old = wb.getWorksheet(name), ord = old.orderNo, views = old.views;
+    var hs = JSON.parse(JSON.stringify((old.getRow(tplHeaderRow(old)).getCell(1).style) || {})), ds = JSON.parse(JSON.stringify((old.getRow(tplHeaderRow(old) + 1).getCell(1).style) || {}));
+    wb.removeWorksheet(old.id);
+    var ws = wb.addWorksheet(name, { views: views }); ws.orderNo = ord;
+    var iD = heads.map(ns).indexOf('접수일자');
+    ws.getRow(1).values = heads.map(String); ws.getRow(1).eachCell(function(c){ c.style = Object.assign({}, hs, { font: Object.assign({}, hs.font || {}, { bold: true }) }); });
+    rows.forEach(function(r, i){ var row = ws.getRow(2 + i);
+      heads.forEach(function(h, j){ var v = r[j]; if (v === '' || v == null) return; var c = row.getCell(j + 1); c.value = v; c.style = JSON.parse(JSON.stringify(ds)); if (j === iD && typeof v === 'number') c.numFmt = 'yyyy-mm-dd'; }); });
+    heads.forEach(function(h, j){ ws.getColumn(j + 1).width = Math.min(40, Math.max(8, String(h).length * 2 + 4)); });
+    return { warn: [] };
+  }
   function stRow(st, test){ var hit = []; st.eachRow(function(row, r){ var b = ns(row.getCell(2).value) + ns(row.getCell(3).value); if (b && test(b)) hit.push(r); }); return hit; }
   function sizeOf(label){ if (!/택배|발송|배송/.test(label)) return null; if (/극소/.test(label)) return '극소'; if (/\(소\)|소$/.test(label)) return '소'; if (/\(중\)|중$/.test(label)) return '중'; if (/\(대\d?\)|대\d?$|이형/.test(label)) return /이형/.test(label) ? null : '대'; return null; }
 
@@ -50,11 +63,13 @@
       var al = ((window.SETTLE_ALIASES || {})[vname] || []).map(function(x){ return String(x).replace(/\s+/g, '').toLowerCase(); });
       var keys = [vc].concat(par, al).filter(function(k){ return k.length >= 2; }), VM = window.vendorMatcher(vname);
       var hit = VM;   /* settle_engines.js vendorMatcher */
-      var jobs = (A.sheets || []).filter(function(s){ return s.kind && wb.getWorksheet(s.name); });
+      /* 업체 전용 설정(SETTLE_AUTO 를 바탕으로 만든 엔진): forceKind = {시트: 원본 종류} 지난달 시트 모양과 다른 원본으로 바꿀 때, bncWho = 박스앤캔 발송인명 */
+      var EO = (this && this !== window && this.afterBuild === AUTO.afterBuild) ? this : AUTO, FK = EO.forceKind || {};
+      var jobs = (A.sheets || []).filter(function(s){ return (s.kind || FK[s.name]) && wb.getWorksheet(s.name); });
       var sizeSet = false, sizeCnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, air = 0, isl = 0, shipSeen = false, shipMissing = false, shipMax = -1, shipSheets = [], shipBig = null;
 
       return jobs.reduce(function(p, s){ return p.then(function(){
-        var ws = wb.getWorksheet(s.name), k = s.kind.key, T = tplRows(ws);
+        var ws = wb.getWorksheet(s.name), k = FK[s.name] || s.kind.key, T = tplRows(ws);
         /* ── 택배비 리스트 ── */
         if (k === 'ebut_shiplist'){
           shipSeen = true;
@@ -159,9 +174,9 @@
             if (noHead.length) log.push(['확인 필요', '시트 「' + s.name + '」 — 발주번호 열을 못 찾아 뺀 파일: ' + noHead.join(', ')]);
             (rs && rs.warn || []).forEach(function(w){ log.push(['확인 필요', '시트 「' + s.name + '」 — ' + w]); });
             /* 거래명세표 쿠팡 줄이 시트를 수식으로 안 보고 숫자면 지난달 값 그대로 → 알려 줌 */
-            stRow(st, function(b){ return /쿠팡/.test(b); }).forEach(function(r){ var g = st.getCell('G' + r).value;
-              if (g != null && g !== '' && !(g && typeof g === 'object' && g.formula))
-                log.push(['확인 필요', '거래명세표 「' + ns(st.getCell('B' + r).value) + ns(st.getCell('C' + r).value) + '」 수량 ' + txt(g) + ' = 지난달 숫자 그대로 — 이번 달 쿠팡 발주서 ' + used.length + '개(입고 ' + used.length + '회) · ' + rows.length + '줄 보고 맞추기']); });
+            stRow(st, function(b){ return /쿠팡/.test(b) && !/파손|착불|반품/.test(b); }).forEach(function(r){ var g = st.getCell('G' + r).value;
+              if (g != null && g !== '' && g !== 0 && !(g && typeof g === 'object' && g.formula))
+                log.push(['확인 필요', '거래명세표 「' + (ns(st.getCell('B' + r).value) || ns(st.getCell('C' + r).value)) + '」 수량 ' + txt(g) + ' = 지난달 숫자 그대로 — 이번 달 쿠팡 발주서 ' + used.length + '개(입고 ' + used.length + '회) · ' + rows.length + '줄 보고 맞추기']); });
           });
         }
         /* ── 박스앤캔 택배·반품 ── */
@@ -174,8 +189,12 @@
                지난달 시트가 「발송」 모양(발송인명)이면 발송 시트에서, 「반품」 모양(고객명)이면 반품 시트에서
                지난달 시트에 있던 발송인명/고객명(예: 메이크창고(박스앤캔))과 같은 줄만 → 등기번호로 중복 제거 */
             var hd = T.heads, isRet = hd.indexOf('발송인명') < 0 && hd.indexOf('고객명') >= 0, who = isRet ? '고객명' : '발송인명';
-            if (hd.indexOf(who) < 0 || hd.indexOf('박스크기') < 0){ log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 모양(발송인명·고객명·박스크기)이 아니라 지난달 그대로']); return; }
-            var LW = learn(T, [who]), names = Object.keys(LW).map(function(x){ return x.split('\u0001')[1]; });
+            /* forceKind: 지난달 시트가 다른 모양(명성 8월 = 이벗 주문목록)이어도 박스앤캔 「발송」 모양으로 시트를 새로 짬 */
+            var rebuild = !!FK[s.name] && (hd.indexOf(who) < 0 || hd.indexOf('박스크기') < 0);
+            if (!rebuild && (hd.indexOf(who) < 0 || hd.indexOf('박스크기') < 0)){ log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 모양(발송인명·고객명·박스크기)이 아니라 지난달 그대로']); return; }
+            var LW = {}, names = [];
+            if (EO.bncWho && EO.bncWho.length){ EO.bncWho.forEach(function(w){ LW[who + '\u0001' + ns(w)] = 1; names.push(ns(w)); }); }
+            else if (!rebuild){ LW = learn(T, [who]); names = Object.keys(LW).map(function(x){ return x.split('\u0001')[1]; }); }
             var rows = [], heads = null, seenR = {}, other = {};
             F.forEach(function(f){ var D = aoaOf(f.wb, [who, '등기번호', '박스크기']); if (!D) return; heads = heads || D.heads;
               var H = D.heads.map(ns), iW = H.indexOf(who), iR = H.indexOf('등기번호');
@@ -183,7 +202,8 @@
                 if (!mine){ if (hit(w)) other[w] = (other[w] || 0) + 1; return; }
                 var kk = ns(r[iR]) || JSON.stringify(r); if (seenR[kk]) return; seenR[kk] = 1; rows.push(r); }); });
             if (!heads){ log.push(['확인 필요', '시트 「' + s.name + '」 — 박스앤캔 택배비에서 「' + (isRet ? '반품' : '발송') + '」 시트(' + who + '·등기번호·박스크기)를 못 찾아 지난달 그대로']); return; }
-            var rs = replaceSheet(wb, s.name, heads, rows), H2 = heads.map(ns), iZ = H2.indexOf('박스크기');
+            var rs = rebuild ? rebuildSheet(wb, s.name, heads, rows) : replaceSheet(wb, s.name, heads, rows), H2 = heads.map(ns), iZ = H2.indexOf('박스크기');
+            if (rebuild) T = { H: 1, heads: [] };
             var cnt = { 극소: 0, 소: 0, 중: 0, 대: 0 }, odd = 0;
             rows.forEach(function(r){ var z = String(r[iZ] || '').trim(); if (cnt[z] != null) cnt[z]++; else odd++; });
             log.push(['자동 적용', '시트 「' + s.name + '」 ← 박스앤캔 택배비 「' + (isRet ? '반품' : '발송') + '」 중 ' + who + ' ' + (names.length ? names.join('·') : core(vname) + '(업체 이름)') + ' ' + rows.length + '건 · 극소 ' + cnt.극소 + ' · 소 ' + cnt.소 + ' · 중 ' + cnt.중 + ' · 대 ' + cnt.대]);
@@ -227,4 +247,17 @@
       });
     }
   };
+
+  /* 명성 (2026-10-06 대표님): 쿠팡입고작업 = 그 달 명성 쿠팡 발주서 전부(7·14·21일…) 합침 — 자동 엔진 그대로
+     택배배송비 = 박스앤캔 택배비(공통) 「발송」 중 발송인명 메이크창고(명성) → 거래명세표 택배발송 극소·소·중·대
+     (8월까지는 이벗 주문목록 로켓쉽먼트 줄이었음 → 9월부터 박스앤캔 원본 모양으로) */
+  var E = window.SETTLE_ENGINES = window.SETTLE_ENGINES || {};
+  E['명성'] = Object.assign({}, AUTO, {
+    forceKind: { '택배배송비': 'bnc_courier' }, bncWho: ['메이크창고(명성)'], needs: ['bnc_courier', 'coupang_po'],
+    items: { 14: 'auto', 15: 'auto', 16: 'auto', 17: 'auto' }, verified: { 14: true, 15: true, 16: true, 17: true },
+    ownSheets: /^(쿠팡입고작업|택배배송비|보관비)$/, verifiedSheets: /^(쿠팡입고작업|택배배송비)$/,
+    ruleList: [{ d: '2026-10-06', t: '쿠팡입고작업 = 그 달 명성 쿠팡 발주서(파일 이름에 명성) 전부 합침 → 쿠팡작업비·바코드스티커 = 확정수량 합계 (지난달 수식 그대로)' },
+      { d: '2026-10-06', t: '택배배송비 = 박스앤캔 택배비 「발송」 중 발송인명 메이크창고(명성) → 거래명세표 택배발송 극소·소·중·대 = 박스크기별 건수' },
+      { d: '2026-10-06', t: '보관비 = 지난달 마지막 날 보관파렛 + 입출고 화물관리 그 달 입고·출고' }]
+  });
 })();
