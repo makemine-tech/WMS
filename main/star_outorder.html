@@ -1364,6 +1364,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <span class="pg-count"><span id="cpPgDone">0</span> / <span id="cpPgTotal">0</span></span>
       <div class="pg-bar"><div class="pg-fill" id="cpPgFill" style="width:0%"></div></div>
       <span id="cpPgHint" style="font-size:.72rem;color:var(--mu)"></span>
+      <button class="cp-asis-btn" id="cpAsIsAllBtn" onclick="cpConfirmAsIsAll()" style="display:none;margin-left:auto" title="남은 부족·없음 행을 모두 이대로 확정 (출고가능한 만큼만 진행)">✓ 전체 이대로</button>
     </div>
 
     <div class="items-sec">
@@ -2437,6 +2438,19 @@ function cpConfirmAsIs(i){
   cpSavePersist();
   cpRender();
 }
+/* 남은 부족·없음 행 전부 이대로 확정 */
+function cpConfirmAsIsAll(){
+  var left = [];
+  (cpState.rows || []).forEach(function(r, i){
+    if (!cpState.asIs[i] && cpClassify(r).status !== 'fit') left.push(i);
+  });
+  if (!left.length) return;
+  if (!confirm('부족·없음 ' + left.length + '건을 모두 이대로 확정할까요?\n(출고가능한 만큼만 진행됩니다)')) return;
+  left.forEach(function(i){ cpState.asIs[i] = true; });
+  cpExpandedRow = -1;
+  cpSavePersist();
+  cpRender();
+}
 function cpUndoAsIs(i){
   if (!cpState.asIs[i]) return;
   delete cpState.asIs[i];
@@ -2463,6 +2477,8 @@ function cpUpdateProgress(done, total){
   document.getElementById('cpPgFill').style.width = pct + '%';
   var pendingLeft = total - done;
   var pgHint = document.getElementById('cpPgHint');
+  var allBtn = document.getElementById('cpAsIsAllBtn');
+  if (allBtn) { allBtn.style.display = pendingLeft > 0 ? '' : 'none'; allBtn.textContent = '✓ 전체 이대로 (' + pendingLeft + '건)'; }
   if (pendingLeft > 0) {
     pg.classList.remove('ready');
     if (pgHint) pgHint.textContent = '남은 ' + pendingLeft + '건 — 부족·없음 행을 [🔍 대체] 또는 [✓ 이대로 확정] 으로 처리하세요';
