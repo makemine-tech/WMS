@@ -184,7 +184,7 @@ function lgDownload(vk){
 }
 function lgInfo(vk){
   var I = LINFO[vk] || {}, ov = document.getElementById('lgOv'); if (ov) ov.remove();
-  var F = [['mail', '정산서 전달메일'], ['biz', '사업자번호'], ['corp', '공급받는자 상호'], ['ceo', '공급받는자 성명'], ['addr', '사업장 주소'], ['btype', '업태'], ['bitem', '종목'], ['mail1', '이메일1 (계산서)'], ['mail2', '이메일2']];
+  var F = [['mail', '정산서 전달메일'], ['biz', '사업자번호'], ['corp', '공급받는자 상호'], ['ceo', '공급받는자 성명'], ['addr', '사업장 주소'], ['btype', '업태'], ['bitem', '종목'], ['mail1', '이메일1 (계산서)'], ['mail2', '이메일2'], ['titem', '계산서 품목 (비우면 「' + lgTaxItem(vk, I) + '」)']];
   ov = document.createElement('div'); ov.id = 'lgOv'; ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:60px 16px;overflow:auto';
   ov.innerHTML = '<div class="card" style="max-width:560px;width:100%;margin:0"><div class="card-h"><span class="card-t">⚙ ' + esc(vk) + ' — 전달메일 · 세금계산서용 정보</span><button class="btn" style="margin-left:auto" onclick="document.getElementById(\'lgOv\').remove()">닫기</button></div>'
     + F.map(function(f){ return '<div style="display:flex;gap:.6rem;align-items:center;margin:.35rem 0"><span class="sm" style="width:120px">' + f[1] + '</span><input type="text" class="famt" style="flex:1" value="' + esc(I[f[0]] || '') + '" onchange="lgSet(\'ledgerInfo/' + esc(vk) + '/' + f[0] + '\', this.value.trim())"></div>'; }).join('')
@@ -245,7 +245,8 @@ function lgImport(input){
             send: typeof r[5] === 'number' && r[5] ? r[5] : null,   /* F 송금토스금액 = 우리가 보내는 돈 */
             memo: typeof r[5] === 'string' && r[5].trim() ? r[5].trim() : (typeof r[10] === 'number' ? '관리표 합계칸 ' + r[10] : null), xlName: nm };
           var info = { group: group || null, mail: String(r[2] || '').trim() || null, biz: String(r[12] || '').trim() || null, corp: String(r[14] || '').trim() || null, ceo: String(r[15] || '').trim() || null, addr: String(r[16] || '').trim() || null,
-            btype: String(r[17] || '').trim() || null, bitem: String(r[18] || '').trim() || null, mail1: String(r[19] || '').trim() || null, mail2: String(r[20] || '').trim() || null };
+            btype: String(r[17] || '').trim() || null, bitem: String(r[18] || '').trim() || null, mail1: String(r[19] || '').trim() || null, mail2: String(r[20] || '').trim() || null,
+            titem: String(r[25] || '').trim() || null };   /* 품목1 (세금계산서 일괄발행 양식) */
           var M = lgMatch(nm, E || 0, V, used, amtOf, alias), L = M ? [].concat(M.v) : [];
           L.forEach(function(v){ used[v.vk] = 1; nV++;
             Object.keys(st).forEach(function(k){ up['ledger/' + ym + '/' + v.vk + '/' + k] = st[k]; });
@@ -272,9 +273,51 @@ function lgExportMenu(btn){
   m.style.cssText = 'position:fixed;z-index:9500;top:' + (r.bottom + 4) + 'px;left:' + Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px;width:290px;background:var(--s1);border:1px solid var(--br);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45);padding:.35rem';
   var it = function(ic, t, d, fn){ return '<button class="btn" style="display:block;width:100%;text-align:left;margin:.15rem 0;padding:.5rem .6rem;line-height:1.35" onclick="document.getElementById(\'lgExMenu\').remove();' + fn + '()"><b>' + ic + ' ' + t + '</b><br><span class="sm dim">' + d + '</span></button>'; };
   m.innerHTML = it('🎨', '디자인 리스트', '요약 카드 · 업체별 정산(묶음·소계·상태 색) · 지출 · 세금계산서 정보 — 보기 좋게', 'lgExportDesign')
+    + it('🧾', '세금계산서 일괄발행 양식', '「1 전달완료」 이상 업체만 · 홈택스 엑셀 업로드 양식(.xls) 그대로 7행부터', 'lgExportTax')
     + it('📋', '관리표 모양 그대로', '원래 00_삼자물류정산관리 엑셀의 색·열 그대로', 'lgExportXl');
   document.body.appendChild(m);
   setTimeout(function(){ document.addEventListener('click', function off(e){ if (!m.contains(e.target) && e.target !== btn){ m.remove(); document.removeEventListener('click', off); } }); }, 0);
+}
+/* ═══ 🧾 세금계산서 일괄발행 양식 (대표님 2026-10-06) ═══
+   홈택스 엑셀 업로드 양식(main/tpl/tax_invoice_form.xls = 8월 양식에서 업체 줄만 지운 것)을 그대로 두고 7행부터 「1 전달완료」 이상 업체를 채움
+   (settle_taxform.js 가 .xls 를 직접 고침 — 색·칸 모양·안내 시트 그대로)
+   공급자 = 메이크마인디자인 고정 · 작성일자 = 그 달 말일 · 공급가액 = 정산금액(VAT 포함) ÷ 1.1 반올림 · 세액 = 정산금액 − 공급가액 · 영수/청구 = 02(청구) */
+var LG_SUP = { biz: 1198694602, corp: '메이크마인디자인주식회사', ceo: '박경우', addr: '경기도 김포시 양촌읍 황금3로7번길 42 1층', btype: '서비스업', bitem: '기타도급(운수/일반창고업)', mail: 'dmzoot@hanmail.net' };
+/* 품목 — 업체 정보(⚙) 「계산서 품목」 → 없으면 8월 양식에 쓰던 품목(사업자번호) → 「포장재 외」 */
+var LG_TAX_ITEM = { '2768101508': '용차비 외', '1098604160': '초콜릿 및 제주누보 외', '8622002549': '제주누보외', '6658601867': '제주누보외', '5798102124': '제주누보외' };
+function lgTaxItem(vk, I){ I = I || LINFO[vk] || {}; return I.titem || LG_TAX_ITEM[String(I.biz || '').replace(/\D/g, '')] || '포장재 외'; }
+function lgExportTax(){
+  if (typeof SETTLE_TAXFORM === 'undefined' || typeof XLSX === 'undefined' || !XLSX.CFB){ alert('양식 도구를 아직 못 불러왔습니다 — 잠시 뒤 다시 눌러 주세요'); return; }
+  var ym = lgYM(), V = monthVendors(ym), X = LEXTRA[ym] || {}, y = +ym.slice(0, 4), m = +ym.slice(5, 7), dd = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  var date = ym.slice(0, 4) + ym.slice(5, 7) + String(dd).padStart(2, '0'), L = [], skip = [], bad = [];
+  var num = function(v){ var d = String(v == null ? '' : v).replace(/\D/g, ''); return d ? (d.length <= 15 ? +d : d) : ''; };
+  V.forEach(function(v){ var s = lgState('v', v.vk, ym, 0, v.name), I = LINFO[v.vk] || {};
+    if (v.skip || !s.amt) return;
+    if (lgStage(s.rec) < 1){ skip.push(v.name); return; }
+    L.push({ name: v.name, I: I, amt: s.amt, item: lgTaxItem(v.vk, I) }); });
+  Object.keys(X).forEach(function(id){ var x = X[id], s = lgState('x', id, ym, 0);   /* 기타 거래처는 사업자번호를 넣은 곳만 */
+    if (!s.amt || lgStage(x) < 1 || !x.biz) return; L.push({ name: x.name || '', I: x, amt: s.amt, item: x.titem || '포장재 외' }); });
+  L.sort(function(a, b){ var o = function(r){ return r.I.ord != null ? +r.I.ord : 9000; }; return o(a) - o(b) || a.name.localeCompare(b.name, 'ko', { numeric: true }); });
+  if (!L.length){ alert(ymLabel(ym) + ' — 「1 전달완료」 이상이면서 정산금액이 있는 업체가 없습니다.' + (skip.length ? '\n\n아직 전달 전: ' + skip.join(', ') : '')); return; }
+  var rows = L.map(function(r){ var I = r.I, sup = Math.round(r.amt / 1.1), tax = Math.round(r.amt) - sup, a = new Array(59);
+    if (!num(I.biz) || !String(I.corp || '').trim() || !String(I.ceo || '').trim() || !String(I.mail1 || '').trim()) bad.push(r.name + ' (' + [!num(I.biz) && '사업자번호', !String(I.corp || '').trim() && '상호', !String(I.ceo || '').trim() && '성명', !String(I.mail1 || '').trim() && '이메일1'].filter(Boolean).join('·') + ')');
+    a[0] = '01'; a[1] = date; a[2] = LG_SUP.biz; a[3] = ''; a[4] = LG_SUP.corp; a[5] = LG_SUP.ceo; a[6] = LG_SUP.addr; a[7] = LG_SUP.btype; a[8] = LG_SUP.bitem; a[9] = LG_SUP.mail;
+    a[10] = num(I.biz); a[11] = ''; a[12] = String(I.corp || '').trim(); a[13] = String(I.ceo || '').trim(); a[14] = String(I.addr || '').trim(); a[15] = String(I.btype || '').trim(); a[16] = String(I.bitem || '').trim();
+    a[17] = String(I.mail1 || '').trim(); a[18] = String(I.mail2 || '').trim(); a[19] = sup; a[20] = tax; a[21] = '';
+    a[22] = String(dd); a[23] = r.item; a[24] = ''; a[25] = ''; a[26] = ''; a[27] = sup; a[28] = tax;
+    a[58] = '02'; return a; });
+  var msg = ymLabel(ym) + ' 세금계산서 일괄발행 양식 — ' + rows.length + '건 (「1 전달완료」 이상)\n작성일자 ' + date + ' · 공급가액 합계 ' + won0(rows.reduce(function(s, a){ return s + a[19]; }, 0)) + ' · 세액 ' + won0(rows.reduce(function(s, a){ return s + a[20]; }, 0));
+  if (rows.length > 100) msg += '\n\n⚠ 양식은 100건까지 — 앞 100건만 넣습니다';
+  if (bad.length) msg += '\n\n⚠ 필수 정보가 빈 업체 ' + bad.length + '곳 (업체 줄 ⚙ 에서 채우기):\n  ' + bad.join('\n  ');
+  if (skip.length) msg += '\n\n아직 전달 전이라 뺀 업체 ' + skip.length + '곳: ' + skip.join(', ');
+  if (!confirm(msg + '\n\n내려받을까요?')) return;
+  fetch('/tpl/tax_invoice_form.xls', { cache: 'no-store' }).then(function(r){ if (!r.ok) throw new Error('양식 파일 ' + r.status); return r.arrayBuffer(); })
+    .then(function(ab){
+      var out = SETTLE_TAXFORM.build(new Uint8Array(ab), rows.slice(0, 100));
+      var aEl = document.createElement('a'); aEl.href = URL.createObjectURL(new Blob([out], { type: 'application/vnd.ms-excel' }));
+      aEl.download = '세금계산서등록양식_' + ym.slice(5, 7) + '월.xls'; document.body.appendChild(aEl); aEl.click(); setTimeout(function(){ URL.revokeObjectURL(aEl.href); aEl.remove(); }, 2000);
+      toast('🧾 세금계산서 양식 ' + Math.min(rows.length, 100) + '건 내려받음');
+    }).catch(function(e){ alert('양식 만들기 실패: ' + ((e && e.message) || e)); console.error(e); });
 }
 /* ═══ 🎨 디자인 리스트 내보내기 (대표님 2026-10-06: 「최대한 디자인된 형태로 이쁘게 알아볼 수 있게 리스트로」) ═══ */
 function lgExportDesign(){
