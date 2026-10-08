@@ -1727,6 +1727,7 @@ async function analyzePdf(file, category) {
         if (next) {
           const m = next.text.match(/PALLET[_\s-]*(\d+)/i);
           if (m) p.palletNo = parseInt(m[1], 10);
+          p.skus = truckPageSkus(next.text);   // 이 파렛트에 실린 SKU ID — 엑셀 파렛트와 순서대로 대조
         }
         const tm = p.text.match(/_TRUCK[_\s-]*(\d+)/i);
         if (tm) p.truckNo = parseInt(tm[1], 10);
@@ -2218,7 +2219,7 @@ function labelMatchesPallet(page, tot, no) {
 /* 한 센터에 대한 라벨 페이지([{url, kind}] 배열) 생성, 인덱스는 팔레트 번호 1..N
    kind: 'truck' (정사각 라벨, 페이지 가득) | 'milkrun' (가로 PDF, 90도 회전 가득) */
 async function getLabelPagesForCenter(center, origin, onlyMilkrun) {
-  const cn = normCenter(center);
+  const cn = baseCenter(normCenter(center));   // 나눠 적은 센터('…-분리')도 원래 센터 라벨에서
   const on = normOrigin(origin);   // 같은 센터라도 출고지가 다르면 라벨도 갈라야 한다
 
   // truck: 모든 파일의 매칭 페이지를 누적 → PALLET 번호 오름차순 정렬
@@ -2308,6 +2309,78 @@ function shipmentKey(g) {
   return normCenter(g.center) + '::' + formatEta(g.eta, new Date().getFullYear()) + '::' + g.palletTotal + '::' + (g.booking || 0) + '::' + (g.originNorm || '');
 }
 
+/* 트럭 라벨 짝수페이지(팔레트 상세)의 SKU ID 목록 — "SKU 명 SKU ID 수량 … 34998096 72" */
+function truckPageSkus(text) {
+  const t = String(text || '');
+  const i = t.search(/수량/);
+  const ids = [];
+  const re = /(?:^|\s)(\d{7,9})\s+\d{1,6}(?=\s|$)/g;
+  let m;
+  while ((m = re.exec(i >= 0 ? t.slice(i) : t))) ids.push(m[1]);
+  return [...new Set(ids)].sort();
+}
+
+/* 센터 기본 이름 — 작업자가 'XRC07-분리' 'XRC07_2' 처럼 나눠 적은 출고건도 같은 센터 트럭 라벨에서 찾는다 */
+function baseCenter(cn) {
+  return String(cn || '').replace(/[-_].*$/, '');
+}
+
+/* 출고건 ↔ 트럭 묶음 순서 배정 (센터별)
+   쿠팡 트럭 라벨 PALLET 번호는 센터 전체 통짜 번호(트럭3=1~18, 트럭4=19~36, 트럭5=37~40)인데
+   엑셀은 출고건마다 1부터 다시 매기는 경우가 있다(XRC07 1~36 + XRC07-분리 1~4).
+   → 번호로 찾지 않고, 출고건마다 '연달아 붙은 트럭들의 파렛트 합 = 출고건 파렛트 수' 인 묶음을 찾아
+     파렛트 순서대로 1:1 배정. 후보가 여럿이면 SKU 순서가 맞는 묶음 → 엑셀 순서(앞 트럭부터).
+   반환 { byGroup: {g.key → {item,pageIdx,truckNo,bookingNo}}, done: Set(shipKey), notes: [] } */
+function allocTruckRuns(byCenter, shipments) {
+  const byGroup = {}, done = new Set(), notes = [];
+  const used = new Set();
+  const skuKey = (arr) => (arr || []).filter(Boolean).slice().sort().join(',');
+  for (const key in shipments) {
+    const sh = shipments[key];
+    const trucks = (byCenter[sh.bc] || []).slice().sort((a, b) =>
+      ((a.labels[0] && a.labels[0].page.palletNo) || 0) - ((b.labels[0] && b.labels[0].page.palletNo) || 0) ||
+      (a.truckNo || 0) - (b.truckNo || 0) || a.name.localeCompare(b.name));
+    const pallets = sh.groups.slice().sort((a, b) => (a.palletNo || 0) - (b.palletNo || 0));
+    /* 엑셀 번호가 이미 라벨 통짜 번호(예 37~40)면 번호 직접 매칭에 맡긴다 */
+    if (pallets.some(g => (g.palletNo || 0) > sh.palletTotal)) continue;
+    if (pallets.length !== sh.palletTotal) continue;   // 파렛트 행이 빠진 출고건은 확인창으로
+    let best = null;
+    for (let s = 0; s < trucks.length; s++) {
+      if (used.has(trucks[s])) continue;
+      const run = []; let sum = 0;
+      for (let e = s; e < trucks.length && sum < sh.palletTotal; e++) {
+        if (used.has(trucks[e])) break;
+        run.push(trucks[e]); sum += trucks[e].palletCount;
+      }
+      if (sum !== sh.palletTotal) continue;
+      const labels = run.flatMap(t => t.labels.map(l => ({ ...l, t })));
+      let hit = 0, known = 0;
+      pallets.forEach((g, i) => {
+        const ls = skuKey(labels[i].page.skus);
+        if (!ls) return;
+        known++;
+        if (ls === skuKey((g.items || []).map(it => it.skuId))) hit++;
+      });
+      const score = known ? hit / known : 0;
+      if (!best || score > best.score) best = { run, labels, score, known, hit };
+      if (score === 1) break;
+    }
+    if (!best) continue;
+    best.run.forEach(t => used.add(t));
+    pallets.forEach((g, i) => {
+      const l = best.labels[i];
+      byGroup[g.key] = { item: l.t.item, pageIdx: l.pageIdx, truckNo: l.t.truckNo, bookingNo: l.t.bookingNo };
+    });
+    done.add(key);
+    const tn = best.run.map(t => 'TRUCK_' + String(t.truckNo ?? '?').padStart(3, '0')).join('+');
+    const p0 = best.labels[0].page.palletNo, p1 = best.labels[best.labels.length - 1].page.palletNo;
+    notes.push(`${sh.centerDisplay} ${sh.palletTotal}파렛트 → ${tn} (PALLET ${p0 ?? '?'}~${p1 ?? '?'})` +
+      (best.known && best.hit < best.known ? ` — SKU 다른 파렛트 ${best.known - best.hit}개, 확인 필요` : ''));
+    if (best.known && best.hit < best.known) notes.warn = true;
+  }
+  return { byGroup, done, notes };
+}
+
 /* 트럭 파일 1개 요약 — 센터/파렛트수/트럭번호/부킹번호 + 파렛트번호 오름차순 라벨페이지 */
 function truckFileSummary(item) {
   const idxs = pickPagesForCategory(item);            // 홀수(라벨) 페이지 번호 오름차순
@@ -2332,7 +2405,8 @@ async function resolveTruckAssignments() {
   const byCenter = {};
   for (const it of pdfStore.truck) {
     const s = truckFileSummary(it);
-    (byCenter[s.centerNorm] = byCenter[s.centerNorm] || []).push(s);
+    const bc = baseCenter(s.centerNorm);
+    (byCenter[bc] = byCenter[bc] || []).push(s);
   }
   /* 센터별 (연속)파렛트번호 → 라벨 페이지 직접 맵.
      쿠팡 트럭 라벨의 PALLET_nnn 은 부킹 전체 통짜 일련번호(예 트럭1=1~18, 트럭2=19~36 …).
@@ -2352,12 +2426,18 @@ async function resolveTruckAssignments() {
   // 엑셀에서 트럭 라벨이 있는 센터의 출고건 추출 (키별 1건)
   const shipments = {};
   for (const g of GROUPS) {
-    const cn = normCenter(g.center);
+    const cn = baseCenter(normCenter(g.center));
     if (!(byCenter[cn] && byCenter[cn].length)) continue;   // 트럭 라벨 있는 센터만
     if (dispatchMode(g) === 'milkrun') continue;             // 배차방식 밀크런 → 트럭 매칭 대상 아님
     const key = shipmentKey(g);
-    if (!shipments[key]) shipments[key] = { key, cn, palletTotal: g.palletTotal, centerDisplay: g.center, eta: formatEta(g.eta, new Date().getFullYear()), groups: [] };
+    if (!shipments[key]) shipments[key] = { key, cn, bc: cn, palletTotal: g.palletTotal, centerDisplay: g.center, eta: formatEta(g.eta, new Date().getFullYear()), groups: [] };
     shipments[key].groups.push(g);
+  }
+  /* ① 출고건 ↔ 트럭 묶음 순서 배정 (번호가 1부터 다시 시작하거나 센터를 나눠 적어도 자리를 찾는다) */
+  const runs = allocTruckRuns(byCenter, shipments);
+  if (runs.notes.length) {
+    console.log('[truck runs]\n' + runs.notes.join('\n'));
+    setPdfStatus('트럭 라벨 배정: ' + runs.notes.join(' · '), runs.notes.warn ? 'warn' : 'ok');
   }
   const map = {};
   const milkrunKeys = new Set();   // 트럭이 아니라 밀크런 라벨로 붙일 출고건
@@ -2365,6 +2445,7 @@ async function resolveTruckAssignments() {
   const hasMilkrunLabels = (cn) => pdfStore.download.some(it => it.pages.some(p => pageMatchesCenter(p, cn)));
   for (const key in shipments) {
     const sh = shipments[key];
+    if (runs.done.has(key)) continue;
     const truckCount = byCenter[sh.cn].filter(s => s.palletCount === sh.palletTotal);
     /* 배차방식이 비어 있고, 파렛트 수가 같은 트럭이 없는데 이 센터 밀크런 라벨이 있으면 → 밀크런 출고건 */
     const mode = dispatchMode(sh.groups[0]);
@@ -2386,7 +2467,7 @@ async function resolveTruckAssignments() {
       else map[k] = chosen[k];
     }
   }
-  TRUCK_ASSIGN = { map, byCenter, byCenterPallet, milkrunKeys };
+  TRUCK_ASSIGN = { map, byCenter, byCenterPallet, milkrunKeys, byGroup: runs.byGroup };
   return TRUCK_ASSIGN;
 }
 
@@ -2487,7 +2568,7 @@ async function buildIntegratedStage() {
   let totalAdded = 0;
   for (let i = 0; i < GROUPS.length; i++) {
     const g = GROUPS[i];
-    const cn = normCenter(g.center);
+    const cn = baseCenter(normCenter(g.center));   // 'XRC07-분리' → 'xrc07' (트럭 라벨 센터)
 
     // 1) 적재리스트 페이지 복제
     if (palletPages[i]) {
@@ -2503,9 +2584,12 @@ async function buildIntegratedStage() {
     if (!mode && assign.milkrunKeys && assign.milkrunKeys.has(shipmentKey(g))) mode = 'milkrun';
     const useTruck = mode === 'truck' || (mode === '' && (assign.byCenter[cn] || []).length);
     if (useTruck) {
-      // ── 트럭 센터: ① 연속 파렛트번호 ↔ 라벨 PALLET 번호 직접 매칭 (우선)
-      const direct = assign.byCenterPallet && assign.byCenterPallet[cn] && assign.byCenterPallet[cn][g.palletNo];
-      if (direct) {
+      // ── 트럭 센터: ⓪ 출고건 ↔ 트럭 묶음 순서 배정 → ① 연속 파렛트번호 ↔ 라벨 PALLET 번호 직접 매칭
+      const run = assign.byGroup && assign.byGroup[g.key];
+      const direct = !run && assign.byCenterPallet && assign.byCenterPallet[cn] && assign.byCenterPallet[cn][g.palletNo];
+      if (run) {
+        labelUrl = await renderPdfPageToImg(run.item.doc, run.pageIdx); kind = 'truck';
+      } else if (direct) {
         labelUrl = await renderPdfPageToImg(direct.item.doc, direct.pageIdx); kind = 'truck';
       } else {
         // ② 폴백: (센터+도착일+파렛트수)로 매칭된 트럭 파일에서 파렛트번호 인덱스로 라벨 선택
