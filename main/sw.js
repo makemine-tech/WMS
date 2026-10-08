@@ -71,7 +71,8 @@ self.addEventListener('fetch', function(e){
   if (e.request.method !== 'GET') return;
   var url = new URL(e.request.url);
   if (/\.(html|js)$/.test(url.pathname) || url.pathname === '/') {
-    e.respondWith(fetch(e.request).catch(function(){ return caches.match(e.request); }));
+    /* 네트워크 실패 + 캐시도 없으면 undefined 를 돌려줘 'Failed to convert value to Response' 가 났음 → 정상 오류 응답 */
+    e.respondWith(fetch(e.request).catch(function(){ return caches.match(e.request).then(function(r){ return r || Response.error(); }); }));
     return;
   }
   if (/\.(svg|png|jpg|jpeg|webp|json)$/.test(url.pathname)) {

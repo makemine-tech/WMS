@@ -78,6 +78,7 @@ function normalizeWH(raw){
   if(!Array.isArray(wh.pendOut))wh.pendOut=[];
   if(!Array.isArray(wh.txLog))wh.txLog=[];
   if(!wh.pColors||typeof wh.pColors!=='object')wh.pColors={};
+  wh.pColors=decKeys(wh.pColors);
   var cells={};
   for(var r=0;r<(wh.rows||0);r++){
     for(var c=0;c<(wh.cols||0);c++){
@@ -100,14 +101,19 @@ var WH_PATH='warehouses';
 var _listeners=[];
 var _pt=null;
 
+/* 상품 색(pColors)은 상품명을 키로 쓰는데, Firebase 키엔 . # $ / [ ] 를 못 쓴다
+   ('AG-909 / AG-877 …' 입고 시 저장 전체가 실패해 입력한 상품이 사라졌음) → 저장할 때만 %XX 로 바꾸고 읽을 때 되돌림 */
+function encKeys(o){var n={};Object.keys(o||{}).forEach(function(k){if(!k)return;n[k.replace(/[%.#$\/\[\]]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();})]=o[k];});return n;}
+function decKeys(o){var n={};Object.keys(o||{}).forEach(function(k){n[k.replace(/%(25|2E|23|24|2F|5B|5D)/g,function(m,h){return String.fromCharCode(parseInt(h,16));})]=o[k];});return n;}
 function dbSaveOne(wh){
   var payload=Object.assign({},wh);
+  payload.pColors=encKeys(wh.pColors);
   delete payload.undoStack;
   delete payload.txLog; // txLog는 txLogs/{id} 경로로 분리 저장
   var ref=fbDb.ref(WH_PATH+'/'+wh.id);
   ref.child('undoStack').remove().catch(function(){});
   ref.child('txLog').remove().catch(function(){}); // 기존 DB의 txLog 정리
-  ref.set(payload).catch(function(e){console.warn('dbSaveOne',e);});
+  ref.set(payload).catch(function(e){console.warn('dbSaveOne',e);alert('저장하지 못했습니다 — 방금 입력한 내용이 사라질 수 있어요.\n'+((e&&e.message)||e));});
 }
 // txLog 단건 push (warehouses 경로와 분리)
 function dbSaveTxEntry(whId,entry){
