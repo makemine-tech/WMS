@@ -109,6 +109,17 @@ h1 em{color:var(--g);font-style:normal}
 .box-inp{align-self:center;flex-shrink:0;width:9rem;height:4.2rem;padding:.3rem .5rem;border-radius:6px;border:1.5px solid rgba(240,88,88,.55);background:transparent;color:var(--tx);font-size:1.5rem;font-weight:800;text-align:center;font-family:var(--mo);outline:none}
 .box-inp:focus{border-color:var(--y);background:rgba(255,200,80,.06)}
 .box-inp::placeholder{color:var(--mu);font-size:.8rem;font-weight:400}
+/* 파렛트 계산 (오른쪽, 스크롤 따라다님) */
+.plt-box{position:fixed;left:calc(50% + 512px);top:96px;z-index:50;width:210px;background:rgba(14,16,22,.96);border:1.5px solid rgba(74,240,168,.45);border-radius:10px;padding:.65rem .75rem;box-shadow:0 6px 24px rgba(0,0,0,.45);font-family:var(--mo);font-size:.8rem;color:var(--tx)}
+.plt-box h4{margin:0 0 .45rem;font-size:.78rem;color:var(--g);font-weight:800;letter-spacing:.02em}
+.plt-box .pr{display:flex;justify-content:space-between;gap:.4rem;padding:.16rem 0}
+.plt-box .pr b{font-size:.95rem}
+.plt-box .pr .sub{color:var(--mu);font-size:.68rem;font-weight:400}
+.plt-box .hr{border-top:1px solid rgba(255,255,255,.12);margin:.35rem 0}
+.plt-box .tot b{font-size:1.25rem;color:var(--g)}
+.plt-box .note{color:var(--mu);font-size:.64rem;line-height:1.45;margin-top:.35rem}
+@media (max-width:1460px){.plt-box{left:auto;top:auto;bottom:12px;right:10px;width:190px;font-size:.74rem}}
+@media print{.plt-box{display:none!important}}
 #boxFltBar{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
 @media (max-width:640px){.box-inp{width:4.5rem;height:3rem;font-size:1.1rem}}
 .grp-prt{padding:.38rem .85rem;border-radius:6px;border:1.5px solid var(--g);background:transparent;color:var(--g);font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--mo);flex-shrink:0;white-space:nowrap}
@@ -340,6 +351,7 @@ h1 em{color:var(--g);font-style:normal}
 
 <!-- STEP 3 : 그룹 인쇄 -->
 <div class="pg" id="pg2">
+  <div class="plt-box" id="pltBox" style="display:none"></div>
   <div class="pg-t">그룹 인쇄</div>
   <div class="pg-s">같은 상품 구성끼리 묶음 · 건수 많은 순</div>
   <div class="stats" style="grid-template-columns:repeat(4,1fr)">
@@ -1138,6 +1150,46 @@ function renderBoxFilter() {
   bar.innerHTML = '<span style="font-size:.72rem;color:var(--mu)">박스별</span>' +
     keys.map(function(k){ return btn(k, k, cnt[k]); }).join('') +
     (none ? btn('', '미입력', none) : '');
+  renderPltBox();
+}
+
+/* ─────────────── 파렛트 계산 ───────────────
+   등록된 송장 전체(오전·오후 추가 등록 누적, 인쇄 여부 무관)를 박스 크기별로 세어 파렛트로 환산.
+   1파렛트 적재 = 60박스 36 · 45박스 54 · 30박스 72 · 15박스 120 · 1박스 400 */
+var PLT_CAP = { 60: 36, 45: 54, 30: 72, 15: 120, 1: 400 };
+function boxNum(v) { var m = String(v||'').match(/\d+/); return m ? +m[0] : null; }
+function fmtPlt(x) { return (Math.round(x * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+function togglePlt() { try { localStorage.setItem('pkPltFold', localStorage.getItem('pkPltFold') === '1' ? '0' : '1'); } catch(e){} renderPltBox(); }
+function renderPltBox() {
+  var el = document.getElementById('pltBox');
+  if (!el) return;
+  if (!invoices.length) { el.style.display = 'none'; return; }
+  var by = {}, other = 0, none = 0, tot = 0, multi = 0, single = 0;
+  invoices.forEach(function(inv){
+    var b = boxOfItems(inv.items);
+    if (!b) { none++; return; }
+    var n = boxNum(b), cap = PLT_CAP[n];
+    if (!cap) { other++; return; }
+    by[n] = (by[n] || 0) + 1;
+    var p = 1 / cap; tot += p;
+    if ((inv.totalQty || 0) >= 2) multi += p; else single += p;
+  });
+  var rows = [60, 45, 30, 15, 1].filter(function(n){ return by[n]; }).map(function(n){
+    return '<div class="pr"><span>' + n + ' <span class="sub">' + by[n].toLocaleString() + '건/' + PLT_CAP[n] + '</span></span><b>' + fmtPlt(by[n] / PLT_CAP[n]) + '</b></div>';
+  }).join('');
+  var fold = false; try { fold = localStorage.getItem('pkPltFold') === '1'; } catch(e){}
+  if (fold) { el.innerHTML = '<h4 style="cursor:pointer;margin:0" onclick="togglePlt()" title="펼치기">📦 총 ' + fmtPlt(tot) + ' 파렛트 ▸</h4>'; el.style.display = ''; return; }
+  el.innerHTML = '<h4 style="cursor:pointer" onclick="togglePlt()" title="접기">📦 파렛트 계산 (누적) ▾</h4>' +
+    (rows || '<div class="note">박스 크기를 입력하면 계산됩니다</div>') +
+    '<div class="hr"></div>' +
+    '<div class="pr tot"><span>총</span><span><b>' + fmtPlt(tot) + '</b> 파렛트</span></div>' +
+    '<div class="pr"><span class="sub">올림</span><span class="sub">' + Math.ceil(tot - 1e-9) + ' 파렛트</span></div>' +
+    '<div class="hr"></div>' +
+    '<div class="pr"><span style="color:var(--y)">합포</span><b style="color:var(--y)">' + fmtPlt(multi) + '</b></div>' +
+    '<div class="pr"><span>단포</span><b>' + fmtPlt(single) + '</b></div>' +
+    ((none || other) ? '<div class="note">' + (none ? '박스 미입력 ' + none + '건' : '') + (none && other ? ' · ' : '') + (other ? '기준 없는 박스 ' + other + '건' : '') + ' — 계산 제외</div>' : '') +
+    '<div class="note">1파렛트: 60→36 · 45→54 · 30→72 · 15→120 · 1→400</div>';
+  el.style.display = '';
 }
 
 function getActiveGroups(opts) {
