@@ -199,6 +199,15 @@
     font-size: 14px; font-weight: 700; color: var(--text);
     margin-bottom: 4px;
   }
+  .col-guide { margin-top: 8px; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+  .col-guide .cg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text-sub); margin-bottom: 6px; }
+  .col-guide .cg-copy { font-size: 11px; padding: 2px 8px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+  .col-guide .cg-cols { display: flex; flex-wrap: wrap; gap: 4px; }
+  .col-guide .cg-c { display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 7px; border-radius: 5px; background: rgba(100,116,139,.08); white-space: nowrap; user-select: text; }
+  .col-guide .cg-c i { font-style: normal; font-size: 10px; color: var(--text-sub); font-family: ui-monospace, monospace; }
+  .col-guide .cg-c.req { font-weight: 700; }
+  .col-guide .cg-c.off { opacity: .5; }
+  .col-guide .cg-note { margin-top: 6px; font-size: 11px; color: var(--text-sub); line-height: 1.5; }
   .dropzone .dz-sub {
     font-size: 12px; color: var(--text-sub);
   }
@@ -720,6 +729,15 @@
           <div class="dz-file" id="dzFile"></div>
           <input type="file" id="fileInput" accept=".xlsx,.xls" />
         </div>
+        <!-- 엑셀 제목줄(1행) 열 안내 — A열 발주번호부터 -->
+        <div class="col-guide">
+          <div class="cg-head">
+            <span>엑셀 제목줄(1행) — A열부터</span>
+            <button type="button" class="cg-copy" id="cgCopy" title="제목줄을 복사 → 엑셀 A1 칸에 붙여넣기">📋 제목줄 복사</button>
+          </div>
+          <div class="cg-cols" id="cgCols"></div>
+          <div class="cg-note"><b>굵은 글씨</b> = 꼭 있어야 하는 열 · 보통 = 있으면 사용 · 흐린 글씨 = 안 씀(있어도 됨). 열 순서가 달라도 제목 글자로 찾습니다.</div>
+        </div>
       </div>
       <div class="field">
         <label>도착예정일 기준 연도 (선택)</label>
@@ -1053,6 +1071,28 @@ const H = {
   origin:       ["출고지", "출고 지", "출고장"],
   dispatch:     ["배차방식", "배차 방식", "배차"],
 };
+
+/* 엑셀 제목줄 안내 — 쿠팡 PO_SKU_LIST 순서 그대로 (A열 발주번호 ~ Q열 배차방식)
+   r = 꼭 있어야 함 · o = 있으면 사용 · x = 안 씀 */
+const COL_GUIDE = [
+  ['발주번호', 'r'], ['발주유형', 'x'], ['발주현황', 'o'], ['SKU ID', 'r'], ['SKU 이름', 'r'], ['SKU Barcode', 'o'],
+  ['물류센터', 'r'], ['입고예정일', 'r'], ['발주일', 'x'], ['발주수량', 'x'], ['확정수량', 'r'], ['박스수', 'r'],
+  ['유통(소비)기한', 'r'], ['파렛트수', 'r'], ['파렛트번호', 'r'], ['출고지', 'o'], ['배차방식', 'o'],
+];
+(function renderColGuide() {
+  const box = document.getElementById('cgCols');
+  if (!box) return;
+  const L = (i) => String.fromCharCode(65 + i);
+  box.innerHTML = COL_GUIDE.map(([n, t], i) =>
+    `<span class="cg-c${t === 'r' ? ' req' : t === 'x' ? ' off' : ''}"><i>${L(i)}</i>${n}</span>`).join('');
+  const btn = document.getElementById('cgCopy');
+  btn.addEventListener('click', async () => {
+    const tsv = COL_GUIDE.map(c => c[0]).join('\t');
+    try { await navigator.clipboard.writeText(tsv); btn.textContent = '✅ 복사됨 — A1에 붙여넣기'; }
+    catch (e) { prompt('아래 글자를 복사해 엑셀 A1 칸에 붙여넣으세요', tsv); }
+    setTimeout(() => { btn.textContent = '📋 제목줄 복사'; }, 2500);
+  });
+})();
 
 let RAW_ROWS = [];
 let GROUPS = [];
