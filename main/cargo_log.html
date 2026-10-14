@@ -81,6 +81,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 .fc-sync{padding:.25rem .65rem;border-radius:7px;border:1px solid rgba(251,146,60,.55);background:transparent;color:var(--o);font-size:12px;font-weight:700;cursor:pointer}
 .fc-sync.need{background:var(--o);color:#0b0d12}
 .fc-c.adj{box-shadow:inset 0 0 0 1.5px var(--o)}
+.fc-c.bad{box-shadow:inset 0 0 0 2px var(--r)}
 .fc-v{display:flex;align-items:center;gap:.3rem}
 .fc-in{flex:1;min-width:0;width:100%;background:transparent;border:none;border-bottom:1px dashed var(--br);color:var(--tx);font-family:var(--mo);font-size:18px;font-weight:700;padding:0;height:auto}
 .fc-in:focus{outline:none;border-bottom-color:var(--o)}
@@ -1217,14 +1218,12 @@ function watchForecast(){
 }
 /* 센터별 값은 이 화면에서만 고칠 수 있음(▲ 올림·+1, ▼ 내림·−1, 숫자 직접) → ⟳ 동기화 = 피킹 값 그대로, ✔ 파렛트 확정 = 그 날 택배출고 기록(우체국/기타 칸) */
 var fcData = null, fcDay = '', fcAdj = {};
-var FC_NONE = '센터 미지정';
 function fcR1(x){ return Math.round((+x || 0) * 10) / 10; }
 function fcF1(x){ var r = fcR1(x); return r === Math.round(r) ? String(r) : r.toFixed(1); }
-/* 칸 목록 = 피킹 센터 + (총 − 센터 합)이 남으면 「센터 미지정」 */
+/* 칸 목록 = 피킹에서 인쇄 때 고른 센터만 (센터 안 고른·아직 인쇄 안 한 몫은 확정에서 빠짐, 대표님 2026-10-15) */
+function fcCenterSum(){ return fcR1(((fcData || {}).centers || []).reduce(function(a, c){ return a + (+c.plt || 0); }, 0)); }
 function fcCells(){
   var v = fcData || {}, cs = (v.centers || []).filter(function(c){ return c && c.name; }).map(function(c){ return { k: c.name, base: fcR1(c.plt) }; });
-  var rest = fcR1((+v.total || 0) - cs.reduce(function(a, c){ return a + c.base; }, 0));
-  if (rest > 0.05) cs.push({ k: FC_NONE, base: rest });
   cs.forEach(function(c){ c.val = (c.k in fcAdj) ? fcAdj[c.k] : c.base; c.adj = (c.k in fcAdj) && fcAdj[c.k] !== c.base; });
   return cs;
 }
@@ -1247,7 +1246,7 @@ function renderForecast(v, d){
     }).join('') +
       '<div class="fc-c all"><div>총 파렛트</div><b id="fcTot">' + fcF1(fcSum()) + '</b></div>' +
       '<button class="fc-ok" data-a="ok" title="센터별 파렛트를 그 날 택배출고로 기록 (우체국/기타 칸)">✔ 파렛트<br>확정</button></div>' +
-    ((+v.none || 0) > 0 ? '<div class="fc-n">센터 안 고르고 인쇄한 송장 ' + fcF1(v.none) + ' 파렛트 · 아직 인쇄 안 한 송장은 「' + FC_NONE + '」에 들어 있음</div>' : '') +
+    ((+v.total || 0) - fcCenterSum() > 0.05 ? '<div class="fc-n">센터를 안 고르고 인쇄했거나 아직 인쇄 안 한 송장 ' + fcF1((+v.total || 0) - fcCenterSum()) + ' 파렛트는 확정에서 빠집니다 (피킹 전체 ' + fcF1(v.total) + ')</div>' : '') +
     (adj ? '<div class="fc-n" style="color:var(--o)">✎ 고친 칸이 있습니다 — 피킹 값으로 돌리려면 ⟳ 동기화</div>' : '');
   box.classList.remove('hide');
 }
@@ -1280,9 +1279,13 @@ function fcConfirm(){
   var date = fcDay || today(), cs = fcCells().filter(function(c){ return +c.val > 0; });
   if (!cs.length){ toast('확정할 파렛트가 없습니다'); return; }
   var dec = cs.filter(function(c){ return fcR1(c.val) !== Math.round(c.val); });
-  if (dec.length && !confirm('소수점 파렛트가 있습니다: ' + dec.map(function(c){ return c.k + ' ' + fcF1(c.val); }).join(', ') + '\n▲▼ 로 맞추지 않고 이대로 기록할까요?')) return;
+  if (dec.length){   /* 확정은 정수로만 (대표님 2026-10-15) — 소수 칸을 빨갛게 */
+    dec.forEach(function(c){ var el = $('fcBox').querySelector('.fc-c[data-k="' + c.k.replace(/["\\]/g, '\\$&') + '"]'); if (el) el.classList.add('bad'); });
+    alert('정수로 맞춘 뒤 확정하세요 — ▲ 올림 · ▼ 내림\n\n소수 칸: ' + dec.map(function(c){ return c.k + ' ' + fcF1(c.val); }).join(', '));
+    return;
+  }
   var parts = {};
-  cs.forEach(function(c){ parts[c.k === FC_NONE ? BASIC : c.k] = { aj: 0, etc: fcR1(c.val), box: 0 }; });
+  cs.forEach(function(c){ parts[c.k] = { aj: 0, etc: Math.round(c.val), box: 0 }; });
   var by = (me && (me.email || '').split('@')[0]) || '', now = Date.now();
   base.child('logs').orderByChild('date').startAt(date).endAt(date).get().then(function(snap){
     var hits = []; snap.forEach(function(c){ var v = c.val(); if (v.kind === 'parcel'){ v.id = c.key; hits.push(v); } });
