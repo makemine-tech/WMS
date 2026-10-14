@@ -1164,23 +1164,46 @@ function renderBoxFilter() {
 /* ─────────────── 파렛트 계산 ───────────────
    등록된 송장 전체(오전·오후 추가 등록 누적, 인쇄 여부 무관)를 박스 크기별로 세어 파렛트로 환산.
    1파렛트 적재 = 60박스 36 · 45박스 54 · 30박스 72 · 15박스 120 · 1박스 400 */
-/* 센터 목록 (박스 메모처럼 작업과 따로 유지: localStorage + wms_sync/groups/{gid}/picking_ez/centers) */
-var pkCenters = ['4355센터', 'HK센터', '짝꿍센터'];
+/* 센터 목록 = 창고관리(WMS)에 등록된 이 그룹의 창고 이름 — 입출고 화물관리와 같은 순서(적재 파렛트 많은 순).
+   로그인 후 groups/{gid} → warehouses/{id}/name 에서 불러오고, 이 PC 에 마지막 목록 보관 */
+var pkCenters = [];
 try { var _pc = JSON.parse(localStorage.getItem('pkCenters') || 'null'); if (Array.isArray(_pc)) pkCenters = _pc; } catch(e){}
 var pkLastCenter = ''; try { pkLastCenter = localStorage.getItem('pkLastCenter') || ''; } catch(e){}
-function saveCenters(list, remote) {
-  pkCenters = list;
-  try { localStorage.setItem('pkCenters', JSON.stringify(list)); } catch(e){}
-  if (remote !== false && pkReady && pkGid && typeof firebase !== 'undefined')
-    firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/centers').set(list.length ? list : null)
-      .catch(function(err){ console.warn('[picking] 센터 저장 실패', err); });
-  renderPltBox();
+function loadWhCenters() {
+  if (!pkReady || !pkGid || typeof firebase === 'undefined') return;
+  var db = firebase.database();
+  db.ref('groups/' + pkGid).get().then(function(g){
+    var wids = g.exists() ? Object.keys(g.val()).filter(function(k){ return k !== '_init'; }) : [];
+    return Promise.all(wids.map(function(wid){
+      return Promise.all([db.ref('warehouses/' + wid + '/name').get(), db.ref('warehouses/' + wid + '/cells').get()]).then(function(r){
+        var cells = r[1].val() || {}, used = 0;
+        Object.keys(cells).forEach(function(k){ var c = cells[k]; if (c && (c.type === 'rack' || c.type === 'shelf')) used += Object.values(c.slots || {}).filter(Boolean).length; });
+        return { name: r[0].val() || wid, plt: used };
+      }).catch(function(){ return null; });
+    }));
+  }).then(function(a){
+    pkCenters = a.filter(Boolean).sort(function(x, y){ return (y.plt - x.plt) || x.name.localeCompare(y.name, 'ko'); }).map(function(w){ return w.name; });
+    try { localStorage.setItem('pkCenters', JSON.stringify(pkCenters)); } catch(e){}
+    renderPltBox();
+  }).catch(function(e){ console.warn('[picking] 창고 목록 읽기 실패', e); });
 }
-function editCenters() {
-  var v = prompt('센터 이름을 쉼표(,)로 구분해 적어주세요\n예) 4355센터, HK센터, 짝꿍센터', pkCenters.join(', '));
-  if (v === null) return;
-  var list = []; v.split(/[,\n]/).forEach(function(x){ x = x.trim(); if (x && list.indexOf(x) < 0) list.push(x); });
-  saveCenters(list);
+/* 오늘의 예상 → 입출고 화물관리 택배출고에 표시: wms_sync/groups/{gid}/picking_ez/forecast/{YYYY-MM-DD}
+   (같은 날 추가 등록까지 누적된 지금 작업 기준, 1.5초 모아서 저장) */
+var pkFcTimer = null, pkFcLast = '';
+function pkToday() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function pkPushForecast(v) {
+  if (!pkReady || !pkGid || typeof firebase === 'undefined' || !invoices.length) return;
+  var r1 = function(x){ return Math.round(x * 10) / 10; };
+  var rec = { total: r1(v.total), multi: r1(v.multi), single: r1(v.single), none: r1(v.none),
+              centers: v.centers.map(function(c){ return { name: c.name, plt: r1(c.plt) }; }), invCount: invoices.length };
+  var key = JSON.stringify(rec);
+  if (key === pkFcLast) return;
+  clearTimeout(pkFcTimer);
+  pkFcTimer = setTimeout(function(){
+    pkFcLast = key; rec.ts = Date.now(); rec.by = pkUid || '';
+    firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/forecast/' + pkToday()).set(rec)
+      .catch(function(err){ pkFcLast = ''; console.warn('[picking] 예상 저장 실패', err); });
+  }, 1500);
 }
 function centerOf(n) { return invCenter[n] || invCenter[pkSafeKey(n)] || ''; }
 /* 인쇄한 송장에 센터 기록 (같은 작업을 보는 다른 PC 와 공유: job/center) */
@@ -1238,6 +1261,7 @@ function renderPltBox() {
   var rows = [60, 45, 30, 15, 1].filter(function(n){ return by[n]; }).map(function(n){
     return '<div class="pr"><span>' + n + ' <span class="sub">' + by[n].toLocaleString() + '건/' + PLT_CAP[n] + '</span></span><b>' + fmtPlt(by[n] / PLT_CAP[n]) + '</b></div>';
   }).join('');
+  pkPushForecast({ total: tot, multi: multi, single: single, none: noC, centers: cNames.map(function(c){ return { name: c, plt: byC[c] || 0 }; }) });
   var fold = false; try { fold = localStorage.getItem('pkPltFold') === '1'; } catch(e){}
   if (fold) { el.innerHTML = '<h4 style="cursor:pointer;margin:0" onclick="togglePlt()" title="펼치기">📦 총 ' + fmtPlt(tot) + ' 파렛트 ▸</h4>'; el.style.display = ''; return; }
   el.innerHTML = '<h4 style="cursor:pointer" onclick="togglePlt()" title="접기">📦 파렛트 계산 (누적) ▾</h4>' +
@@ -1249,8 +1273,8 @@ function renderPltBox() {
     '<div class="pr"><span style="color:var(--y)">합포</span><b style="color:var(--y)">' + fmtPlt(multi) + '</b></div>' +
     '<div class="pr"><span>단포</span><b>' + fmtPlt(single) + '</b></div>' +
     '<div class="hr"></div>' +
-    '<div class="pr"><span style="color:var(--g);font-weight:800;font-size:.72rem">센터별 (인쇄 때 고른 센터)</span><a href="javascript:void 0" onclick="editCenters()" title="센터 목록 설정" style="color:var(--mu);text-decoration:none">⚙</a></div>' +
-    (cRows || '<div class="note">⚙ 를 눌러 센터를 등록하세요</div>') +
+    '<div class="pr"><span style="color:var(--g);font-weight:800;font-size:.72rem">센터별 (인쇄 때 고른 센터)</span><a href="javascript:void 0" onclick="loadWhCenters()" title="창고관리 창고 목록 다시 불러오기" style="color:var(--mu);text-decoration:none">↻</a></div>' +
+    (cRows || '<div class="note">창고관리(WMS)에 등록된 창고가 센터로 나옵니다' + (pkReady ? '' : ' — 로그인 필요') + '</div>') +
     ((none || other) ? '<div class="note">' + (none ? '박스 미입력 ' + none + '건' : '') + (none && other ? ' · ' : '') + (other ? '기준 없는 박스 ' + other + '건' : '') + ' — 계산 제외</div>' : '') +
     '<div class="note">1파렛트: 60→36 · 45→54 · 30→72 · 15→120 · 1→400</div>';
   el.style.display = '';
@@ -2484,13 +2508,7 @@ function pkAttach(){
       snap.ref.set(boxSizes).catch(function(err){ console.warn('[picking] 박스 업로드 실패', err); });
     }
   }, function(err){ console.warn('[picking] boxes 읽기 실패', err); });
-  /* centers: 센터 목록 (작업과 따로 유지) */
-  firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/centers').on('value', function(snap){
-    if (!pkReady) return;
-    var v = snap.val();
-    if (Array.isArray(v)) saveCenters(v.filter(Boolean), false);
-    else if (pkCenters.length) snap.ref.set(pkCenters).catch(function(){});
-  }, function(err){ console.warn('[picking] centers 읽기 실패', err); });
+  loadWhCenters();   /* 센터 목록 = 창고관리(WMS) 창고 이름 */
 
   /* printed: 실시간 인쇄완료 집합 */
   pkBase.child('printed').on('value', function(snap){
