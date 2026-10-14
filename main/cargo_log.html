@@ -78,6 +78,18 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 .fc-c.all div:first-child{color:rgba(11,13,18,.72);font-weight:700}
 .fc-c.all b{color:#0b0d12}
 .fc-n{font-size:11px;color:var(--mu);margin-top:.35rem}
+.fc-sync{padding:.25rem .65rem;border-radius:7px;border:1px solid rgba(251,146,60,.55);background:transparent;color:var(--o);font-size:12px;font-weight:700;cursor:pointer}
+.fc-sync.need{background:var(--o);color:#0b0d12}
+.fc-c.adj{box-shadow:inset 0 0 0 1.5px var(--o)}
+.fc-v{display:flex;align-items:center;gap:.3rem}
+.fc-in{flex:1;min-width:0;width:100%;background:transparent;border:none;border-bottom:1px dashed var(--br);color:var(--tx);font-family:var(--mo);font-size:18px;font-weight:700;padding:0;height:auto}
+.fc-in:focus{outline:none;border-bottom-color:var(--o)}
+.fc-in::-webkit-inner-spin-button,.fc-in::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.fc-ar{display:flex;flex-direction:column;gap:2px}
+.fc-ar button{width:26px;height:18px;line-height:1;padding:0;border-radius:4px;border:1px solid var(--br);background:var(--s3);color:var(--o);font-size:10px;cursor:pointer}
+.fc-ar button:hover{border-color:var(--o)}
+.fc-ok{border:none;border-radius:7px;background:var(--g);color:#0b0d12;font-weight:800;font-size:13px;line-height:1.25;cursor:pointer;padding:.35rem .6rem}
+.fc-ok:hover{filter:brightness(1.08)}
 .form-ft{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.9rem;align-items:center;flex-wrap:wrap}
 .editing{font-size:12px;color:var(--y);margin-right:auto}
 
@@ -209,9 +221,12 @@ table.t td.mc,table.t th.mc{width:1%;padding-left:.4rem;padding-right:0}
       <div class="lb parcel-only">파렛트<br><span style="font-weight:400;font-size:11px">하루 1건 — 같은 날 다시 넣으면 합쳐짐</span></div>
       <div class="parcel-only">
         <div class="fc hide" id="fcBox"></div>
+        <!-- 창고별 직접 입력(창고·AJ·우체국·박스·창고 추가) — 오늘의 예상 「파렛트 확정」으로 대신해 임시 숨김 (2026-10-15). 다시 쓰려면 hide 만 빼면 됨 -->
+        <div class="hide" id="parcelManual">
         <div id="whLines"></div>
         <button class="btn btn-sm" onclick="addLine()">+ 창고 추가</button>
         <div class="tot" id="lineTot"></div>
+        </div>
       </div>
 
       <!-- 입고·출고·기타: 한 줄 -->
@@ -1200,19 +1215,97 @@ function watchForecast(){
   fcRef = db.ref('wms_sync/groups/' + gid + '/picking_ez/forecast/' + d); fcRef._d = d;
   fcRef.on('value', function(s){ renderForecast(s.val(), d); }, function(){ renderForecast(null, d); });
 }
+/* 센터별 값은 이 화면에서만 고칠 수 있음(▲ 올림·+1, ▼ 내림·−1, 숫자 직접) → ⟳ 동기화 = 피킹 값 그대로, ✔ 파렛트 확정 = 그 날 택배출고 기록(우체국/기타 칸) */
+var fcData = null, fcDay = '', fcAdj = {};
+var FC_NONE = '센터 미지정';
+function fcR1(x){ return Math.round((+x || 0) * 10) / 10; }
+function fcF1(x){ var r = fcR1(x); return r === Math.round(r) ? String(r) : r.toFixed(1); }
+/* 칸 목록 = 피킹 센터 + (총 − 센터 합)이 남으면 「센터 미지정」 */
+function fcCells(){
+  var v = fcData || {}, cs = (v.centers || []).filter(function(c){ return c && c.name; }).map(function(c){ return { k: c.name, base: fcR1(c.plt) }; });
+  var rest = fcR1((+v.total || 0) - cs.reduce(function(a, c){ return a + c.base; }, 0));
+  if (rest > 0.05) cs.push({ k: FC_NONE, base: rest });
+  cs.forEach(function(c){ c.val = (c.k in fcAdj) ? fcAdj[c.k] : c.base; c.adj = (c.k in fcAdj) && fcAdj[c.k] !== c.base; });
+  return cs;
+}
+function fcSum(){ return fcR1(fcCells().reduce(function(a, c){ return a + (+c.val || 0); }, 0)); }
 function renderForecast(v, d){
   var box = $('fcBox');
-  if (!v){ box.classList.add('hide'); box.innerHTML = ''; return; }
-  var f1 = function(x){ return (Math.round((+x || 0) * 10) / 10).toFixed(1); };
+  if (d !== fcDay){ fcDay = d; fcAdj = {}; }
+  fcData = v;
+  if (!v || !(+v.invCount)){ box.classList.add('hide'); box.innerHTML = ''; return; }
+  if (box.contains(document.activeElement) && document.activeElement.classList.contains('fc-in')){ fcTotal(); return; }   /* 숫자 고치는 중이면 다시 그리지 않음 */
   var t = v.ts ? new Date(v.ts) : null, hm = t ? String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') : '';
-  var cs = (v.centers || []).filter(function(c){ return c && c.name; });
+  var cs = fcCells(), adj = cs.some(function(c){ return c.adj; });
   box.innerHTML = '<div class="fc-h"><span class="fc-t">📅 ' + (d === today() ? '오늘의 예상' : esc(d.slice(5).replace('-', '/')) + ' 예상') +
-      '<small>피킹 송장 ' + fmt(v.invCount || 0) + '건 기준' + (hm ? ' · ' + hm : '') + '</small></span>' +
-      '<span class="fc-m">합포 ' + f1(v.multi) + ' · 단포 ' + f1(v.single) + '</span></div>' +
-    '<div class="fc-g">' + cs.map(function(c){ return '<div class="fc-c"><div title="' + esc(c.name) + '">' + esc(c.name) + '</div><b>' + f1(c.plt) + '</b></div>'; }).join('') +
-      '<div class="fc-c all"><div>총 파렛트</div><b>' + f1(v.total) + '</b></div></div>' +
-    ((+v.none || 0) > 0 ? '<div class="fc-n">센터 안 고르고 인쇄한 송장 ' + f1(v.none) + ' 파렛트 · 아직 인쇄 안 한 송장은 총 파렛트에만 들어 있음</div>' : '');
+      '<small>피킹 송장 ' + fmt(v.invCount || 0) + '건 기준' + (hm ? ' · ' + hm : '') + ' · 합포 ' + fcF1(v.multi) + ' · 단포 ' + fcF1(v.single) + '</small></span>' +
+      '<button class="fc-sync' + (adj ? ' need' : '') + '" data-a="sync" title="고친 숫자를 버리고 피킹 시스템 값과 1:1 로 맞춤">⟳ 동기화</button></div>' +
+    '<div class="fc-g">' + cs.map(function(c){
+      return '<div class="fc-c' + (c.adj ? ' adj' : '') + '" data-k="' + esc(c.k) + '"><div title="' + esc(c.k) + (c.adj ? ' — 피킹 값 ' + fcF1(c.base) : '') + '">' + esc(c.k) + '</div>' +
+        '<div class="fc-v"><input class="fc-in" type="number" inputmode="decimal" step="0.1" min="0" value="' + fcF1(c.val) + '">' +
+        '<span class="fc-ar"><button data-a="up" title="올림 (정수면 +1)">▲</button><button data-a="dn" title="내림 (정수면 −1)">▼</button></span></div></div>';
+    }).join('') +
+      '<div class="fc-c all"><div>총 파렛트</div><b id="fcTot">' + fcF1(fcSum()) + '</b></div>' +
+      '<button class="fc-ok" data-a="ok" title="센터별 파렛트를 그 날 택배출고로 기록 (우체국/기타 칸)">✔ 파렛트<br>확정</button></div>' +
+    ((+v.none || 0) > 0 ? '<div class="fc-n">센터 안 고르고 인쇄한 송장 ' + fcF1(v.none) + ' 파렛트 · 아직 인쇄 안 한 송장은 「' + FC_NONE + '」에 들어 있음</div>' : '') +
+    (adj ? '<div class="fc-n" style="color:var(--o)">✎ 고친 칸이 있습니다 — 피킹 값으로 돌리려면 ⟳ 동기화</div>' : '');
   box.classList.remove('hide');
+}
+function fcTotal(){ var e = $('fcTot'); if (e) e.textContent = fcF1(fcSum()); }
+function fcSet(k, val){
+  var c = fcCells().filter(function(x){ return x.k === k; })[0]; if (!c) return;
+  val = Math.max(0, fcR1(val));
+  if (val === c.base) delete fcAdj[k]; else fcAdj[k] = val;
+}
+$('fcBox').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  var a = b.dataset.a, cell = b.closest('.fc-c'), k = cell ? cell.dataset.k : null;
+  if (a === 'up' || a === 'dn'){
+    var cur = fcR1(cell.querySelector('.fc-in').value), isInt = cur === Math.round(cur);
+    fcSet(k, a === 'up' ? (isInt ? cur + 1 : Math.ceil(cur)) : (isInt ? cur - 1 : Math.floor(cur)));
+    renderForecast(fcData, fcDay);
+  } else if (a === 'sync'){
+    fcAdj = {}; if (fcRef){ fcRef.once('value').then(function(s){ renderForecast(s.val(), fcDay); toast('⟳ 피킹 시스템 값으로 맞췄습니다'); }); } else renderForecast(fcData, fcDay);
+  } else if (a === 'ok') fcConfirm();
+});
+$('fcBox').addEventListener('input', function(e){
+  if (!e.target.classList.contains('fc-in')) return;
+  fcSet(e.target.closest('.fc-c').dataset.k, e.target.value); fcTotal();
+});
+$('fcBox').addEventListener('change', function(e){ if (e.target.classList.contains('fc-in')){ e.target.blur(); renderForecast(fcData, fcDay); } });
+$('fcBox').addEventListener('keydown', function(e){ if (e.key === 'Enter' && e.target.classList.contains('fc-in')){ e.preventDefault(); e.stopPropagation(); e.target.blur(); renderForecast(fcData, fcDay); } });
+/* ✔ 파렛트 확정 → 그 날 택배출고 1건: 센터마다 우체국/기타 칸에 (AJ 는 목록에서 고침). 그 날 기록이 이미 있으면 물어보고 창고별 수량만 바꿈 */
+function fcConfirm(){
+  if (!gid || !base){ toast('로그인·그룹 확인 중입니다'); return; }
+  var date = fcDay || today(), cs = fcCells().filter(function(c){ return +c.val > 0; });
+  if (!cs.length){ toast('확정할 파렛트가 없습니다'); return; }
+  var dec = cs.filter(function(c){ return fcR1(c.val) !== Math.round(c.val); });
+  if (dec.length && !confirm('소수점 파렛트가 있습니다: ' + dec.map(function(c){ return c.k + ' ' + fcF1(c.val); }).join(', ') + '\n▲▼ 로 맞추지 않고 이대로 기록할까요?')) return;
+  var parts = {};
+  cs.forEach(function(c){ parts[c.k === FC_NONE ? BASIC : c.k] = { aj: 0, etc: fcR1(c.val), box: 0 }; });
+  var by = (me && (me.email || '').split('@')[0]) || '', now = Date.now();
+  base.child('logs').orderByChild('date').startAt(date).endAt(date).get().then(function(snap){
+    var hits = []; snap.forEach(function(c){ var v = c.val(); if (v.kind === 'parcel'){ v.id = c.key; hits.push(v); } });
+    hits.sort(function(a, b){ return (a.at || 0) - (b.at || 0); });
+    var hit = hits[0] || null;
+    if (hit){
+      var old = partsOf(hit), oldTot = Object.keys(old).reduce(function(a, k){ return a + (old[k].aj || 0) + (old[k].etc || 0); }, 0);
+      if (!confirm(date + ' 택배출고 기록이 이미 있습니다 (총 ' + fcF1(oldTot) + ' 파렛트).\n확정값(총 ' + fcF1(fcSum()) + ')으로 창고별 수량을 바꿀까요?\n※ 목록에서 AJ 로 고친 내용도 다시 우체국/기타로 바뀝니다. 업체·작업비·메모는 그대로')) return;
+    }
+    var keep = hit || {}, note = keep.note != null ? keep.note : '';
+    var tt = parcelTotals(parts, note);
+    var rec = Object.assign({}, keep, { date: date, kind: 'parcel', vendor: keep.vendor || '', wh: tt.wh, aj: tt.aj, etc: tt.etc, box: tt.box, parts: tt.parts, note: tt.note, memo: tt.memo,
+      work: keep.work || '', fee: keep.fee || 0, by: keep.by || by, at: keep.at || now, fcAt: now, fcBy: by });
+    if (hit){ rec.editedBy = by; rec.editedAt = now; }
+    delete rec.id; delete rec.batch;
+    var id = hit ? hit.id : base.child('logs').push().key, up = {};
+    up['logs/' + id] = rec;
+    hits.slice(1).forEach(function(h){ up['logs/' + h.id] = null; });
+    return base.update(up).then(function(){
+      toast('✔ 파렛트 확정 — ' + date + ' 택배출고 총 ' + fcF1(tt.aj + tt.etc) + ' 파렛트 (우체국/기타)');
+      if (date !== today() && !inPeriod(date)) toast('기록했습니다 — 지금 보는 기간 밖의 날짜입니다');
+    });
+  }).catch(function(e){ toast('확정 실패: ' + (e.code || e.message)); });
 }
 $('fDate').addEventListener('change', watchForecast);
 
