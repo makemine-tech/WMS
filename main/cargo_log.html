@@ -64,6 +64,20 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 .whl .x:hover{color:var(--r)}
 .tot{display:flex;gap:1rem;flex-wrap:wrap;align-items:center;background:var(--s2);border-radius:9px;padding:.55rem .8rem;font-size:13px;margin-top:.2rem}
 .tot b{font-family:var(--mo);font-size:15px}
+/* ── 오늘의 예상 (피킹이지 파렛트 계산 → 택배출고 위) ── */
+.fc{background:rgba(192,132,252,.10);border:1px solid rgba(192,132,252,.55);border-radius:10px;padding:.6rem .8rem;margin-bottom:.6rem}
+.fc-h{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem}
+.fc-t{font-weight:700;color:var(--p);font-size:14px}
+.fc-t small{font-weight:400;font-size:11px;color:var(--mu);margin-left:.35rem}
+.fc-m{font-size:12px;color:var(--p)}
+.fc-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.45rem}
+.fc-c{background:var(--s2);border-radius:7px;padding:.35rem .6rem;min-width:0}
+.fc-c div:first-child{font-size:11px;color:var(--p);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fc-c b{font-family:var(--mo);font-size:18px;color:var(--tx)}
+.fc-c.all{background:#7c3aed}
+.fc-c.all div:first-child{color:#e9d5ff}
+.fc-c.all b{color:#fff}
+.fc-n{font-size:11px;color:var(--mu);margin-top:.35rem}
 .form-ft{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.9rem;align-items:center;flex-wrap:wrap}
 .editing{font-size:12px;color:var(--y);margin-right:auto}
 
@@ -194,6 +208,7 @@ table.t td.mc,table.t th.mc{width:1%;padding-left:.4rem;padding-right:0}
       <!-- 택배출고: 창고별 여러 줄 -->
       <div class="lb parcel-only">파렛트<br><span style="font-weight:400;font-size:11px">하루 1건 — 같은 날 다시 넣으면 합쳐짐</span></div>
       <div class="parcel-only">
+        <div class="fc hide" id="fcBox"></div>
         <div id="whLines"></div>
         <button class="btn btn-sm" onclick="addLine()">+ 창고 추가</button>
         <div class="tot" id="lineTot"></div>
@@ -465,6 +480,7 @@ function resetForm(keep){
   setWork('');
   $('whLines').innerHTML = '';
   if (!keep) $('fDate').value = today();
+  watchForecast();
   setKind(kind);
   document.querySelectorAll('tr.sel').forEach(function(tr){ tr.classList.remove('sel'); });
 }
@@ -593,6 +609,7 @@ function editEntry(id){
   editId = id; kind = r.kind;
   setKind(r.kind);
   $('fDate').value = r.date; $('fVendor').value = r.vendor || ''; setWh(r.wh || '');
+  watchForecast();
   $('fAJ').value = r.aj || ''; $('fEtc').value = r.etc || ''; $('fBox').value = r.box || ''; $('fMemo').value = r.memo || ''; $('fFee').value = r.fee || ''; setWork(r.work || '');
   if (r.kind === 'parcel'){
     $('whLines').innerHTML = '';
@@ -1173,6 +1190,32 @@ window.addEventListener('beforeunload', function(e){ if (Object.keys(edits).leng
 $('fDate').value = today();
 setKind('parcel');
 setPer('today');
+/* ── 오늘의 예상: 피킹이지 📦 파렛트 계산이 올린 그 날짜 값 (wms_sync/groups/{gid}/picking_ez/forecast/{날짜}) ── */
+var fcRef = null;
+function watchForecast(){
+  if (!db || !gid) return;
+  var d = $('fDate').value || today();
+  if (fcRef && fcRef._d === d) return;
+  if (fcRef) fcRef.off();
+  fcRef = db.ref('wms_sync/groups/' + gid + '/picking_ez/forecast/' + d); fcRef._d = d;
+  fcRef.on('value', function(s){ renderForecast(s.val(), d); }, function(){ renderForecast(null, d); });
+}
+function renderForecast(v, d){
+  var box = $('fcBox');
+  if (!v){ box.classList.add('hide'); box.innerHTML = ''; return; }
+  var f1 = function(x){ return (Math.round((+x || 0) * 10) / 10).toFixed(1); };
+  var t = v.ts ? new Date(v.ts) : null, hm = t ? String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') : '';
+  var cs = (v.centers || []).filter(function(c){ return c && c.name; });
+  box.innerHTML = '<div class="fc-h"><span class="fc-t">📅 ' + (d === today() ? '오늘의 예상' : esc(d.slice(5).replace('-', '/')) + ' 예상') +
+      '<small>피킹 송장 ' + fmt(v.invCount || 0) + '건 기준' + (hm ? ' · ' + hm : '') + '</small></span>' +
+      '<span class="fc-m">합포 ' + f1(v.multi) + ' · 단포 ' + f1(v.single) + '</span></div>' +
+    '<div class="fc-g">' + cs.map(function(c){ return '<div class="fc-c"><div title="' + esc(c.name) + '">' + esc(c.name) + '</div><b>' + f1(c.plt) + '</b></div>'; }).join('') +
+      '<div class="fc-c all"><div>총 파렛트</div><b>' + f1(v.total) + '</b></div></div>' +
+    ((+v.none || 0) > 0 ? '<div class="fc-n">센터 안 고르고 인쇄한 송장 ' + f1(v.none) + ' 파렛트 · 아직 인쇄 안 한 송장은 총 파렛트에만 들어 있음</div>' : '');
+  box.classList.remove('hide');
+}
+$('fDate').addEventListener('change', watchForecast);
+
 attachAC($('fVendor'), 'vendor', function(){ focusNext('vendor'); });
 
 WMSync.init('cargo_log', { requireAuth: true });
@@ -1183,6 +1226,7 @@ WMSync.onAuth(function(st){
   base = db.ref('wms_sync/groups/' + gid + '/cargo');
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
   loadWarehouses();
+  watchForecast();
   base.child('dict').on('value', function(s){
     var d = s.val() || {}; dict = { vendor: {}, wh: {} };
     ['vendor', 'wh'].forEach(function(t){ Object.keys(d[t] || {}).forEach(function(k){ var v = d[t][k]; dict[t][v.name || k] = Object.assign({ _k: k }, v); }); });
