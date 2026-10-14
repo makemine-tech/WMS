@@ -1208,10 +1208,11 @@ function pkClearForecast(){
 }
 function pkToday() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function pkPushForecast(v) {
-  if (!pkReady || !pkGid || typeof firebase === 'undefined' || !invoices.length) return;
+  /* 그룹 DB 에 지금 작업(jobKey)이 있을 때만 — 지워진 옛 작업이 남은 PC 가 다시 올리지 않게 */
+  if (!pkReady || !pkGid || typeof firebase === 'undefined' || !invoices.length || !pkJobKey) return;
   var r1 = function(x){ return Math.round(x * 10) / 10; };
   var rec = { total: r1(v.total), multi: r1(v.multi), single: r1(v.single), none: r1(v.none),
-              centers: v.centers.map(function(c){ return { name: c.name, plt: r1(c.plt) }; }), invCount: invoices.length };
+              centers: v.centers.map(function(c){ return { name: c.name, plt: r1(c.plt) }; }), invCount: invoices.length, jobKey: pkJobKey };
   var key = JSON.stringify(rec);
   if (key === pkFcLast) return;
   clearTimeout(pkFcTimer);
@@ -2563,8 +2564,9 @@ function pkAttach(){
   pkBase.child('meta').on('value', function(snap){
     var m = snap.val();
     if (!m || !m.jobKey){
-      /* 원격 작업 없음 — 다른 PC 가 비웠거나 최초 */
+      /* 원격 작업 없음 — 다른 PC 가 비웠거나 최초 → 오늘 예상도 비움 (화물관리 오늘의 예상 0) */
       if (pkJobKey){ pkJobKey = null; }
+      pkClearForecast();
       pkPdfState = null; pkUpdateWarehouseBadge();
       return;
     }

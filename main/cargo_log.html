@@ -1215,7 +1215,20 @@ function watchForecast(){
   if (fcRef && fcRef._d === d) return;
   if (fcRef) fcRef.off();
   fcRef = db.ref('wms_sync/groups/' + gid + '/picking_ez/forecast/' + d); fcRef._d = d;
-  fcRef.on('value', function(s){ renderForecast(s.val(), d); }, function(){ renderForecast(null, d); });
+  fcRef.on('value', function(s){ fcRaw = s.val(); renderForecast(fcRaw, d); }, function(){ fcRaw = null; renderForecast(null, d); });
+  /* 피킹이지의 지금 작업 키 — 작업이 지워졌거나 다른 작업의 숫자면 오늘 예상을 보이지 않음 */
+  if (!fcJobRef){
+    fcJobRef = db.ref('wms_sync/groups/' + gid + '/picking_ez/job/meta/jobKey');
+    fcJobRef.on('value', function(s){ fcJobKey = s.val() || ''; fcJobOk = true; renderForecast(fcRaw, fcDay || d); }, function(){ fcJobOk = false; });
+  }
+}
+var fcJobRef = null, fcJobKey = '', fcJobOk = false, fcRaw = null;
+/* 오늘 예상은 피킹이지에 지금 작업이 있고, 그 작업에서 올린 숫자일 때만 (지난 날짜는 그대로 보여줌) */
+function fcLive(v, d){
+  if (!v || d !== today() || !fcJobOk) return v;
+  if (!fcJobKey) return null;
+  if (v.jobKey && v.jobKey !== fcJobKey) return null;
+  return v;
 }
 /* 센터별 값은 이 화면에서만 고칠 수 있음(▲ 올림·+1, ▼ 내림·−1, 숫자 직접) → ⟳ 동기화 = 피킹 값 그대로, ✔ 파렛트 확정 = 그 날 택배출고 기록(우체국/기타 칸) */
 var fcData = null, fcDay = '', fcAdj = {};
@@ -1233,6 +1246,7 @@ function renderForecast(v, d){
   var box = $('fcBox');
   if (d !== fcDay){ fcDay = d; fcAdj = {}; }
   fcData = v;
+  v = fcLive(v, d); fcData = v;
   if (!v || !(+v.invCount)){ box.classList.add('hide'); box.innerHTML = ''; return; }
   if (box.contains(document.activeElement) && document.activeElement.classList.contains('fc-in')){ fcTotal(); return; }   /* 숫자 고치는 중이면 다시 그리지 않음 */
   var t = v.ts ? new Date(v.ts) : null, hm = t ? String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') : '';
@@ -1265,7 +1279,9 @@ $('fcBox').addEventListener('click', function(e){
     fcSet(k, a === 'up' ? (isInt ? cur + 1 : Math.ceil(cur)) : (isInt ? cur - 1 : Math.floor(cur)));
     renderForecast(fcData, fcDay);
   } else if (a === 'sync'){
-    fcAdj = {}; if (fcRef){ fcRef.once('value').then(function(s){ renderForecast(s.val(), fcDay); toast('⟳ 피킹 시스템 값으로 맞췄습니다'); }); } else renderForecast(fcData, fcDay);
+    fcAdj = {};
+    if (fcRef && fcJobRef){ Promise.all([fcRef.once('value'), fcJobRef.once('value')]).then(function(r){ fcRaw = r[0].val(); fcJobKey = r[1].val() || ''; fcJobOk = true; renderForecast(fcRaw, fcDay); toast(fcData ? '⟳ 피킹 시스템 값으로 맞췄습니다' : '⟳ 피킹 시스템에 지금 작업이 없습니다 — 예상 0'); }); }
+    else renderForecast(fcRaw, fcDay);
   } else if (a === 'ok') fcConfirm();
 });
 $('fcBox').addEventListener('input', function(e){
