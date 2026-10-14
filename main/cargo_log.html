@@ -80,6 +80,14 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 .fc-n{font-size:11px;color:var(--mu);margin-top:.35rem}
 .fc-sync{padding:.25rem .65rem;border-radius:7px;border:1px solid rgba(251,146,60,.55);background:transparent;color:var(--o);font-size:12px;font-weight:700;cursor:pointer}
 .fc-sync.need{background:var(--o);color:#0b0d12}
+.fc-hb{display:flex;gap:.35rem;flex-wrap:wrap}
+.fc-c .fc-nm{display:flex;align-items:center;gap:.25rem;font-size:11px;color:var(--o);min-width:0}
+.fc-nt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fc-dr{cursor:grab;color:var(--mu);font-size:13px;line-height:1;user-select:none}
+.fc-hd{padding:0 .35rem;border-radius:4px;border:1px solid var(--br);background:transparent;color:var(--mu);font-size:10px;line-height:1.5;cursor:pointer}
+.fc-hd:hover{color:var(--r);border-color:var(--r)}
+.fc-c.drag{opacity:.4}
+.fc-c.over{box-shadow:inset 3px 0 0 var(--o)}
 .fc-c.adj{box-shadow:inset 0 0 0 1.5px var(--o)}
 .fc-c.bad{box-shadow:inset 0 0 0 2px var(--r)}
 .fc-v{display:flex;align-items:center;gap:.3rem}
@@ -1236,8 +1244,24 @@ function fcR1(x){ return Math.round((+x || 0) * 10) / 10; }
 function fcF1(x){ var r = fcR1(x); return r === Math.round(r) ? String(r) : r.toFixed(1); }
 /* 칸 목록 = 피킹에서 인쇄 때 고른 센터만 (센터 안 고른·아직 인쇄 안 한 몫은 확정에서 빠짐, 대표님 2026-10-15) */
 function fcCenterSum(){ return fcR1(((fcData || {}).centers || []).reduce(function(a, c){ return a + (+c.plt || 0); }, 0)); }
+/* 오늘의 예상 센터 순서·숨김 = 이 화면에서 따로 정함 (그룹 공유: wms_sync/groups/{gid}/cargo/fcPrefs {order, hidden}) — 피킹 인쇄 팝업 설정과 별개 */
+var fcPrefs = { order: [], hidden: [] };
+try { var _fp = JSON.parse(localStorage.getItem('cgFcPrefs') || 'null'); if (_fp) fcPrefs = { order: _fp.order || [], hidden: _fp.hidden || [] }; } catch(e){}
+function fcSavePrefs(){
+  try { localStorage.setItem('cgFcPrefs', JSON.stringify(fcPrefs)); } catch(e){}
+  if (base) base.child('fcPrefs').set(fcPrefs).catch(function(e){ toast('설정 저장 실패: ' + (e.code || e.message)); });
+  renderForecast(fcData, fcDay);
+}
+function fcHidden(k){ return (fcPrefs.hidden || []).indexOf(k) >= 0; }
+/* 피킹 순서를 바탕으로 이 화면 순서 적용 (순서에 없는 새 센터는 뒤에) */
+function fcAllCells(){
+  var v = fcData || {}, cs = (v.centers || []).filter(function(c){ return c && c.name; }).map(function(c, i){ return { k: c.name, base: fcR1(c.plt), i: i }; });
+  var ord = fcPrefs.order || [];
+  cs.sort(function(a, b){ var ia = ord.indexOf(a.k), ib = ord.indexOf(b.k); if (ia < 0 && ib < 0) return a.i - b.i; if (ia < 0) return 1; if (ib < 0) return -1; return ia - ib; });
+  return cs;
+}
 function fcCells(){
-  var v = fcData || {}, cs = (v.centers || []).filter(function(c){ return c && c.name; }).map(function(c){ return { k: c.name, base: fcR1(c.plt) }; });
+  var cs = fcAllCells().filter(function(c){ return !fcHidden(c.k); });
   cs.forEach(function(c){ c.val = (c.k in fcAdj) ? fcAdj[c.k] : c.base; c.adj = (c.k in fcAdj) && fcAdj[c.k] !== c.base; });
   return cs;
 }
@@ -1250,18 +1274,20 @@ function renderForecast(v, d){
   if (!v || !(+v.invCount)){ box.classList.add('hide'); box.innerHTML = ''; return; }
   if (box.contains(document.activeElement) && document.activeElement.classList.contains('fc-in')){ fcTotal(); return; }   /* 숫자 고치는 중이면 다시 그리지 않음 */
   var t = v.ts ? new Date(v.ts) : null, hm = t ? String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') : '';
-  var cs = fcCells(), adj = cs.some(function(c){ return c.adj; });
+  var cs = fcCells(), adj = cs.some(function(c){ return c.adj; }), hid = fcAllCells().filter(function(c){ return fcHidden(c.k); }), hidPlt = fcR1(hid.reduce(function(a, c){ return a + c.base; }, 0));
   box.innerHTML = '<div class="fc-h"><span class="fc-t">📅 ' + (d === today() ? '오늘의 예상' : esc(d.slice(5).replace('-', '/')) + ' 예상') +
       '<small>피킹 송장 ' + fmt(v.invCount || 0) + '건 기준' + (hm ? ' · ' + hm : '') + ' · 합포 ' + fcF1(v.multi) + ' · 단포 ' + fcF1(v.single) + '</small></span>' +
-      '<button class="fc-sync' + (adj ? ' need' : '') + '" data-a="sync" title="고친 숫자를 버리고 피킹 시스템 값과 1:1 로 맞춤">⟳ 동기화</button></div>' +
+      '<span class="fc-hb">' + (hid.length ? '<button class="fc-sync" data-a="unhide" title="숨긴 센터 모두 다시 보이기: ' + esc(hid.map(function(c){ return c.k; }).join(', ')) + '">숨김 해제 (' + hid.length + ')</button>' : '') +
+      '<button class="fc-sync' + (adj ? ' need' : '') + '" data-a="sync" title="고친 숫자를 버리고 피킹 시스템 값과 1:1 로 맞춤">⟳ 동기화</button></span></div>' +
     '<div class="fc-g">' + cs.map(function(c){
-      return '<div class="fc-c' + (c.adj ? ' adj' : '') + '" data-k="' + esc(c.k) + '"><div title="' + esc(c.k) + (c.adj ? ' — 피킹 값 ' + fcF1(c.base) : '') + '">' + esc(c.k) + '</div>' +
+      return '<div class="fc-c' + (c.adj ? ' adj' : '') + '" data-k="' + esc(c.k) + '"><div class="fc-nm"><span class="fc-dr" draggable="true" title="끌어서 순서 바꾸기">⠿</span><span class="fc-nt" title="' + esc(c.k) + (c.adj ? ' — 피킹 값 ' + fcF1(c.base) : '') + '">' + esc(c.k) + '</span><button class="fc-hd" data-a="hide" title="이 센터 숨기기 (위 「숨김 해제」로 다시)">숨김</button></div>' +
         '<div class="fc-v"><input class="fc-in" type="number" inputmode="decimal" step="0.1" min="0" value="' + fcF1(c.val) + '">' +
         '<span class="fc-ar"><button data-a="up" title="올림 (정수면 +1)">▲</button><button data-a="dn" title="내림 (정수면 −1)">▼</button></span></div></div>';
     }).join('') +
       '<div class="fc-c all"><div>총 파렛트</div><b id="fcTot">' + fcF1(fcSum()) + '</b></div>' +
       '<button class="fc-ok" data-a="ok" title="센터별 파렛트를 그 날 택배출고로 기록 (우체국/기타 칸)">✔ 파렛트<br>확정</button></div>' +
     ((+v.total || 0) - fcCenterSum() > 0.05 ? '<div class="fc-n">센터를 안 고르고 인쇄했거나 아직 인쇄 안 한 송장 ' + fcF1((+v.total || 0) - fcCenterSum()) + ' 파렛트는 확정에서 빠집니다 (피킹 전체 ' + fcF1(v.total) + ')</div>' : '') +
+    (hidPlt > 0.05 ? '<div class="fc-n">숨긴 센터 ' + fcF1(hidPlt) + ' 파렛트도 확정에서 빠집니다</div>' : '') +
     (adj ? '<div class="fc-n" style="color:var(--o)">✎ 고친 칸이 있습니다 — 피킹 값으로 돌리려면 ⟳ 동기화</div>' : '');
   box.classList.remove('hide');
 }
@@ -1282,8 +1308,32 @@ $('fcBox').addEventListener('click', function(e){
     fcAdj = {};
     if (fcRef && fcJobRef){ Promise.all([fcRef.once('value'), fcJobRef.once('value')]).then(function(r){ fcRaw = r[0].val(); fcJobKey = r[1].val() || ''; fcJobOk = true; renderForecast(fcRaw, fcDay); toast(fcData ? '⟳ 피킹 시스템 값으로 맞췄습니다' : '⟳ 피킹 시스템에 지금 작업이 없습니다 — 예상 0'); }); }
     else renderForecast(fcRaw, fcDay);
-  } else if (a === 'ok') fcConfirm();
+  } else if (a === 'hide'){
+    if (!fcHidden(k)) fcPrefs.hidden = (fcPrefs.hidden || []).concat([k]);
+    delete fcAdj[k]; fcSavePrefs();
+  } else if (a === 'unhide'){ fcPrefs.hidden = []; fcSavePrefs(); }
+  else if (a === 'ok') fcConfirm();
 });
+/* ⠿ 끌어서 순서 — 놓은 칸 자리로 */
+var fcDrag = null;
+$('fcBox').addEventListener('dragstart', function(e){
+  if (!e.target.classList || !e.target.classList.contains('fc-dr')) return;
+  var c = e.target.closest('.fc-c'); fcDrag = c.dataset.k; c.classList.add('drag');
+  try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', fcDrag); e.dataTransfer.setDragImage(c, 20, 20); } catch(x){}
+});
+$('fcBox').addEventListener('dragover', function(e){
+  if (fcDrag == null) return; var c = e.target.closest && e.target.closest('.fc-c[data-k]'); if (!c) return; e.preventDefault();
+  $('fcBox').querySelectorAll('.fc-c.over').forEach(function(x){ x.classList.remove('over'); }); if (c.dataset.k !== fcDrag) c.classList.add('over');
+});
+$('fcBox').addEventListener('drop', function(e){
+  if (fcDrag == null) return; e.preventDefault();
+  var c = e.target.closest && e.target.closest('.fc-c[data-k]'), k = fcDrag; fcDrag = null;
+  if (!c || c.dataset.k === k){ renderForecast(fcData, fcDay); return; }
+  var all = fcAllCells().map(function(x){ return x.k; }), to = all.indexOf(c.dataset.k);
+  all.splice(all.indexOf(k), 1); all.splice(to, 0, k);
+  fcPrefs.order = all; fcSavePrefs();
+});
+$('fcBox').addEventListener('dragend', function(){ if (fcDrag != null){ fcDrag = null; renderForecast(fcData, fcDay); } });
 $('fcBox').addEventListener('input', function(e){
   if (!e.target.classList.contains('fc-in')) return;
   fcSet(e.target.closest('.fc-c').dataset.k, e.target.value); fcTotal();
@@ -1339,6 +1389,7 @@ WMSync.onAuth(function(st){
   base = db.ref('wms_sync/groups/' + gid + '/cargo');
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
   loadWarehouses();
+  base.child('fcPrefs').on('value', function(s){ var v = s.val(); if (v){ fcPrefs = { order: v.order || [], hidden: v.hidden || [] }; try { localStorage.setItem('cgFcPrefs', JSON.stringify(fcPrefs)); } catch(e){} renderForecast(fcRaw, fcDay || $('fDate').value || today()); } });
   watchForecast();
   base.child('dict').on('value', function(s){
     var d = s.val() || {}; dict = { vendor: {}, wh: {} };
