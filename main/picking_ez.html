@@ -120,6 +120,17 @@ h1 em{color:var(--g);font-style:normal}
 .plt-box .note{color:var(--mu);font-size:.64rem;line-height:1.45;margin-top:.35rem}
 @media (max-width:1460px){.plt-box{left:auto;top:auto;bottom:12px;right:10px;width:190px;font-size:.74rem}}
 @media print{.plt-box{display:none!important}}
+.ctr-ov{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px}
+.ctr-box{background:#14171f;border:1.5px solid rgba(74,240,168,.45);border-radius:12px;padding:1.1rem 1.2rem;width:min(420px,100%);color:var(--tx)}
+.ctr-t{font-size:1.05rem;font-weight:800;color:var(--g);margin-bottom:.25rem}
+.ctr-s{font-size:.75rem;color:var(--mu);margin-bottom:.8rem}
+.ctr-btns{display:flex;flex-direction:column;gap:.45rem}
+.ctr-b{padding:.75rem .9rem;border-radius:8px;border:1.5px solid var(--br);background:transparent;color:var(--tx);font-size:1rem;font-weight:700;cursor:pointer;text-align:left}
+.ctr-b:hover,.ctr-b:focus{border-color:var(--g);outline:none;background:rgba(74,240,168,.08)}
+.ctr-b.on{border-color:var(--g)}
+.ctr-foot{display:flex;justify-content:space-between;gap:.5rem;margin-top:.8rem}
+.ctr-x{padding:.4rem .8rem;border-radius:6px;border:1px solid var(--br);background:transparent;color:var(--mu);font-size:.75rem;cursor:pointer}
+@media print{.ctr-ov{display:none!important}}
 #boxFltBar{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
 @media (max-width:640px){.box-inp{width:4.5rem;height:3rem;font-size:1.1rem}}
 .grp-prt{padding:.38rem .85rem;border-radius:6px;border:1.5px solid var(--g);background:transparent;color:var(--g);font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--mo);flex-shrink:0;white-space:nowrap}
@@ -432,6 +443,7 @@ var invoices  = [];      // { invNum, totalQty, pages[], items[], customer } —
 var locGroups = [];      // 피킹리스트
 /* 송장 단위 인쇄 추적 (그룹화는 렌더 시점에 동적으로 계산) */
 var printedInvNums = {}; // { invNum: 1 } — 인쇄완료 송장 집합
+var invCenter = {};      // { invNum: '4355센터' } — 인쇄할 때 고른 센터 (센터별 파렛트 계산)
 var printedMeta = {};    // { invNum: {ts, by} } — 원격 선점 시각 (인쇄 1회 = 같은 ts)
 var printedBatches = []; // [{ts, isMulti, items, customerSummary, invNums, pages}] — 인쇄 단위 스냅샷
 var curFlt = 'all', grpFlt = 'all', custFlt = 'all';
@@ -447,6 +459,7 @@ function saveSession() {
       locGroups: JSON.parse(JSON.stringify(locGroups)),
       printedInvNums: JSON.parse(JSON.stringify(printedInvNums)),
       printedBatches: JSON.parse(JSON.stringify(printedBatches)),
+      invCenter: JSON.parse(JSON.stringify(invCenter)),
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(data));
   } catch(e){ console.warn('세션 저장 실패:', e); }
@@ -464,6 +477,7 @@ function restoreSession() {
   if (!data) return;
   invoices   = data.invoices   || [];
   locGroups  = data.locGroups  || [];
+  invCenter  = data.invCenter  || {};
   /* v2 → 그대로, v1(이전 grpGroups/doneGroups) → 마이그레이션 */
   if (data.v === 2) {
     printedInvNums = data.printedInvNums || {};
@@ -646,7 +660,7 @@ function setMsg(id, cls, html) {
 function resetAll() {
   rawBuffer = null; pdfDoc = null;
   invoices = []; locGroups = [];
-  printedInvNums = {}; printedBatches = [];
+  printedInvNums = {}; printedBatches = []; invCenter = {};
 }
 
 /* ─────────────── 드롭존 ─────────────── */
@@ -816,6 +830,7 @@ function processAllPages(doc, pw, pf, pl) {
     /* 새 분석 시작 → 인쇄 추적 초기화 */
     printedInvNums = {};
     printedBatches = [];
+    invCenter = {};
     saveSession(); /* ← 로컬 캐시 저장 */
     pkPublishJob(); /* ← 그룹 DB 로 발행 (이전 작업 교체 · 다른 PC 자동 로드) */
 
@@ -1149,6 +1164,53 @@ function renderBoxFilter() {
 /* ─────────────── 파렛트 계산 ───────────────
    등록된 송장 전체(오전·오후 추가 등록 누적, 인쇄 여부 무관)를 박스 크기별로 세어 파렛트로 환산.
    1파렛트 적재 = 60박스 36 · 45박스 54 · 30박스 72 · 15박스 120 · 1박스 400 */
+/* 센터 목록 (박스 메모처럼 작업과 따로 유지: localStorage + wms_sync/groups/{gid}/picking_ez/centers) */
+var pkCenters = ['4355센터', 'HK센터', '짝꿍센터'];
+try { var _pc = JSON.parse(localStorage.getItem('pkCenters') || 'null'); if (Array.isArray(_pc)) pkCenters = _pc; } catch(e){}
+var pkLastCenter = ''; try { pkLastCenter = localStorage.getItem('pkLastCenter') || ''; } catch(e){}
+function saveCenters(list, remote) {
+  pkCenters = list;
+  try { localStorage.setItem('pkCenters', JSON.stringify(list)); } catch(e){}
+  if (remote !== false && pkReady && pkGid && typeof firebase !== 'undefined')
+    firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/centers').set(list.length ? list : null)
+      .catch(function(err){ console.warn('[picking] 센터 저장 실패', err); });
+  renderPltBox();
+}
+function editCenters() {
+  var v = prompt('센터 이름을 쉼표(,)로 구분해 적어주세요\n예) 4355센터, HK센터, 짝꿍센터', pkCenters.join(', '));
+  if (v === null) return;
+  var list = []; v.split(/[,\n]/).forEach(function(x){ x = x.trim(); if (x && list.indexOf(x) < 0) list.push(x); });
+  saveCenters(list);
+}
+function centerOf(n) { return invCenter[n] || invCenter[pkSafeKey(n)] || ''; }
+/* 인쇄한 송장에 센터 기록 (같은 작업을 보는 다른 PC 와 공유: job/center) */
+function recordCenter(invNums, center) {
+  if (!center || !invNums || !invNums.length) return;
+  var u = {};
+  invNums.forEach(function(n){ invCenter[n] = center; u[pkSafeKey(n)] = center; });
+  if (pkReady && pkBase) pkBase.child('center').update(u).catch(function(err){ console.warn('[picking] 센터 기록 실패', err); });
+  renderPltBox();
+}
+/* 인쇄 전에 센터 고르기 — cb(센터이름 | '' 지정안함 | null 취소). 센터 목록이 없으면 바로 '' */
+function askCenter(n, cb) {
+  if (!pkCenters.length) { cb(''); return; }
+  var ov = document.createElement('div');
+  ov.className = 'ctr-ov';
+  ov.innerHTML = '<div class="ctr-box"><div class="ctr-t">🏭 어느 센터로 나가나요?</div><div class="ctr-s">이번 인쇄 ' + n + '건 — 센터별 파렛트 계산에 들어갑니다</div>' +
+    '<div class="ctr-btns">' + pkCenters.map(function(c, i){ return '<button class="ctr-b' + (c === pkLastCenter ? ' on' : '') + '" data-i="' + i + '">' + escH(c) + '</button>'; }).join('') + '</div>' +
+    '<div class="ctr-foot"><button class="ctr-x" data-v="none">센터 지정 안 함</button><button class="ctr-x" data-v="cancel">인쇄 취소</button></div></div>';
+  var close = function(v){ document.removeEventListener('keydown', onKey); ov.remove(); cb(v); };
+  var onKey = function(e){ if (e.key === 'Escape') close(null); };
+  ov.addEventListener('click', function(e){
+    var b = e.target.closest('button');
+    if (!b) { if (e.target === ov) close(null); return; }
+    if (b.dataset.i != null) { var c = pkCenters[+b.dataset.i]; pkLastCenter = c; try { localStorage.setItem('pkLastCenter', c); } catch(x){} close(c); }
+    else close(b.dataset.v === 'none' ? '' : null);
+  });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
+  var on = ov.querySelector('.ctr-b.on') || ov.querySelector('.ctr-b'); if (on) on.focus();
+}
 var PLT_CAP = { 60: 36, 45: 54, 30: 72, 15: 120, 1: 400 };
 function boxNum(v) { var m = String(v||'').match(/\d+/); return m ? +m[0] : null; }
 function fmtPlt(x) { return (Math.round(x * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
@@ -1157,7 +1219,7 @@ function renderPltBox() {
   var el = document.getElementById('pltBox');
   if (!el) return;
   if (!invoices.length) { el.style.display = 'none'; return; }
-  var by = {}, other = 0, none = 0, tot = 0, multi = 0, single = 0;
+  var by = {}, other = 0, none = 0, tot = 0, multi = 0, single = 0, byC = {}, noC = 0;
   invoices.forEach(function(inv){
     var b = boxOfItems(inv.items);
     if (!b) { none++; return; }
@@ -1166,7 +1228,13 @@ function renderPltBox() {
     by[n] = (by[n] || 0) + 1;
     var p = 1 / cap; tot += p;
     if ((inv.totalQty || 0) >= 2) multi += p; else single += p;
+    var c = centerOf(inv.invNum);
+    if (c) byC[c] = (byC[c] || 0) + p; else if (printedInvNums[inv.invNum]) noC += p;
   });
+  /* 센터별: 설정한 센터 순서대로 + 목록에서 지운 센터라도 기록이 있으면 표시 */
+  var cNames = pkCenters.slice(); Object.keys(byC).forEach(function(c){ if (cNames.indexOf(c) < 0) cNames.push(c); });
+  var cRows = cNames.map(function(c){ return '<div class="pr"><span>' + escH(c) + '</span><span><b>' + fmtPlt(byC[c] || 0) + '</b> <span class="sub">파렛트</span></span></div>'; }).join('') +
+    (noC > 0.0001 ? '<div class="pr"><span class="sub">센터 미지정(인쇄됨)</span><span class="sub">' + fmtPlt(noC) + '</span></div>' : '');
   var rows = [60, 45, 30, 15, 1].filter(function(n){ return by[n]; }).map(function(n){
     return '<div class="pr"><span>' + n + ' <span class="sub">' + by[n].toLocaleString() + '건/' + PLT_CAP[n] + '</span></span><b>' + fmtPlt(by[n] / PLT_CAP[n]) + '</b></div>';
   }).join('');
@@ -1180,6 +1248,9 @@ function renderPltBox() {
     '<div class="hr"></div>' +
     '<div class="pr"><span style="color:var(--y)">합포</span><b style="color:var(--y)">' + fmtPlt(multi) + '</b></div>' +
     '<div class="pr"><span>단포</span><b>' + fmtPlt(single) + '</b></div>' +
+    '<div class="hr"></div>' +
+    '<div class="pr"><span style="color:var(--g);font-weight:800;font-size:.72rem">센터별 (인쇄 때 고른 센터)</span><a href="javascript:void 0" onclick="editCenters()" title="센터 목록 설정" style="color:var(--mu);text-decoration:none">⚙</a></div>' +
+    (cRows || '<div class="note">⚙ 를 눌러 센터를 등록하세요</div>') +
     ((none || other) ? '<div class="note">' + (none ? '박스 미입력 ' + none + '건' : '') + (none && other ? ' · ' : '') + (other ? '기준 없는 박스 ' + other + '건' : '') + ' — 계산 제외</div>' : '') +
     '<div class="note">1파렛트: 60→36 · 45→54 · 30→72 · 15→120 · 1→400</div>';
   el.style.display = '';
@@ -2023,6 +2094,8 @@ function printGrp(btn) {
   /* 카드 박제 시점에 이미 인쇄됐을 가능성 차단 (race condition) */
   var fresh = payload.invNums.filter(function(n){ return !printedInvNums[n]; });
   if (!fresh.length) { btn.textContent='이미 인쇄됨'; renderGrpList(); return; }
+  /* 인쇄 전에 센터 선택 (센터별 파렛트 계산) — 취소하면 인쇄 안 함 */
+  askCenter(fresh.length, function(ctr){ if (ctr === null) return;
   btn.textContent = '⏳';
   /* 잠금 — 인쇄 전 트랜잭션으로 선점 (다른 PC 와 겹침 방지) */
   pkClaimPrint(fresh, function(ok, claimed, conflict){
@@ -2036,6 +2109,7 @@ function printGrp(btn) {
       var blob=new Blob([bytes],{type:'application/pdf'}), url=URL.createObjectURL(blob);
       var done=function(){
         markInvoicesPrinted(claimed, claimedPages, { jobId: Date.now().toString(36) + Math.random().toString(36).slice(2,6) });
+        recordCenter(claimed, ctr);
         renderGrpList();
         updateDoneSection();
         updateGrpStats();
@@ -2052,6 +2126,7 @@ function printGrp(btn) {
         else { pkReleasePrint(claimed); btn.textContent='❌ 팝업차단'; }
       }
     }, function(e){ pkReleasePrint(claimed); btn.textContent='❌'; console.error(e); });
+  });
   });
 }
 /* claimed 송장들에 해당하는 페이지만 추려서 반환 (충돌로 일부만 선점됐을 때 대비) */
@@ -2112,6 +2187,8 @@ function printChecked() {
     totalInv += fresh.length;
   });
   if (!cardPayloads.length) { alert('선택 필요'); return; }
+  /* 인쇄 전에 센터 선택 (센터별 파렛트 계산) — 취소하면 인쇄 안 함 */
+  askCenter(totalInv, function(ctr){ if (ctr === null) return;
   var msg=document.getElementById('mpdf');
   msg.style.display='block'; msg.className='msg inf';
   msg.innerHTML='<span class="sp"></span>'+totalInv+'건 잠금 확인 중...';
@@ -2145,6 +2222,7 @@ function printChecked() {
         /* 같은 인쇄 작업의 그룹들은 jobId 로 묶어 인쇄완료 목록에서 1장으로 통합 표시·재출력 */
         var jobId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
         for (var i = kept.length - 1; i >= 0; i--) markInvoicesPrinted(kept[i].invNums, kept[i].pages, { jobId: jobId, jobSeq: i });
+        recordCenter(allClaimed, ctr);
         renderGrpList(); updateDoneSection(); updateGrpStats(); populateCustomerFilter();
         msg.className='msg ok';
         msg.textContent='✅ '+keptInv+'건 완료 ('+kept.length+'그룹)' + (conflict.length ? ' · 🔒 '+conflict.length+'건 제외(다른 PC 인쇄중)' : '');
@@ -2161,6 +2239,7 @@ function printChecked() {
     }, function(e){ pkReleasePrint(allClaimed); msg.className='msg er';msg.textContent='❌ '+e.message;},
        /* 순번은 선택한 그룹(카드)별로 1부터 */
        { segments: kept.map(function(k){ return k.pages; }), overall: true });
+  });
   });
 }
 
@@ -2405,6 +2484,13 @@ function pkAttach(){
       snap.ref.set(boxSizes).catch(function(err){ console.warn('[picking] 박스 업로드 실패', err); });
     }
   }, function(err){ console.warn('[picking] boxes 읽기 실패', err); });
+  /* centers: 센터 목록 (작업과 따로 유지) */
+  firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/centers').on('value', function(snap){
+    if (!pkReady) return;
+    var v = snap.val();
+    if (Array.isArray(v)) saveCenters(v.filter(Boolean), false);
+    else if (pkCenters.length) snap.ref.set(pkCenters).catch(function(){});
+  }, function(err){ console.warn('[picking] centers 읽기 실패', err); });
 
   /* printed: 실시간 인쇄완료 집합 */
   pkBase.child('printed').on('value', function(snap){
@@ -2421,6 +2507,13 @@ function pkAttach(){
     printedMeta = meta;
     pkRerender();
   }, function(err){ console.warn('[picking] printed 읽기 실패', err); });
+
+  /* center: 인쇄 때 고른 센터 (송장별) → 센터별 파렛트 */
+  pkBase.child('center').on('value', function(snap){
+    if (!pkReady) return;
+    invCenter = snap.val() || {};
+    renderPltBox();
+  }, function(err){ console.warn('[picking] center 읽기 실패', err); });
 
   /* batches: 실시간 인쇄 이력 (ts 역순) */
   pkBase.child('batches').on('value', function(snap){
