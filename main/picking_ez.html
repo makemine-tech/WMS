@@ -121,13 +121,21 @@ h1 em{color:var(--g);font-style:normal}
 @media (max-width:1460px){.plt-box{left:auto;top:auto;bottom:12px;right:10px;width:190px;font-size:.74rem}}
 @media print{.plt-box{display:none!important}}
 .ctr-ov{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px}
-.ctr-box{background:#14171f;border:1.5px solid rgba(74,240,168,.45);border-radius:12px;padding:1.1rem 1.2rem;width:min(420px,100%);color:var(--tx)}
+.ctr-box{background:#14171f;border:1.5px solid rgba(74,240,168,.45);border-radius:12px;padding:1.1rem 1.2rem;width:min(500px,100%);max-height:90vh;overflow:auto;color:var(--tx)}
 .ctr-t{font-size:1.05rem;font-weight:800;color:var(--g);margin-bottom:.25rem}
 .ctr-s{font-size:.75rem;color:var(--mu);margin-bottom:.8rem}
 .ctr-btns{display:flex;flex-direction:column;gap:.45rem}
 .ctr-b{padding:.75rem .9rem;border-radius:8px;border:1.5px solid var(--br);background:transparent;color:var(--tx);font-size:1rem;font-weight:700;cursor:pointer;text-align:left}
 .ctr-b:hover,.ctr-b:focus{border-color:var(--g);outline:none;background:rgba(74,240,168,.08)}
 .ctr-b.on{border-color:var(--g)}
+.ctr-row{display:flex;align-items:stretch;gap:.35rem;border-radius:9px}
+.ctr-row .ctr-b{flex:1;min-width:0}
+.ctr-row.drag{opacity:.4}
+.ctr-row.over{box-shadow:0 -3px 0 var(--g)}
+.ctr-no{width:3rem;text-align:center;border-radius:7px;border:1px solid var(--br);background:transparent;color:var(--tx);font-family:var(--mo);font-size:.85rem}
+.ctr-dr{display:flex;align-items:center;padding:0 .3rem;color:var(--mu);cursor:grab;font-size:1.1rem;user-select:none}
+.ctr-h{padding:0 .55rem;border-radius:7px;border:1px solid var(--br);background:transparent;color:var(--mu);font-size:.72rem;cursor:pointer}
+.ctr-h:hover{color:var(--r);border-color:var(--r)}
 .ctr-foot{display:flex;justify-content:space-between;gap:.5rem;margin-top:.8rem}
 .ctr-x{padding:.4rem .8rem;border-radius:6px;border:1px solid var(--br);background:transparent;color:var(--mu);font-size:.75rem;cursor:pointer}
 @media print{.ctr-ov{display:none!important}}
@@ -1215,24 +1223,83 @@ function recordCenter(invNums, center) {
   renderPltBox();
 }
 /* 인쇄 전에 센터 고르기 — cb(센터이름 | '' 지정안함 | null 취소). 센터 목록이 없으면 바로 '' */
+/* 센터 순서·숨김 (그룹 공유: wms_sync/groups/{gid}/picking_ez/centerPrefs {order:[이름], hidden:[이름]}) */
+var pkCtrPrefs = { order: [], hidden: [] };
+try { var _cp = JSON.parse(localStorage.getItem('pkCtrPrefs') || 'null'); if (_cp) pkCtrPrefs = { order: _cp.order || [], hidden: _cp.hidden || [] }; } catch(e){}
+function saveCtrPrefs() {
+  try { localStorage.setItem('pkCtrPrefs', JSON.stringify(pkCtrPrefs)); } catch(e){}
+  if (pkReady && pkGid && typeof firebase !== 'undefined')
+    firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/centerPrefs').set(pkCtrPrefs)
+      .catch(function(err){ console.warn('[picking] 센터 순서 저장 실패', err); });
+  renderPltBox();
+}
+/* 정한 순서대로 (순서에 없는 새 창고는 뒤에, 창고관리 순서 그대로) */
+function orderedCenters() {
+  var ord = pkCtrPrefs.order || [];
+  return pkCenters.slice().sort(function(a, b){
+    var ia = ord.indexOf(a), ib = ord.indexOf(b);
+    if (ia < 0 && ib < 0) return pkCenters.indexOf(a) - pkCenters.indexOf(b);
+    if (ia < 0) return 1; if (ib < 0) return -1; return ia - ib;
+  });
+}
+function isHiddenCenter(c) { return (pkCtrPrefs.hidden || []).indexOf(c) >= 0; }
+/* 인쇄 전에 센터 고르기 — cb(센터이름 | '' 지정안함 | null 취소). 센터 목록이 없으면 바로 ''
+   각 줄 오른쪽: 순번(숫자 입력) · ⠿ 끌어서 순서 · 숨김 / 아래 「숨김 해제」 = 숨긴 센터 모두 다시 */
 function askCenter(n, cb) {
   if (!pkCenters.length) { cb(''); return; }
   var ov = document.createElement('div');
   ov.className = 'ctr-ov';
-  ov.innerHTML = '<div class="ctr-box"><div class="ctr-t">🏭 어느 센터로 나가나요?</div><div class="ctr-s">이번 인쇄 ' + n + '건 — 센터별 파렛트 계산에 들어갑니다</div>' +
-    '<div class="ctr-btns">' + pkCenters.map(function(c, i){ return '<button class="ctr-b' + (c === pkLastCenter ? ' on' : '') + '" data-i="' + i + '">' + escH(c) + '</button>'; }).join('') + '</div>' +
-    '<div class="ctr-foot"><button class="ctr-x" data-v="none">센터 지정 안 함</button><button class="ctr-x" data-v="cancel">인쇄 취소</button></div></div>';
+  var dragName = null;
+  var draw = function(){
+    var all = orderedCenters(), vis = all.filter(function(c){ return !isHiddenCenter(c); }), hid = all.length - vis.length;
+    ov.innerHTML = '<div class="ctr-box"><div class="ctr-t">🏭 어느 센터로 나가나요?</div><div class="ctr-s">이번 인쇄 ' + n + '건 — 센터별 파렛트 계산에 들어갑니다 · 오른쪽 번호·⠿ 로 순서, 숨김으로 감추기</div>' +
+      '<div class="ctr-btns">' + (vis.length ? vis.map(function(c, i){
+        return '<div class="ctr-row" draggable="true" data-c="' + escH(c).replace(/"/g, '&quot;') + '">' +
+          '<button class="ctr-b' + (c === pkLastCenter ? ' on' : '') + '" data-pick="1">' + escH(c) + '</button>' +
+          '<input class="ctr-no" type="number" min="1" max="' + vis.length + '" value="' + (i + 1) + '" title="순서 번호 — 바꾸면 그 자리로 이동">' +
+          '<span class="ctr-dr" title="끌어서 순서 바꾸기">⠿</span>' +
+          '<button class="ctr-h" data-hide="1" title="이 센터 숨기기">숨김</button></div>';
+      }).join('') : '<div class="ctr-s" style="margin:0">모든 센터가 숨겨져 있습니다 — 아래 「숨김 해제」</div>') + '</div>' +
+      '<div class="ctr-foot"><span style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="ctr-x" data-v="none">센터 지정 안 함</button>' +
+        (hid ? '<button class="ctr-x" data-v="unhide">숨김 해제 (' + hid + ')</button>' : '') + '</span>' +
+        '<button class="ctr-x" data-v="cancel">인쇄 취소</button></div></div>';
+    var on = ov.querySelector('.ctr-b.on') || ov.querySelector('.ctr-b'); if (on) on.focus();
+  };
+  /* 보이는 센터들 안에서 c 를 k 번째(0부터)로 옮기고, 숨긴 센터는 원래 자리 순서 유지 */
+  var moveTo = function(c, k){
+    var all = orderedCenters(), vis = all.filter(function(x){ return !isHiddenCenter(x); });
+    vis.splice(vis.indexOf(c), 1); vis.splice(Math.max(0, Math.min(k, vis.length)), 0, c);
+    var vi = 0; pkCtrPrefs.order = all.map(function(x){ return isHiddenCenter(x) ? x : vis[vi++]; });
+    saveCtrPrefs(); draw();
+  };
   var close = function(v){ document.removeEventListener('keydown', onKey); ov.remove(); cb(v); };
-  var onKey = function(e){ if (e.key === 'Escape') close(null); };
+  var onKey = function(e){ if (e.key === 'Escape' && !(e.target && e.target.classList && e.target.classList.contains('ctr-no'))) close(null); };
   ov.addEventListener('click', function(e){
     var b = e.target.closest('button');
     if (!b) { if (e.target === ov) close(null); return; }
-    if (b.dataset.i != null) { var c = pkCenters[+b.dataset.i]; pkLastCenter = c; try { localStorage.setItem('pkLastCenter', c); } catch(x){} close(c); }
+    var row = b.closest('.ctr-row'), c = row ? row.dataset.c : null;
+    if (b.dataset.pick) { pkLastCenter = c; try { localStorage.setItem('pkLastCenter', c); } catch(x){} close(c); }
+    else if (b.dataset.hide) { if (!isHiddenCenter(c)) pkCtrPrefs.hidden = (pkCtrPrefs.hidden || []).concat([c]); saveCtrPrefs(); draw(); }
+    else if (b.dataset.v === 'unhide') { pkCtrPrefs.hidden = []; saveCtrPrefs(); draw(); }
     else close(b.dataset.v === 'none' ? '' : null);
   });
+  ov.addEventListener('change', function(e){
+    if (!e.target.classList.contains('ctr-no')) return;
+    var k = parseInt(e.target.value, 10); if (!isFinite(k)) { draw(); return; }
+    moveTo(e.target.closest('.ctr-row').dataset.c, k - 1);
+  });
+  ov.addEventListener('keydown', function(e){ if (e.key === 'Enter' && e.target.classList.contains('ctr-no')) { e.preventDefault(); e.target.blur(); } });
+  ov.addEventListener('dragstart', function(e){ var r = e.target.closest && e.target.closest('.ctr-row'); if (!r) return; dragName = r.dataset.c; r.classList.add('drag'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragName); } catch(x){} });
+  ov.addEventListener('dragover', function(e){ if (dragName == null) return; var r = e.target.closest && e.target.closest('.ctr-row'); if (!r) return; e.preventDefault();
+    ov.querySelectorAll('.ctr-row.over').forEach(function(x){ x.classList.remove('over'); }); if (r.dataset.c !== dragName) r.classList.add('over'); });
+  ov.addEventListener('drop', function(e){ if (dragName == null) return; var r = e.target.closest && e.target.closest('.ctr-row'); e.preventDefault();
+    var c = dragName; dragName = null; if (!r || r.dataset.c === c) { draw(); return; }
+    var vis = orderedCenters().filter(function(x){ return !isHiddenCenter(x); });
+    moveTo(c, vis.indexOf(r.dataset.c)); });
+  ov.addEventListener('dragend', function(){ if (dragName != null) { dragName = null; draw(); } });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(ov);
-  var on = ov.querySelector('.ctr-b.on') || ov.querySelector('.ctr-b'); if (on) on.focus();
+  draw();
 }
 var PLT_CAP = { 60: 36, 45: 54, 30: 72, 15: 120, 1: 400 };
 function boxNum(v) { var m = String(v||'').match(/\d+/); return m ? +m[0] : null; }
@@ -1255,7 +1322,7 @@ function renderPltBox() {
     if (c) byC[c] = (byC[c] || 0) + p; else if (printedInvNums[inv.invNum]) noC += p;
   });
   /* 센터별: 설정한 센터 순서대로 + 목록에서 지운 센터라도 기록이 있으면 표시 */
-  var cNames = pkCenters.slice(); Object.keys(byC).forEach(function(c){ if (cNames.indexOf(c) < 0) cNames.push(c); });
+  var cNames = orderedCenters(); Object.keys(byC).forEach(function(c){ if (cNames.indexOf(c) < 0) cNames.push(c); });
   var cRows = cNames.map(function(c){ return '<div class="pr"><span>' + escH(c) + '</span><span><b>' + fmtPlt(byC[c] || 0) + '</b> <span class="sub">파렛트</span></span></div>'; }).join('') +
     (noC > 0.0001 ? '<div class="pr"><span class="sub">센터 미지정(인쇄됨)</span><span class="sub">' + fmtPlt(noC) + '</span></div>' : '');
   var rows = [60, 45, 30, 15, 1].filter(function(n){ return by[n]; }).map(function(n){
@@ -2509,6 +2576,11 @@ function pkAttach(){
     }
   }, function(err){ console.warn('[picking] boxes 읽기 실패', err); });
   loadWhCenters();   /* 센터 목록 = 창고관리(WMS) 창고 이름 */
+  firebase.database().ref('wms_sync/groups/' + pkGid + '/picking_ez/centerPrefs').on('value', function(snap){
+    if (!pkReady) return;
+    var v = snap.val();
+    if (v) { pkCtrPrefs = { order: v.order || [], hidden: v.hidden || [] }; try { localStorage.setItem('pkCtrPrefs', JSON.stringify(pkCtrPrefs)); } catch(e){} renderPltBox(); }
+  }, function(err){ console.warn('[picking] 센터 순서 읽기 실패', err); });
 
   /* printed: 실시간 인쇄완료 집합 */
   pkBase.child('printed').on('value', function(snap){
