@@ -928,22 +928,25 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-title{display:flex;align-items:center;gap:.55rem;font-size:.92rem;font-weight:900;color:var(--b);margin-bottom:.55rem;letter-spacing:-.005em;flex-wrap:wrap}
 .cp-staging-title .count{background:var(--b);color:#fff;font-family:var(--mo);padding:.12rem .55rem;border-radius:5px;font-size:.78rem;letter-spacing:-.005em}
 .cp-staging-title .hint{font-size:.7rem;color:var(--mu);font-weight:700;flex:1;min-width:200px}
-.cp-staging-actions{display:flex;gap:.4rem;margin-bottom:.7rem;flex-wrap:wrap}
-.cp-staging-actions .btn{padding:.5rem .9rem;font-size:.82rem;font-weight:800;border:none;border-radius:7px;cursor:pointer}
-.cp-staging-actions .commit-all{background:var(--g);color:#0f1117}
+/* 입고대기 메뉴 — 한 줄 묶음 막대(B안): 칸 폭·높이 고정, 칸 사이는 얇은 선, 색은 글자에만 */
+.cp-staging-title .lbl-btns{margin-left:auto;display:flex;gap:.35rem}
+.cp-staging-title .lbl-btn{padding:.38rem .8rem;font-size:.78rem;font-weight:800;background:rgba(255,255,255,.08);color:var(--tx);border:1px solid var(--br);border-radius:7px;cursor:pointer;white-space:nowrap}
+.cp-staging-title .lbl-btn:hover{background:rgba(255,255,255,.16)}
+.cp-staging-actions{display:flex;margin-bottom:.7rem;border:1px solid var(--br);border-radius:8px;overflow:hidden;background:rgba(255,255,255,.03)}
+.cp-staging-actions > .seg{flex:1 1 0;min-width:0;height:2.6rem;display:flex;align-items:center;justify-content:center;gap:.3rem;padding:0 .4rem;font-size:.82rem;font-weight:800;background:transparent;border:none;border-left:1px solid var(--br);border-radius:0;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit;color:var(--tx)}
+.cp-staging-actions > .seg:first-child{border-left:none}
+.cp-staging-actions > .seg:hover{background:rgba(255,255,255,.07)}
+.cp-staging-actions > .seg:active{background:rgba(255,255,255,.12)}
+.cp-staging-actions .boxify{color:#8cc4ff}
+.cp-staging-actions .pending-all{color:var(--y)}
+.cp-staging-actions .delete-all{color:var(--r)}
+/* 첫 칸 — 꺼짐: 「☐ 일괄입고 사용」 / 켜짐: 같은 자리가 초록 [✓ 일괄입고(전체)] + 작은 ✕(끄기) */
+.cp-staging-actions .seg-commit{padding:0;cursor:default}
+.cp-staging-actions .commit-guard{flex:1;height:100%;display:flex;align-items:center;justify-content:center;gap:.35rem;color:var(--mu);cursor:pointer;user-select:none}
+.cp-staging-actions .commit-guard input{width:15px;height:15px;cursor:pointer}
+.cp-staging-actions .commit-all{flex:1;height:100%;background:var(--g);color:#0f1117;border:none;font-size:.82rem;font-weight:900;cursor:pointer}
 .cp-staging-actions .commit-all:hover{filter:brightness(1.08)}
-.cp-staging-actions .print-all{background:rgba(255,255,255,.10);color:var(--tx);border:1px solid var(--br)}
-.cp-staging-actions .print-all:hover{background:rgba(255,255,255,.18)}
-.cp-staging-actions .commit-guard{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .6rem;font-size:.78rem;font-weight:800;color:var(--mu);border:1px dashed var(--br);border-radius:7px;cursor:pointer;user-select:none}
-.cp-staging-actions .commit-guard:has(input:checked){color:var(--g);border-color:var(--g)}
-.cp-staging-actions .act-gap{width:1.4rem;flex:0 0 1.4rem}
-.cp-staging-actions .boxify{background:rgba(88,166,255,.18);color:#8cc4ff;border:1.5px solid rgba(88,166,255,.6)}
-.cp-staging-actions .boxify:hover{background:rgba(88,166,255,.3)}
-.cp-staging-actions .pending-all{background:rgba(240,196,74,.16);color:var(--y);border:1.5px solid rgba(240,196,74,.55)}
-.cp-staging-actions .pending-all:hover{background:rgba(240,196,74,.28)}
-.cp-staging-actions .delete-all{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.55)}
-.cp-staging-actions .delete-all:hover{background:rgba(240,88,88,.12)}
-.cp-staging-actions .btn:active{transform:scale(.97)}
+.cp-staging-actions .commit-off{height:100%;width:2rem;flex:0 0 2rem;background:var(--g);color:#0f1117;border:none;border-left:1px solid rgba(0,0,0,.3);font-weight:900;cursor:pointer;filter:brightness(.82)}
 /* 수량 inline 수정 input */
 .cp-staging-item .qty-input{width:54px;background:#0a0d13;color:var(--g);border:1.5px solid var(--br);border-radius:4px;padding:.16rem .3rem;font-family:var(--mo);font-weight:900;font-size:.82rem;text-align:right;outline:none;-moz-appearance:textfield}
 .cp-staging-item .qty-input::-webkit-outer-spin-button,
@@ -1503,18 +1506,21 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div class="cp-staging-panel" id="cpStagingPanel">
           <div class="cp-staging-title">
             📦 입고 대기 — 박스 검토 후 확정 <span class="count" id="cpStagingCount">0</span>
-            <span class="hint">박스/상품 바코드 스캔하면 여기 담깁니다. [✕ 삭제] / [⏸ 대기] 정리 후 [✓ 일괄 입고].</span>
+            <span class="lbl-btns">
+              <button class="lbl-btn" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품라벨인쇄</button>
+              <button class="lbl-btn" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 혼적라벨인쇄</button>
+            </span>
           </div>
           <div class="cp-staging-actions">
-            <label class="commit-guard" title="잘못 눌러 전체 입고되는 것을 막기 위해 — 체크해야 [일괄입고(전체)] 버튼이 나타나고, 입고하면 다시 꺼집니다"><input type="checkbox" id="cpCommitAllOn" onchange="cpToggleCommitAll(this.checked)"> 일괄입고 사용</label>
-            <button class="btn commit-all" id="cpCommitAllBtn" style="display:none" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 박스번호대로 출고 완료 처리">✓ 일괄입고(전체)</button>
-            <button class="btn boxify" onclick="cpBoxifyImmediate()" title="묻지 않고 바로 — 매칭 SKU 를 센터(+입고일)마다 새 출고박스 하나로 묶어 출고 완료(아래 완료풀)로 넘깁니다">📦 박스화출고(즉시)</button>
-            <button class="btn boxify" onclick="cpStagingMoveAllToPending(true)" title="박스 확인 후 — 처리 대기로 넘기고 출고처리 창을 띄워 박스에 담을 SKU 를 확인한 뒤 출고처리 (센터가 여러 곳이면 센터마다 차례로)">📦 박스화출고(확인)</button>
-            <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄대기</button>
-            <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체삭제</button>
-            <span class="act-gap" aria-hidden="true"></span>
-            <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품라벨</button>
-            <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 혼적라벨</button>
+            <div class="seg seg-commit" title="잘못 눌러 전체 입고되는 것을 막기 위해 — 체크하면 이 칸이 [일괄입고(전체)] 버튼으로 바뀌고, 입고하면 다시 꺼집니다">
+              <label class="commit-guard" id="cpCommitGuard"><input type="checkbox" id="cpCommitAllOn" onchange="cpToggleCommitAll(this.checked)"> 일괄입고 사용</label>
+              <button class="commit-all" id="cpCommitAllBtn" style="display:none" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 박스번호대로 출고 완료 처리">✓ 일괄입고(전체)</button>
+              <button class="commit-off" id="cpCommitOffBtn" style="display:none" onclick="cpToggleCommitAll(false)" title="일괄입고 사용 끄기">✕</button>
+            </div>
+            <button class="seg boxify" onclick="cpBoxifyImmediate()" title="묻지 않고 바로 — 매칭 SKU 를 센터(+입고일)마다 새 출고박스 하나로 묶어 출고 완료(아래 완료풀)로 넘깁니다">📦 박스화출고(즉시)</button>
+            <button class="seg boxify" onclick="cpStagingMoveAllToPending(true)" title="박스 확인 후 — 처리 대기로 넘기고 출고처리 창을 띄워 박스에 담을 SKU 를 확인한 뒤 출고처리 (센터가 여러 곳이면 센터마다 차례로)">📦 박스화출고(확인)</button>
+            <button class="seg pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄대기</button>
+            <button class="seg delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체삭제</button>
           </div>
           <div class="cp-staging-list" id="cpStagingList">
             <div class="cp-staging-empty-big">📥 박스바코드 또는 상품바코드 스캔 대기 중...</div>
@@ -8299,8 +8305,13 @@ function cpStagingCommitAll(){
 function cpToggleCommitAll(on){
   var chk = document.getElementById('cpCommitAllOn');
   var btn = document.getElementById('cpCommitAllBtn');
+  var guard = document.getElementById('cpCommitGuard');
+  var off = document.getElementById('cpCommitOffBtn');
   if (chk) chk.checked = !!on;
+  /* 같은 칸 안에서 바꿔치기 — 옆 버튼이 밀리지 않는다 */
   if (btn) btn.style.display = on ? '' : 'none';
+  if (off) off.style.display = on ? '' : 'none';
+  if (guard) guard.style.display = on ? 'none' : '';
 }
 
 /* 입고 대기 전체 삭제 — 한 번에 비움 (confirm 후) */
