@@ -5618,7 +5618,7 @@ function cpBuildProdLabels(items){
       : '';
     /* 라벨 내용 서명 — 동일 서명끼리는 바코드 렌더·폰트축소를 1회만 하고 나머지는 복제(속도).
      * ⚠ boxSuffix 를 반드시 포함 — 빠지면 내용이 같은 다른 박스 라벨끼리 복제되어 박스번호가 섞인다. */
-    var sig = [labelBc,name,code,size,material,color,origin,ctrAbbr,hasAlt?1:0,boxSuffix].join('␟');
+    var sig = [labelBc,origBc,name,code,size,material,color,origin,ctrAbbr,hasAlt?1:0,boxSuffix].join('␟');   /* origBc — 대체표시 마커가 원바코드에 따라 달라짐 */
     for (var i=0; i<qty; i++) {
       labels.push(
         '<div class="prod-label" data-sig="'+escAttrLocal(sig)+'">'+
@@ -5670,11 +5670,23 @@ function cpPrintLabelsFromItems(items){
  * 폰트 자동축소는 부모 함수 소스를 iframe 안에서 실행(단일 출처). --kiosk-printing 이면 대화상자 없이 즉시 출력. */
 var _cpDirectIfr = null;
 function cpPrintLabelsDirect(items){
+  /* 장수가 많으면 「준비 중」을 먼저 화면에 띄운 뒤 작업 — 눌렸는지 몰라 또 누르는 일 방지 */
+  var total = (items||[]).reduce(function(s, it){ return s + (+it.qty || 1); }, 0);
+  if (total >= CP_PRINT_DEFER_MIN) {
+    cpFlash('ok','🖨 인쇄 준비 중… '+total+'장');
+    setTimeout(function(){
+      var r = cpRenderProdLabelsHtml(items);
+      if (!r.n){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+      cpPrintInIframe(r.html);
+    }, 30);
+    return total;
+  }
   var r = cpRenderProdLabelsHtml(items);
   if (!r.n){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
   cpPrintInIframe(r.html);
   return r.n;
 }
+var CP_PRINT_DEFER_MIN = 20;   /* 이 장수 이상이면 준비 중 안내 먼저 (1장 덧방 즉시인쇄는 그대로 바로) */
 /* 상품 라벨 → 바코드·글씨맞춤까지 끝난 인쇄용 HTML ({html, n}) — 동시출력(상품+혼적 한 번에)에서도 쓴다 */
 function cpRenderProdLabelsHtml(items){
   var labels = cpBuildProdLabels(items);
@@ -5737,6 +5749,13 @@ function cpRenderFitDedup(area){
   lbls.forEach(function(lbl){
     var sig = lbl.getAttribute('data-sig');
     if (sig != null && rep[sig] !== undefined){ lbl.innerHTML = rep[sig]; return; }  /* 복제 */
+    /* 전에 만든 적 있는 라벨 — 바코드·글씨맞춤 건너뛰고 그대로 (다시 뽑기·동시출력이 빨라짐) */
+    if (sig != null && hasJB && _cpLabelMemo.has(sig)){
+      var memo = _cpLabelMemo.get(sig);
+      _cpLabelMemo.delete(sig); _cpLabelMemo.set(sig, memo);   /* 최근 사용으로 뒤로 */
+      lbl.innerHTML = rep[sig] = memo;
+      return;
+    }
     if (hasJB){
       lbl.querySelectorAll('svg[data-bc]').forEach(function(svg){
         try {
@@ -5748,9 +5767,18 @@ function cpRenderFitDedup(area){
     cpFitLabelText(lbl);
     uniq++;
     if (sig != null) rep[sig] = lbl.innerHTML;   /* 축소·바코드까지 끝난 최종 HTML 캐시 */
+    if (sig != null && hasJB){   /* 바코드가 제대로 그려진 것만 기억 */
+      _cpLabelMemo.set(sig, rep[sig]);
+      while (_cpLabelMemo.size > CP_LABEL_MEMO_MAX) _cpLabelMemo.delete(_cpLabelMemo.keys().next().value);
+    }
   });
   return uniq;
 }
+/* 완성 라벨 기억 — 이 창 메모리에만(서버·PC 저장 없음, 새로고침하면 비워짐).
+ * 키(data-sig)는 라벨에 찍히는 내용 전부(인쇄 바코드·상품명·품번·사이즈·재질·색상·제조국·센터·대체표시·박스번호)라
+ * 내용이 하나라도 다르면 새로 만든다. 최근 300종까지만, 오래된 것부터 지움. */
+var CP_LABEL_MEMO_MAX = 300;
+var _cpLabelMemo = new Map();
 function cpFitLabelText(rootEl){
   if (!rootEl) return;
   /* 품번·사이즈 (nowrap) — 가로 폭 기준 */
@@ -8624,7 +8652,12 @@ function cpStagingPrintBoth(){
     byBatch[k].push(it);
   });
   if (!order.length) { cpFlash('warn','⚠️ 인쇄할 매칭 SKU 없음'); return; }
-  if (typeof JsBarcode === 'undefined') cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄');
+  if (typeof JsBarcode === 'undefined') { cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄'); }
+  else cpFlash('ok','🖨 동시출력 준비 중… 박스 '+order.length+'개');
+  /* 안내를 먼저 화면에 그린 뒤 무거운 작업 */
+  setTimeout(function(){ cpStagingPrintBothRun(byBatch, order); }, 30);
+}
+function cpStagingPrintBothRun(byBatch, order){
   var rows = workSession.rows || [];
   var vendor = workSession.vendor || '';
   var html = '', nProd = 0, nBox = 0;
