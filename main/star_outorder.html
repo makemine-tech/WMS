@@ -281,6 +281,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-resume-banner .rb-row .rb-meta{font-size:.7rem;color:var(--mu);font-family:var(--mo);display:block;margin-top:.2rem}
 .cp-resume-banner .rb-row button{font-size:.78rem;padding:.42rem .85rem;white-space:nowrap}
 .cp-resume-banner .rb-hint{font-size:.72rem;color:var(--mu);margin-top:.4rem}
+.cp-sess-switch{display:flex;align-items:center;gap:.7rem;padding:.55rem .8rem;margin-bottom:.6rem;background:rgba(88,166,255,.08);border:1.5px solid rgba(88,166,255,.55);border-radius:9px;flex-wrap:wrap}
+.cp-sess-switch .sw-l{font-size:.75rem;font-weight:900;color:#8cc4ff;white-space:nowrap}
+.cp-sess-switch .sw-cur{flex:1;min-width:260px;font-size:.88rem;color:var(--tx)}
+.cp-sess-switch .sw-cur b{color:#8cc4ff;font-weight:900}
+.cp-sess-switch .sw-btn{padding:.55rem 1.1rem;font-size:.9rem;font-weight:900;background:#58a6ff;color:#0f1117;border:none;border-radius:8px;cursor:pointer;white-space:nowrap}
+.cp-sess-switch .sw-btn:hover{filter:brightness(1.1)}
 .cp-resume-banner .rb-row.cur{border-color:#8cc4ff;background:rgba(88,166,255,.10)}
 .cp-resume-banner .rb-row.cur .rb-info b{color:#8cc4ff}
 .cp-resume-banner .rb-hdr .rb-refresh{float:right;font-size:.72rem;padding:.2rem .6rem;background:transparent;color:var(--y);border:1px solid rgba(240,196,74,.5);border-radius:6px;cursor:pointer}
@@ -1415,6 +1421,15 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
     <div id="cpScanView" style="display:none">
       <div id="cpScanMsg" class="msg" style="display:none"></div>
 
+      <!-- 맨 위 작업 전환 줄 — 지금 작업파일 + 진행률, 다른 작업으로 바로 바꾸기 -->
+      <div class="cp-sess-switch">
+        <span class="sw-l">📄 지금 작업</span>
+        <div class="sw-cur" id="cpSwCur">-</div>
+        <button class="sw-btn" onclick="cpToggleSessPicker()" title="등록된 다른 작업파일(진행 중·일시정지)로 바로 바꾸기 — 새로고침 필요 없음">🔀 다른 작업 선택</button>
+      </div>
+      <!-- 작업파일 선택 — 스캔 화면에서 다른 세션으로 바로 전환 (열 때마다 최신 목록) -->
+      <div class="cp-resume-banner" id="cpSessPicker" style="display:none"></div>
+
       <div class="cp-session-hdr">
         <span class="ss-dot" title="실시간 동기 중"></span>
         <div class="ss-fillers">
@@ -1424,7 +1439,6 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           <div><span class="ss-l">세션 ID</span><div class="ss-id" id="cpSsId">-</div></div>
         </div>
         <div class="ss-actions">
-          <button class="btn btn-s" onclick="cpToggleSessPicker()" title="등록된 다른 작업파일(진행 중·일시정지 세션)로 바로 바꾸기 — 새로고침 필요 없음">📂 작업파일 선택</button>
           <button class="cp-tts-toggle on" id="cpTtsBtn" onclick="cpToggleTts()" title="센터명 음성 안내 (TTS) 켜기/끄기">🔊 음성 ON</button>
           <button class="btn btn-y" onclick="cpPrintShipList('1up')" title="출고적재리스트 — A4 세로, 한 면에 파렛트 1장 (2부)">📃 적재 1장인쇄</button>
           <button class="btn btn-y" onclick="cpPrintShipList('2up')" title="출고적재리스트 — A4 가로 좌우 2칸, 파렛트별로 끊어서. 한 쪽짜리는 좌우 같은 내용(2부), 여러 쪽이면 좌1·우2 / 좌3·공란 순서">📑 적재 2장인쇄(좌우)</button>
@@ -1432,8 +1446,6 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           <button class="btn btn-r" onclick="cpEndScan()" title="세션 완료 처리">📤 작업 종료</button>
         </div>
       </div>
-      <!-- 작업파일 선택 — 스캔 화면에서 다른 세션으로 바로 전환 (열 때마다 최신 목록) -->
-      <div class="cp-resume-banner" id="cpSessPicker" style="display:none"></div>
 
       <div class="cp-scan-input-wrap" id="cpScanInputWrap">
         <div class="cp-mode-toggle">
@@ -3318,6 +3330,11 @@ function cpPalletBoxOrder(){
 function cpRefreshSessionHdr(){
   if (!workSession) return;
   var setT = function(id, val){ var el = document.getElementById(id); if (el) el.textContent = val; };
+  /* 맨 위 작업 전환 줄 — 업체 · 파일명 + 진행률 막대 (스캔마다 갱신) */
+  var sw = document.getElementById('cpSwCur');
+  if (sw) sw.innerHTML = '<b>' + escH(workSession.vendor || '(업체 미입력)') + '</b>' +
+    (workSession.poFileName ? ' <span style="font-size:.78rem">📄 ' + escH(workSession.poFileName) + '</span>' : '') +
+    cpSessProgressHtml(workSession);
   setT('cpSsVendor', workSession.vendor || '(미입력)');
   setT('cpSsFile',   workSession.poFileName || '-');
   setT('cpSsStart',  workSession.createdAt ? fmtDt(workSession.createdAt) : '-');
