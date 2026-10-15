@@ -925,6 +925,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-actions .commit-all:hover{filter:brightness(1.08)}
 .cp-staging-actions .print-all{background:rgba(255,255,255,.10);color:var(--tx);border:1px solid var(--br)}
 .cp-staging-actions .print-all:hover{background:rgba(255,255,255,.18)}
+.cp-staging-actions .boxify{background:rgba(88,166,255,.18);color:#8cc4ff;border:1.5px solid rgba(88,166,255,.6)}
+.cp-staging-actions .boxify:hover{background:rgba(88,166,255,.3)}
 .cp-staging-actions .pending-all{background:rgba(240,196,74,.16);color:var(--y);border:1.5px solid rgba(240,196,74,.55)}
 .cp-staging-actions .pending-all:hover{background:rgba(240,196,74,.28)}
 .cp-staging-actions .delete-all{background:transparent;color:var(--r);border:1.5px solid rgba(240,88,88,.55)}
@@ -1480,11 +1482,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <span class="hint">박스/상품 바코드 스캔하면 여기 담깁니다. [✕ 삭제] / [⏸ 대기] 정리 후 [✓ 일괄 입고].</span>
           </div>
           <div class="cp-staging-actions">
-            <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 출고 완료로 처리">✓ 일괄 입고 (전체)</button>
-            <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄 대기로</button>
-            <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품 라벨 일괄 인쇄</button>
-            <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 박스 혼적라벨 일괄 인쇄</button>
-            <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체 삭제</button>
+            <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 박스번호대로 출고 완료 처리">✓ 일괄입고(전체)</button>
+            <button class="btn boxify" onclick="cpStagingMoveAllToPending(true)" title="박스가 없거나 섞어서 박스를 새로 꾸릴 때 — 매칭 SKU 를 처리 대기로 넘기고 곧바로 출고처리 창을 띄워 새 출고박스로 묶습니다 (센터가 여러 곳이면 센터마다 차례로)">📦 박스화출고처리</button>
+            <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄대기</button>
+            <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품라벨</button>
+            <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 혼적라벨</button>
+            <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체삭제</button>
           </div>
           <div class="cp-staging-list" id="cpStagingList">
             <div class="cp-staging-empty-big">📥 박스바코드 또는 상품바코드 스캔 대기 중...</div>
@@ -6897,6 +6900,19 @@ function cpPendingClearAll(){
 var cpPopupTargetIds = [];   /* 후보 pending id 들 */
 var cpPopupCenter = '';
 var cpPopupEta = '';
+var cpBoxifyIds = [];        /* 📦 박스화출고처리로 넘긴 pending id — 묶음마다 창을 이어 띄운다 */
+
+/* 박스화출고처리 — 아직 출고처리 안 된 다음 (센터+입고일) 묶음 창을 띄운다. 다 끝나면 마무리 안내 */
+function cpBoxifyNext(){
+  var pending = (workSession && workSession.pending) || [];
+  var left = pending.filter(function(p){ return cpBoxifyIds.indexOf(p.id) >= 0; });
+  cpBoxifyIds = left.map(function(p){ return p.id; });
+  if (!left.length) {
+    cpFlash('ok','📦 박스화출고처리 완료 — 모든 묶음이 새 출고박스로 적재됐습니다');
+    return;
+  }
+  cpOpenShipPopup(left[0].id);
+}
 
 function cpOpenShipPopup(pickedId){
   var pending = (workSession && workSession.pending) || [];
@@ -6911,14 +6927,22 @@ function cpOpenShipPopup(pickedId){
   cpPopupTargetIds = cands.map(function(p){ return p.id; });
   /* 컨텍스트 헤더 */
   var ctx = document.getElementById('cpShipPopupCtx');
-  if (ctx) ctx.innerHTML = escH(cpPopupCenter||'?') + (cpPopupEta ? ' · ' + escH(cpPopupEta) : '');
-  /* SKU 체크박스 (기본 모두 체크) */
+  /* 박스화출고처리 중이면 남은 묶음 수를 같이 보여준다 */
+  var bfGroups = {};
+  if (cpBoxifyIds.length) pending.forEach(function(p){
+    if (cpBoxifyIds.indexOf(p.id) >= 0) bfGroups[(p.center||'')+'|'+(p.eta||'')] = true;
+  });
+  var bfN = Object.keys(bfGroups).length;
+  if (ctx) ctx.innerHTML = escH(cpPopupCenter||'?') + (cpPopupEta ? ' · ' + escH(cpPopupEta) : '')
+    + (bfN > 1 ? ' <span style="color:var(--y);font-size:.85em">· 📦 박스화 남은 묶음 '+bfN+'</span>' : '');
+  /* SKU 체크박스 (기본 모두 체크 — 박스화출고처리 중이면 이번에 넘긴 것만 체크) */
   var itemsEl = document.getElementById('cpShipPopupItems');
   if (itemsEl) {
     itemsEl.innerHTML = cands.map(function(p){
       var meta = stockMeta[normBarcode(p.barcode)] || {};
-      return '<label class="cp-item-cb sel" data-pid="'+escH(p.id)+'" data-qty="'+(+p.qty||0)+'">'+
-        '<input type="checkbox" checked onchange="cpToggleItemCb(this)">'+
+      var on = !cpBoxifyIds.length || cpBoxifyIds.indexOf(p.id) >= 0;
+      return '<label class="cp-item-cb'+(on?' sel':'')+'" data-pid="'+escH(p.id)+'" data-qty="'+(+p.qty||0)+'">'+
+        '<input type="checkbox"'+(on?' checked':'')+' onchange="cpToggleItemCb(this)">'+
         '<span class="src">📦 '+escH(p.srcBoxBarcode)+'</span>'+
         '<span class="bc">'+escH(p.barcode)+'</span>'+
         '<span class="code">'+escH(meta.code||'-')+'</span>'+
@@ -6981,10 +7005,15 @@ function cpToggleBoxOpt(input){
   var all = document.querySelectorAll('.cp-box-opt');
   all.forEach(function(el){ el.classList.toggle('sel', el.contains(input) && input.checked); });
 }
-function cpCloseShipPopup(){
+function cpCloseShipPopup(keepBoxify){
   document.getElementById('cpShipPopupBack').classList.remove('open');
   document.getElementById('cpShipPopupBox').classList.remove('open');
   cpPopupTargetIds = [];
+  if (keepBoxify || !cpBoxifyIds.length) return;
+  /* 박스화출고처리 도중 취소 — 남은 것은 처리 대기에 그대로 두고 이어 띄우기만 멈춘다 */
+  var n = cpBoxifyIds.length;
+  cpBoxifyIds = [];
+  cpFlash('warn','⏸ 박스화출고처리 멈춤 — 남은 '+n+' SKU 는 처리 대기에 있습니다 ([✓ 출고처리]로 이어서)');
 }
 function cpConfirmShip(){
   /* 선택된 SKU id 들 + 박스 옵션 수집 */
@@ -7045,11 +7074,13 @@ function cpConfirmShip(){
   }).then(function(){
     workSession.scans = combined;
     workSession.pending = newPending;
-    cpCloseShipPopup();
+    cpCloseShipPopup(true);
     cpRefreshScanUI();
     var totalQty = newScans.reduce(function(s,x){return s+x.qty;},0);
     cpFlash('ok','✓ 출고박스 <b>'+escH(shipBoxNo)+'</b> 에 '+pickedItems.length+' SKU · '+totalQty+'개 적재됨');
     cpSpeak('완료');
+    /* 박스화출고처리 — 다음 묶음 창 이어서 (이번에 체크 해제한 것도 다시 남은 묶음으로 뜬다) */
+    if (cpBoxifyIds.length) setTimeout(cpBoxifyNext, 250);
   }).catch(function(err){
     cpFlash('er','❌ 출고처리 실패: '+escH(err && err.message || err));
   });
@@ -7694,9 +7725,10 @@ function cpRefreshScanUI(){
 }
 
 /* ═══════════ 센터별 한 줄 요약 (박스바코드 스캔칸 아래) ═══════════
- * PO rows 의 센터별 그룹화 → 누적파렛수P - 총출고수량(진행/잔여)
- * 예: 인천1 = 1P - 300(50/250) | 인천2 = 1P - 300(50/250) | 인천3 = 1P - 300(50/250)
- *   1P    = 그 센터의 distinct palletNo 개수 (작업한 파렛트 수)
+ * PO rows 의 센터별 그룹화 → 누적파렛수 - 박스수 - 총출고수량(진행/잔여)
+ * 예: 인천14 = 14파렛트 - 120박스 - 2547(1632/915) | 인천2 = ...
+ *   14파렛트 = 그 센터의 distinct palletNo 개수 (작업한 파렛트 수)
+ *   120박스  = 그 센터 완료 기록의 서로 다른 출고박스 수 (완료풀 센터 칩과 같은 기준)
  *   300   = 그 센터의 PO 총 출고대상 수량 (canShip 합)
  *   50/250 = (현재까지 출고된 누적 / 남은 수량) */
 function cpRefreshCenterSummary(){
@@ -7729,6 +7761,9 @@ function cpRefreshCenterSummary(){
     byCenter[c].shipped += (+s.qty || 0);
     var pn = +s.palletNo;
     if (pn > 0) byCenter[c].pallets[pn] = true;
+    /* 박스수 — 완료풀 센터 칩과 같은 기준 (파렛트+출고박스 조합이 서로 다른 개수) */
+    var bk = cpScanBoxKey(s);
+    if (bk) (byCenter[c].boxes || (byCenter[c].boxes = {}))[cpScanPalletKey(s, rows) + '#' + bk] = true;
   });
   /* 입고대기(staging)는 '대기'로 따로 표기하고 잔여 계산엔 함께 차감.
    * 처리대기(pending)는 박스만 합치면 끝나는 단계 — 대기가 아니라 완료(shipped)로 센다. */
@@ -7751,13 +7786,15 @@ function cpRefreshCenterSummary(){
   el.innerHTML = order.map(function(c){
     var sum = byCenter[c];
     var palCount = Object.keys(sum.pallets).length;
+    var boxCount = Object.keys(sum.boxes || {}).length;
     var have = sum.shipped + sum.waiting;          /* 완료 + 대기 = 카운터상 출고 처리된 총량 */
     var rem = Math.max(0, sum.need - have);
     var done = sum.need > 0 && have >= sum.need;
     var waitHtml = sum.waiting > 0 ? '<span class="wt">+'+sum.waiting+'대기</span>' : '';
     return '<span class="cs-item'+(done?' done':'')+'">'+
       '<b>'+escH(c)+'</b>= '+
-      '<span class="cs-pal">'+palCount+'P</span> - '+
+      '<span class="cs-pal">'+palCount+'파렛트</span> - '+
+      '<span class="cs-pal">'+boxCount+'박스</span> - '+
       '<span class="cs-need">'+sum.need+'</span>'+
       '<span class="cs-prog">(<span class="pr">'+sum.shipped+'</span>'+waitHtml+'/<span class="rm">'+rem+'</span>)</span>'+
     '</span>';
@@ -8133,14 +8170,16 @@ function cpStagingUpdateQty(itemId, raw, inputEl){
   });
 }
 
-/* 입고 대기 → 처리 대기로 일괄 이동 (매칭 SKU 만, 잔류는 staging 에 남김) */
-function cpStagingMoveAllToPending(){
+/* 입고 대기 → 처리 대기로 일괄 이동 (매칭 SKU 만, 잔류는 staging 에 남김)
+ * boxify=true (📦 박스화출고처리) — 확인 없이 넘기고 곧바로 출고처리 창을 띄운다.
+ * 센터(+입고일)가 여러 묶음이면 한 묶음 확정할 때마다 다음 묶음 창이 이어서 뜬다 (cpBoxifyNext). */
+function cpStagingMoveAllToPending(boxify){
   if (!workSessionRef) return;
   var stg = (workSession.staging || []);
   var matched = stg.filter(function(x){return !x.unmatched;});
-  if (!matched.length) { cpFlash('warn','⚠️ 이동할 매칭 SKU 없음'); return; }
+  if (!matched.length) { cpFlash('warn','⚠️ '+(boxify ? '박스화할' : '이동할')+' 매칭 SKU 없음'); return; }
   var totalQty = matched.reduce(function(s,x){return s+(+x.qty||0);},0);
-  if (!confirm('입고 대기의 매칭 SKU ' + matched.length + '종 · ' + totalQty + '개를 처리 대기로 이동할까요?\n(잔류 SKU 는 입고 대기에 남습니다)')) return;
+  if (!boxify && !confirm('입고 대기의 매칭 SKU ' + matched.length + '종 · ' + totalQty + '개를 처리 대기로 이동할까요?\n(잔류 SKU 는 입고 대기에 남습니다)')) return;
   var sessRows = workSession.rows || [];
   var newPending = matched.map(function(it){
     var r = sessRows[it.srcIdx] || {};
@@ -8164,6 +8203,11 @@ function cpStagingMoveAllToPending(){
     workSession.staging = remainStaging;
     workSession.pending = pp;
     cpRefreshScanUI();
+    if (boxify) {
+      cpBoxifyIds = newPending.map(function(p){ return p.id; });
+      cpBoxifyNext();
+      return;
+    }
     cpFlash('warn','⏸ 입고 대기 '+matched.length+' SKU → 처리 대기로 이동됨'+(remainStaging.length?' (잔류 '+remainStaging.length+'건은 입고 대기에 남음)':''));
   }).catch(function(err){
     cpFlash('er','❌ 이동 실패: '+escH(err && err.message || err));
