@@ -936,6 +936,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-actions .print-all:hover{background:rgba(255,255,255,.18)}
 .cp-staging-actions .commit-guard{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .6rem;font-size:.78rem;font-weight:800;color:var(--mu);border:1px dashed var(--br);border-radius:7px;cursor:pointer;user-select:none}
 .cp-staging-actions .commit-guard:has(input:checked){color:var(--g);border-color:var(--g)}
+.cp-staging-actions .act-gap{width:1.4rem;flex:0 0 1.4rem}
 .cp-staging-actions .boxify{background:rgba(88,166,255,.18);color:#8cc4ff;border:1.5px solid rgba(88,166,255,.6)}
 .cp-staging-actions .boxify:hover{background:rgba(88,166,255,.3)}
 .cp-staging-actions .pending-all{background:rgba(240,196,74,.16);color:var(--y);border:1.5px solid rgba(240,196,74,.55)}
@@ -1507,11 +1508,13 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
           <div class="cp-staging-actions">
             <label class="commit-guard" title="잘못 눌러 전체 입고되는 것을 막기 위해 — 체크해야 [일괄입고(전체)] 버튼이 나타나고, 입고하면 다시 꺼집니다"><input type="checkbox" id="cpCommitAllOn" onchange="cpToggleCommitAll(this.checked)"> 일괄입고 사용</label>
             <button class="btn commit-all" id="cpCommitAllBtn" style="display:none" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 박스번호대로 출고 완료 처리">✓ 일괄입고(전체)</button>
-            <button class="btn boxify" onclick="cpStagingMoveAllToPending(true)" title="박스가 없거나 섞어서 박스를 새로 꾸릴 때 — 매칭 SKU 를 처리 대기로 넘기고 곧바로 출고처리 창을 띄워 새 출고박스로 묶습니다 (센터가 여러 곳이면 센터마다 차례로)">📦 박스화출고처리</button>
+            <button class="btn boxify" onclick="cpBoxifyImmediate()" title="묻지 않고 바로 — 매칭 SKU 를 센터(+입고일)마다 새 출고박스 하나로 묶어 출고 완료(아래 완료풀)로 넘깁니다">📦 박스화출고(즉시)</button>
+            <button class="btn boxify" onclick="cpStagingMoveAllToPending(true)" title="박스 확인 후 — 처리 대기로 넘기고 출고처리 창을 띄워 박스에 담을 SKU 를 확인한 뒤 출고처리 (센터가 여러 곳이면 센터마다 차례로)">📦 박스화출고(확인)</button>
             <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄대기</button>
+            <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체삭제</button>
+            <span class="act-gap" aria-hidden="true"></span>
             <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품라벨</button>
             <button class="btn print-all" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 혼적라벨</button>
-            <button class="btn delete-all" onclick="cpStagingClearAll()" title="입고 대기 모든 항목을 한 번에 삭제 (확인 후)">✕ 전체삭제</button>
           </div>
           <div class="cp-staging-list" id="cpStagingList">
             <div class="cp-staging-empty-big">📥 박스바코드 또는 상품바코드 스캔 대기 중...</div>
@@ -8387,6 +8390,71 @@ function cpStagingUpdateQty(itemId, raw, inputEl){
   }).catch(function(err){
     cpFlash('er','❌ 저장 실패: '+escH(err && err.message || err));
     if (inputEl) inputEl.value = orig.qty || 0;
+  });
+}
+
+/* 📦 박스화출고(즉시) — 묻지 않고, 입고 대기 매칭 SKU 를 (센터+입고일)마다 새 출고박스 하나로 묶어 바로 출고 완료.
+ * 출고처리 창(cpConfirmShip)과 같은 규칙: 새 박스 번호는 다음 순차, 발주수량 초과면 전체 차단.
+ * 잔류·발주초과(unmatched)는 입고 대기에 남긴다. */
+function cpBoxifyImmediate(){
+  if (!workSessionRef || !workSession) return;
+  var stg = (workSession.staging || []);
+  var matched = stg.filter(function(x){ return !x.unmatched && x.srcIdx != null && x.srcIdx >= 0; });
+  if (!matched.length) { cpFlash('warn','⚠️ 박스화할 매칭 SKU 없음'); return; }
+  var ovCheck = cpCheckOverflow(matched.map(function(t){ return { srcIdx:t.srcIdx, qty:t.qty }; }));
+  if (!ovCheck.ok) {
+    cpFlash('er','❌ <b>발주수량 초과 차단</b> — 박스화출고 불가<span class="sub">'+cpFormatViolations(ovCheck.violations)+'<br>초과 SKU 수량을 고치거나 [📦 박스화출고(확인)]으로 골라서 처리하세요.</span>');
+    cpSpeak('초과 차단');
+    return;
+  }
+  cpFlushSessionSave();   /* 대기 중인 스캔 저장을 먼저 내보낸다 — 이 write 에 덮이지 않게 */
+  var sessRows = workSession.rows || [];
+  var groups = {}, order = [];
+  matched.forEach(function(t){
+    var r = sessRows[t.srcIdx] || {};
+    var c = r.center || '', e = r.eta || '';
+    var gk = c + '|' + e;
+    if (!groups[gk]) { groups[gk] = { center:c, eta:e, items:[] }; order.push(gk); }
+    groups[gk].items.push(t);
+  });
+  var boxes = (workSession.shipBoxes || []).slice();
+  workSession.shipBoxes = boxes;   /* cpNextShipBoxNo 가 방금 만든 번호까지 보도록 */
+  var newScans = [], made = [];
+  order.forEach(function(gk){
+    var g = groups[gk];
+    var boxNo = cpNextShipBoxNo(g.center);
+    boxes.push({ boxNo:boxNo, center:g.center, eta:g.eta, status:'open', createdAt:Date.now(), by:getUserId() });
+    var qty = 0;
+    g.items.forEach(function(t){
+      var sc = {
+        ts: Date.now(), by: getUserId(),
+        type: 'box', input: t.srcBoxBarcode || t.barcode,
+        srcBoxBarcode: t.srcBoxBarcode || '', boxBarcode: t.srcBoxBarcode || '',
+        shipBoxNo: boxNo,
+        barcode: t.barcode, poBarcode: t.poBarcode || '',
+        qty: t.qty,
+        palletEta: g.eta, palletCenter: g.center,
+        palletNo: cpCurPallet(g.eta, g.center),
+        srcIdx: t.srcIdx,
+        undone: false
+      };
+      if (Array.isArray(t.seqs)) sc.seqs = t.seqs;   /* 찍은 순서 — 완료풀 라벨 인쇄 순서 */
+      newScans.push(sc);
+      qty += (+t.qty || 0);
+    });
+    made.push(boxNo + ' ' + g.items.length + '종 ' + qty + '개');
+  });
+  var remainStaging = stg.filter(function(x){ return matched.indexOf(x) < 0; });
+  var combined = (workSession.scans || []).concat(newScans);
+  workSessionRef.update({ scans: combined, staging: remainStaging, shipBoxes: boxes, updatedAt: Date.now() }).then(function(){
+    workSession.scans = combined;
+    workSession.staging = remainStaging;
+    cpLocalActTs = Date.now();   /* 새 출고박스 — 마지막 박스 안내 대상 */
+    cpRefreshScanUI();
+    cpFlash('ok','📦 박스화출고 완료 — 새 출고박스 '+made.length+'개<span class="sub">'+made.map(escH).join(' · ')+(remainStaging.length ? ' · 잔류/초과 '+remainStaging.length+'건은 입고 대기에 남음' : '')+'</span>');
+    cpSpeak('완료');
+  }).catch(function(err){
+    cpFlash('er','❌ 박스화출고 실패: '+escH(err && err.message || err));
   });
 }
 
