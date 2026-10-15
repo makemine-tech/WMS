@@ -929,8 +929,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-title .count{background:var(--b);color:#fff;font-family:var(--mo);padding:.12rem .55rem;border-radius:5px;font-size:.78rem;letter-spacing:-.005em}
 .cp-staging-title .hint{font-size:.7rem;color:var(--mu);font-weight:700;flex:1;min-width:200px}
 /* 입고대기 메뉴 — 한 줄 묶음 막대(B안): 칸 폭·높이 고정, 칸 사이는 얇은 선, 색은 글자에만 */
-.cp-staging-title .lbl-btns{margin-left:auto;display:flex;gap:.45rem}
-.cp-staging-title .lbl-btn{padding:.6rem 1.15rem;font-size:.92rem;font-weight:900;background:rgba(255,255,255,.10);color:var(--tx);border:1.5px solid var(--br);border-radius:8px;cursor:pointer;white-space:nowrap;font-family:inherit}
+.cp-staging-title .lbl-btns{margin-left:auto;display:flex;align-items:stretch;border:1.5px solid var(--br);border-radius:8px;overflow:hidden}   /* 상품라벨 | 동시출력 | 혼적라벨 한 덩어리, 세 칸 같은 크기 */
+.cp-staging-title .lbl-btn{width:6.6rem;height:2.3rem;padding:0 .3rem;font-size:.82rem;font-weight:900;background:rgba(255,255,255,.08);color:var(--tx);border:none;border-left:1px solid var(--br);border-radius:0;cursor:pointer;white-space:nowrap;font-family:inherit}
+.cp-staging-title .lbl-btn:first-child{border-left:none}
+.cp-staging-title .lbl-btn.both{background:rgba(88,166,255,.22);color:#8cc4ff}
 .cp-staging-title .lbl-btn:hover{background:rgba(255,255,255,.18)}
 .cp-staging-title .lbl-btn:active{transform:scale(.97)}
 /* 입고대기 메뉴 — [일괄입고: 전체] [박스화출고: 즉시출고·검토출고] 는 같은 색 묶음(제목 + 버튼), 일괄대기·전체삭제는 작게 */
@@ -1515,7 +1517,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             📦 입고 대기 — 박스 검토 후 확정 <span class="count" id="cpStagingCount">0</span>
             <span class="lbl-btns">
               <button class="lbl-btn" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품라벨</button>
-              <button class="lbl-btn" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (150x100mm, 박스수만큼)">📋 혼적라벨</button>
+              <button class="lbl-btn both" onclick="cpStagingPrintBoth()" title="상품라벨 + 혼적라벨을 한 번에 — 박스마다 그 박스 상품라벨 뒤에 혼적라벨">🖨 동시출력</button>
+              <button class="lbl-btn" onclick="cpStagingPrintAllMixLabels()" title="대기 중인 각 박스마다 혼적 리스트 라벨 인쇄 (80x40mm, 박스수만큼)">📋 혼적라벨</button>
             </span>
           </div>
           <div class="cp-staging-actions">
@@ -5667,8 +5670,15 @@ function cpPrintLabelsFromItems(items){
  * 폰트 자동축소는 부모 함수 소스를 iframe 안에서 실행(단일 출처). --kiosk-printing 이면 대화상자 없이 즉시 출력. */
 var _cpDirectIfr = null;
 function cpPrintLabelsDirect(items){
+  var r = cpRenderProdLabelsHtml(items);
+  if (!r.n){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  cpPrintInIframe(r.html);
+  return r.n;
+}
+/* 상품 라벨 → 바코드·글씨맞춤까지 끝난 인쇄용 HTML ({html, n}) — 동시출력(상품+혼적 한 번에)에서도 쓴다 */
+function cpRenderProdLabelsHtml(items){
   var labels = cpBuildProdLabels(items);
-  if (!labels.length){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  if (!labels.length) return { html:'', n:0 };
 
   /* 1) 바코드를 부모에서 렌더 (오프스크린) → SVG 가 그려진 상태로 직렬화 */
   var tmp = document.createElement('div');
@@ -5680,8 +5690,7 @@ function cpPrintLabelsDirect(items){
   cpRenderFitDedup(tmp);
   var bodyHtml = tmp.innerHTML;
   tmp.remove();
-  cpPrintInIframe(bodyHtml);
-  return labels.length;
+  return { html: bodyHtml, n: labels.length };
 }
 
 /* 라벨 HTML 만 담은 작은 iframe 을 인쇄 — 무거운 본문 전체를 인쇄용으로 다시 배치하지 않아 빠르다.
@@ -8599,6 +8608,39 @@ function cpStagingPrintAllMixLabels(){
   }).join('');
   cpDoPrintMixLabels(allHtml);
   cpFlash('ok','📋 박스 ' + order.length + '개 혼적라벨 인쇄 준비');
+}
+
+/* 입고 대기 — 상품라벨 + 혼적라벨 동시출력.
+ * 두 인쇄를 따로 부르면 뒤 인쇄가 앞 인쇄 iframe 을 지워 버리므로, 한 번의 인쇄로 합친다.
+ * 박스마다 [그 박스 상품라벨들 → 그 박스 혼적라벨] 순서 — 한 박스 라벨이 한데 모여 나온다. */
+function cpStagingPrintBoth(){
+  if (!workSession) return;
+  var stg = (workSession.staging || []);
+  var byBatch = {}, order = [];
+  stg.forEach(function(it){
+    if (it.unmatched) return;
+    var k = it.batchId || ('B'+it.srcBoxBarcode);
+    if (!byBatch[k]) { byBatch[k] = []; order.push(k); }
+    byBatch[k].push(it);
+  });
+  if (!order.length) { cpFlash('warn','⚠️ 인쇄할 매칭 SKU 없음'); return; }
+  if (typeof JsBarcode === 'undefined') cpFlash('warn','⚠️ JsBarcode 라이브러리 로딩 실패 — 바코드 그림 없이 인쇄');
+  var rows = workSession.rows || [];
+  var vendor = workSession.vendor || '';
+  var html = '', nProd = 0, nBox = 0;
+  order.forEach(function(k){
+    var items = byBatch[k];
+    var pr = cpRenderProdLabelsHtml(items.map(function(it){
+      return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx, box: it.srcBoxBarcode || '', seqs: it.seqs, ts: it.ts };
+    }));
+    html += pr.html; nProd += pr.n;
+    var center = (rows[items[0].srcIdx] || {}).center || '';
+    var mix = cpBuildMixLabelHtmlForBox(items[0].srcBoxBarcode || '?', items, vendor, center);
+    if (mix) { html += mix; nBox++; }
+  });
+  if (!html) { cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  cpPrintInIframe(html);
+  cpFlash('ok','🖨 동시출력 — 상품라벨 '+nProd+'장 + 혼적라벨 '+nBox+'박스');
 }
 
 /* 입고 대기 — 박스(batchId) 단위 혼적 리스트 라벨 인쇄 (80x40mm, 2 SKU/페이지 분할) */
