@@ -925,6 +925,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-staging-actions .commit-all:hover{filter:brightness(1.08)}
 .cp-staging-actions .print-all{background:rgba(255,255,255,.10);color:var(--tx);border:1px solid var(--br)}
 .cp-staging-actions .print-all:hover{background:rgba(255,255,255,.18)}
+.cp-staging-actions .commit-guard{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .6rem;font-size:.78rem;font-weight:800;color:var(--mu);border:1px dashed var(--br);border-radius:7px;cursor:pointer;user-select:none}
+.cp-staging-actions .commit-guard:has(input:checked){color:var(--g);border-color:var(--g)}
 .cp-staging-actions .boxify{background:rgba(88,166,255,.18);color:#8cc4ff;border:1.5px solid rgba(88,166,255,.6)}
 .cp-staging-actions .boxify:hover{background:rgba(88,166,255,.3)}
 .cp-staging-actions .pending-all{background:rgba(240,196,74,.16);color:var(--y);border:1.5px solid rgba(240,196,74,.55)}
@@ -1482,7 +1484,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
             <span class="hint">박스/상품 바코드 스캔하면 여기 담깁니다. [✕ 삭제] / [⏸ 대기] 정리 후 [✓ 일괄 입고].</span>
           </div>
           <div class="cp-staging-actions">
-            <button class="btn commit-all" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 박스번호대로 출고 완료 처리">✓ 일괄입고(전체)</button>
+            <label class="commit-guard" title="잘못 눌러 전체 입고되는 것을 막기 위해 — 체크해야 [일괄입고(전체)] 버튼이 나타나고, 입고하면 다시 꺼집니다"><input type="checkbox" id="cpCommitAllOn" onchange="cpToggleCommitAll(this.checked)"> 일괄입고 사용</label>
+            <button class="btn commit-all" id="cpCommitAllBtn" style="display:none" onclick="cpStagingCommitAll()" title="대기 중인 모든 박스를 박스번호대로 출고 완료 처리">✓ 일괄입고(전체)</button>
             <button class="btn boxify" onclick="cpStagingMoveAllToPending(true)" title="박스가 없거나 섞어서 박스를 새로 꾸릴 때 — 매칭 SKU 를 처리 대기로 넘기고 곧바로 출고처리 창을 띄워 새 출고박스로 묶습니다 (센터가 여러 곳이면 센터마다 차례로)">📦 박스화출고처리</button>
             <button class="btn pending-all" onclick="cpStagingMoveAllToPending()" title="대기 중인 매칭 SKU 를 모두 처리 대기로 이동 (잔류는 제외)">⏸ 일괄대기</button>
             <button class="btn print-all" onclick="cpStagingPrintLabels()" title="대기 중인 모든 SKU 의 상품 라벨 일괄 인쇄 (80x40mm, 수량만큼)">📃 상품라벨</button>
@@ -8075,9 +8078,18 @@ function cpStagingCommitItems(items, onDone){
 /* 전체 일괄 입고 — 클릭 즉시 입고 (확인 절차 없음).
  * 잔류 차단은 cpStagingCommitItems 안에서 처리. 발주초과는 staging UI 의 빨강 배지로 시각 경고만. */
 function cpStagingCommitAll(){
+  var on = document.getElementById('cpCommitAllOn');
+  if (on && !on.checked) { cpFlash('warn','⚠️ [일괄입고 사용]을 체크해야 전체 입고됩니다'); return; }
   var stg = (workSession && workSession.staging) || [];
   if (!stg.length) { cpFlash('warn','⚠️ 입고 대기 항목 없음'); return; }
-  cpStagingCommitItems(stg);
+  cpStagingCommitItems(stg, function(){ cpToggleCommitAll(false); });   /* 입고하면 다시 잠근다 */
+}
+/* [일괄입고 사용] 체크 — 켜야 [일괄입고(전체)] 버튼이 보인다 (새로고침하면 항상 꺼짐) */
+function cpToggleCommitAll(on){
+  var chk = document.getElementById('cpCommitAllOn');
+  var btn = document.getElementById('cpCommitAllBtn');
+  if (chk) chk.checked = !!on;
+  if (btn) btn.style.display = on ? '' : 'none';
 }
 
 /* 입고 대기 전체 삭제 — 한 번에 비움 (confirm 후) */
