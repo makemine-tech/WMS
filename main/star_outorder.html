@@ -1143,6 +1143,9 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
  *   베이지 #F1ECE2  (텍스트 · 보더 라이트) */
 .cp-pallet{background:linear-gradient(180deg,#225f1f 0%,#1a4a18 100%);border:2.5px solid #5BA32A;border-radius:14px;padding:1.1rem 1.1rem 1rem;display:flex;flex-direction:column;gap:.75rem;min-height:360px;box-shadow:0 4px 18px rgba(31,95,31,.35)}
 .cp-pallet .pl-hdr{font-size:1.05rem;color:#F1ECE2;font-family:var(--mo);letter-spacing:.06em;font-weight:900;text-align:center;padding-bottom:.55rem;border-bottom:1px dashed rgba(241,236,226,.35)}
+.cp-pallet .pl-target{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem;letter-spacing:0;white-space:nowrap}
+.cp-pallet .pl-target input{width:3.4rem;padding:.15rem .3rem;background:#F1ECE2;color:#1f3a1a;border:2px solid #F0C44A;border-radius:6px;font-family:var(--mo);font-weight:900;font-size:1rem;text-align:center}
+.cp-pallet .pl-target input:placeholder-shown{border-style:dashed;background:rgba(241,236,226,.15);color:#F1ECE2}
 .cp-pallet .pl-empty{padding:2.3rem .5rem;text-align:center;color:rgba(241,236,226,.7);font-size:1.15rem;line-height:1.55}
 .cp-pallet .pl-list{display:flex;flex-direction:column;gap:.7rem;flex:1;overflow:auto;max-height:540px}
 /* 한 행 — 올리브 톤 반투명, 노랑 보더 (.cp-pallet 자손에만 적용 — 라벨 .prod-label .pl-row 와 격리) */
@@ -1523,7 +1526,11 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <div class="cp-gutter" data-left="1" title="드래그로 중·우 폭 조절 · 더블클릭 시 기본 비율로 초기화"></div>
         <!-- 우: 파렛트 카드 (입고일+센터별 독립) -->
         <div class="cp-pallet">
-          <div class="pl-hdr">🚛 현재 파렛트 — 입고일+센터별</div>
+          <div class="pl-hdr">🚛 현재 파렛트 — 입고일+센터별
+            <label class="pl-target" title="1파렛트에 보통 몇 박스 싣는지 (진행 평균). 예) 12 → 11번째 박스를 작업할 때 '다음 박스가 12번째, 마지막 박스입니다' 음성 안내. 비우면 안내 안 함">
+              / 1파렛트 기준 <input type="number" id="cpPalTarget" min="2" step="1" inputmode="numeric" placeholder="__" onchange="cpSetPalletTarget(this.value)" onclick="this.select()"> 박스
+            </label>
+          </div>
           <div class="pl-list" id="cpPalletList">
             <div class="pl-empty">출고 스캔이 들어오면 입고일+센터별 파렛트가 자동 생성됩니다</div>
           </div>
@@ -3223,6 +3230,7 @@ function cpSavePending(){ return !!_cpSaveTimer || _cpSaveInFlight > 0; }
 function cpApplyStagingLocal(sg){
   if (!workSession) return;
   workSession.staging = sg;
+  cpLocalActTs = Date.now();   /* 이 기기 스캔 — 마지막 박스 안내는 스캔한 기기에서만 */
   cpScheduleSessionSave();
 }
 function cpScheduleSessionSave(){
@@ -7174,6 +7182,7 @@ function cpConfirmShip(){
   }).then(function(){
     workSession.scans = combined;
     workSession.pending = newPending;
+    cpLocalActTs = Date.now();   /* 새 출고박스 — 마지막 박스 안내 대상 */
     cpCloseShipPopup(true);
     cpRefreshScanUI();
     var totalQty = newScans.reduce(function(s,x){return s+x.qty;},0);
@@ -7236,9 +7245,94 @@ function cpListPalletGroups(){
                 .sort(function(a,b){ return b.latestTs - a.latestTs; });
 }
 
+/* ═══════════ 1파렛트 기준 박스수 → 마지막 박스 직전 음성 안내 ═══════════
+ * 헤더 [1파렛트 기준 __ 박스] 에 평균 박스수(N)를 적어 두면,
+ * 입고일+센터별 현재 파렛트에 N-1 번째 박스가 들어온 순간 "다음 박스가 N번째, 마지막 박스입니다" 를 강하게 안내.
+ * 박스수 = 완료 기록(현재 파렛트 번호)의 출고박스 + 입고대기의 박스 스캔(원박스) — 같은 박스는 한 번만.
+ * 세션(palletBoxTarget)에 저장해 다른 기기와 공유. 안내는 이 기기에서 방금 스캔/출고처리했을 때만(여러 PC 동시 발화 방지). */
+var cpBoxCueLast = {};          /* 그룹|파렛트번호 → 지난 렌더의 박스수 (증가 순간만 잡는다) */
+var cpLocalActTs = 0;           /* 이 기기에서 마지막으로 스캔·출고처리한 시각 */
+var CP_BOXCUE_VARIANT = 'A';    /* 안내 멘트 종류 — 사장님 선택 */
+function cpSetPalletTarget(v){
+  var n = parseInt(v, 10);
+  if (!(n >= 2)) n = 0;
+  if (workSession) workSession.palletBoxTarget = n;
+  if (workSessionRef) { try { workSessionRef.update({ palletBoxTarget: n, updatedAt: Date.now() }); } catch(e){} }
+  var inp = document.getElementById('cpPalTarget'); if (inp) inp.value = n || '';
+  cpFlash('ok', n ? '🚛 1파렛트 기준 <b>'+n+'박스</b> — '+(n-1)+'번째 박스 때 "다음 박스가 '+n+'번째, 마지막" 안내' : '🚛 1파렛트 기준 박스수 해제 — 안내 안 함');
+  var si = document.getElementById('cpScanInp'); if (si) si.focus();
+}
+/* 1~99 고유어 수 (열두, 스무, 서른다섯…) — 박스 셀 때 자연스럽게 */
+function cpKoNative(n){
+  var ones = ['','한','두','세','네','다섯','여섯','일곱','여덟','아홉'];
+  var tens = ['','열','스물','서른','마흔','쉰','예순','일흔','여든','아흔'];
+  if (!(n >= 1 && n <= 99)) return String(n);
+  var t = Math.floor(n / 10), o = n % 10;
+  if (t === 2 && o === 0) return '스무';
+  return tens[t] + ones[o];
+}
+/* 강한 안내 — 경고음 뒤에 앞 음성(센터명 등)을 끊지 않고 이어서 말한다 */
+function cpBoxCueSay(n, label){
+  if (!cpTtsEnabled || typeof window.speechSynthesis === 'undefined') return;
+  var nn = cpKoNative(n);
+  var V = {
+    A: { beep:1, rate:1.0,  rep:1, text:'다음 박스가 '+nn+' 번째, 마지막 박스입니다' },
+    B: { beep:2, rate:0.95, rep:2, text:'주의! 다음 박스가 마지막, '+nn+' 번째 박스입니다' },
+    C: { beep:3, rate:0.9,  rep:1, text:'마지막 박스! 다음이 '+nn+' 번째! 파렛트 마감 준비하세요' },
+    D: { beep:2, rate:1.05, rep:2, text:'마감 박스! '+nn+' 박스째!' }
+  }[CP_BOXCUE_VARIANT] || null;
+  if (!V) return;
+  for (var b = 0; b < V.beep; b++) setTimeout(cpBeep, b * 160);
+  setTimeout(function(){
+    try {
+      for (var r = 0; r < V.rep; r++) {
+        var u = new SpeechSynthesisUtterance(V.text);
+        u.lang = 'ko-KR'; u.rate = V.rate; u.pitch = 1.1; u.volume = 1.0;
+        window.speechSynthesis.speak(u);   /* cancel 없이 줄 세움 — 방금 말한 센터명 뒤에 이어서 */
+      }
+    } catch(e){}
+  }, V.beep * 160 + 60);
+  cpFlash('warn','🚛 <b>'+escH(label)+'</b> — 다음 박스가 <b>'+n+'번째, 마지막 박스</b>입니다 (1파렛트 기준 '+n+'박스)');
+}
+function cpBoxCueCheck(){
+  if (!workSession) return;
+  var target = +workSession.palletBoxTarget || 0;
+  var inp = document.getElementById('cpPalTarget');
+  if (inp && document.activeElement !== inp) inp.value = target || '';
+  var rows = workSession.rows || [];
+  var cnt = {}, lbl = {};
+  function add(eta, ctr, no, k){
+    if (!k) return;
+    var gk = cpPalletKey(eta, ctr) + '#' + no;
+    (cnt[gk] || (cnt[gk] = {}))[k] = true;
+    lbl[gk] = cpPalletShort(eta, ctr) + ' ' + no + '번';
+  }
+  (workSession.scans || []).forEach(function(s){
+    if (s.undone) return;
+    var r = rows[s.srcIdx] || {};
+    var eta = s.palletEta || r.eta || '', ctr = s.palletCenter || r.center || '';
+    var no = s.palletNo || 1;
+    if (no !== cpCurPallet(eta, ctr)) return;
+    add(eta, ctr, no, s.shipBoxNo || s.srcBoxBarcode);
+  });
+  (workSession.staging || []).forEach(function(t){
+    if (t.unmatched || t.type !== 'box' || !t.srcBoxBarcode) return;
+    var eta = t.palletEta || '', ctr = t.palletCenter || '';
+    add(eta, ctr, cpCurPallet(eta, ctr), t.srcBoxBarcode);
+  });
+  var fresh = (Date.now() - cpLocalActTs) < 4000;
+  Object.keys(cnt).forEach(function(gk){
+    var n = Object.keys(cnt[gk]).length;
+    var prev = cpBoxCueLast[gk];
+    cpBoxCueLast[gk] = n;
+    if (target >= 2 && fresh && prev != null && prev < n && n === target - 1) cpBoxCueSay(target, lbl[gk]);
+  });
+}
+
 function cpRefreshPallet(){
   var list = document.getElementById('cpPalletList');
   if (!list || !workSession) return;
+  cpBoxCueCheck();
   var groups = cpListPalletGroups();
   if (!groups.length) {
     list.innerHTML = '<div class="pl-empty">출고 스캔이 들어오면<br>입고일+센터별 파렛트가<br>자동 생성됩니다</div>';
