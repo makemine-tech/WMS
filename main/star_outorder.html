@@ -7294,6 +7294,19 @@ function cpBoxCueSay(n, label){
   }, V.beep * 160 + 60);
   cpFlash('warn','🚛 <b>'+escH(label)+'</b> — 다음 박스가 <b>'+n+'번째, 마지막 박스</b>입니다 (1파렛트 기준 '+n+'박스)');
 }
+/* N번째(마지막) 박스 — 경고음 1번 + "마지막 박스입니다" (A안과 같은 말투, 앞 음성 뒤에 이어서) */
+function cpBoxCueSayLast(n, label){
+  if (!cpTtsEnabled || typeof window.speechSynthesis === 'undefined') return;
+  cpBeep();
+  setTimeout(function(){
+    try {
+      var u = new SpeechSynthesisUtterance('마지막 박스입니다');
+      u.lang = 'ko-KR'; u.rate = 1.0; u.pitch = 1.1; u.volume = 1.0;
+      window.speechSynthesis.speak(u);
+    } catch(e){}
+  }, 220);
+  cpFlash('warn','🚛 <b>'+escH(label)+'</b> — <b>마지막 박스</b>입니다 ('+n+'번째 · 1파렛트 기준 '+n+'박스) — 다 실으면 [▶ 마감]');
+}
 function cpBoxCueCheck(){
   if (!workSession) return;
   var target = +workSession.palletBoxTarget || 0;
@@ -7326,6 +7339,8 @@ function cpBoxCueCheck(){
     var prev = cpBoxCueLast[gk];
     cpBoxCueLast[gk] = n;
     if (target >= 2 && fresh && prev != null && prev < n && n === target - 1) cpBoxCueSay(target, lbl[gk]);
+    /* 실제 마지막(N번째) 박스가 들어온 순간 — "마지막 박스입니다" */
+    else if (target >= 2 && fresh && prev != null && prev < n && n === target) cpBoxCueSayLast(target, lbl[gk]);
   });
 }
 
