@@ -3608,6 +3608,7 @@ function cpShowResumeBanner(sessions, mineId, targetId){
         (s.poFileName ? ' <span style="color:var(--tx);font-size:.78rem">📄 '+escH(s.poFileName)+'</span>' : '') +
         (isCur ? ' <span style="color:#8cc4ff;font-size:.7rem">(지금 작업 중)</span>' : (isMine ? ' <span style="color:var(--g);font-size:.7rem">(이 PC 에서 시작)</span>' : '')) +
         '<span class="rb-meta">시작 '+escH(fmtDt(s.createdAt))+' · 스캔 '+scanCnt+'건 · 출고박스 '+sBoxes+'개 · 처리대기 '+penCnt+'건 · ID '+escH(s.sessionId)+'</span>'+
+        cpSessProgressHtml(s) +
       '</div>'+
       btns +
     '</div>';
@@ -3621,6 +3622,34 @@ function cpShowResumeBanner(sessions, mineId, targetId){
     '</div>' +
     rowsHtml +
     '<div class="rb-hint">' + (multi ? '여러 PC 에서 시작된 세션이 있을 수 있습니다. ' : '') + '※ "버리기" 누르면 abandoned 처리되어 다시 이어작업 못 합니다.</div>';
+}
+
+/* 작업파일 진행률 막대 — 센터 요약 줄과 같은 기준
+ *   출고대상 = 행별 출고가능(canShip, 없으면 발주수량) 합
+ *   완료     = 완료 스캔 + 처리대기 (처리대기는 박스만 묶으면 끝이라 완료로 셈)
+ *   대기     = 입고대기(매칭분) — 막대에 옅게 덧붙여 표시 */
+function cpSessProgressHtml(s){
+  var need = 0, done = 0, wait = 0;
+  (s.rows || []).forEach(function(r){ need += (+r.canShip || +r.qty || 0); });
+  (s.scans || []).forEach(function(x){ if (!x.undone) done += (+x.qty || 0); });
+  (s.pending || []).forEach(function(p){ if (p.srcIdx != null && p.srcIdx >= 0) done += (+p.qty || 0); });
+  (s.staging || []).forEach(function(t){ if (!t.unmatched && t.srcIdx != null && t.srcIdx >= 0) wait += (+t.qty || 0); });
+  if (need <= 0) return '';
+  var pDone = Math.min(100, done / need * 100);
+  var pWait = Math.min(100 - pDone, wait / need * 100);
+  var pct = Math.floor(pDone);
+  if (pct === 100 && done < need) pct = 99;   /* 반올림으로 덜 끝났는데 100% 로 보이지 않게 */
+  var full = done >= need;
+  var col = full ? 'var(--g)' : '#8cc4ff';
+  return '<div style="display:flex;align-items:center;gap:.5rem;margin-top:.35rem">'+
+      '<div style="flex:1;height:10px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden;display:flex" '+
+        'title="완료 '+done+' + 입고대기 '+wait+' / 출고대상 '+need+'">'+
+        '<div style="width:'+pDone.toFixed(1)+'%;background:'+col+'"></div>'+
+        (pWait > 0 ? '<div style="width:'+pWait.toFixed(1)+'%;background:'+col+';opacity:.35"></div>' : '')+
+      '</div>'+
+      '<span style="font-size:.95rem;font-weight:900;color:'+col+';min-width:3.2em;text-align:right">'+pct+'%</span>'+
+      '<span style="font-size:.7rem;color:var(--mu);font-family:var(--mo);white-space:nowrap">'+done+(wait ? '<span style="opacity:.7">+'+wait+'대기</span>' : '')+' / '+need+'</span>'+
+    '</div>';
 }
 
 function cpHideResumeBanner(){
