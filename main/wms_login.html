@@ -18,6 +18,10 @@
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
+/* 그룹 선택 — ⠿ 끌어서 순서 바꾸기 */
+.grp-handle{cursor:grab;touch-action:none;user-select:none;font-size:20px;line-height:1;color:#64748B;padding:6px 2px;flex-shrink:0;}
+.grp-handle:active{cursor:grabbing;color:#93C5FD;}
+.grp-row.dragging{opacity:.55;outline:2px dashed #60A5FA;outline-offset:2px;border-radius:10px;}
 body{background:#0F172A;font-family:system-ui,sans-serif;color:#E2E8F0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
 .card{background:#1E293B;border-radius:20px;padding:32px 28px;width:100%;max-width:420px;box-shadow:0 8px 48px rgba(0,0,0,.5);}
 .inp{width:100%;background:#0F172A;border:1px solid #334155;border-radius:8px;padding:10px 12px;color:#E2E8F0;font-size:14px;outline:none;font-family:inherit;}
@@ -210,17 +214,31 @@ function showLogin(errMsg){
 }
 
 /* ── 슈퍼관리자: 그룹 목록 ── */
+/* 그룹 순서 — groupOrder (gid 배열, 슈퍼관리자 공유). 처음 그릴 때 한 번 읽어 오고, ⠿ 끌기로 바꾸면 저장 */
+var _groupOrder=null;
+function sortGroupEntries(groups){
+  var ord=_groupOrder||[];
+  return Object.entries(groups).map(function(e,i){return {e:e,i:i,o:ord.indexOf(e[0])};})
+    .sort(function(a,b){ if(a.o>=0&&b.o>=0) return a.o-b.o; if(a.o>=0!==b.o>=0) return a.o>=0?-1:1; return a.i-b.i; })
+    .map(function(x){return x.e;});
+}
 function showAdminView(user, groups){
   _currentUser=user;
   _currentGroups=groups||{};
+  if(_groupOrder===null){
+    _groupOrder=[];
+    db.ref('groupOrder').get().then(function(sn){ var v=sn.val(); if(Array.isArray(v)&&v.length){ _groupOrder=v; showAdminView(_currentUser,_currentGroups); } }).catch(function(){});
+  }
   var groupHtml='';
   if(!groups||Object.keys(groups).length===0){
     groupHtml='<div style="text-align:center;color:#64748B;padding:20px;font-size:13px;">등록된 그룹이 없습니다<br><span style="font-size:11px;">아래 버튼으로 새 그룹을 만드세요</span></div>';
   }else{
-    Object.entries(groups).forEach(function(entry){
+    var ents=sortGroupEntries(groups), many=ents.length>1;
+    ents.forEach(function(entry){
       var gid=entry[0];
       var whCount=Object.keys(entry[1]).filter(function(k){return k!=='_init';}).length;
-      groupHtml+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+      groupHtml+='<div class="grp-row" data-gid="'+gid+'" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+      +(many?'<span class="grp-handle" title="끌어서 그룹 순서 바꾸기" onpointerdown="grpDragStart(event,\x27'+gid+'\x27)">⠿</span>':'')
       +'<div onclick="enterGroup(\''+gid+'\')" style="flex:1;display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid #334155;border-radius:10px;cursor:pointer;" onmouseover="this.style.background=\'rgba(59,130,246,.1)\'" onmouseout="this.style.background=\'rgba(255,255,255,.04)\'">'
       +'<span style="font-size:20px;">🏢</span>'
       +'<div style="flex:1;"><div style="font-weight:700;font-size:15px;">'+gid+'</div>'
@@ -242,7 +260,35 @@ function showAdminView(user, groups){
    +'<div style="font-size:14px;font-weight:700;">그룹 선택</div>'
    +'<button onclick="showCreateGroupModal()" style="background:#2563EB;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;">+ 새 그룹</button>'
    +'</div>'
-   +groupHtml+'</div>');
+   +'<div id="grpList">'+groupHtml+'</div>'
+   +(Object.keys(groups||{}).length>1?'<div style="font-size:11px;color:#475569;margin-top:6px;">⠿ 를 끌어서 그룹 순서를 바꿀 수 있습니다</div>':'')
+   +'</div>');
+}
+
+/* 그룹 줄 끌기 — 마우스·손가락 공통(pointer). 끄는 동안 줄을 직접 옮기고, 손을 떼면 그 순서를 groupOrder 에 저장 */
+function grpDragStart(e,gid){
+  e.preventDefault();
+  var list=document.getElementById('grpList'); if(!list) return;
+  var row=list.querySelector('.grp-row[data-gid="'+gid+'"]'); if(!row) return;
+  var moved=false;
+  row.classList.add('dragging');
+  function onMove(ev){
+    var el=document.elementFromPoint(ev.clientX,ev.clientY);
+    var over=el&&el.closest?el.closest('.grp-row'):null;
+    if(!over||over===row||over.parentNode!==list) return;
+    var rows=Array.prototype.slice.call(list.children);
+    if(rows.indexOf(over)>rows.indexOf(row)) list.insertBefore(row,over.nextSibling); else list.insertBefore(row,over);
+    moved=true;
+  }
+  function onUp(){
+    window.removeEventListener('pointermove',onMove);window.removeEventListener('pointerup',onUp);window.removeEventListener('pointercancel',onUp);
+    row.classList.remove('dragging');
+    if(!moved) return;
+    var ord=Array.prototype.map.call(list.querySelectorAll('.grp-row'),function(r){return r.getAttribute('data-gid');});
+    _groupOrder=ord;
+    db.ref('groupOrder').set(ord).catch(function(err){alert('그룹 순서 저장 실패: '+err.message);});
+  }
+  window.addEventListener('pointermove',onMove);window.addEventListener('pointerup',onUp);window.addEventListener('pointercancel',onUp);
 }
 
 /* ── 새 그룹 생성 모달 ── */
