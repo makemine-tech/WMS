@@ -9445,6 +9445,9 @@ function renderList(){
       '<td style="font-size:.72rem;color:var(--mu)">'+fmtDt(o.createdAt||0)+'<br>'+escH(o.createdBy||'')+'</td>'+
       '<td style="white-space:nowrap;display:flex;gap:.3rem;flex-wrap:wrap">'+
         '<button class="btn btn-s" style="padding:.32rem .65rem;font-size:.72rem" onclick="loadOrder(\''+escH(o.orderId)+'\')">📂 열기</button>'+
+        /* 쿠팡 작업 지시서 — 작업이 끝나 세션이 닫혀도 적재리스트를 다시 뽑을 수 있게 (완료된 세션 기록으로) */
+        ((o.coupang && o.coupang.sessionId) ? '<button class="btn btn-y" style="padding:.32rem .65rem;font-size:.72rem" onclick="cpReprintShipListForOrder(\''+escH(o.orderId)+'\')" title="이 작업의 쿠팡 출고 적재리스트를 다시 인쇄 (작업 종료 후에도 가능)">📃 적재리스트 인쇄</button>' : '') +
+        ((o.items||[]).length ? '<button class="btn btn-g" style="padding:.32rem .65rem;font-size:.72rem" onclick="downloadOrderExcel(\''+escH(o.orderId)+'\')" title="업체 제출용 출고리스트 엑셀 (박스별 상세 + 상품별 합계)">📊 출고리스트 엑셀</button>' : '') +
         ((o.status==='executed' && isAdmin) ? '<button class="btn" style="padding:.32rem .65rem;font-size:.72rem;background:#7c8399;color:#0f1117" onclick="loadAndCancelExec(\''+escH(o.orderId)+'\')" title="이 지시서 실행 취소 — 재고 원복">🔁 실행취소</button>' : '') +
         ((o.status==='cancelled' && isAdmin) ? '<button class="btn" style="padding:.32rem .65rem;font-size:.72rem;background:var(--g);color:#0f1117" onclick="loadAndReExecute(\''+escH(o.orderId)+'\')" title="취소된 지시서를 다시 출고완료로 — 재고 재차감">✅ 출고완료</button>' : '') +
         (o.status==='executed' ? '' : '<button class="btn btn-r" style="padding:.32rem .65rem;font-size:.72rem" onclick="deleteOrder(\''+escH(o.orderId)+'\')">✕ 삭제</button>') +
@@ -9482,6 +9485,88 @@ function loadAndCancelExec(orderId){
   if (!Array.isArray(curOrder.items)) curOrder.items = [];
   curOrderSaved = true;
   cancelExecution();
+}
+
+/* ═══════════ 저장된 지시서 — 적재리스트 다시 인쇄 ═══════════
+ * 작업 종료(completed)된 쿠팡 세션은 coupangSessions/{sid} 에 그대로 남아 있다.
+ * 그 세션을 잠깐 작업 세션 자리에 끼워 기존 적재리스트 인쇄(cpPrintShipList)를 그대로 쓴다 —
+ * 인쇄 내용은 그 자리에서 다 만들어지므로(화면에 그린 뒤 인쇄) 곧바로 원래 세션으로 되돌린다. */
+function cpReprintShipListForOrder(orderId){
+  var o = allOrders.find(function(x){ return x.orderId === orderId; });
+  var sid = o && o.coupang && o.coupang.sessionId;
+  if (!sid) { setMsg('m0','er','❌ 이 지시서에는 쿠팡 작업 기록이 없어 적재리스트를 만들 수 없습니다'); return; }
+  if (!groupId || typeof firebase === 'undefined') { setMsg('m0','er','❌ Firebase 연결 안 됨'); return; }
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sid);
+  setMsg('m0','inf','⏳ 적재리스트 불러오는 중… ' + escH(orderId));
+  ref.once('value').then(function(snap){
+    var sess = snap.val();
+    if (!sess || !(sess.scans || []).length) { setMsg('m0','er','❌ 작업 기록(세션 ' + escH(sid) + ')을 찾지 못했습니다'); return; }
+    sess.sessionId = sess.sessionId || sid;
+    var mode = confirm('적재리스트 인쇄 방식\n\n[확인] 1장인쇄 — A4 세로, 파렛트마다 2부\n[취소] 2장인쇄(좌우) — A4 가로') ? '1up' : '2up';
+    var keepS = workSession, keepR = workSessionRef;
+    workSession = sess; workSessionRef = ref;   /* 총 파렛트 수 입력값은 그 작업 기록에 저장 */
+    try { cpPrintShipList(mode); }
+    finally { workSession = keepS; workSessionRef = keepR; }
+    setMsg('m0','ok','📃 적재리스트 인쇄 — ' + escH(o.customer || '') + ' · ' + escH(orderId));
+  }).catch(function(err){ setMsg('m0','er','❌ 불러오기 실패: ' + escH(err && err.message || err)); });
+}
+
+/* ═══════════ 저장된 지시서 — 출고리스트 엑셀 (업체 제출용) ═══════════
+ * 시트1 「출고리스트」: 박스(출고박스)별 상세 — 파렛트·박스·SKU·바코드·상품명·수량
+ * 시트2 「상품별 합계」: 바코드별 수량 합계
+ * 숫자는 숫자 셀로 넣어 업체가 합계·필터를 바로 쓸 수 있게. */
+function downloadOrderExcel(orderId){
+  var o = allOrders.find(function(x){ return x.orderId === orderId; });
+  if (!o) { setMsg('m0','er','❌ 지시서를 찾을 수 없습니다'); return; }
+  if (typeof XLSX === 'undefined') { setMsg('m0','er','❌ 엑셀 라이브러리 로딩 실패 — 새로고침 후 다시 시도'); return; }
+  var items = (o.items || []).slice();
+  if (!items.length) { setMsg('m0','warn','⚠️ 품목이 없습니다'); return; }
+  var num = function(v){ var n = +v; return isNaN(n) ? 0 : n; };
+  /* 정렬: 센터 → 입고예정일 → 파렛트 → 박스 */
+  items.sort(function(a, b){
+    var ca = a.palletCenter || a.center || '', cb = b.palletCenter || b.center || '';
+    if (ca !== cb) return ca.localeCompare(cb, 'ko', {numeric:true});
+    var ea = a.palletEta || a.eta || '', eb = b.palletEta || b.eta || '';
+    if (ea !== eb) return ea < eb ? -1 : 1;
+    var pa = num(a.palletNo || a.pallet), pb = num(b.palletNo || b.pallet);
+    if (pa !== pb) return pa - pb;
+    return String(a.shipBoxNo || a.box || '').localeCompare(String(b.shipBoxNo || b.box || ''), 'ko', {numeric:true});
+  });
+  var head = ['No','출고일','물류센터','입고예정일','파렛트','출고박스','원박스','SKU ID','바코드','출고바코드','상품명','품번','사이즈','색상','수량'];
+  var aoa = [head];
+  var total = 0;
+  items.forEach(function(it, i){
+    var q = num(it.qty); total += q;
+    aoa.push([
+      i + 1, o.outboundDate || '', it.palletCenter || it.center || '', it.palletEta || it.eta || '',
+      num(it.palletNo || it.pallet) || '', it.shipBoxNo || '', it.srcBoxBarcode || it.box || '',
+      it.skuId || '', it.barcode || '', it.altBarcode || it.barcode || '',
+      it.skuName || it.name || '', it.code || '', it.size || '', it.color || '', q
+    ]);
+  });
+  aoa.push(['합계','','','','','','','','','','','','','',total]);
+  var ws1 = XLSX.utils.aoa_to_sheet(aoa);
+  ws1['!cols'] = [4,11,10,11,6,14,16,12,16,16,34,12,8,8,7].map(function(w){ return {wch:w}; });
+  /* 상품별 합계 */
+  var byBc = {}, order = [];
+  items.forEach(function(it){
+    var k = (it.barcode || '') + '|' + (it.palletCenter || it.center || '');
+    if (!byBc[k]) { byBc[k] = { center: it.palletCenter || it.center || '', skuId: it.skuId || '', barcode: it.barcode || '', alt: it.altBarcode || it.barcode || '', name: it.skuName || it.name || '', code: it.code || '', size: it.size || '', qty: 0, boxes: {} }; order.push(k); }
+    byBc[k].qty += num(it.qty);
+    var bx = it.shipBoxNo || it.box; if (bx) byBc[k].boxes[bx] = 1;
+  });
+  var aoa2 = [['물류센터','SKU ID','바코드','출고바코드','상품명','품번','사이즈','박스수','수량']];
+  order.forEach(function(k){ var r = byBc[k]; aoa2.push([r.center, r.skuId, r.barcode, r.alt, r.name, r.code, r.size, Object.keys(r.boxes).length, r.qty]); });
+  aoa2.push(['합계','','','','','','','',total]);
+  var ws2 = XLSX.utils.aoa_to_sheet(aoa2);
+  ws2['!cols'] = [10,12,16,16,34,12,8,7,8].map(function(w){ return {wch:w}; });
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, '출고리스트');
+  XLSX.utils.book_append_sheet(wb, ws2, '상품별 합계');
+  var safe = function(s){ return String(s || '').replace(/[\\\/:*?"<>|]/g, '_').trim(); };
+  var fname = safe(o.customer || '출고') + '_출고리스트_' + safe(o.outboundDate || '') + '_' + safe(orderId) + '.xlsx';
+  XLSX.writeFile(wb, fname);
+  setMsg('m0','ok','📊 출고리스트 엑셀 저장 — ' + escH(fname) + ' (' + items.length + '줄 · ' + total + '개)');
 }
 
 /* ─────────────── 초기화 ─────────────── */
