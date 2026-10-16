@@ -5884,6 +5884,24 @@ function cpSpeak(text, rate){
     u.pitch = 1.0;
     u.volume = 1.0;
     window.speechSynthesis.speak(u);
+    /* 마지막 박스 안내가 아직 다 안 나왔으면 끊긴 채로 두지 않고 이 말 뒤에 다시 이어서 말한다
+       (박스 찍고 바로 [전체출고] → "완료" 가 안내를 끊어 먹던 문제) */
+    if (_cpCue && Date.now() - _cpCue.ts < 10000) cpSpeakCue(_cpCue.text, _cpCue.rate, true);
+  } catch(e){}
+}
+/* 중요 안내(마지막 박스) — 앞 말을 끊지 않고 줄 세움. 다 말할 때까지 _cpCue 로 붙잡아 두어
+   중간에 다른 cpSpeak 가 cancel 해도 다시 이어 말한다 */
+var _cpCue = null;
+function cpSpeakCue(text, rate, again){
+  if (!cpTtsEnabled || typeof window.speechSynthesis === 'undefined') return;
+  try {
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR'; u.rate = rate || 1.0; u.pitch = 1.1; u.volume = 1.0;
+    var cue = again && _cpCue ? _cpCue : { text:text, rate:rate, ts:Date.now() };
+    cue.u = u;
+    _cpCue = cue;
+    u.onend = function(){ if (_cpCue && _cpCue.u === u) _cpCue = null; };   /* 끝까지 말했을 때만 놓아줌 (cancel 로 끊긴 건 u 가 이미 바뀜) */
+    window.speechSynthesis.speak(u);
   } catch(e){}
 }
 /* 수량 카운트 음성 — 입고 시스템과 같은 방식으로 일·이·삼… (10 마다 반복).
@@ -7327,7 +7345,6 @@ function cpKoNative(n){
 }
 /* 강한 안내 — 경고음 뒤에 앞 음성(센터명 등)을 끊지 않고 이어서 말한다 */
 function cpBoxCueSay(n, label){
-  if (!cpTtsEnabled || typeof window.speechSynthesis === 'undefined') return;
   var nn = cpKoNative(n);
   var V = {
     A: { beep:1, rate:1.0,  rep:1, text:'다음 박스가 '+nn+' 번째, 마지막 박스입니다' },
@@ -7336,30 +7353,21 @@ function cpBoxCueSay(n, label){
     D: { beep:2, rate:1.05, rep:2, text:'마감 박스! '+nn+' 박스째!' }
   }[CP_BOXCUE_VARIANT] || null;
   if (!V) return;
-  for (var b = 0; b < V.beep; b++) setTimeout(cpBeep, b * 160);
-  setTimeout(function(){
-    try {
-      for (var r = 0; r < V.rep; r++) {
-        var u = new SpeechSynthesisUtterance(V.text);
-        u.lang = 'ko-KR'; u.rate = V.rate; u.pitch = 1.1; u.volume = 1.0;
-        window.speechSynthesis.speak(u);   /* cancel 없이 줄 세움 — 방금 말한 센터명 뒤에 이어서 */
-      }
-    } catch(e){}
-  }, V.beep * 160 + 60);
-  cpFlash('warn','🚛 <b>'+escH(label)+'</b> — 다음 박스가 <b>'+n+'번째, 마지막 박스</b>입니다 (1파렛트 기준 '+n+'박스)');
+  cpBoxCueFire(V.beep, V.rep > 1 ? V.text + '. ' + V.text : V.text, V.rate,
+    '🚛 <b>'+escH(label)+'</b> — 다음 박스가 <b>'+n+'번째, 마지막 박스</b>입니다 (1파렛트 기준 '+n+'박스)');
 }
-/* N번째(마지막) 박스 — 경고음 1번 + "마지막 박스입니다" (A안과 같은 말투, 앞 음성 뒤에 이어서) */
+/* N번째(마지막) 박스 — 경고음 1번 + "마지막 박스입니다" */
 function cpBoxCueSayLast(n, label){
-  if (!cpTtsEnabled || typeof window.speechSynthesis === 'undefined') return;
-  cpBeep();
-  setTimeout(function(){
-    try {
-      var u = new SpeechSynthesisUtterance('마지막 박스입니다');
-      u.lang = 'ko-KR'; u.rate = 1.0; u.pitch = 1.1; u.volume = 1.0;
-      window.speechSynthesis.speak(u);
-    } catch(e){}
-  }, 220);
-  cpFlash('warn','🚛 <b>'+escH(label)+'</b> — <b>마지막 박스</b>입니다 ('+n+'번째 · 1파렛트 기준 '+n+'박스) — 다 실으면 [▶ 마감]');
+  cpBoxCueFire(1, '마지막 박스입니다', 1.0,
+    '🚛 <b>'+escH(label)+'</b> — <b>마지막 박스</b>입니다 ('+n+'번째 · 1파렛트 기준 '+n+'박스) — 다 실으면 [▶ 마감]');
+}
+/* 경고음 → (조금 뒤) 음성 + 화면 안내.
+ * 음성·화면 둘 다 살짝 늦춰서, 같은 순간 나오는 "완료" 음성·「입고 완료」 문구에 덮이지 않고 그 뒤에 나온다.
+ * 음성은 cpSpeakCue — 도중에 다른 음성이 끊어도 다시 이어 말한다. 화면 안내는 음성을 꺼 둬도 나온다. */
+function cpBoxCueFire(beeps, text, rate, flashHtml){
+  for (var b = 0; b < beeps; b++) setTimeout(cpBeep, b * 160);
+  setTimeout(function(){ cpSpeakCue(text, rate); }, beeps * 160 + 60);
+  setTimeout(function(){ cpFlash('warn', flashHtml); }, 350);
 }
 function cpBoxCueCheck(){
   if (!workSession) return;
