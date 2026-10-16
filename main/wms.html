@@ -191,7 +191,9 @@ function mkCell(tp,dr,dc){return{type:tp,divR:dr,divC:dc,slots:mkSlots(dr,dc)};}
 function mkWH(name,rows,cols){var cells={};for(var r=0;r<rows;r++)for(var c=0;c<cols;c++)cells[r+'-'+c]={type:null,divR:1,divC:1,slots:{'0-0':null}};return{id:uid(),name:name,rows:rows,cols:cols,cells:cells,inQ:[],history:[],undoStack:[],pColors:{},sheetsUrl:'',pendOut:[],txLog:[]};}
 function calcSt(wh){var tot=0,used=0;Object.values(wh.cells||{}).forEach(function(c){if(!c)return;if(c.type==='rack'||c.type==='shelf'){tot+=((c.divR||1)*(c.divC||1));used+=Object.values(c.slots||{}).filter(Boolean).length;}});return{tot:tot,used:used,free:tot-used};}
 function getPG(wh,cells){var src=cells||wh.cells||{},m={};Object.values(src).forEach(function(c){if(!c)return;Object.values(c.slots||{}).forEach(function(s){if(!s)return;var clr=(wh.pColors&&wh.pColors[s.name])||'#94A3B8';if(!m[s.name])m[s.name]={name:s.name,cnt:0,totalQty:0,clr:clr,exps:{}};m[s.name].cnt++;m[s.name].totalQty+=s.qty||0;var ek=s.exp||'';if(!m[s.name].exps[ek])m[s.name].exps[ek]={exp:ek,cnt:0,totalQty:0};m[s.name].exps[ek].cnt++;m[s.name].exps[ek].totalQty+=s.qty||0;});});return Object.values(m).map(function(p){return Object.assign({},p,{exps:Object.values(p.exps).sort(function(a,b){if(!a.exp)return 1;if(!b.exp)return -1;return a.exp.localeCompare(b.exp);})});});}
-function pickClr(wh,name){if(wh.pColors[name])return wh.pColors[name];var used=new Set(Object.values(wh.pColors));return PAL.find(function(c){return !used.has(c);})||PAL[0];}
+/* 그룹 통일 색(업체등록·상품연결 화면에서 지정, vendorConfig/{gid}/colors) — 있으면 창고 색보다 먼저 쓴다 */
+var _grpClr={};
+function pickClr(wh,name){if(_grpClr[name])return _grpClr[name];if(wh.pColors[name])return wh.pColors[name];var used=new Set(Object.values(wh.pColors));return PAL.find(function(c){return !used.has(c);})||PAL[0];}
 function setClrMap(existing,key,val){var n=Object.assign({},existing);n[key]=val;return n;}
 function qC(v){var s=String(v==null?'':v);return s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\n')>=0?'"'+s.replace(/"/g,'""')+'"':s;}
 function rowC(arr){return arr.map(qC).join(',');}
@@ -707,6 +709,19 @@ function UnitPop(p){
 function WHView(p){
   var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack,onLogout=p.onLogout,isAdmin=p.isAdmin,fbUser=p.fbUser;
   var pendOut=wh.pendOut||[];
+  /* 그룹 통일 색 불러오기 — 이 창고 색이 그룹 색과 다르면 그룹 색으로 맞춘다 (나중에 그룹에 들어온 창고도 같은 색) */
+  useEffect(function(){
+    var g=p.gid||localStorage.getItem('wms_adminGroupId')||'';
+    if(!g)return;
+    var alive=true;
+    fbDb.ref('vendorConfig/'+g+'/colors').get().then(function(snap){
+      if(!alive)return;
+      _grpClr=decKeys(snap.val()||{});
+      var diff=Object.keys(_grpClr).some(function(nm){return wh.pColors[nm]!==_grpClr[nm];});
+      if(diff)onUpdate(function(w){return Object.assign({},w,{pColors:Object.assign({},w.pColors,_grpClr)});});
+    }).catch(function(){});   /* 창고 단독 사용자는 그룹 설정을 못 읽음 — 창고 색 그대로 */
+    return function(){alive=false;};
+  },[p.gid,wh.id]);
 
 
   var v1=useState('ops'),tab=v1[0],setTab=v1[1];
@@ -827,7 +842,19 @@ function WHView(p){
   function withUndo(fn){onUpdate(function(w){try{var snap={cells:deep(w.cells),inQ:w.inQ.slice()};var nw=fn(Object.assign({},w,{cells:deep(w.cells)}));return Object.assign({},nw,{undoStack:(w.undoStack||[]).slice(-4).concat([snap])});}catch(e){console.warn('withUndo 실패',e);return w;}});}
   function doUndo(){onUpdate(function(w){if(!w.undoStack||!w.undoStack.length)return w;var stack=w.undoStack.slice(),prev=stack.pop();return Object.assign({},w,prev,{undoStack:stack});});}
   function doSave(){var MAX_HIST=15;onUpdate(function(w){var nh=w.history.concat([{id:uid(),label:dayLabel(),cells:deep(w.cells),stats:calcSt(w),prods:getPG(w,w.cells)}]);if(nh.length>MAX_HIST)nh=nh.slice(nh.length-MAX_HIST);return Object.assign({},w,{history:nh});});toastK.current++;setSaveFlash(true);setTimeout(function(){setSaveFlash(false);},2200);}
-  function chgClr(name,clr){onUpdate(function(w){return Object.assign({},w,{pColors:setClrMap(w.pColors,name,clr)});});setColorPick(null);}
+  function chgClr(name,clr){
+    onUpdate(function(w){return Object.assign({},w,{pColors:setClrMap(w.pColors,name,clr)});});setColorPick(null);
+    /* 그룹이 있으면 그룹 통일 색 + 그룹의 모든 창고에 같이 (업체등록·상품연결 화면과 같은 규칙).
+       그룹 설정 쓰기 권한(슈퍼관리자)이 없으면 이 창고에만 바뀜 */
+    var g=p.gid||localStorage.getItem('wms_adminGroupId')||'';
+    if(!g)return;
+    var ek=encKeys((function(){var o={};o[name]=1;return o;})());ek=Object.keys(ek)[0];
+    fbDb.ref('groups/'+g).get().then(function(gs){
+      var u={};u['vendorConfig/'+g+'/colors/'+ek]=clr;
+      Object.keys(gs.val()||{}).forEach(function(wid){if(wid!=='_init'&&wid!==wh.id)u['warehouses/'+wid+'/pColors/'+ek]=clr;});
+      return fbDb.ref().update(u).then(function(){_grpClr[name]=clr;});
+    }).catch(function(e){console.warn('그룹 색 저장 안 됨 — 이 창고에만 적용',e);});
+  }
   function toggleSel(key){if(didDrag.current)return;setSel(function(s){var n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});}
   function applySetup(){if(!sel.size)return;withUndo(function(w){sel.forEach(function(k){w.cells[k]=mkCell(sType,sDiv.r,sDiv.c);});return w;});setSel(new Set());}
   /* ★ 창고명 저장 */

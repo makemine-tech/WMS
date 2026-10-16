@@ -67,6 +67,22 @@ h1{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px;}
 .unlinked-banner{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;font-size:12px;color:#FCD34D;line-height:1.6;margin-bottom:12px;}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1E293B;border:1px solid #334155;border-radius:10px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;z-index:50;}
 .toast.show{opacity:1;}
+/* 유닛 컬러 칸 — 실선=그룹 통일 색, 점선=아직 통일 전(창고 색), ≠=창고마다 다름 */
+.swatch{width:30px;height:30px;flex-shrink:0;border-radius:7px;border:2px dashed #475569;background:transparent;cursor:pointer;position:relative;padding:0;align-self:center;}
+.swatch.set{border:2px solid #E2E8F0;}
+.swatch:hover{transform:scale(1.08);}
+.sw-diff{position:absolute;right:-7px;top:-8px;background:#F59E0B;color:#0F172A;font-size:11px;font-weight:900;border-radius:9px;padding:0 4px;line-height:15px;}
+.btn-unify{margin-left:auto;background:rgba(245,158,11,.15);color:#FBBF24;border:1px solid rgba(245,158,11,.4);border-radius:7px;padding:5px 10px;font-size:11px;font-weight:800;cursor:pointer;}
+.clr-pop{position:absolute;z-index:1000;background:#1E293B;border:1px solid #475569;border-radius:10px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+.clr-pop .cp-h{font-size:12px;font-weight:800;margin-bottom:6px;max-width:220px;}
+.clr-pop .cp-h span{display:block;font-size:10.5px;color:#94A3B8;font-weight:600;margin-top:2px;}
+.clr-pop .cp-now{font-size:10.5px;color:#94A3B8;margin-bottom:7px;display:flex;align-items:center;gap:3px;}
+.clr-pop .cp-now i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid #64748B;}
+.clr-pop .cp-now b{color:#FBBF24;margin-left:4px;}
+.clr-pop .cp-row{display:flex;gap:4px;margin-bottom:4px;}
+.clr-pop .cp-chip{width:24px;height:24px;border-radius:5px;border:1px solid rgba(255,255,255,.25);cursor:pointer;padding:0;}
+.clr-pop .cp-chip:hover{transform:scale(1.15);}
+.clr-pop .cp-chip.on{outline:2px solid #fff;outline-offset:1px;}
 .center{text-align:center;padding:60px 20px;color:#64748B;font-size:14px;}
 .spinner{width:24px;height:24px;border:2px solid #334155;border-top-color:#3B82F6;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 16px;}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -99,6 +115,18 @@ var _products=[];   /* 현재 재고 상품명 (창고 slots 합집합 — 상�
 var _vendors={};    /* vendorId -> {name,email,createdAt} */
 var _map={};        /* productKey -> {name, vendorId} */
 var _locs={};       /* 상품명 -> [{wid, whName, ck, qty, exp}] — 미연결 상품 위치·수량 표시용 */
+var _wids=[];       /* 그룹 창고 id 목록 — 색을 모든 창고에 같이 쓴다 */
+var _grpClr={};     /* 상품명 -> 그룹 통일 색 (vendorConfig/{gid}/colors) */
+var _whClr={};      /* 상품명 -> {색: 그 색을 쓰는 창고 수} — 창고마다 색이 다른지 보기용 */
+
+/* 유닛 컬러 — 창고관리(wms.html)와 같은 팔레트 */
+var PAL_ROWS=[['#B22222','#FF0000','#FF6666','#FFCCCC'],['#CC7A00','#FFA500','#FFC04D','#FFE5B3'],['#B3B300','#FFFF00','#FFFF66','#FFFFCC'],['#006400','#008000','#4CAF50','#C8E6C9'],['#00008B','#0000FF','#6666FF','#CCCCFF'],['#000033','#000080','#333399','#9999CC'],['#004D40','#008080','#4DB6AC','#B2DFDB'],['#4B0082','#800080','#B366B3','#E6CCE6'],['#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF']];
+/* 창고 pColors 와 같은 키 인코딩 — Firebase 키에 못 쓰는 . # $ / [ ] (와 %) 만 %XX 로 */
+function clrEnc(k){return String(k).replace(/[%.#$\/\[\]]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();});}
+function clrDec(k){return String(k).replace(/%(25|2E|23|24|2F|5B|5D)/g,function(m,h){return String.fromCharCode(parseInt(h,16));});}
+function decMap(o){var n={};Object.keys(o||{}).forEach(function(k){n[clrDec(k)]=o[k];});return n;}
+/* 창고 색 중 가장 많이 쓰는 색 */
+function topWhClr(nm){var m=_whClr[nm]||{},best='',bn=0;Object.keys(m).forEach(function(c){if(m[c]>bn){bn=m[c];best=c;}});return best;}
 
 function colAlpha(c){ var s=String.fromCharCode(65+(c%26)); if(c>=26) s=String.fromCharCode(65+Math.floor(c/26)-1)+s; return s; }
 /* 칸 키 "r-c"(0부터) → 배치도 좌표 "B-3" (창고관리 칸 표기와 동일) */
@@ -149,16 +177,19 @@ function renderDenied(msg){
 function loadAll(){
   return db.ref('groups/'+GID).get().then(function(gs){
     var wids = gs.exists() ? Object.keys(gs.val()).filter(function(k){return k!=='_init';}) : [];
-    _locs={};
+    _locs={}; _wids=wids; _whClr={};
     var jobs = wids.map(function(wid){
       /* 상품별재고(getPG)와 동일하게 현재 슬롯에 실제로 놓인 상품명만 수집.
-         pColors(등록 이력 누적)는 오타·출고완료분이 남으므로 쓰지 않음. */
+         pColors(등록 이력 누적)는 오타·출고완료분이 남으므로 상품 목록엔 쓰지 않음 — 색 비교에만 씀. */
       return Promise.all([
         db.ref('warehouses/'+wid+'/cells').get(),
-        db.ref('warehouses/'+wid+'/name').get().catch(function(){return null;})
+        db.ref('warehouses/'+wid+'/name').get().catch(function(){return null;}),
+        db.ref('warehouses/'+wid+'/pColors').get().catch(function(){return null;})
       ]).then(function(res){
         var cells=res[0].val()||{}, names=[];
         var whName=(res[1]&&res[1].val())||wid;
+        var pc=decMap((res[2]&&res[2].val())||{});
+        Object.keys(pc).forEach(function(nm){ var m=_whClr[nm]||(_whClr[nm]={}); m[pc[nm]]=(m[pc[nm]]||0)+1; });
         Object.keys(cells).forEach(function(ck){
           var c=cells[ck]; if(!c||!c.slots) return;
           Object.keys(c.slots).forEach(function(sk){
@@ -177,11 +208,13 @@ function loadAll(){
     _products = Object.keys(set).sort(function(a,b){return a.localeCompare(b,'ko');});
     return Promise.all([
       db.ref('vendorConfig/'+GID+'/vendors').get(),
-      db.ref('vendorConfig/'+GID+'/map').get()
+      db.ref('vendorConfig/'+GID+'/map').get(),
+      db.ref('vendorConfig/'+GID+'/colors').get().catch(function(){return null;})
     ]);
   }).then(function(res){
     _vendors = (res[0] && res[0].val()) || {};
     _map = (res[1] && res[1].val()) || {};
+    _grpClr = decMap((res[2] && res[2].val()) || {});
   });
 }
 
@@ -242,7 +275,16 @@ function render(user){
     var k=keyOf(nm);
     var sel=(_map[k]&&_map[k].vendorId)||'';
     var zero=(_products.indexOf(nm)<0) ? '<span class="pzero">재고 0</span>' : '';
+    /* 유닛 컬러 — 그룹 통일 색이 있으면 그 색(실선), 없으면 창고에서 쓰는 색(점선), 창고마다 다르면 ≠ 표시 */
+    var gc=_grpClr[nm], wc=topWhClr(nm), nDiff=Object.keys(_whClr[nm]||{}).length;
+    var shown=gc||wc;
+    var swTitle=gc ? '그룹 통일 색 '+gc+' — 모든 창고에 같은 색 (클릭해서 바꾸기)'
+      : (nDiff>1 ? '창고마다 색이 다릅니다 ('+Object.keys(_whClr[nm]).join(', ')+') — 클릭해서 하나로 통일'
+        : (wc ? '창고 색 '+wc+' (아직 그룹 통일 전) — 클릭해서 모든 창고에 통일' : '색 없음 — 클릭해서 지정'));
+    var sw='<button class="swatch'+(gc?' set':'')+'" style="'+(shown?'background:'+shown+';':'')+'" title="'+esc(swTitle)+'" onclick="openClr(event,\''+encodeURIComponent(nm)+'\')">'
+      +(!gc&&nDiff>1?'<span class="sw-diff">≠</span>':'')+'</button>';
     return '<div class="prow'+(isUnlinked?' unlinked':'')+'">'
+      +sw
       +'<div class="pmain"><div class="pname" title="클릭 → 상품명 일괄 변경/통합" onclick="renameProduct(\''+encodeURIComponent(nm)+'\')">'+esc(nm)+'<span class="rename-hint">✎ 이름수정</span>'+zero+'</div>'
       +(isUnlinked?locHtml(nm):'')+'</div>'
       +'<select class="sel'+(sel?'':' none')+'" onchange="linkProduct(\''+encodeURIComponent(nm)+'\',this.value)">'
@@ -253,6 +295,8 @@ function render(user){
     ? '<div class="empty" style="color:#34D399;">✅ 모든 상품이 업체에 연결되었습니다</div>'
     : '<div class="unlinked-banner">⚠️ 아래 '+unlinked.length+'개 상품이 아직 업체에 연결되지 않았습니다. 누락 없이 연결해 주세요.</div>'
       + unlinked.map(function(nm){return prow(nm,true);}).join('');
+
+  var diffCnt = allNames.filter(function(nm){ return !_grpClr[nm] && Object.keys(_whClr[nm]||{}).length>1; }).length;
 
   var linkedHtml = linked.length===0
     ? '<div class="empty">연결된 상품이 없습니다</div>'
@@ -284,7 +328,10 @@ function render(user){
     +unlinkedHtml+'</div>'
 
     +'<div class="section">'
-    +'<div class="section-h">🔗 연결된 상품 <span class="count-chip" style="background:rgba(124,58,237,.15);color:#A78BFA;">'+linked.length+'</span></div>'
+    +'<div class="section-h">🔗 연결된 상품 <span class="count-chip" style="background:rgba(124,58,237,.15);color:#A78BFA;">'+linked.length+'</span>'
+    +(diffCnt ? '<button class="btn-unify" onclick="unifyAllColors()" title="그룹 통일 색이 없는 상품 중 창고마다 색이 다른 것을, 창고에서 가장 많이 쓰는 색으로 모든 창고에 맞춥니다">🎨 창고마다 다른 색 '+diffCnt+'개 통일</button>' : '')
+    +'</div>'
+    +'<div class="add-hint" style="margin-top:0;margin-bottom:10px;">🎨 왼쪽 색 칸을 눌러 <b>유닛 컬러</b>를 정하면 그룹의 <b>모든 창고</b>에 같은 색으로 적용됩니다. (점선 = 아직 통일 전 · ≠ = 창고마다 색이 다름)</div>'
     +linkedHtml+'</div>'
 
     +'<div class="section">'
@@ -474,6 +521,11 @@ function doRename(oldName,newName){
         updates['warehouses/'+wid+'/pColors']=npc;
       }
     });
+    /* 그룹 통일 색도 새 이름으로 옮김 (새 이름에 이미 색이 있으면 그 색 유지) */
+    if(_grpClr[oldName]){
+      updates['vendorConfig/'+GID+'/colors/'+clrEnc(oldName)]=null;
+      if(!_grpClr[newName]) updates['vendorConfig/'+GID+'/colors/'+clrEnc(newName)]=_grpClr[oldName];
+    }
     var oldK=keyOf(oldName), newK=keyOf(newName);
     if(_map[oldK]){
       var vId=_map[oldK].vendorId;
@@ -487,6 +539,80 @@ function doRename(oldName,newName){
   }).catch(function(e){toast('변경 실패: '+e.message);});
 }
 window.doRename=doRename;
+
+/* ── 유닛 컬러 — 그룹 통일 색 지정 → 그룹 모든 창고 pColors 에 같은 색 ── */
+var _clrPop=null;
+function closeClr(){ if(_clrPop){ _clrPop.remove(); _clrPop=null; } }
+function openClr(ev, encName){
+  ev.stopPropagation();
+  closeClr();
+  var nm=decodeURIComponent(encName);
+  var cur=_grpClr[nm]||'';
+  var whs=Object.keys(_whClr[nm]||{});
+  var pop=document.createElement('div');
+  pop.className='clr-pop';
+  pop.innerHTML='<div class="cp-h">🎨 '+esc(nm)+'<span>모든 창고에 같은 색</span></div>'
+    +(whs.length ? '<div class="cp-now">지금 창고 색: '+whs.map(function(c){return '<i style="background:'+c+'" title="'+c+'"></i>';}).join('')+(whs.length>1?' <b>창고마다 다름</b>':'')+'</div>' : '')
+    +PAL_ROWS.map(function(row){
+      return '<div class="cp-row">'+row.map(function(c){
+        return '<button class="cp-chip'+(c===cur?' on':'')+'" style="background:'+c+'" title="'+c+'" onclick="setGroupColor(\''+encodeURIComponent(nm)+'\',\''+c+'\')"></button>';
+      }).join('')+'</div>';
+    }).join('');
+  document.body.appendChild(pop);
+  var r=ev.currentTarget.getBoundingClientRect();
+  var top=r.bottom+window.scrollY+6, left=r.left+window.scrollX;
+  var pw=pop.offsetWidth, ph=pop.offsetHeight;
+  if(left+pw>window.scrollX+document.documentElement.clientWidth-8) left=window.scrollX+document.documentElement.clientWidth-pw-8;
+  if(r.bottom+ph+6>window.innerHeight) top=r.top+window.scrollY-ph-6;
+  pop.style.left=Math.max(8,left)+'px'; pop.style.top=Math.max(8,top)+'px';
+  _clrPop=pop;
+}
+window.openClr=openClr;
+document.addEventListener('click',function(e){ if(_clrPop && !_clrPop.contains(e.target)) closeClr(); });
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeClr(); });
+
+/* 한 번의 저장으로 — 그룹 색 + 그룹 안 모든 창고의 pColors 를 같은 색으로 */
+function colorUpdates(list){   /* list: [[상품명, 색], ...] */
+  var u={};
+  list.forEach(function(p){
+    var ek=clrEnc(p[0]);
+    u['vendorConfig/'+GID+'/colors/'+ek]=p[1];
+    _wids.forEach(function(wid){ u['warehouses/'+wid+'/pColors/'+ek]=p[1]; });
+  });
+  return u;
+}
+function applyColorsLocal(list){
+  list.forEach(function(p){ _grpClr[p[0]]=p[1]; var m={}; m[p[1]]=_wids.length||1; _whClr[p[0]]=m; });
+}
+function setGroupColor(encName, clr){
+  var nm=decodeURIComponent(encName);
+  closeClr();
+  db.ref().update(colorUpdates([[nm,clr]])).then(function(){
+    applyColorsLocal([[nm,clr]]); renderReload();
+    toast('🎨 '+nm+' — 창고 '+_wids.length+'곳 모두 같은 색');
+  }).catch(function(e){toast('색 저장 실패: '+e.message);});
+}
+window.setGroupColor=setGroupColor;
+
+/* 그룹 통일 색이 없는데 창고마다 색이 다른 상품 → 창고에서 가장 많이 쓰는 색으로 일괄 통일 */
+function unifyAllColors(){
+  var list=[], shownSet={};
+  /* 화면에 나오는 상품(현재 재고 + 업체 연결)만 — 창고 pColors 에 남은 옛 이름·오타는 건드리지 않음 */
+  _products.forEach(function(n){ shownSet[n]=1; });
+  Object.keys(_map).forEach(function(k){ if(_map[k]&&_map[k].name) shownSet[_map[k].name]=1; });
+  Object.keys(_whClr).forEach(function(nm){
+    if(!shownSet[nm] || _grpClr[nm]) return;
+    if(Object.keys(_whClr[nm]).length<2) return;
+    list.push([nm, topWhClr(nm)]);
+  });
+  if(!list.length){ toast('통일할 상품이 없습니다'); return; }
+  if(!confirm('창고마다 색이 다른 상품 '+list.length+'개를\n창고에서 가장 많이 쓰는 색으로 모든 창고('+_wids.length+'곳)에 통일할까요?\n\n(통일한 뒤에도 색 칸을 눌러 언제든 바꿀 수 있습니다)')) return;
+  db.ref().update(colorUpdates(list)).then(function(){
+    applyColorsLocal(list); renderReload();
+    toast('🎨 '+list.length+'개 상품 색 통일 완료');
+  }).catch(function(e){toast('통일 실패: '+e.message);});
+}
+window.unifyAllColors=unifyAllColors;
 
 var _user=null;
 function renderReload(){ if(_user) render(_user); }
