@@ -21,7 +21,7 @@ var WMS_PAGES=[
       locked:'슈퍼관리자 고정', self:'1차 슈퍼관리자 + 2차 비밀번호(데이터 암호화) — 등급을 낮춰도 DB 규칙이 슈퍼관리자만 허용'},
     {key:'site_stats',   file:'site_stats.html',   label:'사이트 통계 · 로그분석 (숨김 메뉴)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + DB 규칙 stats 읽기는 슈퍼관리자만'},
-    {key:'settlement',   file:'settlement.html',   label:'정산관리 (숨김 메뉴 · 3PL 업체별 정산)', floor:3, gate:true,
+    {key:'settlement',   file:'settlement.html',   label:'정산관리 (숨김 메뉴 · 3PL 업체별 정산 · 부가세 관리)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) — 업체별 정산 기능은 진행하며 추가'},
   ]},
   {group:'업체(거래처) 관리', items:[
