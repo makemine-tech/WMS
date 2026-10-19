@@ -28,12 +28,13 @@ function vatListen(){
   db.ref('settlement/vat/files').on('value', function(s){ VFILES = s.val() || {}; vatRe(); });
   db.ref('settlement/vat/rows').on('value', function(s){ VROWS = s.val() || {}; vatRe(); });
   db.ref('settlement/vat/man').on('value', function(s){ VMAN = s.val() || {}; vatRe(); });
+  if (typeof vcListen === 'function') vcListen();   /* 📋 마감집계 (settle_vatclose.js) */
   /* WMS 매출이 바뀌면(정산금액·업체 정보·확정본) 다시 */
   ['settlement/ledger', 'settlement/ledgerExtra', 'settlement/ledgerInfo', 'settlement/vendors'].forEach(function(p){ db.ref(p).on('value', function(){ setTimeout(vatRe, 0); }); });
 }
 function vatRe(){
   var el = $('tabVat'); if (!el || el.classList.contains('hide')) return;
-  var a = document.activeElement; if (a && a.closest && a.closest('#vatForm')) return;   /* 입력 중이면 그대로 */
+  var a = document.activeElement; if (a && a.closest && a.closest('#vatForm,#vcForm,.vc-memo')) return;   /* 입력 중이면 그대로 */
   renderVat();
 }
 
@@ -174,7 +175,13 @@ function renderVat(){
     + '.vt-scroll{overflow-x:auto}.vtt{min-width:860px}.vtt td.n,.vtt th.n{text-align:right}.vtt tr.tot td{font-weight:800;border-top:2px solid var(--br)}'
     + '#vatForm{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}#vatForm input,#vatForm select{font-size:12.5px;padding:.3rem .4rem}'
     + '.vt-sec>summary{cursor:pointer;font-weight:800;font-size:13.5px;padding:.2rem 0}'
+    + '.vt-view{display:flex;gap:.3rem;margin-bottom:.8rem;flex-wrap:wrap}.vt-view .btn{font-size:13px;padding:.4rem .9rem}.vt-view .btn.on{background:var(--b);border-color:var(--b);color:#0b0d12}'
     + '</style>';
+  /* 📋 마감집계(3개 사업자 한 화면 입력) ↔ 📊 자료 분석 */
+  var view = VAT_OPT.view === 'data' || typeof renderVatClose !== 'function' ? 'data' : 'close';
+  h += '<div class="vt-view"><button class="btn' + (view === 'close' ? ' on' : '') + '" onclick="vcView(&quot;close&quot;)">📋 마감집계 입력 (박스앤캔·어반샵·메이크마인)</button>'
+    + '<button class="btn' + (view === 'data' ? ' on' : '') + '" onclick="vcView(&quot;data&quot;)">📊 자료 분석 (WMS 매출·홈택스 자료)</button></div>';
+  if (view === 'close'){ el.innerHTML = h + renderVatClose(); vcFill(); return; }
   /* 특이사항 맨 위 */
   if (IS.length) h += '<div class="vt-iss"><div style="font-weight:800;margin-bottom:.3rem">⚠️ 특이사항 ' + IS.length + '건 <span class="sm dim" style="font-weight:500">— 추정해서 넣지 않았습니다. 확인 후 고르거나 고쳐 주세요</span></div>'
     + IS.map(function(x){ return '<div class="it">' + x.lv + ' ' + x.t + '</div>'; }).join('') + '</div>';
@@ -392,6 +399,7 @@ function vatSaveParsed(R){
 function vatFiles(list){
   Array.prototype.reduce.call(list, function(p, file){
     return p.then(function(){ return file.arrayBuffer(); }).then(function(buf){
+      if (typeof vcTryFile === 'function' && vcTryFile(file.name, buf)) return;   /* 마감집계 엑셀이면 📋 마감집계로 */
       var res; try { res = vatRead(file.name, buf); } catch (e) { res = [{ ok: false, name: file.name, reason: '파일을 열지 못했습니다 (' + ((e && e.message) || e) + ')', heads: [] }]; }
       return res.reduce(function(q, R){ return q.then(function(){ if (!R.ok){ VAT_PEND.push(R); renderVat(); return; } return vatSaveParsed(R); }); }, Promise.resolve());
     }).catch(function(e){ VAT_PEND.push({ name: file.name, reason: '올리기 실패: ' + ((e && (e.code || e.message)) || e), heads: [] }); renderVat(); });
