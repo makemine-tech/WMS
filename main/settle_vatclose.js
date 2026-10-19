@@ -99,7 +99,7 @@ function renderVatClose(){
     + '.vc-memo{width:100%;margin-top:.45rem;font-size:12px;padding:.3rem .45rem;min-height:2.2em;resize:vertical}'
     + '.vc-att{margin:.1rem 0 .3rem;padding:.35rem .45rem;border:1px dashed var(--br);border-radius:8px;font-size:12px}.vc-att .f{display:flex;align-items:center;gap:.35rem;padding:.12rem 0}.vc-att .f .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.vc-att .f b{font-family:var(--mo)}.vc-att .btn{padding:.05rem .4rem;font-size:11px}'
     + '.vc-g.sale .vc-gt,.vc-g.sale label,.vc-g.sale input,.vc-g.sale .vc-att b,.vc-o.sale,.vc-hist .sale{color:#38bdf8}'
-    + '.vc-g.buy .vc-gt,.vc-g.buy label,.vc-g.buy input,.vc-g.buy .vc-att b,.vc-o.buy,.vc-hist .buy{color:#fb923c}'
+    + '.vc-g.buy .vc-gt,.vc-g.buy label,.vc-g.buy input,.vc-g.buy .vc-att b,.vc-o.buy,.vc-hist .buy{color:#facc15}'
     + '.vc-g.minus .vc-gt,.vc-g.minus label,.vc-g.minus input,.vc-o.minus,.vc-neg{color:var(--r)!important}'
     + '.vc-zip{display:block;width:100%;margin-top:.45rem;padding:.45rem;font-size:12.5px}'
     + '.vc-sum{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem 1rem;margin-bottom:.8rem}'
@@ -162,7 +162,7 @@ function renderVatClose(){
   return h;
 }
 function vcWon(n){ n = Math.round(n) || 0; return n < 0 ? '<span class="vc-neg">−' + vW(-n) + '</span>' : vW(n); }   /* 마이너스 = 적색 */
-function vcTone(t){ return /매출/.test(t) ? 'sale' : /매입/.test(t) ? 'buy' : 'minus'; }   /* 매출 하늘색 · 매입 주황색 · 빼는 칸 적색 (대표님 2026-10-19) */
+function vcTone(t){ return /매출/.test(t) ? 'sale' : /매입/.test(t) ? 'buy' : 'minus'; }   /* 매출 하늘색 · 매입 노란색 · 빼는 칸 적색 (대표님 2026-10-19) */
 
 /* 화면의 계산 칸만 다시 채우기 (입력 중에도) */
 function vcFill(){
@@ -366,7 +366,7 @@ function vcSheet(p, B, rec){
   r = 4;
   var head = function(t, sub){ var row = ws.getRow(r++); row.getCell(1).value = t; if (sub) row.getCell(3).value = sub;
     [1, 2, 3].forEach(function(i){ var c = row.getCell(i); fill(c, 'FFDCE6F1'); c.font = { bold: true }; c.border = box; }); };
-  var TONE = { sale: 'FF0091D5', buy: 'FFE26B0A', minus: 'FFC00000' }, tone = null;
+  var TONE = { sale: 'FF0091D5', buy: 'FFBF8F00', minus: 'FFC00000' }, tone = null;
   var line = function(lb, val, note, opt){ var row = ws.getRow(r); var tc = (opt && opt.tone) || tone; if (tc){ row.getCell(1).font = { color: { argb: TONE[tc] } }; row.getCell(2).font = { color: { argb: TONE[tc] } }; } row.getCell(1).value = lb; row.getCell(2).value = val; if (note) row.getCell(3).value = note;
     row.getCell(2).numFmt = opt && opt.cnt ? '#,##0' : NUM; [1, 2, 3].forEach(function(i){ row.getCell(i).border = box; });
     if (opt && opt.bold){ row.font = { bold: true }; } if (opt && opt.fill) [1, 2, 3].forEach(function(i){ fill(row.getCell(i), opt.fill); });
