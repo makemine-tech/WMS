@@ -104,7 +104,7 @@ function renderVatClose(){
     + '.vc-zip{display:block;width:100%;margin-top:.45rem;padding:.45rem;font-size:12.5px}'
     + '.vc-sum{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem 1rem;margin-bottom:.8rem}'
     + '.vc-sum .it{display:flex;flex-direction:column;line-height:1.3}.vc-sum .it span{font-size:11px;color:var(--mu)}.vc-sum .it b{font-family:var(--mo);font-size:15px}'
-    + '.vc-sum .tot b{font-size:20px}.vc-hist tr{cursor:pointer}.vc-hist tr.on td{background:rgba(96,165,250,.08)}.vc-hist tr.yr td{font-weight:800;border-top:2px solid var(--br);cursor:default}'
+    + '.vc-sum .tot b{font-size:20px}.vc-hist tr{cursor:pointer}.vc-hist tr.on td{background:rgba(96,165,250,.08)}.vc-hist tr.yr td{font-weight:800;border-top:2px solid var(--br);cursor:default}.vc-hist tr.half td{background:rgba(56,189,248,.05);border-top:1px solid var(--br)}.vc-hist tr.sub td{font-size:11.5px;opacity:.75;padding-top:.25rem;padding-bottom:.25rem}.vc-hist tr.sub td:first-child{padding-left:1.1rem}'
     + '</style>';
   h += '<div class="vc-top"><span class="bar-t">📋 부가세 마감집계</span>'
     + '<button class="btn" onclick="vcShift(-1)">◀</button>'
@@ -144,17 +144,34 @@ function renderVatClose(){
   h += '</div>';
   h += '<div class="card" style="padding:.6rem .8rem"><textarea class="vc-memo" style="margin:0" data-memo="all" placeholder="이번 기 전체 메모" oninput="vcIn(this)">' + esc((rec.memo || {}).all || '') + '</textarea></div>';
   /* 누적 */
-  var keys = Object.keys(VCLOSE).filter(function(k){ return /^\d{4}_[1-4]$/.test(k); }).sort().reverse();
-  h += '<div class="card"><div class="card-h"><span class="card-t">📚 기간별 누적</span><span class="card-s">줄을 누르면 그 기간을 엽니다 · 금액 = 저장된 값 기준</span></div>';
+  var keys = Object.keys(VCLOSE).filter(function(k){ return /^\d{4}_[1-4]$/.test(k); }).sort().reverse(), hv = VAT_OPT.hv === 'h';
+  h += '<div class="card"><div class="card-h"><span class="card-t">📚 기간별 누적</span>'
+    + '<span class="vt-view" style="margin:0"><button class="btn' + (hv ? '' : ' on') + '" onclick="vatOpt(&quot;hv&quot;,&quot;q&quot;)">분기별 (예정·확정 따로)</button><button class="btn' + (hv ? ' on' : '') + '" onclick="vatOpt(&quot;hv&quot;,&quot;h&quot;)">반기 합산 (1기·2기 = 예정+확정)</button></span>'
+    + '<span class="card-s">' + (hv ? '박스앤캔·어반샵 = 개인사업자 반기신고 → 예정+확정 6개월치 합산 · 메이크마인디자인은 법인(분기 신고)이라 참고용 합산' : '줄을 누르면 그 기간을 엽니다 · 금액 = 저장된 값 기준') + '</span></div>';
   if (keys.length){
-    h += '<div class="vt-scroll"><table class="ftbl vtt vc-hist"><thead><tr><th>기간</th>' + VC_BIZ.map(function(B){ return '<th class="n sale">' + B.nm + ' 매출</th><th class="n buy">매입</th><th class="n">납부예정</th>'; }).join('') + '<th class="n">합계 납부예정</th></tr></thead><tbody>';
+    h += '<div class="vt-scroll"><table class="ftbl vtt vc-hist"><thead><tr><th>기간</th>' + VC_BIZ.map(function(B){ return '<th class="n sale">' + B.nm + ' 매출' + (hv && B.id === 'mm' ? ' (참고)' : '') + '</th><th class="n buy">매입</th><th class="n">납부예정</th>'; }).join('') + '<th class="n">합계 납부예정</th></tr></thead><tbody>';
     var yr = null, ysum = 0, flush = function(){ if (yr != null) h += '<tr class="yr"><td>' + yr + '년 합계</td><td colspan="' + (VC_BIZ.length * 3) + '"></td><td class="n">' + vcWon(ysum) + '</td></tr>'; };
-    keys.forEach(function(k){ var y = +k.slice(0, 4), kk = +k.slice(5), r = VCLOSE[k];
-      if (y !== yr){ flush(); yr = y; ysum = 0; }
-      var t = vcTotal(r); ysum += t;
-      h += '<tr' + (k === vcKey(p) ? ' class="on"' : '') + ' onclick="vcGo({ y: ' + y + ', k: ' + kk + ' })"><td><b>' + y + ' ' + VC_K[kk].t + '</b><div class="sm dim">' + VC_K[kk].m + '</div></td>'
-        + VC_BIZ.map(function(B){ var c = vcCalc(B.id, r[B.id]); return '<td class="n sale">' + vW(c.sale) + '</td><td class="n buy">' + vW(c.buy) + '</td><td class="n"><b>' + vcWon(c.pay) + '</b></td>'; }).join('')
-        + '<td class="n"><b>' + vcWon(t) + '</b></td></tr>'; });
+    var cells = function(L){   /* L = 기록 여러 개 → 사업자별 매출·매입·납부 합 */
+      var t = 0, html = VC_BIZ.map(function(B){ var o = { sale: 0, buy: 0, pay: 0 }; L.forEach(function(r){ var c = vcCalc(B.id, r[B.id]); o.sale += c.sale; o.buy += c.buy; o.pay += c.pay; }); t += o.pay;
+        return '<td class="n sale">' + vW(o.sale) + '</td><td class="n buy">' + vW(o.buy) + '</td><td class="n"><b>' + vcWon(o.pay) + '</b></td>'; }).join('');
+      return { html: html, t: t };
+    };
+    var qrow = function(y, kk, sub){ var k = y + '_' + kk, C = cells([VCLOSE[k]]);
+      h += '<tr class="' + (k === vcKey(p) ? 'on' : '') + (sub ? ' sub' : '') + '" onclick="vcGo({ y: ' + y + ', k: ' + kk + ' })"><td>' + (sub ? '<span class="dim">└ </span>' + VC_K[kk].t.split(' ')[1] + ' <span class="sm dim">' + VC_K[kk].m + '</span>' : '<b>' + y + ' ' + VC_K[kk].t + '</b><div class="sm dim">' + VC_K[kk].m + '</div>') + '</td>'
+        + C.html + '<td class="n"><b>' + vcWon(C.t) + '</b></td></tr>';
+      return C.t; };
+    if (!hv) keys.forEach(function(k){ var y = +k.slice(0, 4); if (y !== yr){ flush(); yr = y; ysum = 0; } ysum += qrow(y, +k.slice(5)); });
+    else {
+      var halves = []; keys.forEach(function(k){ var hk = k.slice(0, 4) + '_' + (+k.slice(5) <= 2 ? 1 : 2); if (halves.indexOf(hk) < 0) halves.push(hk); });
+      halves.forEach(function(hk){ var y = +hk.slice(0, 4), hn = +hk.slice(5), ks = [hn * 2 - 1, hn * 2], have = ks.filter(function(kk){ return VCLOSE[y + '_' + kk]; });
+        if (y !== yr){ flush(); yr = y; ysum = 0; }
+        var C = cells(have.map(function(kk){ return VCLOSE[y + '_' + kk]; })); ysum += C.t;
+        var open = have[have.length - 1];
+        h += '<tr class="half" onclick="vcGo({ y: ' + y + ', k: ' + open + ' })"><td><b>' + y + ' ' + hn + '기 합산</b><div class="sm dim">' + (hn === 1 ? '1~6월' : '7~12월') + ' · ' + ks.map(function(kk){ return VC_K[kk].t.split(' ')[1] + (VCLOSE[y + '_' + kk] ? ' ✓' : ' <span style="color:var(--y)">미저장</span>'); }).join(' · ') + '</div></td>'
+          + C.html + '<td class="n"><b>' + vcWon(C.t) + '</b></td></tr>';
+        have.forEach(function(kk){ qrow(y, kk, true); });
+      });
+    }
     flush();
     h += '</tbody></table></div>';
   } else h += '<div class="empty-s">아직 저장한 기간이 없습니다 — 위 칸을 채우고 💾 저장하거나, 마감집계 엑셀을 불러오세요.</div>';
