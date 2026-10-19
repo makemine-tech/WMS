@@ -9,8 +9,10 @@
        어반샵 납부 = 부가세 예상 − 예정시 기납부액
        메이크마인 납부 = 부가세 예상 − 환급금
    - 마감집계 엑셀(.xls)을 이 탭에 끌어다 놓으면 시트마다 기간을 읽어 칸을 채움 (B2 「박스앤캔 매출기간 2026년 7월~9월」)
-   DB: settlement/vat/close/{YYYY}_{k} (k 1~4) = { bc:{칸:식}, ub:{…}, mm:{…}, memo:{bc,ub,mm,all}, at, by, src }
-   쓰는 전역: db, me, esc, toast, $, XLSX, firebase, VAT_OPT, vatOpt, vW (settle_vat.js)
+   - 외부매출 자진신고 매출 칸 = 📎 외부몰 파일 올리기 (네이버스마트스토어 = 과세매출금액만 · 그 밖 = 월별 줄의 숫자 합) → 칸 값 = 파일 합계들 「a+b」
+     원본은 파일함처럼 2차 비밀번호 키로 암호화해 Storage settlement/vat_{YYYY}_{k}/{id} — ⬇ 로 원본 내려받기
+   DB: settlement/vat/close/{YYYY}_{k} (k 1~4) = { bc:{칸:식}, ub:{…}, mm:{…}, memo:{bc,ub,mm,all}, files:{ '{사업자}_{칸}': {id: {name,size,amt,detail,path,iv,at,by}} }, at, by, src }
+   쓰는 전역: db, me, esc, toast, $, XLSX, firebase, VAT_OPT, vatOpt, vW (settle_vat.js), WMS2FA, putBytes, getBytes, newId, st (settlement.html)
 ============================================================ */
 var VCLOSE = {}, VC_DRAFT = null, VC_LISTEN = false;
 var VC_K = [null, { t: '1기 예정', m: '1월~3월' }, { t: '1기 확정', m: '4월~6월' }, { t: '2기 예정', m: '7월~9월' }, { t: '2기 확정', m: '10월~12월' }];
@@ -25,12 +27,12 @@ var VC_BIZ = [
     { t: '기납부', f: [['prepaid', '예정시 기납부액', 'E27']] }
   ] },
   { id: 'ub', nm: '어반샵', g: [
-    { t: '매출', f: [['taxSale', '국세청 계산서 매출', 'B35'], ['selfSale', '외부매출 자진신고 매출', 'C35']] },
+    { t: '매출', f: [['taxSale', '국세청 계산서 매출', 'B35'], ['selfSale', '외부매출 자진신고 매출', 'C35', { files: 1 }]] },
     { t: '매입', f: [['buyCard', '신용카드 매입 (예상)', 'D35'], ['buyTax', '국세청 매입총액', 'E35']] },
     { t: '기납부', f: [['prepaid', '예정시 기납부액', 'E36']] }
   ] },
   { id: 'mm', nm: '메이크마인디자인', full: '메이크마인디자인 주식회사', g: [
-    { t: '매출', f: [['taxSale', '국세청 계산서 매출', 'B44'], ['selfSale', '외부매출 자진신고 매출', 'C44']] },
+    { t: '매출', f: [['taxSale', '국세청 계산서 매출', 'B44'], ['selfSale', '외부매출 자진신고 매출', 'C44', { files: 1 }]] },
     { t: '매입', f: [['buyCard', '신용카드 매입 (예상)', 'D44'], ['buyTax', '국세청 매입총액', 'E44'], ['buyPaper', '종이계산서 매입', 'H44']] },
     { t: '환급', f: [['refund', '환급금', 'E49']] }
   ] }
@@ -95,6 +97,7 @@ function renderVatClose(){
     + '.vc-out{border-top:2px solid var(--br);margin-top:.35rem;padding-top:.4rem}.vc-o{display:flex;justify-content:space-between;font-size:12.5px;padding:.12rem 0}.vc-o b{font-family:var(--mo)}'
     + '.vc-o.pay{font-size:14px;font-weight:800;border-top:1px dashed var(--br);margin-top:.25rem;padding-top:.35rem}'
     + '.vc-memo{width:100%;margin-top:.45rem;font-size:12px;padding:.3rem .45rem;min-height:2.2em;resize:vertical}'
+    + '.vc-att{margin:.1rem 0 .3rem;padding:.35rem .45rem;border:1px dashed var(--br);border-radius:8px;font-size:12px}.vc-att .f{display:flex;align-items:center;gap:.35rem;padding:.12rem 0}.vc-att .f .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.vc-att .f b{font-family:var(--mo)}.vc-att .btn{padding:.05rem .4rem;font-size:11px}'
     + '.vc-sum{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem 1rem;margin-bottom:.8rem}'
     + '.vc-sum .it{display:flex;flex-direction:column;line-height:1.3}.vc-sum .it span{font-size:11px;color:var(--mu)}.vc-sum .it b{font-family:var(--mo);font-size:15px}'
     + '.vc-sum .tot b{font-size:20px}.vc-hist tr{cursor:pointer}.vc-hist tr.on td{background:rgba(96,165,250,.08)}.vc-hist tr.yr td{font-weight:800;border-top:2px solid var(--br);cursor:default}'
@@ -123,7 +126,7 @@ function renderVatClose(){
       h += '<div class="vc-g"><div class="vc-gt">' + G.t + (G.s ? ' <span>· ' + G.s + '</span>' : '') + '</div>';
       G.f.forEach(function(F){ var cnt = F[3] && F[3].cnt, val = vcShow(d[F[0]]);
         h += '<div class="vc-r"><label for="vc_' + B.id + '_' + F[0] + '">' + F[1] + '</label><input type="text" inputmode="decimal" id="vc_' + B.id + '_' + F[0] + '" data-b="' + B.id + '" data-f="' + F[0] + '"' + (cnt ? ' class="cnt"' : '')
-          + ' value="' + esc(val) + '" placeholder="0" oninput="vcIn(this)" onblur="vcBlur(this)"></div><div class="vc-ev" data-vcev="' + B.id + '.' + F[0] + '"></div>'; });
+          + ' value="' + esc(val) + '" placeholder="0" oninput="vcIn(this)" onblur="vcBlur(this)"></div><div class="vc-ev" data-vcev="' + B.id + '.' + F[0] + '"></div>' + (F[3] && F[3].files ? vcFilesHtml(p, B.id, F[0]) : ''); });
       h += '</div>';
     });
     var outs = [['sale', '매출총액'], ['buy', '매입총액'], ['diff', '매출 − 매입'], ['vat', '부가세 예상 (차액 − 차액÷1.1)']];
@@ -196,7 +199,7 @@ function vcPack(d){
 function vcSave(){
   var p = vcP(), k = vcKey(p), P = vcPack(vcRec(p));
   if (P.bad.length){ toast('숫자로 읽을 수 없는 칸: ' + P.bad.join(', ')); return; }
-  var rec = Object.assign(P.o, { at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '', src: '화면 입력' });
+  var rec = Object.assign(P.o, { files: (VCLOSE[k] || {}).files || null, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '', src: '화면 입력' });
   db.ref('settlement/vat/close/' + k).set(rec).then(function(){ VC_DRAFT = null; toast('💾 ' + vcLabel(p) + ' 저장 — 3사 납부예정 ' + vW(vcTotal(P.o)) + '원'); renderVat(); })
     .catch(function(e){ toast('저장 실패: ' + ((e && e.code) || e)); });
 }
@@ -242,9 +245,98 @@ function vcImport(name, L){
     + '\n\n저장할까요?';
   if (!confirm(msg)) return;
   var u = {};
-  L.forEach(function(x){ var P = vcPack(x.d); u[vcKey(x.p)] = Object.assign(P.o, { at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '', src: '엑셀 ' + name.slice(0, 80) + ' · ' + x.sheet }); });
+  L.forEach(function(x){ var P = vcPack(x.d); u[vcKey(x.p)] = Object.assign(P.o, { files: (VCLOSE[vcKey(x.p)] || {}).files || null, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '', src: '엑셀 ' + name.slice(0, 80) + ' · ' + x.sheet }); });
   db.ref('settlement/vat/close').update(u).then(function(){
     VC_DRAFT = null; toast('📊 ' + L.map(function(x){ return vcLabel(x.p); }).join(', ') + ' 불러와 저장' + (over.length ? ' (덮어씀 ' + over.length + ')' : ''));
     VAT_OPT.cp = L[0].p; vatOpt('view', 'close');
   }).catch(function(e){ toast('저장 실패: ' + ((e && e.code) || e)); });
+}
+
+/* ═══ 외부몰 자진신고 매출 파일 (칸 아래 📎 올리기 · ⬇ 원본 · ×) ═══ */
+function vcFileMap(key, b, f){ return (((VCLOSE[key] || {}).files || {})[b + '_' + f]) || {}; }
+function vcFileIds(F){ return Object.keys(F).sort(function(x, y){ return (F[x].at || 0) - (F[y].at || 0); }); }
+function vcFilesHtml(p, b, f){
+  var F = vcFileMap(vcKey(p), b, f), ids = vcFileIds(F), arg = function(id){ return '(&quot;' + b + '&quot;,&quot;' + f + '&quot;' + (id ? ',&quot;' + id + '&quot;' : ''); };
+  var h = '<div class="vc-att">' + ids.map(function(id){ var m = F[id];
+    return '<div class="f"><span class="nm" title="' + esc(m.name) + '">📄 ' + esc(m.name) + (m.detail ? '<div class="sm dim" style="white-space:normal">' + esc(m.detail) + '</div>' : '') + '</span><b>' + vW(m.amt) + '</b>'
+      + '<button class="btn" title="원본 내려받기" onclick="vcFileDown' + arg(id) + ')">⬇</button><button class="btn r" title="파일 빼기" onclick="vcFileDel' + arg(id) + ')">×</button></div>'; }).join('');
+  if (ids.length > 1) h += '<div class="f" style="border-top:1px solid var(--br);margin-top:.15rem;padding-top:.2rem"><span class="nm dim">파일 합계</span><b>' + vW(ids.reduce(function(s, id){ return s + (+F[id].amt || 0); }, 0)) + '</b><span style="width:52px"></span></div>';
+  return h + '<label class="btn" style="display:inline-block;margin-top:.2rem">📎 외부몰 파일 올리기<input type="file" multiple accept=".xls,.xlsx,.csv" style="display:none" onchange="vcFileUp' + arg() + ',this.files);this.value=&quot;&quot;"></label>'
+    + (ids.length ? '' : ' <span class="sm dim">올리면 합계가 이 칸에 들어갑니다</span>') + '</div>';
+}
+/* 엑셀 → { amt, detail, months[], warn } · 못 읽으면 null */
+function vcFileAmt(buf){
+  var wb = XLSX.read(buf, { type: 'array' }), num = function(v){ var n = typeof v === 'number' ? v : vcEval(v); return isNaN(n) ? 0 : n; };
+  var monthOf = function(v){ var t = String(v == null ? '' : v).trim(), m = t.match(/^(\d{4})[.\-\/년\s]*(\d{1,2})/); if (m) return +m[2]; m = t.match(/^(\d{1,2})\s*월/); return m ? +m[1] : null; };
+  for (var si = 0; si < wb.SheetNames.length; si++){
+    var a = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[si]], { header: 1, defval: '', raw: true, blankrows: false });
+    var hi = -1; for (var i = 0; i < Math.min(a.length, 15); i++){ if (a[i].some(function(v){ return typeof v === 'string' && v.trim(); }) && a[i + 1] && a[i + 1].some(function(v){ return typeof v === 'number'; })){ hi = i; break; } }
+    if (hi < 0) continue;
+    var H = a[hi].map(function(v){ return String(v).replace(/\s/g, ''); }), rows = [], tot = null, months = [];
+    for (var r = hi + 1; r < a.length; r++){ var R = a[r], lab = String(R[0] == null ? '' : R[0]).trim();
+      if (!lab && !R.slice(1).some(function(v){ return num(v); })) continue;
+      if (!lab || /합계|소계|총계|^계$/.test(lab)){ tot = R; continue; }   /* 이름 없는 줄 = 파일 안 합계 줄 */
+      rows.push(R); var mo = monthOf(lab); if (mo) months.push(mo); }
+    if (!rows.length) continue;
+    var ci = H.indexOf('과세매출금액');
+    if (ci >= 0){   /* 네이버스마트스토어 부가세신고 월별내역 — 과세만 (대표님 2026-10-19) */
+      var amt = rows.reduce(function(s, R){ return s + num(R[ci]); }, 0), fi = H.indexOf('면세매출금액'), fr = fi >= 0 ? rows.reduce(function(s, R){ return s + num(R[fi]); }, 0) : 0;
+      return { amt: amt, detail: '과세매출금액 ' + rows.length + '개월' + (fr ? ' (면세 ' + vW(fr) + ' 제외)' : ''), months: months, warn: '' };
+    }
+    var cols = [];
+    for (var c = 1; c < H.length; c++){ (function(c){ if (!rows.some(function(R){ return typeof R[c] === 'number' || num(R[c]); })) return; cols.push([H[c] || (c + 1) + '열', rows.reduce(function(t, R){ return t + num(R[c]); }, 0), c]); })(c); }
+    if (!cols.length) continue;
+    var amt2 = cols.reduce(function(t, x){ return t + x[1]; }, 0), warn = '';
+    if (tot){ var ts = cols.reduce(function(t, x){ return t + num(tot[x[2]]); }, 0); if (ts && Math.abs(ts - amt2) > 1) warn = '파일 안 합계 줄(' + vW(ts) + ')과 월별 합(' + vW(amt2) + ')이 다릅니다'; }
+    return { amt: amt2, detail: cols.map(function(x){ return x[0] + ' ' + vW(x[1]); }).join(' · '), months: months, warn: warn };
+  }
+  return null;
+}
+function vcFileUp(b, f, list){
+  var p = vcP(), key = vcKey(p), lb = vcLabel(p), ms = [p.k * 3 - 2, p.k * 3 - 1, p.k * 3];
+  if (VC_DRAFT && VC_DRAFT.key === key && !confirm('저장 안 한 변경이 있습니다. 파일을 올리면서 지금 화면 값도 같이 저장할까요?')) return;
+  Array.prototype.reduce.call(list, function(q, file){ return q.then(function(){ return file.arrayBuffer().then(function(buf){
+    var R; try { R = vcFileAmt(buf); } catch (e) { R = null; }
+    var msg = '「' + file.name + '」\n\n';
+    if (R){
+      var out = R.months.filter(function(m){ return ms.indexOf(m) < 0; });
+      msg += '합계 ' + vW(R.amt) + '원 — ' + R.detail + (R.warn ? '\n⚠ ' + R.warn : '') + (out.length ? '\n⚠ ' + lb + '(' + VC_K[p.k].m + ') 밖의 달이 있습니다: ' + out.join(', ') + '월' : '') + '\n\n' + lb + ' 외부매출 자진신고 매출에 더할까요?';
+      if (!confirm(msg)) return;
+    } else {
+      var v = prompt(msg + '금액 칸을 찾지 못했습니다. 이 파일의 자진신고 매출 합계를 직접 넣어 주세요 (취소 = 올리지 않음)', ''); if (v == null) return;
+      var n = vcEval(v); if (isNaN(n)){ toast('숫자로 넣어 주세요'); return; } R = { amt: n, detail: '금액 직접 입력', warn: '' };
+    }
+    var id = newId(), path = 'settlement/vat_' + key + '/' + id; toast('🔒 암호화해 올리는 중… ' + file.name);
+    return WMS2FA.encrypt(path, buf).then(function(enc){ return putBytes(path, enc.data).then(function(){ return enc.iv; }); }).then(function(iv){
+      var m = { name: file.name.slice(0, 160), size: file.size, amt: Math.round(R.amt), detail: (String(R.detail || '') + (R.warn ? ' ⚠ ' + R.warn : '')).slice(0, 300), path: path, iv: iv, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '' };
+      return db.ref('settlement/vat/close/' + key + '/files/' + b + '_' + f + '/' + id).set(m).then(function(){
+        var C = VCLOSE[key] = VCLOSE[key] || {}, FS = C.files = C.files || {}, FF = FS[b + '_' + f] = FS[b + '_' + f] || {};
+        FF[id] = Object.assign({}, m, { at: Date.now() });
+        return vcFileSync(b, f, key).then(function(){ toast('📎 ' + file.name + ' — ' + vW(m.amt) + '원 반영'); });
+      });
+    });
+  }); }).catch(function(e){ toast('올리기 실패: ' + ((e && (e.code || e.message)) || e)); }); }, Promise.resolve());
+}
+/* 칸 값 = 올린 파일 합계들 「a+b」 → 바로 저장 (화면에 저장 안 한 변경이 있으면 같이) */
+function vcFileSync(b, f, key){
+  var F = vcFileMap(key, b, f), expr = vcFileIds(F).map(function(id){ return String(Math.round(+F[id].amt || 0)); }).join('+').replace(/\+-/g, '-');
+  var base = VC_DRAFT && VC_DRAFT.key === key ? VC_DRAFT.d : JSON.parse(JSON.stringify(VCLOSE[key] || {}));
+  base[b] = base[b] || {}; base[b][f] = expr;
+  var P = vcPack(base), rec = Object.assign(P.o, { files: (VCLOSE[key] || {}).files || null, at: firebase.database.ServerValue.TIMESTAMP, by: (me && me.email) || '', src: (VCLOSE[key] || {}).src || '화면 입력' });
+  return db.ref('settlement/vat/close/' + key).set(rec).then(function(){ VC_DRAFT = null; renderVat(); });
+}
+function vcFileDown(b, f, id){
+  var m = vcFileMap(vcKey(vcP()), b, f)[id]; if (!m) return;
+  toast('내려받는 중…');
+  getBytes(m.path).then(function(ab){ return WMS2FA.decrypt(m.path, m.iv, ab); }).then(function(bytes){
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes])); a.download = m.name;
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }).catch(function(e){ alert('내려받기 실패: ' + ((e && (e.code || e.message)) || e)); });
+}
+function vcFileDel(b, f, id){
+  var key = vcKey(vcP()), F = vcFileMap(key, b, f), m = F[id]; if (!m) return;
+  if (!confirm('「' + m.name + '」(' + vW(m.amt) + '원)을 빼고 원본도 지울까요?\n\n외부매출 자진신고 매출 칸은 남은 파일 합계로 바뀝니다.')) return;
+  st.ref(m.path).delete().catch(function(){}).then(function(){ return db.ref('settlement/vat/close/' + key + '/files/' + b + '_' + f + '/' + id).set(null); })
+    .then(function(){ delete F[id]; return vcFileSync(b, f, key); }).then(function(){ toast('뺐습니다'); })
+    .catch(function(e){ toast('실패: ' + ((e && (e.code || e.message)) || e)); });
 }
