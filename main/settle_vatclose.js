@@ -11,6 +11,7 @@
    - 마감집계 엑셀(.xls)을 이 탭에 끌어다 놓으면 시트마다 기간을 읽어 칸을 채움 (B2 「박스앤캔 매출기간 2026년 7월~9월」)
    - 외부매출 자진신고 매출 칸 = 📎 외부몰 파일 올리기 (네이버스마트스토어 = 과세매출금액만 · 그 밖 = 월별 줄의 숫자 합) → 칸 값 = 파일 합계들 「a+b」
      원본은 파일함처럼 2차 비밀번호 키로 암호화해 Storage settlement/vat_{YYYY}_{k}/{id} — ⬇ 로 원본 내려받기
+   - 사업자마다 📦 세무사 제출 자료 일괄 다운로드 = 집계표 엑셀(ExcelJS, 입력 식·계산 수식 그대로) + 올린 원본(복호화) → {년}_{기}_{사업자}_세무사제출.zip (JSZip 필요할 때 불러옴)
    DB: settlement/vat/close/{YYYY}_{k} (k 1~4) = { bc:{칸:식}, ub:{…}, mm:{…}, memo:{bc,ub,mm,all}, files:{ '{사업자}_{칸}': {id: {name,size,amt,detail,path,iv,at,by}} }, at, by, src }
    쓰는 전역: db, me, esc, toast, $, XLSX, firebase, VAT_OPT, vatOpt, vW (settle_vat.js), WMS2FA, putBytes, getBytes, newId, st (settlement.html)
 ============================================================ */
@@ -61,20 +62,19 @@ function vcShow(s){   /* 저장된 식 → 쉼표 넣어 보여주기 */
 }
 
 /* ── 계산 (엑셀과 같은 식) ── */
+/* 매출·매입에 더하는 칸 · 1.3% 공제 칸 · 빼는 칸 (화면 계산과 제출용 엑셀 수식이 같이 씀) */
+var VC_SUM = {
+  bc: { sale: ['omCard', 'omCash', 'omEtc', 'taxSale', 'extraSale'], buy: ['buyCard', 'buyPaper', 'buyTax'], ded: ['omCard', 'omCash'], less: 'prepaid' },
+  ub: { sale: ['taxSale', 'selfSale'], buy: ['buyCard', 'buyTax'], ded: [], less: 'prepaid' },
+  mm: { sale: ['taxSale', 'selfSale'], buy: ['buyCard', 'buyTax', 'buyPaper'], ded: [], less: 'refund' }
+};
 function vcCalc(id, d){
-  var v = function(k){ var n = vcEval(d && d[k]); return isNaN(n) ? 0 : n; }, o = {};
-  if (id === 'bc'){
-    o.sale = v('omCard') + v('omCash') + v('omEtc') + v('taxSale') + v('extraSale');
-    o.buy = v('buyCard') + v('buyPaper') + v('buyTax');
-  } else if (id === 'ub'){
-    o.sale = v('taxSale') + v('selfSale'); o.buy = v('buyCard') + v('buyTax');
-  } else {
-    o.sale = v('taxSale') + v('selfSale'); o.buy = v('buyCard') + v('buyTax') + v('buyPaper');
-  }
+  var v = function(k){ var n = vcEval(d && d[k]); return isNaN(n) ? 0 : n; }, S = VC_SUM[id], sum = function(L){ return L.reduce(function(s, k){ return s + v(k); }, 0); }, o = {};
+  o.sale = sum(S.sale); o.buy = sum(S.buy);
   o.diff = o.sale - o.buy;
   o.vat = o.diff - o.diff / 1.1;
-  o.ded = id === 'bc' ? -(v('omCard') + v('omCash')) * 0.013 : 0;
-  o.less = id === 'mm' ? v('refund') : v('prepaid');
+  o.ded = S.ded.length ? -sum(S.ded) * 0.013 : 0;
+  o.less = v(S.less);
   o.pay = o.vat + o.ded - o.less;
   return o;
 }
@@ -98,6 +98,7 @@ function renderVatClose(){
     + '.vc-o.pay{font-size:14px;font-weight:800;border-top:1px dashed var(--br);margin-top:.25rem;padding-top:.35rem}'
     + '.vc-memo{width:100%;margin-top:.45rem;font-size:12px;padding:.3rem .45rem;min-height:2.2em;resize:vertical}'
     + '.vc-att{margin:.1rem 0 .3rem;padding:.35rem .45rem;border:1px dashed var(--br);border-radius:8px;font-size:12px}.vc-att .f{display:flex;align-items:center;gap:.35rem;padding:.12rem 0}.vc-att .f .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.vc-att .f b{font-family:var(--mo)}.vc-att .btn{padding:.05rem .4rem;font-size:11px}'
+    + '.vc-zip{display:block;width:100%;margin-top:.45rem;padding:.45rem;font-size:12.5px}'
     + '.vc-sum{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem 1rem;margin-bottom:.8rem}'
     + '.vc-sum .it{display:flex;flex-direction:column;line-height:1.3}.vc-sum .it span{font-size:11px;color:var(--mu)}.vc-sum .it b{font-family:var(--mo);font-size:15px}'
     + '.vc-sum .tot b{font-size:20px}.vc-hist tr{cursor:pointer}.vc-hist tr.on td{background:rgba(96,165,250,.08)}.vc-hist tr.yr td{font-weight:800;border-top:2px solid var(--br);cursor:default}'
@@ -134,7 +135,8 @@ function renderVatClose(){
     outs.push(['less', B.id === 'mm' ? '환급금 (−)' : '예정시 기납부액 (−)']);
     h += '<div class="vc-out">' + outs.map(function(o){ return '<div class="vc-o"><span>' + o[1] + '</span><b data-vco="' + B.id + '.' + o[0] + '"></b></div>'; }).join('')
       + '<div class="vc-o pay"><span>부가세 납부예정액</span><b data-vco="' + B.id + '.pay"></b></div></div>'
-      + '<textarea class="vc-memo" data-memo="' + B.id + '" placeholder="메모 (누락된 매입, 확인할 것 등)" oninput="vcIn(this)">' + esc((rec.memo || {})[B.id] || '') + '</textarea></div>';
+      + '<textarea class="vc-memo" data-memo="' + B.id + '" placeholder="메모 (누락된 매입, 확인할 것 등)" oninput="vcIn(this)">' + esc((rec.memo || {})[B.id] || '') + '</textarea>'
+      + '<button class="btn vc-zip" onclick="vcZip(&quot;' + B.id + '&quot;)" title="집계표 엑셀 + 올린 외부매출 원본 파일을 ZIP 하나로">📦 세무사 제출 자료 일괄 다운로드</button></div>';
   });
   h += '</div>';
   h += '<div class="card" style="padding:.6rem .8rem"><textarea class="vc-memo" style="margin:0" data-memo="all" placeholder="이번 기 전체 메모" oninput="vcIn(this)">' + esc((rec.memo || {}).all || '') + '</textarea></div>';
@@ -339,4 +341,75 @@ function vcFileDel(b, f, id){
   st.ref(m.path).delete().catch(function(){}).then(function(){ return db.ref('settlement/vat/close/' + key + '/files/' + b + '_' + f + '/' + id).set(null); })
     .then(function(){ delete F[id]; return vcFileSync(b, f, key); }).then(function(){ toast('뺐습니다'); })
     .catch(function(e){ toast('실패: ' + ((e && (e.code || e.message)) || e)); });
+}
+
+/* ═══ 📦 세무사 제출 자료 일괄 다운로드 (사업자마다) — 집계표 엑셀(수식 그대로) + 올린 외부매출 원본 → ZIP 하나 ═══ */
+function vcLoadZip(){
+  if (typeof JSZip !== 'undefined') return Promise.resolve();
+  return new Promise(function(ok, no){ var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'; s.onload = ok; s.onerror = function(){ no(new Error('JSZip 을 불러오지 못했습니다')); }; document.head.appendChild(s); });
+}
+/* 집계표 엑셀 한 장 (ExcelJS) — 입력 칸은 식(=436798716+43679872) 그대로, 계산 줄은 엑셀 수식 */
+function vcSheet(p, B, rec){
+  var d = rec[B.id] || {}, S = VC_SUM[B.id], files = (rec.files || {});
+  var wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('마감집계');
+  ws.columns = [{ width: 38 }, { width: 20 }, { width: 46 }];
+  var NUM = '#,##0;[Red]-#,##0', thin = { style: 'thin', color: { argb: 'FFBFBFBF' } }, box = { top: thin, left: thin, bottom: thin, right: thin };
+  var fill = function(c, argb){ c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb } }; };
+  var r = 1, ref = {};
+  ws.mergeCells('A1:C1'); ws.getCell('A1').value = (B.full || B.nm) + ' 부가세 마감집계'; ws.getCell('A1').font = { bold: true, size: 15 };
+  ws.mergeCells('A2:C2'); ws.getCell('A2').value = p.y + '년 ' + VC_K[p.k].t + ' · 매출기간 ' + p.y + '년 ' + VC_K[p.k].m + ' 마감 · 작성 ' + new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  ws.getCell('A2').font = { color: { argb: 'FF666666' } };
+  r = 4;
+  var head = function(t, sub){ var row = ws.getRow(r++); row.getCell(1).value = t; if (sub) row.getCell(3).value = sub;
+    [1, 2, 3].forEach(function(i){ var c = row.getCell(i); fill(c, 'FFDCE6F1'); c.font = { bold: true }; c.border = box; }); };
+  var line = function(lb, val, note, opt){ var row = ws.getRow(r); row.getCell(1).value = lb; row.getCell(2).value = val; if (note) row.getCell(3).value = note;
+    row.getCell(2).numFmt = opt && opt.cnt ? '#,##0' : NUM; [1, 2, 3].forEach(function(i){ row.getCell(i).border = box; });
+    if (opt && opt.bold){ row.font = { bold: true }; } if (opt && opt.fill) [1, 2, 3].forEach(function(i){ fill(row.getCell(i), opt.fill); });
+    row.getCell(3).alignment = { wrapText: true, vertical: 'top' }; return 'B' + (r++); };
+  B.g.forEach(function(G){
+    head(G.t, G.s || '');
+    G.f.forEach(function(F){ var t = vcClean(d[F[0]]), n = vcEval(t); if (isNaN(n)) n = 0;
+      var val = /\d[+-]/.test(t) ? { formula: t.replace(/^\+/, ''), result: n } : n;
+      var FF = files[B.id + '_' + F[0]] || {}, fids = vcFileIds(FF);
+      var note = fids.length ? '첨부 ' + fids.length + '개: ' + fids.map(function(id){ return FF[id].name + ' ' + vW(FF[id].amt); }).join(' / ') : '';
+      ref[F[0]] = line(F[1], val, note, { cnt: F[3] && F[3].cnt }); });
+  });
+  r++;
+  head('계산', '엑셀과 같은 식');
+  var c = vcCalc(B.id, d), plus = function(L){ return L.map(function(k){ return ref[k]; }).join('+'); };
+  var sale = line('매출총액', { formula: plus(S.sale), result: c.sale }, '');
+  var buy = line('매입총액', { formula: plus(S.buy), result: c.buy }, '');
+  var diff = line('매출 − 매입', { formula: sale + '-' + buy, result: c.diff }, '');
+  var vat = line('부가세 예상 (차액 − 차액÷1.1)', { formula: diff + '-' + diff + '/1.1', result: c.vat }, '');
+  var ded = S.ded.length ? line('신용카드·현금영수증 공제 (−1.3%)', { formula: '-(' + plus(S.ded) + ')*0.013', result: c.ded }, '신용카드 + 현금영수증 매출 × 1.3%') : null;
+  var less = line(S.less === 'refund' ? '환급금 (−)' : '예정시 기납부액 (−)', { formula: ref[S.less], result: c.less }, '');
+  line('부가세 납부예정액', { formula: vat + (ded ? '+' + ded : '') + '-' + less, result: c.pay }, '', { bold: true, fill: 'FFFFF2CC' });
+  /* 첨부 파일 목록 */
+  var att = []; B.g.forEach(function(G){ G.f.forEach(function(F){ var FF = files[B.id + '_' + F[0]] || {}; vcFileIds(FF).forEach(function(id){ att.push([F[1], FF[id]]); }); }); });
+  if (att.length){ r++; head('첨부 파일 (같은 ZIP 안)', '');
+    att.forEach(function(a){ line(a[1].name, a[1].amt, a[0] + (a[1].detail ? ' — ' + a[1].detail : '')); }); }
+  var memo = (rec.memo || {})[B.id]; if (memo){ r++; head('메모', ''); ws.mergeCells('A' + r + ':C' + r); ws.getCell('A' + r).value = memo; ws.getCell('A' + r).alignment = { wrapText: true, vertical: 'top' }; ws.getRow(r).height = Math.min(120, 18 * (1 + (memo.match(/\n/g) || []).length)); r++; }
+  ws.pageSetup = { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  return wb.xlsx.writeBuffer();
+}
+function vcZip(bid){
+  var p = vcP(), key = vcKey(p), B = VC_BIZ.filter(function(x){ return x.id === bid; })[0];
+  if (VC_DRAFT && VC_DRAFT.key === key){ toast('저장 안 한 변경이 있습니다 — 💾 저장한 뒤 내려받아 주세요'); return; }
+  var rec = VCLOSE[key]; if (!rec || !rec[bid]){ toast(vcLabel(p) + ' ' + B.nm + ' 에 저장된 값이 없습니다'); return; }
+  if (typeof ExcelJS === 'undefined'){ toast('엑셀 도구(ExcelJS)를 불러오지 못했습니다 — 새로고침 후 다시'); return; }
+  var base = p.y + '_' + VC_K[p.k].t.replace(/\s/g, '') + '_' + B.nm, used = {}, att = [];
+  B.g.forEach(function(G){ G.f.forEach(function(F){ var FF = ((rec.files || {})[bid + '_' + F[0]]) || {}; vcFileIds(FF).forEach(function(id){ att.push(FF[id]); }); }); });
+  var uniq = function(n){ var nm = n, i = 2; while (used[nm]){ nm = n.replace(/(\.[^.]+)?$/, function(e){ return ' (' + i + ')' + (e || ''); }); i++; } used[nm] = 1; return nm; };
+  toast('📦 ' + B.nm + ' 제출 자료 묶는 중… (첨부 ' + att.length + '개)');
+  vcLoadZip().then(function(){
+    var zip = new JSZip();
+    return vcSheet(p, B, rec).then(function(buf){ zip.file(uniq(base + '_마감집계.xlsx'), buf); })
+      .then(function(){ return att.reduce(function(q, m){ return q.then(function(){
+        return getBytes(m.path).then(function(ab){ return WMS2FA.decrypt(m.path, m.iv, ab); }).then(function(bytes){ zip.file(uniq(m.name), bytes); }); }); }, Promise.resolve()); })
+      .then(function(){ return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }); });
+  }).then(function(blob){
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = base + '_세무사제출.zip';
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    toast('📦 ' + a.download + ' — 집계표 + 첨부 ' + att.length + '개');
+  }).catch(function(e){ alert('일괄 다운로드 실패: ' + ((e && (e.code || e.message)) || e)); });
 }
