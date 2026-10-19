@@ -98,6 +98,9 @@ function renderVatClose(){
     + '.vc-o.pay{font-size:14px;font-weight:800;border-top:1px dashed var(--br);margin-top:.25rem;padding-top:.35rem}'
     + '.vc-memo{width:100%;margin-top:.45rem;font-size:12px;padding:.3rem .45rem;min-height:2.2em;resize:vertical}'
     + '.vc-att{margin:.1rem 0 .3rem;padding:.35rem .45rem;border:1px dashed var(--br);border-radius:8px;font-size:12px}.vc-att .f{display:flex;align-items:center;gap:.35rem;padding:.12rem 0}.vc-att .f .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.vc-att .f b{font-family:var(--mo)}.vc-att .btn{padding:.05rem .4rem;font-size:11px}'
+    + '.vc-g.sale .vc-gt,.vc-g.sale label,.vc-g.sale input,.vc-g.sale .vc-att b,.vc-o.sale,.vc-hist .sale{color:#38bdf8}'
+    + '.vc-g.buy .vc-gt,.vc-g.buy label,.vc-g.buy input,.vc-g.buy .vc-att b,.vc-o.buy,.vc-hist .buy{color:#fb923c}'
+    + '.vc-g.minus .vc-gt,.vc-g.minus label,.vc-g.minus input,.vc-o.minus,.vc-neg{color:var(--r)!important}'
     + '.vc-zip{display:block;width:100%;margin-top:.45rem;padding:.45rem;font-size:12.5px}'
     + '.vc-sum{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem 1rem;margin-bottom:.8rem}'
     + '.vc-sum .it{display:flex;flex-direction:column;line-height:1.3}.vc-sum .it span{font-size:11px;color:var(--mu)}.vc-sum .it b{font-family:var(--mo);font-size:15px}'
@@ -124,7 +127,7 @@ function renderVatClose(){
     var d = rec[B.id] || {};
     h += '<div class="vc-b"><div class="vc-bt">' + esc(B.full || B.nm) + '</div><div class="vc-bp">매출기간 ' + p.y + '년 ' + VC_K[p.k].m + ' 마감</div>';
     B.g.forEach(function(G){
-      h += '<div class="vc-g"><div class="vc-gt">' + G.t + (G.s ? ' <span>· ' + G.s + '</span>' : '') + '</div>';
+      h += '<div class="vc-g ' + vcTone(G.t) + '"><div class="vc-gt">' + G.t + (G.s ? ' <span>· ' + G.s + '</span>' : '') + '</div>';
       G.f.forEach(function(F){ var cnt = F[3] && F[3].cnt, val = vcShow(d[F[0]]);
         h += '<div class="vc-r"><label for="vc_' + B.id + '_' + F[0] + '">' + F[1] + '</label><input type="text" inputmode="decimal" id="vc_' + B.id + '_' + F[0] + '" data-b="' + B.id + '" data-f="' + F[0] + '"' + (cnt ? ' class="cnt"' : '')
           + ' value="' + esc(val) + '" placeholder="0" oninput="vcIn(this)" onblur="vcBlur(this)"></div><div class="vc-ev" data-vcev="' + B.id + '.' + F[0] + '"></div>' + (F[3] && F[3].files ? vcFilesHtml(p, B.id, F[0]) : ''); });
@@ -133,7 +136,7 @@ function renderVatClose(){
     var outs = [['sale', '매출총액'], ['buy', '매입총액'], ['diff', '매출 − 매입'], ['vat', '부가세 예상 (차액 − 차액÷1.1)']];
     if (B.id === 'bc') outs.push(['ded', '신용카드·현금영수증 공제 (−1.3%)']);
     outs.push(['less', B.id === 'mm' ? '환급금 (−)' : '예정시 기납부액 (−)']);
-    h += '<div class="vc-out">' + outs.map(function(o){ return '<div class="vc-o"><span>' + o[1] + '</span><b data-vco="' + B.id + '.' + o[0] + '"></b></div>'; }).join('')
+    h += '<div class="vc-out">' + outs.map(function(o){ return '<div class="vc-o ' + ({ sale: 'sale', buy: 'buy', ded: 'minus', less: 'minus' }[o[0]] || '') + '"><span>' + o[1] + '</span><b data-vco="' + B.id + '.' + o[0] + '"></b></div>'; }).join('')
       + '<div class="vc-o pay"><span>부가세 납부예정액</span><b data-vco="' + B.id + '.pay"></b></div></div>'
       + '<textarea class="vc-memo" data-memo="' + B.id + '" placeholder="메모 (누락된 매입, 확인할 것 등)" oninput="vcIn(this)">' + esc((rec.memo || {})[B.id] || '') + '</textarea>'
       + '<button class="btn vc-zip" onclick="vcZip(&quot;' + B.id + '&quot;)" title="집계표 엑셀 + 올린 외부매출 원본 파일을 ZIP 하나로">📦 세무사 제출 자료 일괄 다운로드</button></div>';
@@ -144,13 +147,13 @@ function renderVatClose(){
   var keys = Object.keys(VCLOSE).filter(function(k){ return /^\d{4}_[1-4]$/.test(k); }).sort().reverse();
   h += '<div class="card"><div class="card-h"><span class="card-t">📚 기간별 누적</span><span class="card-s">줄을 누르면 그 기간을 엽니다 · 금액 = 저장된 값 기준</span></div>';
   if (keys.length){
-    h += '<div class="vt-scroll"><table class="ftbl vtt vc-hist"><thead><tr><th>기간</th>' + VC_BIZ.map(function(B){ return '<th class="n">' + B.nm + ' 매출</th><th class="n">매입</th><th class="n">납부예정</th>'; }).join('') + '<th class="n">합계 납부예정</th></tr></thead><tbody>';
+    h += '<div class="vt-scroll"><table class="ftbl vtt vc-hist"><thead><tr><th>기간</th>' + VC_BIZ.map(function(B){ return '<th class="n sale">' + B.nm + ' 매출</th><th class="n buy">매입</th><th class="n">납부예정</th>'; }).join('') + '<th class="n">합계 납부예정</th></tr></thead><tbody>';
     var yr = null, ysum = 0, flush = function(){ if (yr != null) h += '<tr class="yr"><td>' + yr + '년 합계</td><td colspan="' + (VC_BIZ.length * 3) + '"></td><td class="n">' + vcWon(ysum) + '</td></tr>'; };
     keys.forEach(function(k){ var y = +k.slice(0, 4), kk = +k.slice(5), r = VCLOSE[k];
       if (y !== yr){ flush(); yr = y; ysum = 0; }
       var t = vcTotal(r); ysum += t;
       h += '<tr' + (k === vcKey(p) ? ' class="on"' : '') + ' onclick="vcGo({ y: ' + y + ', k: ' + kk + ' })"><td><b>' + y + ' ' + VC_K[kk].t + '</b><div class="sm dim">' + VC_K[kk].m + '</div></td>'
-        + VC_BIZ.map(function(B){ var c = vcCalc(B.id, r[B.id]); return '<td class="n">' + vW(c.sale) + '</td><td class="n">' + vW(c.buy) + '</td><td class="n"><b>' + vcWon(c.pay) + '</b></td>'; }).join('')
+        + VC_BIZ.map(function(B){ var c = vcCalc(B.id, r[B.id]); return '<td class="n sale">' + vW(c.sale) + '</td><td class="n buy">' + vW(c.buy) + '</td><td class="n"><b>' + vcWon(c.pay) + '</b></td>'; }).join('')
         + '<td class="n"><b>' + vcWon(t) + '</b></td></tr>'; });
     flush();
     h += '</tbody></table></div>';
@@ -158,14 +161,15 @@ function renderVatClose(){
   h += '</div>';
   return h;
 }
-function vcWon(n){ n = Math.round(n); return n < 0 ? '<span style="color:var(--g)">(' + vW(-n) + ')</span>' : vW(n); }
+function vcWon(n){ n = Math.round(n) || 0; return n < 0 ? '<span class="vc-neg">−' + vW(-n) + '</span>' : vW(n); }   /* 마이너스 = 적색 */
+function vcTone(t){ return /매출/.test(t) ? 'sale' : /매입/.test(t) ? 'buy' : 'minus'; }   /* 매출 하늘색 · 매입 주황색 · 빼는 칸 적색 (대표님 2026-10-19) */
 
 /* 화면의 계산 칸만 다시 채우기 (입력 중에도) */
 function vcFill(){
   var rec = vcRec(vcP()), all = 0;
   VC_BIZ.forEach(function(B){ var c = vcCalc(B.id, rec[B.id]); all += c.pay;
     Object.keys(c).forEach(function(k){ document.querySelectorAll('[data-vco="' + B.id + '.' + k + '"]').forEach(function(e){
-      e.innerHTML = k === 'pay' ? vcWon(c.pay) : k === 'ded' || k === 'less' ? (c[k] ? (k === 'less' ? '−' : '') + vW(c[k]) : '0') : vW(c[k]); }); });
+      e.innerHTML = k === 'sale' || k === 'buy' ? vW(c[k]) : vcWon(k === 'less' ? -c.less : c[k]); }); });
     B.g.forEach(function(G){ G.f.forEach(function(F){ var e = document.querySelector('[data-vcev="' + B.id + '.' + F[0] + '"]'), s = (rec[B.id] || {})[F[0]], t = vcClean(s), n = vcEval(s);
       var inp = $('vc_' + B.id + '_' + F[0]); if (inp) inp.classList.toggle('bad', isNaN(n));
       if (e) e.textContent = isNaN(n) ? '숫자와 + − 만 넣을 수 있습니다' : /\d[+-]/.test(t) ? '= ' + vW(n) : ''; }); });
@@ -362,31 +366,32 @@ function vcSheet(p, B, rec){
   r = 4;
   var head = function(t, sub){ var row = ws.getRow(r++); row.getCell(1).value = t; if (sub) row.getCell(3).value = sub;
     [1, 2, 3].forEach(function(i){ var c = row.getCell(i); fill(c, 'FFDCE6F1'); c.font = { bold: true }; c.border = box; }); };
-  var line = function(lb, val, note, opt){ var row = ws.getRow(r); row.getCell(1).value = lb; row.getCell(2).value = val; if (note) row.getCell(3).value = note;
+  var TONE = { sale: 'FF0091D5', buy: 'FFE26B0A', minus: 'FFC00000' }, tone = null;
+  var line = function(lb, val, note, opt){ var row = ws.getRow(r); var tc = (opt && opt.tone) || tone; if (tc){ row.getCell(1).font = { color: { argb: TONE[tc] } }; row.getCell(2).font = { color: { argb: TONE[tc] } }; } row.getCell(1).value = lb; row.getCell(2).value = val; if (note) row.getCell(3).value = note;
     row.getCell(2).numFmt = opt && opt.cnt ? '#,##0' : NUM; [1, 2, 3].forEach(function(i){ row.getCell(i).border = box; });
     if (opt && opt.bold){ row.font = { bold: true }; } if (opt && opt.fill) [1, 2, 3].forEach(function(i){ fill(row.getCell(i), opt.fill); });
     row.getCell(3).alignment = { wrapText: true, vertical: 'top' }; return 'B' + (r++); };
   B.g.forEach(function(G){
-    head(G.t, G.s || '');
+    head(G.t, G.s || ''); tone = vcTone(G.t);
     G.f.forEach(function(F){ var t = vcClean(d[F[0]]), n = vcEval(t); if (isNaN(n)) n = 0;
       var val = /\d[+-]/.test(t) ? { formula: t.replace(/^\+/, ''), result: n } : n;
       var FF = files[B.id + '_' + F[0]] || {}, fids = vcFileIds(FF);
       var note = fids.length ? '첨부 ' + fids.length + '개: ' + fids.map(function(id){ return FF[id].name + ' ' + vW(FF[id].amt); }).join(' / ') : '';
       ref[F[0]] = line(F[1], val, note, { cnt: F[3] && F[3].cnt }); });
   });
-  r++;
+  r++; tone = null;
   head('계산', '엑셀과 같은 식');
   var c = vcCalc(B.id, d), plus = function(L){ return L.map(function(k){ return ref[k]; }).join('+'); };
-  var sale = line('매출총액', { formula: plus(S.sale), result: c.sale }, '');
-  var buy = line('매입총액', { formula: plus(S.buy), result: c.buy }, '');
+  var sale = line('매출총액', { formula: plus(S.sale), result: c.sale }, '', { tone: 'sale' });
+  var buy = line('매입총액', { formula: plus(S.buy), result: c.buy }, '', { tone: 'buy' });
   var diff = line('매출 − 매입', { formula: sale + '-' + buy, result: c.diff }, '');
   var vat = line('부가세 예상 (차액 − 차액÷1.1)', { formula: diff + '-' + diff + '/1.1', result: c.vat }, '');
-  var ded = S.ded.length ? line('신용카드·현금영수증 공제 (−1.3%)', { formula: '-(' + plus(S.ded) + ')*0.013', result: c.ded }, '신용카드 + 현금영수증 매출 × 1.3%') : null;
-  var less = line(S.less === 'refund' ? '환급금 (−)' : '예정시 기납부액 (−)', { formula: ref[S.less], result: c.less }, '');
+  var ded = S.ded.length ? line('신용카드·현금영수증 공제 (−1.3%)', { formula: '-(' + plus(S.ded) + ')*0.013', result: c.ded }, '신용카드 + 현금영수증 매출 × 1.3%', { tone: 'minus' }) : null;
+  var less = line(S.less === 'refund' ? '환급금 (−)' : '예정시 기납부액 (−)', { formula: ref[S.less], result: c.less }, '', { tone: 'minus' });
   line('부가세 납부예정액', { formula: vat + (ded ? '+' + ded : '') + '-' + less, result: c.pay }, '', { bold: true, fill: 'FFFFF2CC' });
   /* 첨부 파일 목록 */
   var att = []; B.g.forEach(function(G){ G.f.forEach(function(F){ var FF = files[B.id + '_' + F[0]] || {}; vcFileIds(FF).forEach(function(id){ att.push([F[1], FF[id]]); }); }); });
-  if (att.length){ r++; head('첨부 파일 (같은 ZIP 안)', '');
+  if (att.length){ r++; tone = null; head('첨부 파일 (같은 ZIP 안)', '');
     att.forEach(function(a){ line(a[1].name, a[1].amt, a[0] + (a[1].detail ? ' — ' + a[1].detail : '')); }); }
   var memo = (rec.memo || {})[B.id]; if (memo){ r++; head('메모', ''); ws.mergeCells('A' + r + ':C' + r); ws.getCell('A' + r).value = memo; ws.getCell('A' + r).alignment = { wrapText: true, vertical: 'top' }; ws.getRow(r).height = Math.min(120, 18 * (1 + (memo.match(/\n/g) || []).length)); r++; }
   ws.pageSetup = { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
