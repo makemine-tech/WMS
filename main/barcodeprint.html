@@ -185,11 +185,11 @@ h1 em{color:var(--g);font-style:normal}
       <input type="file" accept=".xlsx,.xls" onchange="handleExcel(this.files[0]);this.value='';">
     </span>
     <button class="btn btn-g" id="printAllBtn" onclick="printExcelAll()" disabled>🖨 전체 인쇄 (확정수량대로)</button>
-    <span class="hint" id="excelInfo">기본 양식: SKU 이름 · SKU Barcode · 확정수량 · 유통(소비기한) 열을 사용합니다.</span>
+    <span class="hint" id="excelInfo">기본 양식: SKU 이름 · SKU Barcode · 확정수량 · 유통(소비기한) · 발주현황(라벨 오른쪽 아래) 열을 사용합니다.</span>
   </div>
   <div class="tbl-wrap" id="excelWrap" style="display:none">
     <table class="tbl">
-      <thead><tr><th>#</th><th>상품명</th><th>바코드</th><th>소비기한(수정가능)</th><th style="text-align:right">장수(수정가능)</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>상품명</th><th>바코드</th><th>소비기한(수정가능)</th><th>발주현황(라벨 오른쪽 아래)</th><th style="text-align:right">장수(수정가능)</th><th></th></tr></thead>
       <tbody id="excelBody"></tbody>
     </table>
   </div>
@@ -228,8 +228,8 @@ h1 em{color:var(--g);font-style:normal}
 /* 라벨 사이즈별 인쇄/미리보기 파라미터.
    printable = 라벨 - 여백(좌우4mm·상하3mm 안쪽). 바코드는 viewBox로 가운데 정렬. */
 var SIZES = {
-  '50x30': { w:50, h:30, padV:3, padH:4, nameFs:'7pt',  expFs:'7.5pt', bcMax:'12mm', barH:42, bcFont:16, nameLines:2, prevScale:7.4 },
-  '80x40': { w:80, h:40, padV:3, padH:4, nameFs:'10.5pt', expFs:'11pt', bcMax:'17mm', barH:64, bcFont:20, nameLines:2, prevScale:5.6 }
+  '50x30': { w:50, h:30, padV:3, padH:4, nameFs:'7pt',  expFs:'7.5pt', bcMax:'12mm', barH:42, bcFont:16, nameLines:2, prevScale:7.4, stFs:'5.5pt' },
+  '80x40': { w:80, h:40, padV:3, padH:4, nameFs:'10.5pt', expFs:'11pt', bcMax:'17mm', barH:64, bcFont:20, nameLines:2, prevScale:5.6, stFs:'8pt' }
 };
 var curSize = '50x30';
 var curTab = 'manual';
@@ -237,7 +237,7 @@ var curTab = 'manual';
    +offX=오른쪽 / +offY=아래. localStorage 저장. 기본값은 측정된 보정치(오른쪽2·아래4). */
 var offX = 2, offY = 4;
 var groupId = null, regRef = null, registry = {};
-var excelRows = [];   /* [{name, barcode, exp, qty}] */
+var excelRows = [];   /* [{name, barcode, exp, qty, st}] — st = 엑셀 「발주현황」 → 라벨 오른쪽 아래 */
 
 /* ─────────────── 유틸 ─────────────── */
 function setMsg(id, kind, html){ var el=document.getElementById(id); if(!el)return; el.className='msg '+kind; el.innerHTML=html; el.style.display=''; }
@@ -453,6 +453,7 @@ function handleExcel(file){
       var cBar  = findCol(headers, ['barcode','바코드'], 5);
       var cQty  = findCol(headers, ['확정수량','수량'], 10);
       var cExp  = findCol(headers, ['유통','소비기한','유통기한'], 13);
+      var cSt   = findCol(headers, ['발주현황'], -1);   /* 없으면 안 찍음 */
       excelRows = [];
       for(var r=hRow+1;r<aoa.length;r++){
         var row = aoa[r]; if(!row||!row.length) continue;
@@ -463,7 +464,8 @@ function handleExcel(file){
           name: row[cName]!=null ? String(row[cName]).trim() : '',
           barcode: String(bc).trim(),
           exp: row[cExp]!=null ? String(row[cExp]).trim() : '',
-          qty: qty
+          qty: qty,
+          st: cSt>=0 && row[cSt]!=null ? String(row[cSt]).trim() : ''
         });
       }
       if(!excelRows.length){ setMsg('m0','er','❌ 바코드가 있는 행이 없습니다'); return; }
@@ -485,6 +487,7 @@ function renderExcel(){
       '<td>'+escH(x.name)+'</td>'+
       '<td style="font-family:var(--mo)">'+escH(x.barcode)+'</td>'+
       '<td><input class="mini-inp" style="width:120px;text-align:left" value="'+escAttr(x.exp)+'" oninput="excelRows['+i+'].exp=this.value"></td>'+
+      '<td><input class="mini-inp" style="width:110px;text-align:left" value="'+escAttr(x.st||'')+'" oninput="excelRows['+i+'].st=this.value"></td>'+
       '<td class="num"><input class="mini-inp" type="number" min="0" value="'+(x.qty||0)+'" oninput="excelRows['+i+'].qty=parseInt(this.value,10)||0"></td>'+
       '<td><button class="rowbtn" onclick="printExcelRow('+i+')">🖨 이 품목</button></td>'+
     '</tr>';
@@ -495,7 +498,7 @@ function excelToLabels(list){
   list.forEach(function(x){
     registerBarcode(x.barcode, x.name);
     var q = x.qty||0;
-    for(var i=0;i<q;i++) labels.push({ code:x.barcode, name:x.name, exp:fmtExp(x.exp) });
+    for(var i=0;i<q;i++) labels.push({ code:x.barcode, name:x.name, exp:fmtExp(x.exp), st:x.st||'' });
   });
   return labels;
 }
@@ -562,7 +565,8 @@ function doPrint(labels){
   var labelsHtml = labels.map(function(it){
     var nm = it.name ? '<div class="nm">'+escH(it.name)+'</div>' : '<div class="nm"></div>';
     var ex = it.exp ? '<div class="ex">소비기한 '+escH(it.exp)+'</div>' : '<div class="ex"></div>';
-    return '<div class="label"><div class="pad">'+nm+'<svg class="bc" data-code="'+escAttr(it.code)+'"></svg>'+ex+'</div></div>';
+    var st = it.st ? '<div class="st">'+escH(it.st)+'</div>' : '';   /* 엑셀 발주현황 — 라벨 오른쪽 아래 (인쇄 보정 이동 안 받음) */
+    return '<div class="label"><div class="pad">'+nm+'<svg class="bc" data-code="'+escAttr(it.code)+'"></svg>'+ex+'</div>'+st+'</div>';
   }).join('');
 
   w.document.open();
@@ -572,13 +576,14 @@ function doPrint(labels){
     '<style>'+
       '@page { size: '+S.w+'mm '+S.h+'mm; margin: 0 }'+
       'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
-      '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; page-break-after:always; overflow:hidden }'+
+      '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; page-break-after:always; overflow:hidden; position:relative }'+
       '.label:last-child { page-break-after:auto }'+
       /* 여백 좌우4mm·상하3mm 안쪽 + 세로 가운데 정렬 */
       '.pad { width:100%; height:100%; box-sizing:border-box; padding:'+S.padV+'mm '+S.padH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.8mm; text-align:center; transform:translate('+offX+'mm,'+offY+'mm) }'+
       '.nm { font-size:'+S.nameFs+'; font-weight:800; line-height:1.05; width:100%; display:-webkit-box; -webkit-line-clamp:'+S.nameLines+'; -webkit-box-orient:vertical; overflow:hidden }'+
       '.bc { width:100%; height:auto; max-height:'+S.bcMax+' }'+
       '.ex { font-size:'+S.expFs+'; font-weight:900; letter-spacing:.02em; line-height:1 }'+
+      '.st { position:absolute; right:1.2mm; bottom:0.8mm; max-width:40%; font-size:'+S.stFs+'; font-weight:800; line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:right }'+
       '@media screen { body{padding:14px;background:#222} .label{background:#fff;margin:0 auto 8px;box-shadow:0 0 0 1px #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
       '@media print { .toolbar{display:none} .label{margin:0} }'+
     '</style></head><body>'+
