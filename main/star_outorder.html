@@ -9430,13 +9430,18 @@ function orderListTotals(o){
   });
   var cp = o.coupang;
   if (cp && cp.sessionId) {
-    var pk = {}, bk = {};
+    /* 적재리스트 인쇄(cpBuildShipListGroups)와 같은 기준 — 품목 = 실제 출고 줄.
+       파렛트 = (입고일+센터+파렛트번호) 장 수, 박스 = 장마다 실제 상품이 담긴 박스번호 개수의 합.
+       등록만 되고 비어 있는 출고박스(cp.shipBoxes)는 세지 않는다. */
+    var pages = {};
     items.forEach(function(it){
-      pk[(it.palletCenter || it.center || '') + '|' + (it.palletEta || it.eta || '') + '|' + (it.palletNo || it.pallet || 1)] = 1;
-      var b = it.shipBoxNo || it.box; if (b) bk[b] = 1;
+      var pk = (it.palletEta || it.eta || '') + '|' + (it.palletCenter || it.center || '') + '|' + (it.palletNo || it.pallet || 1);
+      if (!pages[pk]) pages[pk] = {};
+      var b = it.shipBoxNo || it.srcBoxBarcode || '';
+      if (b) pages[pk][b] = 1;
     });
-    pal = cnt(cp.pallets) || cnt(pk);
-    box = cnt(cp.shipBoxes) || cnt(bk);
+    pal = cnt(pages);
+    box = Object.keys(pages).reduce(function(s, k){ return s + cnt(pages[k]); }, 0);
   }
   return { skus: cnt(kinds), pallets: Math.round(pal * 100) / 100, boxes: box, qty: qty };
 }
