@@ -1646,7 +1646,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <table class="tbl">
         <thead><tr>
           <th>지시서 번호</th><th>출고일자</th><th>거래처/받는곳</th>
-          <th style="text-align:right">종수</th><th style="text-align:right">총수량</th>
+          <th style="text-align:right">종수</th><th style="text-align:right">총 파렛트</th>
+          <th style="text-align:right">박스수</th><th style="text-align:right">총수량</th>
           <th>상태</th><th>작성</th><th></th>
         </tr></thead>
         <tbody id="listBody"></tbody>
@@ -9416,6 +9417,29 @@ function statusLabel(s){
   if (s==='cancelled') return '<span class="status-chip status-cancelled">취소</span>';
   return '<span class="status-chip status-draft">임시저장</span>';
 }
+/* 저장된 지시서 목록 합계 — 종수 / 총 파렛트 / 박스수 / 총수량
+ * 쿠팡 작업 지시서: 품목이 스캔 줄 단위라 종수는 바코드 종류, 파렛트·박스는 작업 기록(마감 파렛트·출고박스) 개수.
+ * 일반 지시서: 품목 줄마다 입력한 파렛트수·박스수 합. */
+function orderListTotals(o){
+  var items = o.items || [];
+  var cnt = function(v){ return v ? Object.keys(v).length : 0; };   /* Firebase 배열이 객체로 올 때도 */
+  var kinds = {}, qty = 0, pal = 0, box = 0;
+  items.forEach(function(it, i){
+    kinds[it.barcode || it.skuId || it.name || ('#' + i)] = 1;
+    qty += (+it.qty || 0); pal += (+it.pallet || 0); box += (+it.boxCnt || 0);
+  });
+  var cp = o.coupang;
+  if (cp && cp.sessionId) {
+    var pk = {}, bk = {};
+    items.forEach(function(it){
+      pk[(it.palletCenter || it.center || '') + '|' + (it.palletEta || it.eta || '') + '|' + (it.palletNo || it.pallet || 1)] = 1;
+      var b = it.shipBoxNo || it.box; if (b) bk[b] = 1;
+    });
+    pal = cnt(cp.pallets) || cnt(pk);
+    box = cnt(cp.shipBoxes) || cnt(bk);
+  }
+  return { skus: cnt(kinds), pallets: Math.round(pal * 100) / 100, boxes: box, qty: qty };
+}
 function renderList(){
   var sel = document.getElementById('filterStatus').value;
   var q = (document.getElementById('filterQ').value||'').trim().toLowerCase();
@@ -9429,18 +9453,19 @@ function renderList(){
   });
   var tb = document.getElementById('listBody');
   if (!rows.length) {
-    tb.innerHTML = '<tr><td colspan="8" class="empty-row">조건에 맞는 지시서가 없습니다</td></tr>';
+    tb.innerHTML = '<tr><td colspan="10" class="empty-row">조건에 맞는 지시서가 없습니다</td></tr>';
     return;
   }
   tb.innerHTML = rows.map(function(o){
-    var n = (o.items||[]).length;
-    var q = (o.items||[]).reduce(function(s,it){ return s + (+it.qty||0); }, 0);
+    var t = orderListTotals(o);
     return '<tr>'+
       '<td class="cell-bc">'+escH(o.orderId)+'</td>'+
       '<td>'+escH(o.outboundDate||'')+'</td>'+
       '<td class="cell-name" title="'+escH(o.customer)+'">'+escH(o.customer||'')+'</td>'+
-      '<td class="cell-num">'+n+'</td>'+
-      '<td class="cell-num" style="color:var(--g)">'+q+'</td>'+
+      '<td class="cell-num">'+t.skus+'</td>'+
+      '<td class="cell-num">'+t.pallets+'</td>'+
+      '<td class="cell-num">'+t.boxes+'</td>'+
+      '<td class="cell-num" style="color:var(--g)">'+t.qty+'</td>'+
       '<td>'+statusLabel(o.status||'draft')+'</td>'+
       '<td style="font-size:.72rem;color:var(--mu)">'+fmtDt(o.createdAt||0)+'<br>'+escH(o.createdBy||'')+'</td>'+
       '<td style="white-space:nowrap;display:flex;gap:.3rem;flex-wrap:wrap">'+
