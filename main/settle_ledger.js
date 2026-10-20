@@ -11,7 +11,7 @@
        settlement/ledgerInfo/{업체키} = { group, mail, biz, corp, ceo, addr, btype, bitem, mail1, mail2 }
        settlement/ledgerExtra/{ym}/{id} = { group, name, mail, amount, send, sent, inv, chk, paid, paidAmt, carry, memo }
        settlement/ledgerAlias/{관리표 이름} = 업체키   — 관리표 이름(법인명) ↔ 정산서 업체 연결을 기억 (금액으로 한 번 맞추면 지난달 시트에도)
-   전미수 = 지난달 미수 (지난달 전미수 + 정산금액 − 입금액, 「입금」만 체크하고 입금액이 비면 전액 입금) — 직접 넣으면(carry) 그 값
+   전미수 = 지난달 미수 (지난달 전미수 + 정산금액 − 입금액, 「입금」 체크 또는 진행 「3 체크완료」인데 입금액이 비면 전액 입금) — 직접 넣으면(carry) 그 값
    쓰는 전역: db, YM, ALLBOX, VENDORS, monthVendors, doneOf, decryptBox, esc, toast, ymLabel, firebase, XLSX, SETTLE_DESIGN, SETTLE_STMT
 ============================================================ */
 var LEDGER = {}, LINFO = {}, LEXTRA = {}, LALIAS = {}, LYM = null, LG_OPT = (function(){ try { return JSON.parse(localStorage.getItem('ledgerOpt')) || { design: 'd1', hideZero: true }; } catch (e) { return { design: 'd1', hideZero: true }; } })();
@@ -52,7 +52,8 @@ function lgState(kind, key, ym, depth, name){
   var amt = A ? A.v : man, src = A ? A.src : (man != null ? '직접' : '');
   var carry = rec.carry != null && rec.carry !== '' ? +rec.carry : (depth > 24 || kind !== 'v' ? 0 : lgState('v', key, lgPrev(ym), (depth || 0) + 1, name).unpaid);
   var due = (carry || 0) + (amt || 0);
-  var paid = rec.paidAmt != null && rec.paidAmt !== '' ? +rec.paidAmt : (rec.paid ? due : 0);
+  /* 진행 「3 체크완료」 = 입금 확인 끝 → 입금액을 안 넣었으면 전액 입금 (미수에서 빠짐, 대표님 2026-10-20) — 「2 계산서발행완료」까지는 미수 */
+  var paid = rec.paidAmt != null && rec.paidAmt !== '' ? +rec.paidAmt : (rec.paid || rec.chk ? due : 0);
   return { rec: rec, amt: amt, src: src, man: man, reread: reread, carry: carry || 0, paid: paid, unpaid: Math.round(due - paid) };
 }
 function lgSet(path, v){ return db.ref('settlement/' + path).set(v === '' || v == null || v === false ? null : v).catch(function(e){ toast('저장 실패: ' + ((e && e.code) || e)); }); }
@@ -144,7 +145,7 @@ function renderLedger(){
       + '<td class="stk" style="min-width:200px;max-width:240px"><b>' + esc(r.name) + '</b>' + (r.kind === 'v' ? ' <a href="javascript:void 0" class="sm" title="정산서 전달메일 · 세금계산서용 정보" onclick="lgInfo(\'' + esc(r.key) + '\')">⚙' + (I.biz && I.mail ? '' : '<span style="color:#fbbf24">!</span>') + '</a>' : '') + (rec.xlName && rec.xlName !== r.name ? '<div class="sm dim" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">관리표: ' + esc(rec.xlName) + '</div>' : '') + '</td>'
       + '<td><input type="text" class="famt" style="width:80px" value="' + esc(r.group) + '" onchange="lgSet(\'' + (r.kind === 'v' ? 'ledgerInfo/' + r.key + '/group' : P(r, 'group')) + '\', this.value.trim())"></td>'
       + '<td class="n">' + num('carry', rec.carry, s.carry ? won0(s.carry) : '', carryRed) + (carryRed && (rec.carry == null || rec.carry === '') ? '<div class="sm" style="color:#f87171">미수 ' + won0(s.carry) + '</div>' : '') + '</td>'
-      + '<td class="n">' + amtCell + '</td><td class="n">' + num('send', rec.send, '보낼 돈') + '</td><td class="n">' + num('paidAmt', rec.paidAmt, rec.paid && rec.paidAmt == null ? '관리표 입금' : '입금액') + '</td>'
+      + '<td class="n">' + amtCell + '</td><td class="n">' + num('send', rec.send, '보낼 돈') + '</td><td class="n">' + num('paidAmt', rec.paidAmt, rec.chk && rec.paidAmt == null ? '전액 입금(체크완료)' : rec.paid && rec.paidAmt == null ? '관리표 입금' : '입금액') + '</td>'
       + '<td>' + sel + '</td>'
       + '<td class="n"><b style="color:' + (s.unpaid > 0 ? '#f87171' : s.unpaid < 0 ? '#60a5fa' : 'var(--g)') + '">' + (s.unpaid ? won0(s.unpaid) + (s.unpaid < 0 ? ' (초과)' : '') : (s.amt || s.carry ? '완료' : '')) + '</b></td>'
       + '<td>' + dl + '</td><td><input type="text" class="famt" style="width:150px" value="' + esc(rec.memo || '') + '" onchange="lgSet(\'' + P(r, 'memo') + '\', this.value.trim())"></td>'
