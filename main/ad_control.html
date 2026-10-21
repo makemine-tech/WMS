@@ -14,6 +14,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
 <script src="/wms_access.js" data-page="ad_control" data-floor="3"></script>
+<!-- 2차 인증: 급여관리·정산관리·사이트 통계와 같은 2차 비밀번호 -->
+<script src="/wms_2fa.js"></script>
 <style>
 :root{
   --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
@@ -107,6 +109,8 @@ td.kwn{min-width:150px}
     <div class="top-sp"></div>
     <span class="st" id="st">—</span>
     <button class="btn p" id="btnNow">⟳ 지금 새로 받기</button>
+    <span class="st" title="사용하지 않으면 자동으로 잠깁니다" style="border:1px solid var(--br);border-radius:7px;padding:.35rem .6rem;font-family:var(--mo)">🔓 자동잠금 <span data-2fa-timer></span></span>
+    <button class="btn" onclick="WMS2FA.lockNow()" style="color:var(--y)">지금 잠그기</button>
     <a href="/wms_admin.html">관리도구</a>
     <a href="/index.html">홈으로</a>
   </div></div>
@@ -409,25 +413,31 @@ document.addEventListener('click', function(ev){
   }
 });
 
-/* ── 시작 — wms_access.js 가 슈퍼관리자 확인을 마치면 ── */
-var _started = false;
+/* ── 시작 — 1차 wms_access.js(슈퍼관리자) → 2차 비밀번호(wms_2fa.js) 를 통과하면 ── */
+var _started = false, _open = false;
 function start(){
-  if (_started) return; _started = true;
+  _open = true;
+  if (_started) { load(); return; }
+  _started = true;
   db = firebase.database(); fns = firebase.app().functions('asia-northeast3');
-  $('gate').classList.add('hide'); $('app').classList.remove('hide');
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
   $('btnSales').addEventListener('click', saveSales);
-  window.addEventListener('resize', function(){ if (D.struct) renderChart(); });
+  window.addEventListener('resize', function(){ if (_open && D.struct) renderChart(); });
   load();
-  setInterval(function(){ if (!document.hidden) load(); }, 5 * 60 * 1000);   /* 5분마다 화면 갱신 (수집은 서버가 30분마다) */
+  setInterval(function(){ if (_open && !document.hidden) load(); }, 5 * 60 * 1000);   /* 5분마다 화면 갱신 (수집은 서버가 30분마다) */
 }
-(function wait(){
-  var A = window.WMSAccess;
-  if (A && A.ready && A.level >= 3) { start(); return; }
-  if (A && A.ready && A.level < 3) { $('gate').textContent = '슈퍼관리자만 볼 수 있습니다'; return; }
-  setTimeout(wait, 150);
-})();
+WMS2FA.guard({
+  page: 'ad_control', title: '광고 관제', icon: '📣',
+  onUnlock: function(){ $('gate').classList.add('hide'); $('app').classList.remove('hide'); start(); },
+  onLock: function(){
+    _open = false;
+    D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [] };
+    ['kpis', 'tblShop', 'tblKw', 'log', 'warn'].forEach(function(id){ $(id).innerHTML = ''; });
+    $('chart').innerHTML = ''; $('tip').classList.add('hide');
+    $('app').classList.add('hide');
+  }
+});
 </script>
 </body>
 </html>
