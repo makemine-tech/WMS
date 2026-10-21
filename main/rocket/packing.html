@@ -752,7 +752,7 @@
   <section class="panel">
     <div class="panel-head">
       <div class="panel-title"><span class="step">3</span>PDF 업로드 (거래명세서 · 라벨 · 선택)</div>
-      <span style="font-size:11px; color:var(--text-sub);">파일명으로 자동 분류 (booking_maniFest_*, supplier.coupang.com_*, download*, Truck_Shipment_*)</span>
+      <span style="font-size:11px; color:var(--text-sub);">파일명으로 자동 분류 (booking_maniFest_* · 기사님전달문서_*, supplier.coupang.com_* · 물류동봉문서_*, download* · Truck_Shipment_* · 물류부착문서_*)</span>
     </div>
     <div class="row">
       <div class="field" style="flex: 3 1 380px;">
@@ -760,7 +760,7 @@
         <div class="dropzone" id="pdfDropzone">
           <div class="dz-icon">📑</div>
           <div class="dz-title">PDF 여러 개를 한번에 끌어다 놓으세요</div>
-          <div class="dz-sub">booking_manifest · supplier.coupang.com · download · Truck_Shipment 자동 인식</div>
+          <div class="dz-sub">booking_manifest · supplier.coupang.com · download · Truck_Shipment · 기사님전달문서 · 물류동봉문서 · 물류부착문서 자동 인식</div>
           <input type="file" id="pdfFileInput" accept=".pdf" multiple />
         </div>
       </div>
@@ -1668,6 +1668,11 @@ document.getElementById("defaultYear").addEventListener("input", renderIfReady);
      supplier  : /^supplier\.coupang\.com/i
      download  : /^download\d*\.pdf$/i
      truck     : /^truck_shipment/i
+   쿠팡 새 파일명(2026-10~)도 같은 칸으로:
+     기사님전달문서_*  → booking  (트럭쉽먼트 거래명세서 + 기사님 QR)
+     물류동봉문서_*    → supplier (밀크런 거래명세서, 쿠팡 제출용/업체 보관용 2장)
+     물류부착문서_*    → 내용으로 판별 — '_트럭'/'_TRUCK' 이면 truck(홀수=트럭 라벨),
+                        밀크런ID/MRN 이 있으면 download(밀크런 부착 라벨, 맨 뒤 적재리스트 페이지는 제외)
    각 카테고리 출력 정책:
      booking  → 전체 페이지
      supplier → 홀수 페이지만
@@ -1675,8 +1680,8 @@ document.getElementById("defaultYear").addEventListener("input", renderIfReady);
      truck    → 홀수 페이지만 (홀수=센터정보, 짝수=팔레트상세, 홀수만 부착용)
 ========================================================= */
 const PDF_CAT = {
-  booking:  { name: 'booking',  label: '거래명세서(booking)', regex: /booking_?manifest/i },
-  supplier: { name: 'supplier', label: '거래명세서(supplier)', regex: /supplier\.coupang/i },
+  booking:  { name: 'booking',  label: '거래명세서(booking)', regex: /booking_?manifest|기사님\s*전달\s*문서/i },
+  supplier: { name: 'supplier', label: '거래명세서(supplier)', regex: /supplier\.coupang|물류\s*동봉\s*문서/i },
   download: { name: 'download', label: '밀크런 라벨(download)', regex: /^download\d*\.pdf$/i },
   truck:    { name: 'truck',    label: '트럭쉽먼트 라벨',     regex: /truck_?shipment/i },
 };
@@ -1686,6 +1691,17 @@ function classifyPdf(filename) {
   for (const k of ['booking','supplier','download','truck']) {
     if (PDF_CAT[k].regex.test(filename)) return k;
   }
+  if (/물류\s*부착\s*문서/.test(filename)) return 'attach';   // 내용 보고 truck / download 결정
+  return null;
+}
+
+/* 물류부착문서 — 첫 장 글자로 트럭 라벨인지 밀크런 라벨인지 판별 */
+async function detectAttachPdf(file) {
+  const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const tc = await (await doc.getPage(1)).getTextContent();
+  const t = tc.items.map(it => it.str).join(' ');
+  if (/_\s*(트럭|TRUCK)/i.test(t)) return 'truck';
+  if (/밀크런|MRN\d/i.test(t)) return 'download';
   return null;
 }
 
@@ -1731,18 +1747,23 @@ async function analyzePdf(file, category) {
       if (m) center = m[1];
     } else if (category === 'supplier') {
       // "FC Name 안성8 Delivery..."
-      m = text.match(/FC\s*Name\s+(\S+)/);
+      m = text.match(/FC\s*Name\s+(\S+)/)
+       || text.match(/납품\s*센터\s+(\S+?)\s*\(/);          // 물류동봉문서: "납품 센터 전라광주4(GWJ4)"
       if (m) center = m[1];
     } else if (category === 'download') {
       // "받는 사람 : 안성8(10)"
-      m = text.match(/받는\s*사람\s*[:：]\s*(\S+?)\s*\(/);
+      m = text.match(/받는\s*사람\s*[:：]\s*(\S+?)\s*\(/)
+       || text.match(/부착해주세요\s+(\S+?)\s*\(\d+\)/);    // 물류부착문서(밀크런): "부착해주세요 전라광주4(29)"
       if (m) center = m[1];
     } else if (category === 'truck') {
       // 홀수페이지에 "CHA8 천안8(RC)_TRUCK_001" 또는 "INC41 인천41(RC)_TRUCK_001"
-      m = text.match(/[A-Z]{2,4}\d*\s+(\S+?\(?\S*?\)?)_TRUCK/);
+      m = text.match(/[A-Z]{2,4}\d*\s+(\S+?\(?\S*?\)?)_TRUCK/)
+       || text.match(/부착해주세요\s+(\S+?)\s*\[/);          // 물류부착문서(트럭): "부착해주세요 동탄1 [로켓그로스] DON1_트럭1"
       if (m) center = m[1];
     }
     const pg = { idx: i, text, center, centerNorm: normCenter(center) };
+    /* 물류부착문서(밀크런) 맨 뒤 '팔레트 적재리스트' 빈 양식 — 라벨이 아니라 출력·매칭에서 뺀다 */
+    if (category === 'download' && /적재리스트/.test(text)) pg.notLabel = true;
     /* 밀크런 라벨의 파렛트 번호 — 적재리스트 '총수-번호'(예 6-1)와 맞춘다.
        '파렛트 1/6', '파렛트 6-1', 'PALLET 1/6' 같은 표기를 모두 잡고,
        숫자 한 개만 있으면 번호로만 본다. 못 읽으면 예전처럼 순서대로 배정된다. */
@@ -1765,11 +1786,11 @@ async function analyzePdf(file, category) {
       if (p.idx % 2 === 1) {
         const next = pages[p.idx]; // 다음 짝수페이지 (배열 인덱스 = p.idx)
         if (next) {
-          const m = next.text.match(/PALLET[_\s-]*(\d+)/i);
+          const m = next.text.match(/(?:PALLET|팔레트)[_\s-]*(\d+)/i);
           if (m) p.palletNo = parseInt(m[1], 10);
           p.skus = truckPageSkus(next.text);   // 이 파렛트에 실린 SKU ID — 엑셀 파렛트와 순서대로 대조
         }
-        const tm = p.text.match(/_TRUCK[_\s-]*(\d+)/i);
+        const tm = p.text.match(/_(?:TRUCK|트럭)[_\s-]*(\d+)/i);
         if (tm) p.truckNo = parseInt(tm[1], 10);
       }
     }
@@ -1802,7 +1823,10 @@ function pickPagesForCategory(item) {
   switch (item.category) {
     case 'booking':  return Array.from({length:n}, (_,i)=>i+1);              // 전체
     case 'supplier': return Array.from({length:n}, (_,i)=>i+1).filter(i=>i%2===1); // 홀수
-    case 'download': return Array.from({length:Math.ceil(n/2)}, (_,i)=>i+1); // 앞 절반
+    case 'download': {                                                         // 라벨 페이지의 앞 절반 (적재리스트 페이지 제외)
+      const lab = item.pages.filter(p => !p.notLabel).map(p => p.idx);
+      return lab.slice(0, Math.ceil(lab.length/2));
+    }
     case 'truck':    return Array.from({length:n}, (_,i)=>i+1).filter(i=>i%2===1); // 홀수
   }
   return [];
@@ -1849,7 +1873,8 @@ async function handlePdfFiles(files) {
   setPdfStatus(`PDF ${files.length}개 분석 중...`);
   let added = 0, skipped = 0;
   for (const f of files) {
-    const cat = classifyPdf(f.name);
+    let cat = classifyPdf(f.name);
+    if (cat === 'attach') { try { cat = await detectAttachPdf(f); } catch (e) { cat = null; } }
     if (!cat) { skipped++; continue; }
     try {
       // 동일 파일명이 이미 있으면 교체
@@ -2357,6 +2382,9 @@ function truckPageSkus(text) {
   const re = /(?:^|\s)(\d{7,9})\s+\d{1,6}(?=\s|$)/g;
   let m;
   while ((m = re.exec(i >= 0 ? t.slice(i) : t))) ids.push(m[1]);
+  /* 물류부착문서(트럭): "상품 바코드 S0033592815086  상품번호 53307084  상품명 …" */
+  const re2 = /S\d{10,16}\s+(\d{7,9})(?=\s|$)/g;
+  while ((m = re2.exec(t))) ids.push(m[1]);
   return [...new Set(ids)].sort();
 }
 
