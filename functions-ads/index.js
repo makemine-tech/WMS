@@ -298,6 +298,7 @@ exports.adsSetBid = onCall(OPTS, async (req) => {
   const maxBid = await maxBidCfg();
   const bid = Math.round((+d.bid || 0) / 10) * 10;
   if (!(bid >= 50)) throw new HttpsError('invalid-argument', '입찰가는 50원 이상이어야 합니다');
+  if (kind === 'keyword' && bid < 70) throw new HttpsError('invalid-argument', '파워링크 키워드 입찰가는 70원 이상이어야 합니다');
   if (bid > maxBid) throw new HttpsError('failed-precondition', '최고 입찰가(' + maxBid + '원)를 넘습니다 — 설정에서 최고 입찰가를 올리세요');
   /* 손으로 금액을 정하면 그 대상의 목표 순위 추적은 끈다 (다음 수집 때 덮어쓰지 않게) */
   const had = (await db().ref('adctl/target/' + id).once('value')).exists();
@@ -358,21 +359,33 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
   if (T.kind === 'keyword') {
     const est = await estimateBid(api, id, T.dev, T.rank);
     if (!est) { await db().ref('adctl/target/' + id).update({ note: '네이버 예상 입찰가를 못 받음', chk: now }); return { id, skip: 'no-estimate' }; }
+    /* 예상 입찰가 흐름 — 경쟁(비딩)이 세지는지 화면 경고등이 본다: est0 = 목표 건 뒤 첫 값, estDay = 오늘 첫 값 */
+    const today = kday(now), eu = { est, estTs: now, estPrev: T.est != null ? T.est : est };
+    if (T.est0 == null) eu.est0 = est;
+    if (T.estDayD !== today) { eu.estDayD = today; eu.estDay = est; }
+    await db().ref('adctl/target/' + id).update(eu); Object.assign(T, eu);
     /* 광고그룹의 기기별 입찰 가중치(%)가 걸려 있으면 실제 입찰 = 입찰가 × 가중치 — 그만큼 나눠서 맞춘다 */
     const g = (S.adgroups || {})[((S.keywords || {})[id] || {}).gid] || {};
     const w = +(T.dev === 'pc' ? g.pcW : g.moW) || 100;
     want = est * 100 / w; why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '');
   } else {
     if (now - (+T.lastAdj || 0) < 55 * 60e3) return { id, skip: 'wait' };
-    const R = (rank[id] || {})[T.dev];
-    const rk = R && !(rank[id] || {}).d7 && R[1] > 0 ? R[0] : null;
-    if (rk == null) { want = bid * 1.15; why = '오늘 노출 없음'; }
-    else if (rk > T.rank + 0.5) { want = bid * (rk - T.rank > 2 ? 1.2 : 1.1); why = '현재 ' + rk + '위'; }
-    else if (rk < T.rank - 0.7) { want = bid * 0.93; why = '현재 ' + rk + '위'; }
-    else { await db().ref('adctl/target/' + id).update({ note: '목표 근처 (현재 ' + rk + '위)', chk: now }); return { id, skip: 'on-target', rk }; }
+    const RR = rank[id] || {}, R = RR[T.dev];
+    /* 오늘 그 기기 노출이 있으면 오늘 순위, 없으면 최근 7일 순위로 판단 (2026-10-22: 새벽 1시 「오늘 노출 없음」으로 밤새 올라갈 뻔함) */
+    const rk = R && R[1] > 0 ? R[0] : null, src = RR.d7 ? '최근 7일 ' : '현재 ';
+    const hh = kst(now).getUTCHours();
+    if (rk == null) {
+      if (hh < 8) { await db().ref('adctl/target/' + id).update({ note: '새벽이라 노출이 적어 아침까지 기다림', chk: now }); return { id, skip: 'night' }; }
+      if (now - (+T.lastAdj || 0) < 2 * 3600e3) { await db().ref('adctl/target/' + id).update({ note: '노출 기록 없음 — 2시간 지켜본 뒤 올림', chk: now }); return { id, skip: 'wait-noimp' }; }
+      want = bid * 1.1; why = '노출 기록 없음';
+    }
+    else if (rk > T.rank + 0.5) { want = bid * (rk - T.rank > 2 ? 1.2 : 1.1); why = src + rk + '위'; }
+    else if (rk < T.rank - 0.7) { want = bid * 0.93; why = src + rk + '위'; }
+    else { await db().ref('adctl/target/' + id).update({ note: '목표 근처 (' + src + rk + '위)', chk: now }); return { id, skip: 'on-target', rk }; }
   }
   const raw = Math.round(want / 10) * 10;
-  const to = Math.max(50, Math.min(cap, raw)), atCap = raw > cap;
+  const minBid = T.kind === 'keyword' ? 70 : 50;   /* 파워링크 최소 입찰가 70원 (50원 보내면 400 Invalid value), 쇼핑 50원 */
+  const to = Math.max(minBid, Math.min(cap, raw)), atCap = raw > cap;
   if (to === bid || (Math.abs(to - bid) < Math.max(10, bid * 0.05) && !(atCap && bid < cap))) {
     await db().ref('adctl/target/' + id).update({ note: atCap ? '상한 ' + cap + '원에 닿음 — 목표 순위가 안 나오면 상한을 올리세요' : '목표 근처 · ' + why, chk: now });
     return { id, skip: 'small', atCap };
@@ -404,7 +417,7 @@ exports.adsSetTargetBulk = onCall(OPTS, async (req) => {
   if (d.rank == null || d.rank === '') {
     const up = {}; ids.forEach((id) => { up['adctl/target/' + id] = null; });
     await db().ref().update(up);
-    await writeLog(who, { kind, id: ids[0], act: 'target', to: null, reason: '목표 순위 일괄 해제 · ' + ids.length + '개', ok: true, bulk: ids.length });
+    await writeLog(who, { kind, id: ids[0], ids, act: 'target', to: null, reason: '목표 순위 일괄 해제 · ' + ids.length + '개', ok: true, bulk: ids.length });
     return { ok: true, cleared: ids.length };
   }
   const rank = Math.round(+d.rank), dev = d.dev === 'pc' ? 'pc' : 'mo';
@@ -414,7 +427,7 @@ exports.adsSetTargetBulk = onCall(OPTS, async (req) => {
   const now = Date.now(), T = { kind, dev, rank, cap, by: who.email || who.uid, ts: now, lastAdj: 0 };
   const up = {}; ids.forEach((id) => { up['adctl/target/' + id] = T; });
   await db().ref().update(up);
-  await writeLog(who, { kind, id: ids[0], act: 'target', to: rank, bulk: ids.length,
+  await writeLog(who, { kind, id: ids[0], ids, act: 'target', to: rank, bulk: ids.length,
     reason: '목표 ' + (dev === 'pc' ? 'PC' : '모바일') + ' ' + rank + '위 일괄 · ' + ids.length + '개 · 상한 ' + cap + '원', ok: true });
   const api = client();
   const S = (await db().ref('adctl/struct').once('value')).val() || {};
