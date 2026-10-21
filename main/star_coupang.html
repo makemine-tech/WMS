@@ -723,7 +723,15 @@ body.sd-collapsed .sd-fold{top:.3rem}
 <div class="modal-bg" id="boxGenModal" onclick="if(event.target===this)closeBoxGenModal()">
   <div class="modal">
     <h2>📦 박스바코드 생성/인쇄 <button class="close" onclick="closeBoxGenModal()">✕</button></h2>
-    <div class="modal-sub">시작 바코드 + 생성 수량을 입력하면 순차 바코드가 만들어집니다. 50×30mm 라벨로 인쇄, 100장씩 끊어 출력. 중간 손실 시 번호로 재출력 가능.</div>
+    <div class="modal-sub">시작 바코드 + 생성 수량을 입력하면 순차 바코드가 만들어집니다. 고른 라벨 크기(50×30 / 80×40mm)로 인쇄, 100장씩 끊어 출력. 중간 손실 시 번호로 재출력 가능.</div>
+
+    <div class="modal-row">
+      <label>라벨 크기</label>
+      <select id="labelSizeSel" onchange="setLabelSize(this.value)" style="background:#0a0d13;color:var(--tx);border:1.5px solid var(--br);border-radius:6px;padding:.5rem .7rem;font-size:.95rem;outline:none;width:100%">
+        <option value="50x30">50 × 30 mm (기본)</option>
+        <option value="80x40">80 × 40 mm</option>
+      </select>
+    </div>
 
     <!-- 1) 생성 폼 -->
     <div class="modal-row">
@@ -746,7 +754,7 @@ body.sd-collapsed .sd-fold{top:.3rem}
       <div>생성 범위 <span class="range" id="genRange">—</span> · 총 <b id="genTotal">0</b>장</div>
       <div>인쇄 완료 <b id="printedCnt">0</b>/<b id="printedTotal">0</b>장 (<b id="printedPct">0%</b>)</div>
       <div class="modal-prg"><div class="fill" id="printedFill"></div></div>
-      <div style="font-size:.72rem;color:var(--mu);margin-top:.35rem">※ 인쇄 다이얼로그에서 프린터를 50×30mm 라벨용으로 설정하세요. 여백 0, 배율 100%.</div>
+      <div style="font-size:.72rem;color:var(--mu);margin-top:.35rem">※ 인쇄 다이얼로그에서 프린터를 <span id="labelSizeNote">50×30</span>mm 라벨용으로 설정하세요. 여백 0, 배율 100%.</div>
     </div>
     <div class="modal-actions" id="printActions" style="display:none">
       <button class="btn btn-y" onclick="printNextChunk()" id="printNextBtn">🖨 다음 100장 인쇄</button>
@@ -4808,9 +4816,28 @@ var labelPad = 4;          // 숫자 자릿수
 var printedCount = 0;      // 인쇄 완료 누적
 var LABEL_KEY = 'star_coupang_labels_v1';
 
+/* 라벨 크기 — 50×30(기본) / 80×40. 50×30 값은 기존 출력과 동일.
+   inW/inH = 안쪽 영역, bcMax/bcMaxKo = 바코드 최대 높이(한글 없음/있음), koFs = 한글 글자, barH/barHKo = JsBarcode 막대 높이 */
+var LABEL_SIZE_KEY = 'star_coupang_labelSize';
+var LABEL_SIZES = {
+  '50x30': { w:50, h:30, inW:46, inH:26, gap:0.8, bcMax:22, bcMaxKo:15, koFs:14, barH:65, barHKo:50 },
+  '80x40': { w:80, h:40, inW:75, inH:36, gap:1.2, bcMax:30, bcMaxKo:21, koFs:20, barH:90, barHKo:60 }
+};
+var labelSize = '50x30';
+try { var _ls = localStorage.getItem(LABEL_SIZE_KEY); if (LABEL_SIZES[_ls]) labelSize = _ls; } catch(e){}
+
+function setLabelSize(v) {
+  if (!LABEL_SIZES[v]) v = '50x30';
+  labelSize = v;
+  try { localStorage.setItem(LABEL_SIZE_KEY, v); } catch(e){}
+  var sel = document.getElementById('labelSizeSel'); if (sel) sel.value = v;
+  var note = document.getElementById('labelSizeNote'); if (note) note.textContent = v.replace('x','×');
+}
+
 /* 모달 열기/닫기 */
 function openBoxGenModal() {
   document.getElementById('boxGenModal').classList.add('open');
+  setLabelSize(labelSize);
   loadBoxLabels();
   renderGenInfo();
   setTimeout(function(){ document.getElementById('genStart').focus(); }, 50);
@@ -4970,22 +4997,23 @@ function printLabels(codes, doneCb) {
   }).join('');
   var firstCode = items[0].code;
   var lastCode = items[items.length-1].code;
+  var S = LABEL_SIZES[labelSize] || LABEL_SIZES['50x30'];
 
   w.document.open();
   w.document.write(
     '<!doctype html><html><head><meta charset="utf-8"><title>박스 라벨 '+items.length+'장</title>'+
     '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>'+
     '<style>'+
-      '@page { size: 50mm 30mm; margin: 0 }'+
+      '@page { size: '+S.w+'mm '+S.h+'mm; margin: 0 }'+
       'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
-      '.label { width:50mm; height:30mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
+      '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
       '.label:last-child { page-break-after:auto }'+
-      '.inner { width:46mm; height:26mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.8mm }'+
+      '.inner { width:'+S.inW+'mm; height:'+S.inH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:'+S.gap+'mm }'+
       /* 바코드: viewBox+preserveAspectRatio로 가운데 정렬(인쇄 시 위로 쏠림 방지), height:auto 로 자연 비율 유지 */
-      '.bc { width:46mm; height:auto; max-height:22mm }'+
+      '.bc { width:'+S.inW+'mm; height:auto; max-height:'+S.bcMax+'mm }'+
       /* 한글 라벨 있는 경우: 바코드 영역 조금 줄이고 한글 추가 */
-      '.label.with-label .bc { max-height:15mm }'+
-      '.ko { font-size:14pt; font-weight:900; line-height:1; letter-spacing:.04em; color:#000 }'+
+      '.label.with-label .bc { max-height:'+S.bcMaxKo+'mm }'+
+      '.ko { font-size:'+S.koFs+'pt; font-weight:900; line-height:1; letter-spacing:.04em; color:#000 }'+
       '@media screen { body{padding:12px;background:#222;color:#fff} .label{background:#fff;color:#000;margin:0 auto 4px;border:1px dashed #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
       '@media print { .toolbar{display:none} .label{margin:0} }'+
     '</style></head><body>'+
@@ -4999,7 +5027,7 @@ function printLabels(codes, doneCb) {
       'window.addEventListener("load",function(){'+
         'var svgs = document.querySelectorAll("svg.bc");'+
         'svgs.forEach(function(s){'+
-          'var height = s.closest(".label.with-label") ? 50 : 65;'+
+          'var height = s.closest(".label.with-label") ? '+S.barHKo+' : '+S.barH+';'+
           'try {'+
             'JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:24, fontOptions:"bold", textMargin:2, margin:0, width:2, height:height, textAlign:"center" });'+
             '/* 렌더 후 viewBox 부여 → CSS 박스 안에서 가로·세로 정확히 가운데 정렬 (인쇄 시 위로 쏠림 방지) */'+
