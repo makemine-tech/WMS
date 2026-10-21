@@ -1764,6 +1764,8 @@ async function analyzePdf(file, category) {
     const pg = { idx: i, text, center, centerNorm: normCenter(center) };
     /* 물류부착문서(밀크런) 맨 뒤 '팔레트 적재리스트' 빈 양식 — 라벨이 아니라 출력·매칭에서 뺀다 */
     if (category === 'download' && /적재리스트/.test(text)) pg.notLabel = true;
+    /* 물류부착문서(로켓그로스 밀크런) 라벨은 세로 양식 — 예전 download(가로)처럼 눕히지 않고 트럭 라벨처럼 세로로 인쇄 */
+    if (category === 'download' && /부착해주세요/.test(text)) pg.portrait = true;
     /* 밀크런 라벨의 파렛트 번호 — 적재리스트 '총수-번호'(예 6-1)와 맞춘다.
        '파렛트 1/6', '파렛트 6-1', 'PALLET 1/6' 같은 표기를 모두 잡고,
        숫자 한 개만 있으면 번호로만 본다. 못 읽으면 예전처럼 순서대로 배정된다. */
@@ -2348,7 +2350,7 @@ async function getLabelPagesForCenter(center, origin, onlyMilkrun) {
       dlMatches.length);
     const items = [];
     for (const m of dlMatches) {
-      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: 'milkrun', page: m.page });
+      items.push({ url: await renderPdfPageToImg(m.item.doc, m.pageIdx), kind: m.page.portrait ? 'truck' : 'milkrun', page: m.page });
     }
     items.byOrigin = dlByOrigin;   // 출고지로 갈랐는지 — 못 갈랐으면 센터 하나로 순서 공유
     return items;
