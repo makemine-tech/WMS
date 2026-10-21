@@ -92,6 +92,9 @@ tr.off td{color:var(--mu2)}
 .qi b.hi{background:var(--g)} .qi b.md{background:var(--y)} .qi b.lo{background:var(--r)}
 .rk{display:block;white-space:nowrap;font-size:12px} .rk b{font-size:13px;color:var(--tx)} .rk.mu{color:var(--mu2)}
 td.tgt{min-width:170px}
+.bulk{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;background:var(--s2);border:1px solid var(--br);border-radius:10px;padding:.55rem .7rem;margin-bottom:.6rem;font-size:12.5px}
+.bulk select,.bulk input{font-size:12.5px;padding:.3rem .4rem}
+.bulk input{text-align:right;font-family:var(--mo)}
 .tgt select{font-size:12px;padding:.25rem .3rem}
 .tgt input{font-size:12px;padding:.25rem .35rem;text-align:right;font-family:var(--mo)}
 .pin{font-weight:800;color:var(--b);white-space:nowrap}
@@ -160,7 +163,16 @@ td.kwn{min-width:150px}
       <div class="tbl-wrap" id="tblShop"></div>
     </div>
     <div class="card" id="kwCard">
-      <div class="card-h"><div class="card-t">파워링크 · 키워드별</div><div class="card-s">오늘 누적</div></div>
+      <div class="card-h"><div class="card-t">파워링크 · 키워드별</div><div class="card-s">오늘 누적 · 체크한 키워드에 목표 순위를 한 번에</div></div>
+      <div class="bulk">
+        <b>일괄 목표 순위</b>
+        <select id="bkDev"><option value="mo">모바일</option><option value="pc">PC</option></select>
+        <input type="number" id="bkRank" min="1" max="15" step="1" placeholder="위" style="width:52px">
+        <input type="number" id="bkCap" min="50" step="10" placeholder="상한(원)" style="width:86px">
+        <button class="btn p" id="bkApply">체크한 키워드 반영</button>
+        <button class="btn" id="bkClear">체크한 키워드 해제</button>
+        <span class="st" id="bkSt"></span>
+      </div>
       <div class="tbl-wrap" id="tblKw"></div>
     </div>
     <div class="card">
@@ -177,6 +189,7 @@ td.kwn{min-width:150px}
    통계 배열 = [노출, 클릭, 광고비, 전환수, 평균순위×10, 전환매출] ── */
 var db, fns, D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [], rank: {}, target: {} };
 var I = { IMP: 0, CLK: 1, COST: 2, CONV: 3, RNK: 4, CAMT: 5 };
+var KW_UNSEL = {};   /* 파워링크 일괄 반영에서 체크를 뺀 키워드 (화면을 다시 그려도 유지) */
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -414,10 +427,11 @@ function renderKw(S){
   $('kwCard').classList.toggle('hide', !ids.length);
   if (!ids.length) return;
   ids.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; });
-  var h = '<table><thead><tr><th>키워드</th>' + HEAD + '<th>입찰가</th><th>목표 순위</th><th>추천 (참고)</th></tr></thead><tbody>';
+  var allOn = ids.every(function(k){ return !KW_UNSEL[k]; });
+  var h = '<table><thead><tr><th><input type="checkbox" id="kwAll" title="전체 선택"' + (allOn ? ' checked' : '') + '></th><th>키워드</th>' + HEAD + '<th>입찰가</th><th>목표 순위</th><th>추천 (참고)</th></tr></thead><tbody>';
   ids.forEach(function(kid){
     var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, bid = k.useGroupBid ? g.bid : k.bid;
-    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + starsCell(kid) + qiCell(k.qi) + rankCell(kid) + statCells(kid) +
+    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td><input type="checkbox" class="kwSel" value="' + kid + '"' + (KW_UNSEL[kid] ? '' : ' checked') + '></td><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + starsCell(kid) + qiCell(k.qi) + rankCell(kid) + statCells(kid) +
       '<td>' + bidCell('keyword', kid, bid, k.useGroupBid ? '그룹 입찰가 사용 중' : '') + '</td>' + targetCell('keyword', kid) + '<td class="hint">' + hintFor(kid, bid) + '</td></tr>';
   });
   $('tblKw').innerHTML = h + '</tbody></table>';
@@ -477,6 +491,29 @@ document.addEventListener('click', function(ev){
     t.disabled = true; t.textContent = '…';
     call('adsSetBid', { kind: kind, id: id, bid: to, reason: reason }).then(load)
       .catch(function(e){ alert('변경 실패: ' + (e && e.message || e)); t.disabled = false; t.textContent = '적용'; });
+    return;
+  }
+  if (t.id === 'kwAll') {
+    document.querySelectorAll('.kwSel').forEach(function(c){ c.checked = t.checked; if (t.checked) delete KW_UNSEL[c.value]; else KW_UNSEL[c.value] = 1; });
+    return;
+  }
+  if (t.classList && t.classList.contains('kwSel')) { if (t.checked) delete KW_UNSEL[t.value]; else KW_UNSEL[t.value] = 1; return; }
+  if (t.id === 'bkApply' || t.id === 'bkClear') {
+    var sel = [].map.call(document.querySelectorAll('.kwSel:checked'), function(c){ return c.value; });
+    if (!sel.length) { alert('체크한 키워드가 없습니다'); return; }
+    var clear = t.id === 'bkClear', bdev = $('bkDev').value, brk = +$('bkRank').value, bcap = +$('bkCap').value || null;
+    if (!clear && !(brk >= 1 && brk <= 15)) { alert('목표 순위를 1~15 사이로 넣으세요'); return; }
+    var bmsg = clear ? ('체크한 키워드 ' + sel.length + '개의 목표 순위 추적을 해제합니다 (입찰가는 지금 그대로).')
+      : ('체크한 키워드 ' + sel.length + '개를\n' + (bdev === 'pc' ? 'PC' : '모바일') + ' ' + brk + '위 금액으로 맞춥니다' + (bcap ? ' · 상한 ' + fmt(bcap) + '원' : ' · 상한 = 설정 최고 입찰가') +
+         '\n\n네이버 순위별 예상 입찰가로 바로 맞추고, 30분마다 다시 맞춥니다.\n반영할까요?');
+    if (!confirm(bmsg)) return;
+    t.disabled = true; $('bkSt').textContent = '처리 중…';
+    call('adsSetTargetBulk', clear ? { kind: 'keyword', ids: sel, rank: null } : { kind: 'keyword', ids: sel, dev: bdev, rank: brk, cap: bcap }).then(function(r){
+      $('bkSt').textContent = clear ? ('해제 ' + (r.cleared || 0) + '개') :
+        ('반영 ' + r.n + '개 · 금액 바뀜 ' + r.changed + '개' + (r.capped ? ' · 상한에 닿음 ' + r.capped + '개' : '') + (r.failed ? ' · 못 맞춤 ' + r.failed + '개' : ''));
+      return load();
+    }).catch(function(e){ $('bkSt').textContent = '실패: ' + (e && e.message || e); })
+      .then(function(){ t.disabled = false; });
     return;
   }
   if (t.dataset.tset) {

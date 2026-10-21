@@ -381,7 +381,7 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
   await db().ref('adctl/target/' + id).update({ lastAdj: now, chk: now, note: (atCap ? '상한 ' + cap + '원까지만 · ' : '') + why });
   await writeLog({ email: 'auto' }, { kind: T.kind, id, act: 'bid', from: r.from, to: r.to,
     reason: '목표 ' + (T.dev === 'pc' ? 'PC' : '모바일') + ' ' + T.rank + '위 추적 · ' + why, ok: true, auto: true });
-  return { id, from: r.from, to: r.to };
+  return { id, from: r.from, to: r.to, atCap };
 }
 async function applyTargets(api, S, rank) {
   const all = (await db().ref('adctl/target').once('value')).val() || {};
@@ -393,6 +393,39 @@ async function applyTargets(api, S, rank) {
   }
   return n;
 }
+
+/* 여러 개 한 번에 — 파워링크 키워드 일괄 { kind:'keyword', ids:[…], dev, rank:1~15 | null(일괄 해제), cap }
+   하나씩과 같은 규칙(trackOne)으로 바로 맞춘다. 최대 100개. */
+exports.adsSetTargetBulk = onCall(OPTS, async (req) => {
+  const who = await requireSuper(req);
+  const d = req.data || {}, kind = d.kind;
+  const ids = [...new Set((d.ids || []).map(String).filter(Boolean))].slice(0, 100);
+  if (!(kind === 'ad' || kind === 'keyword') || !ids.length) throw new HttpsError('invalid-argument', '대상이 없습니다');
+  if (d.rank == null || d.rank === '') {
+    const up = {}; ids.forEach((id) => { up['adctl/target/' + id] = null; });
+    await db().ref().update(up);
+    await writeLog(who, { kind, id: ids[0], act: 'target', to: null, reason: '목표 순위 일괄 해제 · ' + ids.length + '개', ok: true, bulk: ids.length });
+    return { ok: true, cleared: ids.length };
+  }
+  const rank = Math.round(+d.rank), dev = d.dev === 'pc' ? 'pc' : 'mo';
+  if (!(rank >= 1 && rank <= 15)) throw new HttpsError('invalid-argument', '목표 순위는 1~15위');
+  const maxBid = await maxBidCfg();
+  const cap = d.cap ? Math.max(50, Math.min(Math.round(+d.cap / 10) * 10, maxBid)) : maxBid;
+  const now = Date.now(), T = { kind, dev, rank, cap, by: who.email || who.uid, ts: now, lastAdj: 0 };
+  const up = {}; ids.forEach((id) => { up['adctl/target/' + id] = T; });
+  await db().ref().update(up);
+  await writeLog(who, { kind, id: ids[0], act: 'target', to: rank, bulk: ids.length,
+    reason: '목표 ' + (dev === 'pc' ? 'PC' : '모바일') + ' ' + rank + '위 일괄 · ' + ids.length + '개 · 상한 ' + cap + '원', ok: true });
+  const api = client();
+  const S = (await db().ref('adctl/struct').once('value')).val() || {};
+  const rk = (await db().ref('adctl/rank').once('value')).val() || {};
+  const res = await pool(ids, 3, async (id) => {
+    try { return await trackOne(api, S, rk, id, T, maxBid, now); }
+    catch (e) { await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120) }); return { id, err: e.message }; }
+  });
+  return { ok: true, n: ids.length, changed: res.filter((r) => r && r.to != null).length,
+    capped: res.filter((r) => r && r.atCap).length, failed: res.filter((r) => r && (r.err || r.skip === 'no-estimate')).length };
+});
 
 exports.adsSetTarget = onCall(OPTS, async (req) => {
   const who = await requireSuper(req);
