@@ -4817,11 +4817,12 @@ var printedCount = 0;      // 인쇄 완료 누적
 var LABEL_KEY = 'star_coupang_labels_v1';
 
 /* 라벨 크기 — 50×30(기본) / 80×40. 50×30 값은 기존 출력과 동일.
-   inW/inH = 안쪽 영역, bcMax/bcMaxKo = 바코드 최대 높이(한글 없음/있음), koFs = 한글 글자, barH/barHKo = JsBarcode 막대 높이 */
+   inW/inH = 안쪽 영역, bcMax/bcMaxKo = 바코드 최대 높이(한글 없음/있음), koFs = 한글 글자, barH/barHKo = JsBarcode 막대 높이
+   dual = 80×40 전용 — 바코드 2개(위 왼쪽 · 아래 오른쪽, 각 bcW×bcH mm, 모서리에서 mX·mY 띄움) + 가운데 번호·한글. 어느 쪽을 읽어도 되게 */
 var LABEL_SIZE_KEY = 'star_coupang_labelSize';
 var LABEL_SIZES = {
   '50x30': { w:50, h:30, inW:46, inH:26, gap:0.8, bcMax:22, bcMaxKo:15, koFs:14, barH:65, barHKo:50 },
-  '80x40': { w:80, h:40, inW:75, inH:36, gap:1.2, bcMax:30, bcMaxKo:21, koFs:20, barH:90, barHKo:60 }
+  '80x40': { w:80, h:40, dual:true, bcW:50, bcH:13, mX:3, mY:1.5, codeFs:13, koFs:14 }
 };
 var labelSize = '50x30';
 try { var _ls = localStorage.getItem(LABEL_SIZE_KEY); if (LABEL_SIZES[_ls]) labelSize = _ls; } catch(e){}
@@ -4989,15 +4990,45 @@ function printLabels(codes, doneCb) {
   var w = window.open('', '_blank', 'width=420,height=600');
   if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
 
-  /* 라벨 HTML — label이 있으면 .with-label 클래스 + 한글 div 추가 */
+  var S = LABEL_SIZES[labelSize] || LABEL_SIZES['50x30'];
+  /* 라벨 HTML — label이 있으면 .with-label 클래스 + 한글 div 추가.
+     dual(80×40) = 위 왼쪽 바코드 + 가운데 번호(·한글) + 아래 오른쪽 바코드 */
   var labelsHtml = items.map(function(it){
+    if (S.dual) {
+      var svg = '<svg class="bc" data-code="'+escH(it.code)+'"></svg>';
+      return '<div class="label dual"><div class="bt">'+svg+'</div>'+
+        '<div class="mid"><span class="code">'+escH(it.code)+'</span>'+(it.label ? '<span class="ko">'+escH(it.label)+'</span>' : '')+'</div>'+
+        '<div class="bb">'+svg+'</div></div>';
+    }
     var cls = it.label ? 'label with-label' : 'label';
     var ko = it.label ? '<div class="ko">'+escH(it.label)+'</div>' : '';
     return '<div class="'+cls+'"><div class="inner"><svg class="bc" data-code="'+escH(it.code)+'"></svg>'+ko+'</div></div>';
   }).join('');
   var firstCode = items[0].code;
   var lastCode = items[items.length-1].code;
-  var S = LABEL_SIZES[labelSize] || LABEL_SIZES['50x30'];
+  var sizeCss = S.dual
+    ? /* 80×40: 바코드는 50×30 과 비슷한 크기(가로 bcW mm), 위 왼쪽·아래 오른쪽 모서리 기준 absolute */
+      '.label { position:relative; width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; page-break-after:always; overflow:hidden }'+
+      '.label:last-child { page-break-after:auto }'+
+      '.bt, .bb { position:absolute; width:'+S.bcW+'mm; height:'+S.bcH+'mm }'+
+      '.bt { left:'+S.mX+'mm; top:'+S.mY+'mm }'+
+      '.bb { right:'+S.mX+'mm; bottom:'+S.mY+'mm }'+
+      '.bc { display:block; width:100%; height:100% }'+
+      '.mid { position:absolute; left:0; right:0; top:'+(S.mY+S.bcH)+'mm; bottom:'+(S.mY+S.bcH)+'mm; display:flex; align-items:center; justify-content:center; gap:3mm; line-height:1; color:#000 }'+
+      '.code { font-family:"Courier New",monospace; font-size:'+S.codeFs+'pt; font-weight:900; letter-spacing:.04em }'+
+      '.ko { font-size:'+S.koFs+'pt; font-weight:900; letter-spacing:.04em }'
+    : '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
+      '.label:last-child { page-break-after:auto }'+
+      '.inner { width:'+S.inW+'mm; height:'+S.inH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:'+S.gap+'mm }'+
+      /* 바코드: viewBox+preserveAspectRatio로 가운데 정렬(인쇄 시 위로 쏠림 방지), height:auto 로 자연 비율 유지 */
+      '.bc { width:'+S.inW+'mm; height:auto; max-height:'+S.bcMax+'mm }'+
+      /* 한글 라벨 있는 경우: 바코드 영역 조금 줄이고 한글 추가 */
+      '.label.with-label .bc { max-height:'+S.bcMaxKo+'mm }'+
+      '.ko { font-size:'+S.koFs+'pt; font-weight:900; line-height:1; letter-spacing:.04em; color:#000 }';
+  /* dual 은 번호를 가운데 글씨로 따로 찍으므로 바코드는 숫자 없이 막대만, 칸(bcW×bcH)에 꽉 맞춤 */
+  var bcOpt = S.dual
+    ? '{ format:"CODE128", displayValue:false, margin:0, width:2, height:60 }'
+    : '{ format:"CODE128", displayValue:true, font:"Courier New", fontSize:24, fontOptions:"bold", textMargin:2, margin:0, width:2, height:height, textAlign:"center" }';
 
   w.document.open();
   w.document.write(
@@ -5006,14 +5037,7 @@ function printLabels(codes, doneCb) {
     '<style>'+
       '@page { size: '+S.w+'mm '+S.h+'mm; margin: 0 }'+
       'html,body { margin:0; padding:0; background:#fff; color:#000; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif }'+
-      '.label { width:'+S.w+'mm; height:'+S.h+'mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; page-break-after:always; overflow:hidden }'+
-      '.label:last-child { page-break-after:auto }'+
-      '.inner { width:'+S.inW+'mm; height:'+S.inH+'mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:'+S.gap+'mm }'+
-      /* 바코드: viewBox+preserveAspectRatio로 가운데 정렬(인쇄 시 위로 쏠림 방지), height:auto 로 자연 비율 유지 */
-      '.bc { width:'+S.inW+'mm; height:auto; max-height:'+S.bcMax+'mm }'+
-      /* 한글 라벨 있는 경우: 바코드 영역 조금 줄이고 한글 추가 */
-      '.label.with-label .bc { max-height:'+S.bcMaxKo+'mm }'+
-      '.ko { font-size:'+S.koFs+'pt; font-weight:900; line-height:1; letter-spacing:.04em; color:#000 }'+
+      sizeCss +
       '@media screen { body{padding:12px;background:#222;color:#fff} .label{background:#fff;color:#000;margin:0 auto 4px;border:1px dashed #888} .toolbar{position:sticky;top:0;background:#222;padding:8px;text-align:center;margin-bottom:12px;z-index:10} button{padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;border:none;background:#4af0a8;color:#0f1117;margin:0 4px} button.s{background:#1e2333;color:#fff;border:1px solid #444} }'+
       '@media print { .toolbar{display:none} .label{margin:0} }'+
     '</style></head><body>'+
@@ -5029,10 +5053,10 @@ function printLabels(codes, doneCb) {
         'svgs.forEach(function(s){'+
           'var height = s.closest(".label.with-label") ? '+S.barHKo+' : '+S.barH+';'+
           'try {'+
-            'JsBarcode(s, s.getAttribute("data-code"), { format:"CODE128", displayValue:true, font:"Courier New", fontSize:24, fontOptions:"bold", textMargin:2, margin:0, width:2, height:height, textAlign:"center" });'+
+            'JsBarcode(s, s.getAttribute("data-code"), '+bcOpt+');'+
             '/* 렌더 후 viewBox 부여 → CSS 박스 안에서 가로·세로 정확히 가운데 정렬 (인쇄 시 위로 쏠림 방지) */'+
             'var vw = parseFloat(s.getAttribute("width")), vh = parseFloat(s.getAttribute("height"));'+
-            'if (vw && vh) { s.setAttribute("viewBox", "0 0 " + vw + " " + vh); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); s.removeAttribute("width"); s.removeAttribute("height"); }'+
+            'if (vw && vh) { s.setAttribute("viewBox", "0 0 " + vw + " " + vh); s.setAttribute("preserveAspectRatio", "'+(S.dual ? 'none' : 'xMidYMid meet')+'"); s.removeAttribute("width"); s.removeAttribute("height"); }'+
           '} catch(e) { console.error(e); }'+
         '});'+
         'setTimeout(function(){ window.print(); }, 300);'+
