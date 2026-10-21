@@ -464,3 +464,147 @@ exports.adsSetTarget = onCall(OPTS, async (req) => {
   catch (e) { await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120) }); throw new HttpsError('internal', e.message); }
   return { ok: true, applied };
 });
+
+/* ── 알림 — 픽앤톡과 같은 웹 푸시(FCM), 슈퍼관리자(대표님) 기기에만 ──
+   토큰 위치: wms_sync/groups/{gid}/picktalk/fcmTokens/{token} = { uid, … } — 픽앤톡에서 알림을 허용한 기기.
+   누르면 광고 관제 화면으로. 보낸 알림은 adctl/notify 에도 남긴다. */
+async function notifyAdmins(title, body, tag) {
+  const supers = Object.keys((await db().ref('superadmins').once('value')).val() || {});
+  const gids = Object.keys((await db().ref('groups').once('value')).val() || {});
+  const tokens = [];
+  for (const gid of gids) {
+    const m = (await db().ref('wms_sync/groups/' + gid + '/picktalk/fcmTokens').once('value')).val() || {};
+    Object.keys(m).forEach((tok) => { if (m[tok] && supers.indexOf(m[tok].uid) >= 0 && tokens.indexOf(tok) < 0) tokens.push(tok); });
+  }
+  await db().ref('adctl/notify').push({ t: Date.now(), title, body, n: tokens.length });
+  if (!tokens.length) { logger.warn('알림 받을 기기 없음 — 픽앤톡에서 알림 허용 필요'); return 0; }
+  try {
+    const r = await admin.messaging().sendEachForMulticast({
+      notification: { title, body },
+      data: { url: '/ad_control.html', kind: 'adctl' },
+      webpush: { notification: { icon: '/icon.svg', badge: '/icon.svg', tag: tag || ('adctl-' + Date.now()), requireInteraction: true },
+        fcmOptions: { link: 'https://makewon.com/ad_control.html' } },
+      tokens
+    });
+    return r.successCount;
+  } catch (e) { logger.error('알림 발송 실패', { e: e.message }); return 0; }
+}
+
+exports.adsNotifyTest = onCall(OPTS, async (req) => {
+  await requireSuper(req);
+  const n = await notifyAdmins('📣 광고 관제 알림 시험', '이 알림이 보이면 예산 80%·90%·소진 알림이 이 기기로 옵니다', 'adctl-test');
+  return { ok: true, sent: n };
+});
+
+/* ── 하루 예산 지킴이 (10분마다) ──────────────────────────
+   adctl/config/budget = { shop: 원, pl: 원 }  (쇼핑검색 · 파워링크, 0/없음 = 안 지킴)
+   adctl/config/reopenHour = 0~23 (다음 날 다시 켜는 시각, 기본 9시)
+   오늘 광고비(네이버 캠페인 통계 합)가
+     80% · 90%  → 알림 한 번씩
+     100% 이상  → 그 종류에서 지금 켜져서 돌고 있는 캠페인을 끈다(userLock) + 알림. 끈 목록은 adctl/budgetOff/{캠페인} = { date, tp, ts }
+   다시 켜기: 끈 날 이후 reopenHour 가 되면 지킴이가 끈 캠페인만 다시 켠다 (대표님이 직접 끈 건 건드리지 않음).
+             같은 날 예산을 올려 100% 아래가 되면 바로 다시 켠다.
+   상태: adctl/budget/{날짜}/{shop|pl} = { spent, budget, pct, ts, a80, a90, a100 }
+   주의: 네이버 통계는 몇 분~수십 분 늦게 잡혀서 끄는 시점에 이미 조금 넘을 수 있다 (10분 간격 + 통계 지연). */
+const BTYPE = { SHOPPING: 'shop', WEB_SITE: 'pl' };
+const BNAME = { shop: '쇼핑검색', pl: '파워링크' };
+async function setCampaignLock(api, cid, lock) {
+  const cur = await api.get('/ncc/campaigns/' + cid);
+  cur.userLock = lock;
+  await api.put('/ncc/campaigns/' + cid, { fields: 'userLock' }, cur);
+}
+async function budgetCheck(trigger) {
+  const now = Date.now(), today = kday(now), hh = kst(now).getUTCHours();
+  const cfg = (await db().ref('adctl/config').once('value')).val() || {};
+  const B = cfg.budget || {}, reopenHour = cfg.reopenHour != null ? +cfg.reopenHour : 9;
+  const off = (await db().ref('adctl/budgetOff').once('value')).val() || {};
+  if (!(+B.shop > 0) && !(+B.pl > 0) && !Object.keys(off).length) return { skip: 'no-budget' };
+  const api = client();
+  const camps = (await api.get('/ncc/campaigns')) || [];
+  const s = await statsSummary(api, [camps.map((c) => c.nccCampaignId)], today, today);
+  const spent = { shop: 0, pl: 0 };
+  camps.forEach((c) => { const t = BTYPE[c.campaignTp]; if (t) spent[t] += (s[c.nccCampaignId] || [0, 0, 0])[2]; });
+  const state = (await db().ref('adctl/budget/' + today).once('value')).val() || {};
+  const up = {}, done = [];
+  const who = { email: 'auto' };
+
+  /* 1) 지난날 예산으로 끈 캠페인 — 다시 켤 시각이 되면 켠다 */
+  for (const cid of Object.keys(off)) {
+    const o = off[cid];
+    if (o.date < today && hh >= reopenHour) {
+      try {
+        await setCampaignLock(api, cid, false);
+        up['adctl/budgetOff/' + cid] = null;
+        await writeLog(who, { kind: 'campaign', id: cid, act: 'lock', from: true, to: false, reason: '예산 소진으로 껐던 캠페인 — ' + reopenHour + '시 다시 켬', ok: true, auto: true });
+        done.push(['reopen', o.tp, cid]);
+      } catch (e) { logger.warn('다시 켜기 실패', { cid, e: e.message }); }
+    }
+  }
+  const reopened = done.filter((x) => x[0] === 'reopen');
+  if (reopened.length) {
+    const names = reopened.map((x) => (camps.find((c) => c.nccCampaignId === x[2]) || {}).name).filter(Boolean);
+    await notifyAdmins('🟢 광고 다시 켬', reopened.length + '개 캠페인을 ' + reopenHour + '시에 다시 켰습니다 — ' + names.slice(0, 3).join(', '), 'adctl-reopen-' + today);
+  }
+
+  /* 2) 오늘 예산 */
+  for (const t of ['shop', 'pl']) {
+    const bud = +B[t] || 0, st = Object.assign({}, state[t] || {});
+    st.spent = spent[t]; st.budget = bud; st.ts = now;
+    st.pct = bud ? Math.round(spent[t] / bud * 1000) / 10 : null;
+    if (bud > 0) {
+      for (const thr of [80, 90]) {
+        if (st.pct >= thr && !st['a' + thr]) {
+          st['a' + thr] = now;
+          await notifyAdmins('⚠️ ' + BNAME[t] + ' 광고비 ' + thr + '% 소진', '오늘 ' + spent[t].toLocaleString('ko-KR') + '원 / 예산 ' + bud.toLocaleString('ko-KR') + '원 (' + st.pct + '%)', 'adctl-' + t + '-' + thr + '-' + today);
+        }
+      }
+      const mine = camps.filter((c) => BTYPE[c.campaignTp] === t);
+      if (st.pct >= 100) {
+        /* 지금 돌고 있는 캠페인만 끈다 */
+        const run = mine.filter((c) => !c.userLock && String(c.status || '').toUpperCase() === 'ELIGIBLE');
+        const offNow = [];
+        for (const c of run) {
+          try {
+            await setCampaignLock(api, c.nccCampaignId, true);
+            up['adctl/budgetOff/' + c.nccCampaignId] = { date: today, tp: t, ts: now, name: c.name };
+            offNow.push(c.name);
+            await writeLog(who, { kind: 'campaign', id: c.nccCampaignId, act: 'lock', from: false, to: true,
+              reason: BNAME[t] + ' 하루 예산 ' + bud.toLocaleString('ko-KR') + '원 소진 (' + spent[t].toLocaleString('ko-KR') + '원) — 끔', ok: true, auto: true });
+          } catch (e) { logger.warn('예산 끄기 실패', { cid: c.nccCampaignId, e: e.message }); }
+        }
+        if (offNow.length) {
+          st.a100 = now; st.offN = (st.offN || 0) + offNow.length;
+          await notifyAdmins('⛔ ' + BNAME[t] + ' 예산 소진 — 광고 끔', '오늘 ' + spent[t].toLocaleString('ko-KR') + '원 / 예산 ' + bud.toLocaleString('ko-KR') + '원 · ' + offNow.length + '개 캠페인 껐습니다 (내일 ' + reopenHour + '시 다시 켬)', 'adctl-' + t + '-100-' + today);
+        }
+      } else {
+        /* 예산을 올려 100% 아래가 됐으면 오늘 끈 것은 바로 다시 켠다 */
+        for (const cid of Object.keys(off)) {
+          const o = off[cid];
+          if (o.tp === t && o.date === today && up['adctl/budgetOff/' + cid] === undefined) {
+            try {
+              await setCampaignLock(api, cid, false);
+              up['adctl/budgetOff/' + cid] = null;
+              await writeLog(who, { kind: 'campaign', id: cid, act: 'lock', from: true, to: false, reason: BNAME[t] + ' 예산을 올려 다시 켬', ok: true, auto: true });
+            } catch (e) { logger.warn('예산 올림 다시 켜기 실패', { cid, e: e.message }); }
+          }
+        }
+      }
+    }
+    up['adctl/budget/' + today + '/' + t] = st;
+  }
+  up['adctl/budgetChk'] = { ts: now, trigger, spent };
+  await db().ref().update(clean(up));
+  return { ok: true, spent };
+}
+
+exports.adsBudgetGuard = onSchedule(Object.assign({ schedule: 'every 10 minutes', timeZone: 'Asia/Seoul' }, OPTS), async () => {
+  try { await budgetCheck('schedule'); }
+  catch (e) { logger.error('예산 지킴이 실패', { e: e.message }); await db().ref('adctl/budgetChk').update({ ts: Date.now(), err: String(e.message).slice(0, 300) }).catch(() => {}); }
+});
+
+/* 화면에서 예산을 저장한 직후 바로 한 번 점검 */
+exports.adsBudgetNow = onCall(OPTS, async (req) => {
+  await requireSuper(req);
+  try { return await budgetCheck('manual'); }
+  catch (e) { throw new HttpsError('internal', e.message); }
+});

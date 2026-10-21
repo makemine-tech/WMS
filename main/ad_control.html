@@ -35,6 +35,21 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .top-t{font-size:17px;font-weight:900}
 .top-e{font-family:var(--mo);font-size:11px;color:var(--mu);letter-spacing:.12em}
 .top-sp{flex:1}
+.bud-row{padding-top:0;padding-bottom:.6rem}
+.bud{min-width:230px;background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:.4rem .65rem}
+.bud .bt{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;font-size:12px;color:var(--mu)}
+.bud .bt b{font-family:var(--mo);font-size:15px;color:var(--tx)}
+.bud .bar2{height:7px;border-radius:4px;background:#232a38;margin-top:.3rem;overflow:hidden}
+.bud .bar2 i{display:block;height:100%;border-radius:4px;background:var(--b)}
+.bud.w80 .bar2 i{background:#fb923c} .bud.w90 .bar2 i{background:#ef4444} .bud.w80{border-color:rgba(251,146,60,.55)} .bud.w90{border-color:rgba(239,68,68,.7)}
+.bud.over{border-color:#ef4444;box-shadow:0 0 12px rgba(239,68,68,.45)}
+.bud .bs{font-size:11px;color:var(--mu);margin-top:.2rem}
+.bud.none{opacity:.7}
+.bud-edit{max-width:1400px;margin:0 auto;padding:0 1rem .8rem}
+.bud-edit-in{margin-left:auto;max-width:560px;background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.8rem .9rem;display:grid;grid-template-columns:auto 1fr;gap:.45rem .6rem;align-items:center;font-size:12.5px}
+.bud-edit-in label{color:var(--mu)}
+.bud-edit-in .row2{grid-column:1/-1;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;line-height:1.6}
+@media (max-width:560px){ .bud{min-width:0;flex:1 1 100%} }
 .top a{font-size:12.5px;color:var(--mu);text-decoration:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
 .st{font-size:12px;color:var(--mu)}
 .st.er{color:var(--r)}
@@ -133,7 +148,26 @@ td.kwn{min-width:150px}
     <button class="btn" onclick="WMS2FA.lockNow()" style="color:var(--y)">지금 잠그기</button>
     <a href="/wms_admin.html">관리도구</a>
     <a href="/index.html">홈으로</a>
+  </div>
+  <div class="top-in bud-row">
+    <div class="top-sp"></div>
+    <div class="bud" id="budShop"></div>
+    <div class="bud" id="budPl"></div>
+    <button class="btn" id="btnBud" title="하루 예산 · 다시 켜는 시각 · 알림">⚙ 하루 예산</button>
+  </div>
+  <div class="bud-edit hide" id="budEdit"><div class="bud-edit-in">
+    <label>쇼핑검색 하루 예산</label><input type="number" id="bShop" min="0" step="1000" placeholder="원 (비우면 안 지킴)">
+    <label>파워링크 하루 예산</label><input type="number" id="bPl" min="0" step="1000" placeholder="원 (비우면 안 지킴)">
+    <label>다음 날 다시 켜는 시각</label><span><select id="bHour"></select> <span class="st" id="bHourRec"></span></span>
+    <div class="row2">
+      <button class="btn p" id="btnBudSave">저장</button>
+      <button class="btn" id="btnNotifyTest">🔔 알림 시험</button>
+      <span class="st" id="budSt"></span>
+    </div>
+    <div class="row2 st">10분마다 오늘 광고비를 확인합니다. 80% · 90%에 휴대폰 알림(픽앤톡에서 알림을 허용한 기기), 100%가 되면 그 종류에서 돌고 있는 캠페인을 끄고 알립니다.
+      끈 캠페인은 다음 날 위 시각에 다시 켜집니다. 오늘 예산을 올리면 바로 다시 켜집니다. 네이버 통계가 늦게 잡혀 끄는 시점에 조금 넘을 수 있어요.</div>
   </div></div>
+  </div>
 
   <div class="wrap">
     <div id="warn"></div>
@@ -218,9 +252,11 @@ function load(){
     db.ref('adctl/day').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
     g('adctl/config'), db.ref('adctl/sales').orderByKey().startAt(addDays(t, -60)).get().then(function(s){ return s.val(); }),
     db.ref('adctl/log').orderByKey().limitToLast(400).get().then(function(s){ return s.val(); }),
-    g('adctl/rank'), g('adctl/target')
+    g('adctl/rank'), g('adctl/target'), g('adctl/budget/' + t), g('adctl/budgetOff'), g('adctl/budgetChk'),
+    db.ref('adctl/hour').orderByKey().startAt(since).get().then(function(s){ return s.val(); })
   ]).then(function(r){
     D.rank = r[9] || {}; D.target = r[10] || {};
+    D.budget = r[11] || {}; D.budgetOff = r[12] || {}; D.budgetChk = r[13] || null; D.hour7 = r[14] || {};
     D.struct = r[0]; D.status = r[1]; D.snaps = r[2] || {}; D.hour = r[3] || {}; D.hourY = r[4] || {};
     D.days = r[5] || {}; D.cfg = r[6] || {}; D.sales = r[7] || {};
     D.logs = Object.keys(r[8] || {}).map(function(k){ return r[8][k]; }).reverse();
@@ -271,7 +307,64 @@ function render(){
     $('kpis').innerHTML = ''; $('tblShop').innerHTML = ''; $('tblKw').innerHTML = ''; renderLog(); return;
   }
   $('warn').innerHTML = '';
-  renderKpis(S); renderChart(); renderShop(S); renderKw(S); renderLog();
+  renderKpis(S); renderChart(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
+}
+
+/* ── 오늘 하루 예산 (오른쪽 위) ── 지킴이(10분)가 기록한 값, 없으면 마지막 수집 스냅으로 계산 */
+function spentByType(S){
+  var out = { shop: 0, pl: 0 };
+  Object.keys(S.campaigns || {}).forEach(function(cid){ var t = { SHOPPING: 'shop', WEB_SITE: 'pl' }[S.campaigns[cid].tp]; if (t) out[t] += cur(cid)[I.COST]; });
+  return out;
+}
+function renderBudget(S){
+  var B = (D.cfg && D.cfg.budget) || {}, sp = spentByType(S || {}), ts = null;
+  ['shop', 'pl'].forEach(function(t){
+    var st = D.budget && D.budget[t];
+    var spent = st && st.spent != null && (!D.status || st.ts >= (D.status.ts || 0) - 60e3) ? st.spent : sp[t];
+    if (st && st.ts) ts = Math.max(ts || 0, st.ts);
+    var bud = +B[t] || 0, pct = bud ? spent / bud * 100 : null;
+    var offN = Object.keys(D.budgetOff || {}).filter(function(k){ return D.budgetOff[k].tp === t; }).length;
+    var el = $(t === 'shop' ? 'budShop' : 'budPl');
+    el.className = 'bud' + (!bud ? ' none' : pct >= 100 ? ' w90 over' : pct >= 90 ? ' w90' : pct >= 80 ? ' w80' : '');
+    el.innerHTML = '<div class="bt"><span>' + (t === 'shop' ? '🛒 쇼핑검색' : '🔗 파워링크') + ' 오늘</span><span><b>' + fmt(spent) + '</b>' +
+      (bud ? ' / ' + fmt(bud) + '원' : '원') + '</span></div>' +
+      '<div class="bar2"><i style="width:' + (bud ? Math.min(100, pct).toFixed(1) : 0) + '%"></i></div>' +
+      '<div class="bs">' + (!bud ? '예산 미설정 — ⚙ 하루 예산' : (pct >= 100 ? '⛔ 소진' + (offN ? ' · 캠페인 ' + offN + '개 꺼짐 (' + (D.cfg.reopenHour != null ? D.cfg.reopenHour : 9) + '시 다시 켬)' : '') :
+        Math.round(pct) + '% · 남은 ' + fmt(bud - spent) + '원')) + '</div>';
+  });
+  var c = D.budgetChk;
+  $('btnBud').title = '하루 예산 · 다시 켜는 시각 · 알림' + (c && c.ts ? ' · 마지막 예산 점검 ' + kTime(c.ts) + (c.err ? ' · 오류: ' + c.err : '') : '');
+}
+/* 다음 날 다시 켤 추천 시각 — 최근 7일 전환이 하루 중 처음 10% 쌓이는 시각 (전환 없으면 클릭 기준) */
+function recommendHour(){
+  var conv = new Array(24).fill(0), clk = new Array(24).fill(0), td = today();
+  Object.keys(D.hour7 || {}).forEach(function(d){ if (d >= td) return; var H = D.hour7[d] || {};
+    Object.keys(H).forEach(function(cid){ var h = H[cid] || {}; Object.keys(h).forEach(function(hh){ var a = h[hh] || []; conv[+hh] += +a[3] || 0; clk[+hh] += +a[1] || 0; }); }); });
+  /* 데이터가 적으면(전환 5건 · 클릭 30번 미만) 추천하지 않는다 — 몇 번 안 되는 클릭으로 엉뚱한 시각이 나오지 않게 */
+  function first(arr, min){ var tot = arr.reduce(function(a, b){ return a + b; }, 0); if (tot < min) return null; var c = 0; for (var i = 0; i < 24; i++) { c += arr[i]; if (c >= tot * 0.1) return i; } return null; }
+  var h = first(conv, 5), by = '전환';
+  if (h == null) { h = first(clk, 30); by = '클릭'; }
+  return h == null ? null : { h: h, by: by };
+}
+function openBudget(){
+  var p = $('budEdit'), B = (D.cfg && D.cfg.budget) || {};
+  p.classList.toggle('hide');
+  if (p.classList.contains('hide')) return;
+  $('bShop').value = B.shop || ''; $('bPl').value = B.pl || '';
+  var sel = $('bHour'), cur0 = D.cfg && D.cfg.reopenHour != null ? +D.cfg.reopenHour : 9, rec = recommendHour();
+  sel.innerHTML = Array.from({ length: 24 }, function(_, i){ return '<option value="' + i + '"' + (i === cur0 ? ' selected' : '') + '>' + i + '시</option>'; }).join('');
+  $('bHourRec').innerHTML = rec ? '추천 <b>' + rec.h + '시</b> (최근 7일 ' + rec.by + '이 하루 중 쌓이기 시작하는 시각) <button class="tbtn" id="btnRec">적용</button>' : '추천은 며칠 데이터가 쌓이면 나옵니다';
+}
+function saveBudget(){
+  var b = { shop: +$('bShop').value || null, pl: +$('bPl').value || null };
+  var u = { budget: b, reopenHour: +$('bHour').value, ts: Date.now() };
+  $('budSt').textContent = '저장 중…';
+  db.ref('adctl/config').update(u).then(function(){
+    D.cfg = Object.assign({}, D.cfg, u);
+    $('budSt').textContent = '저장됨 · 바로 점검 중…';
+    return call('adsBudgetNow', {});
+  }).then(function(r){ $('budSt').textContent = '저장 · 점검 완료'; return load(); })
+    .catch(function(e){ $('budSt').textContent = '실패: ' + (e.code || e.message); });
 }
 
 function renderKpis(S){
@@ -502,7 +595,7 @@ function renderKw(S){
 }
 
 function nameOf(kind, id){
-  var S = D.struct || {}, n = kind === 'ad' ? S.ads : kind === 'adgroup' ? S.adgroups : S.keywords;
+  var S = D.struct || {}, n = kind === 'ad' ? S.ads : kind === 'adgroup' ? S.adgroups : kind === 'campaign' ? S.campaigns : S.keywords;
   var x = n && n[id]; return x ? (x.name || x.kw || id) : id;
 }
 function renderLog(){
@@ -523,7 +616,7 @@ function fillCfg(){
 function saveCfg(){
   var c = { aov: +$('cAov').value || null, margin: +$('cMargin').value || null, target: +$('cTarget').value || 15,
             maxBid: +$('cMax').value || 3000, season: $('cSeason').value || null, ts: Date.now() };
-  db.ref('adctl/config').set(c).then(function(){ D.cfg = c; $('cfgSt').textContent = '저장됨'; render(); })
+  db.ref('adctl/config').update(c).then(function(){ D.cfg = Object.assign({}, D.cfg, c); $('cfgSt').textContent = '저장됨'; render(); })
     .catch(function(e){ $('cfgSt').textContent = '실패: ' + (e.code || e.message); });
 }
 function saveSales(){
@@ -563,6 +656,7 @@ document.addEventListener('click', function(ev){
     alert(sb.dataset.aname + '\n\n' + (why.length ? why.map(function(w){ return '• ' + w; }).join('\n') : '이상 없음'));
     return;
   }
+  if (t.id === 'btnRec') { var rc = recommendHour(); if (rc) $('bHour').value = String(rc.h); return; }
   if (t.id === 'kwAll') {
     document.querySelectorAll('.kwSel').forEach(function(c){ c.checked = t.checked; if (t.checked) delete KW_UNSEL[c.value]; else KW_UNSEL[c.value] = 1; });
     return;
@@ -630,6 +724,13 @@ function start(){
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
   $('btnSales').addEventListener('click', saveSales);
+  $('btnBud').addEventListener('click', openBudget);
+  $('btnBudSave').addEventListener('click', saveBudget);
+  $('btnNotifyTest').addEventListener('click', function(){
+    $('budSt').textContent = '알림 보내는 중…';
+    call('adsNotifyTest', {}).then(function(r){ $('budSt').textContent = r.sent ? ('알림 보냄 · 기기 ' + r.sent + '대') : '받을 기기가 없어요 — 휴대폰 픽앤톡에서 알림을 먼저 허용하세요'; })
+      .catch(function(e){ $('budSt').textContent = '실패: ' + (e && e.message || e); });
+  });
   try { $('showAll').checked = localStorage.getItem('adctl_showAll') === '1'; } catch (e) {}
   $('showAll').addEventListener('change', function(){
     try { localStorage.setItem('adctl_showAll', $('showAll').checked ? '1' : '0'); } catch (e) {}
@@ -645,6 +746,7 @@ WMS2FA.guard({
   onLock: function(){
     _open = false;
     D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [], rank: {}, target: {} };
+    ['budShop', 'budPl'].forEach(function(id){ $(id).innerHTML = ''; }); $('budEdit').classList.add('hide');
     ['kpis', 'tblShop', 'tblKw', 'log', 'warn'].forEach(function(id){ $(id).innerHTML = ''; });
     $('chart').innerHTML = ''; $('tip').classList.add('hide');
     $('app').classList.add('hide');
