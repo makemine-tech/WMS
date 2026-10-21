@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>광고 관제 — 메이크창고</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<!-- 관문: 슈퍼관리자(3) 고정. 광고 데이터(adctl)도 DB 규칙상 슈퍼관리자만 읽는다.
+     네이버 광고 API 키는 서버(Secret Manager)에만 있고 이 화면엔 없다 — 변경은 서버 함수(functions-ads)가 대신 한다. -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script src="/wms_access.js" data-page="ad_control" data-floor="3"></script>
+<style>
+:root{
+  --bg:#0b0d12; --s1:#141822; --s2:#1c2331; --s3:#232b3b; --br:#2a3040; --tx:#e6e9f0; --mu:#8b94a8; --mu2:#5d6678;
+  --g:#4ade80; --y:#fbbf24; --b:#60a5fa; --r:#f87171;
+  --mo:'Space Mono',monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-size:14px}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.35rem .5rem}
+.hide{display:none!important}
+.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;color:var(--mu)}
+
+.top{position:sticky;top:0;z-index:20;background:rgba(11,13,18,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--br)}
+.top-in{max-width:1400px;margin:0 auto;padding:.7rem 1rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.top-t{font-size:17px;font-weight:900}
+.top-e{font-family:var(--mo);font-size:11px;color:var(--mu);letter-spacing:.12em}
+.top-sp{flex:1}
+.top a{font-size:12.5px;color:var(--mu);text-decoration:none;border:1px solid var(--br);border-radius:7px;padding:.35rem .7rem}
+.st{font-size:12px;color:var(--mu)}
+.st.er{color:var(--r)}
+.btn{background:var(--s3);border:1px solid var(--br);color:var(--tx);border-radius:7px;padding:.4rem .8rem;font-size:12.5px;font-weight:700}
+.btn.p{background:var(--b);border-color:var(--b);color:#0b0d12}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+.wrap{max-width:1400px;margin:0 auto;padding:1rem 1rem 3rem}
+.note{font-size:12px;color:var(--mu);margin:0 0 1rem;line-height:1.75}
+.note b{color:var(--tx)}
+.warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.4);color:var(--y);border-radius:10px;padding:.7rem .9rem;font-size:12.5px;line-height:1.7;margin-bottom:1rem}
+
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.7rem;margin-bottom:1rem}
+.kpi{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.8rem .95rem;min-width:0}
+.kpi .k{font-size:12px;color:var(--mu);margin-bottom:.3rem}
+.kpi .v{font-family:var(--mo);font-size:22px;font-weight:700;letter-spacing:-.02em}
+.kpi .s{font-size:11.5px;color:var(--mu);margin-top:.2rem}
+.kpi .v.ok{color:var(--g)} .kpi .v.bad{color:var(--r)}
+
+.grid2{display:grid;grid-template-columns:2fr 1fr;gap:.8rem;margin-bottom:.8rem}
+.card{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.9rem 1rem;min-width:0;margin-bottom:.8rem}
+.grid2 .card{margin-bottom:0}
+.card-h{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.6rem;flex-wrap:wrap}
+.card-t{font-size:14px;font-weight:800}
+.card-s{font-size:11.5px;color:var(--mu)}
+.chart{width:100%;height:190px;display:block}
+.chart text{fill:var(--mu);font-family:var(--mo);font-size:10px}
+.frm{display:grid;grid-template-columns:auto 1fr;gap:.45rem .6rem;align-items:center;font-size:12.5px}
+.frm label{color:var(--mu)}
+.frm input{width:100%}
+.frm .row2{grid-column:1/-1;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--mu);font-weight:700;font-size:11.5px;padding:.45rem .45rem;border-bottom:1px solid var(--br);white-space:nowrap}
+th.num,td.num{text-align:right;font-family:var(--mo)}
+td{padding:.42rem .45rem;border-bottom:1px solid #1d2230;vertical-align:middle}
+tr.grp td{background:var(--s2);font-weight:800}
+tr.off td{color:var(--mu2)}
+.pname{display:flex;align-items:center;gap:.45rem;min-width:180px;max-width:340px}
+.pname img{width:30px;height:30px;border-radius:5px;object-fit:cover;flex:none;background:var(--s3)}
+.pname span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bid{display:flex;align-items:center;gap:.25rem;white-space:nowrap}
+.bid input{width:76px;text-align:right;font-family:var(--mo)}
+.bid button{background:var(--s3);border:1px solid var(--br);color:var(--tx);border-radius:6px;padding:.25rem .4rem;font-size:11.5px;font-weight:700}
+.bid button.ap{background:var(--b);border-color:var(--b);color:#0b0d12}
+.sw{border:1px solid var(--br);border-radius:999px;padding:.15rem .55rem;font-size:11px;font-weight:800;background:var(--s3);color:var(--mu)}
+.sw.on{background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.5);color:var(--g)}
+.hint{font-size:11.5px;line-height:1.5;max-width:240px}
+.hint .u{color:var(--g)} .hint .d{color:var(--r)} .hint .n{color:var(--mu)}
+.dlt{font-size:10.5px;color:var(--mu);display:block;white-space:nowrap}
+td.kwn{min-width:150px}
+.log{font-size:12px;line-height:1.8;max-height:260px;overflow:auto}
+.log .ok{color:var(--g)} .log .er{color:var(--r)}
+.empty{color:var(--mu);font-size:12.5px;padding:1.2rem;text-align:center}
+.tip{position:fixed;z-index:50;pointer-events:none;background:#0f131b;border:1px solid var(--br);border-radius:8px;padding:.45rem .6rem;font-size:12px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.tip b{font-family:var(--mo)}
+@media (max-width:1000px){ .kpis{grid-template-columns:repeat(3,minmax(0,1fr))} .grid2{grid-template-columns:1fr} }
+@media (max-width:560px){ .kpis{grid-template-columns:repeat(2,minmax(0,1fr))} .wrap{padding:.8rem .75rem 2rem} }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate">권한을 확인하는 중…</div>
+
+<div id="app" class="hide">
+  <div class="top"><div class="top-in">
+    <div>
+      <div class="top-t">광고 관제 🔒</div>
+      <div class="top-e">NAVER SEARCH AD CONTROL</div>
+    </div>
+    <div class="top-sp"></div>
+    <span class="st" id="st">—</span>
+    <button class="btn p" id="btnNow">⟳ 지금 새로 받기</button>
+    <a href="/wms_admin.html">관리도구</a>
+    <a href="/index.html">홈으로</a>
+  </div></div>
+
+  <div class="wrap">
+    <div id="warn"></div>
+    <div class="note">30분마다 네이버 검색광고 API에서 자동으로 받아 옵니다. 입찰가·켜기/끄기는 <b>대표님이 누를 때만</b> 바뀌고, 모든 변경은 아래 기록에 남습니다.
+      네이버 전환(구매) 집계는 몇 시간 늦게 잡힐 수 있어요 — 스마트스토어 주문 연결 전까지는 <b>오늘 스토어 매출을 직접 입력</b>하면 광고비 비율을 계산합니다.</div>
+    <div id="kpis" class="kpis"></div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-h"><div class="card-t">시간대별 광고비 (오늘)</div><div class="card-s" id="chartSub">막대에 올리면 어제 같은 시간과 비교</div></div>
+        <svg class="chart" id="chart"></svg>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t">기준 설정</div><div class="card-s">추천·손익분기 계산에 씀</div></div>
+        <div class="frm">
+          <label>객단가(원)</label><input type="number" id="cAov" min="0" step="100" placeholder="예 25000">
+          <label>마진율(%)</label><input type="number" id="cMargin" min="0" max="100" step="1" placeholder="예 30">
+          <label>목표 광고비율(%)</label><input type="number" id="cTarget" min="1" max="100" step="1" placeholder="15">
+          <label>최고 입찰가(원)</label><input type="number" id="cMax" min="50" step="10" placeholder="3000">
+          <label>시즌 시작일</label><input type="date" id="cSeason">
+          <div class="row2"><button class="btn" id="btnCfg">설정 저장</button><span class="st" id="cfgSt"></span></div>
+          <label style="margin-top:.4rem">오늘 스토어 매출</label><input type="number" id="sAmt" min="0" step="1000" placeholder="스마트스토어 오늘 결제금액" style="margin-top:.4rem">
+          <div class="row2"><button class="btn" id="btnSales">매출 저장</button><span class="st" id="salesSt"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><div class="card-t">쇼핑검색 · 상품별</div><div class="card-s">오늘 누적 · 「1시간」은 최근 1시간 변화 · 추천은 참고용</div></div>
+      <div class="tbl-wrap" id="tblShop"></div>
+    </div>
+    <div class="card" id="kwCard">
+      <div class="card-h"><div class="card-t">파워링크 · 키워드별</div><div class="card-s">오늘 누적</div></div>
+      <div class="tbl-wrap" id="tblKw"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">변경 기록</div><div class="card-s">최근 50건</div></div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+<div class="tip hide" id="tip"></div>
+
+<script>
+/* ── 데이터 (functions-ads 가 기록 — 설명은 functions-ads/index.js 머리말)
+   adctl/struct · snap/{날짜}/{HHmm} · hour/{날짜}/{캠페인} · day/{날짜} · status · log · config · sales/{날짜}
+   통계 배열 = [노출, 클릭, 광고비, 전환수, 평균순위×10, 전환매출] ── */
+var db, fns, D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [] };
+var I = { IMP: 0, CLK: 1, COST: 2, CONV: 3, RNK: 4, CAMT: 5 };
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmt(n){ return Math.round(n || 0).toLocaleString('ko-KR'); }
+function kstNow(){ return new Date(Date.now() + 9 * 3600e3); }
+function today(){ return kstNow().toISOString().slice(0, 10); }
+function addDays(s, n){ var d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function kTime(t){ var d = new Date(t + 9 * 3600e3).toISOString(); return d.slice(5, 10).replace('-', '/') + ' ' + d.slice(11, 16); }
+function z(){ return [0, 0, 0, 0, 0, 0]; }
+function arr(a){ a = a || []; return [+a[0]||0, +a[1]||0, +a[2]||0, +a[3]||0, +a[4]||0, +a[5]||0]; }
+function sub(a, b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2], a[3]-b[3], a[4], a[5]-b[5]]; }
+function add(a, b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2], a[3]+b[3], 0, a[5]+b[5]]; }
+function minOf(hm){ return +hm.slice(0, 2) * 60 + +hm.slice(2); }
+
+/* ── 불러오기 ── */
+function load(){
+  var t = today(), y = addDays(t, -1), since = addDays(t, -7);
+  var g = function(p){ return db.ref(p).get().then(function(s){ return s.val(); }); };
+  return Promise.all([
+    g('adctl/struct'), g('adctl/status'), g('adctl/snap/' + t), g('adctl/hour/' + t), g('adctl/hour/' + y),
+    db.ref('adctl/day').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
+    g('adctl/config'), db.ref('adctl/sales').orderByKey().startAt(addDays(t, -60)).get().then(function(s){ return s.val(); }),
+    db.ref('adctl/log').orderByKey().limitToLast(50).get().then(function(s){ return s.val(); })
+  ]).then(function(r){
+    D.struct = r[0]; D.status = r[1]; D.snaps = r[2] || {}; D.hour = r[3] || {}; D.hourY = r[4] || {};
+    D.days = r[5] || {}; D.cfg = r[6] || {}; D.sales = r[7] || {};
+    D.logs = Object.keys(r[8] || {}).map(function(k){ return r[8][k]; }).reverse();
+    fillCfg(); render();
+  }).catch(function(e){ $('warn').innerHTML = '<div class="warn">불러오지 못했습니다: ' + esc(e && (e.code || e.message)) + '</div>'; });
+}
+
+/* 오늘 누적(마지막 스냅) · 최근 n분 변화 */
+function snapKeys(){ return Object.keys(D.snaps).sort(); }
+function lastSnap(){ var k = snapKeys(); return k.length ? D.snaps[k[k.length - 1]] : null; }
+function cur(id){ var s = lastSnap(); return arr(s && s.s && s.s[id]); }
+function delta(id, mins){
+  var k = snapKeys(); if (!k.length) return z();
+  var lastK = k[k.length - 1], base = null;
+  for (var i = k.length - 1; i >= 0; i--) { if (minOf(lastK) - minOf(k[i]) >= mins) { base = k[i]; break; } }
+  var now = arr(D.snaps[lastK].s && D.snaps[lastK].s[id]);
+  if (!base) return now;      /* 그만큼 앞선 스냅이 없으면 오늘 시작부터 */
+  return sub(now, arr(D.snaps[base].s && D.snaps[base].s[id]));
+}
+function days7(id){ var t = z(); Object.keys(D.days).forEach(function(d){ t = add(t, arr(D.days[d][id])); }); return t; }
+
+/* ── 손익분기 · 추천 (참고용) ──
+   손익분기 클릭단가 = 객단가 × 마진율 × 구매전환율(최근 7일+오늘, 클릭 30 이상일 때만) */
+function cvrOf(id){ var a = add(days7(id), cur(id)); return a[I.CLK] >= 30 ? a[I.CONV] / a[I.CLK] : null; }
+function beCpc(cvr){ var aov = +D.cfg.aov || 0, m = (+D.cfg.margin || 0) / 100; return (aov && m && cvr) ? aov * m * cvr : null; }
+function hintFor(id, bid){
+  var c = cur(id), h3 = delta(id, 180), out = [];
+  var cpc = c[I.CLK] ? c[I.COST] / c[I.CLK] : 0, cvr = cvrOf(id), be = beCpc(cvr);
+  if (be && cpc > be * 1.0 && c[I.CLK] >= 10) out.push('<span class="d">▼ 오늘 클릭단가 ' + fmt(cpc) + '원 &gt; 손익분기 ' + fmt(be) + '원</span>');
+  if (h3[I.CLK] >= 15 && h3[I.CONV] === 0 && cvr) out.push('<span class="d">▼ 최근 3시간 클릭 ' + h3[I.CLK] + ' · 전환 0</span>');
+  var cvrT = c[I.CLK] >= 20 ? c[I.CONV] / c[I.CLK] : null;
+  if (cvrT && cvr && cvrT > cvr * 1.3) out.push('<span class="u">▲ 오늘 구매율 ' + (cvrT * 100).toFixed(1) + '% (평소 ' + (cvr * 100).toFixed(1) + '%)</span>');
+  if (be && cpc && cpc < be * 0.6 && c[I.RNK] > 30) out.push('<span class="u">▲ 여유 있음 · 평균 ' + (c[I.RNK] / 10).toFixed(1) + '위</span>');
+  if (!out.length) out.push('<span class="n">' + (be ? '손익분기 ' + fmt(be) + '원' : (cvr == null ? '데이터 부족' : '객단가·마진율을 넣으면 계산')) + '</span>');
+  return out.join('<br>');
+}
+
+/* ── 그리기 ── */
+function render(){
+  var S = D.struct;
+  var st = D.status;
+  $('st').className = 'st' + (st && !st.ok ? ' er' : '');
+  $('st').textContent = st ? ((st.ok ? '마지막 수집 ' : '수집 실패 ') + kTime(st.ts) + (st.ok ? '' : ' — ' + (st.err || ''))) : '아직 수집 전';
+  if (!S) {
+    $('warn').innerHTML = '<div class="warn">아직 받아 온 데이터가 없습니다. 서버에 광고 API 키를 넣고 함수를 배포한 뒤 「⟳ 지금 새로 받기」를 누르세요.' +
+      (st && st.err ? '<br>마지막 오류: ' + esc(st.err) : '') + '</div>';
+    $('kpis').innerHTML = ''; $('tblShop').innerHTML = ''; $('tblKw').innerHTML = ''; renderLog(); return;
+  }
+  $('warn').innerHTML = '';
+  renderKpis(S); renderChart(); renderShop(S); renderKw(S); renderLog();
+}
+
+function renderKpis(S){
+  var t = z(), h1 = z(), t7 = z();
+  Object.keys(S.campaigns || {}).forEach(function(cid){ t = add(t, cur(cid)); h1 = add(h1, delta(cid, 60)); t7 = add(t7, days7(cid)); });
+  var cpc = t[I.CLK] ? t[I.COST] / t[I.CLK] : 0;
+  var td = today(), sales = D.sales[td] && +D.sales[td].amt || 0;
+  var pct = sales ? t[I.COST] / sales * 100 : null, target = +D.cfg.target || 15;
+  /* 시즌 누적 — 시즌 시작일부터 지난 날 최종 + 오늘 */
+  var ss = D.cfg.season || '', sCost = t[I.COST], sSales = sales;
+  if (ss) {
+    Object.keys(D.days).forEach(function(d){ if (d >= ss && d < td) Object.keys(S.campaigns).forEach(function(cid){ sCost += arr(D.days[d][cid])[I.COST]; }); });
+    Object.keys(D.sales).forEach(function(d){ if (d >= ss && d < td) sSales += +D.sales[d].amt || 0; });
+  }
+  var sPct = (ss && sSales) ? sCost / sSales * 100 : null;
+  function k(lbl, v, s, cls){ return '<div class="kpi"><div class="k">' + lbl + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div><div class="s">' + (s || '') + '</div></div>'; }
+  $('kpis').innerHTML =
+    k('오늘 광고비', fmt(t[I.COST]) + '원', '최근 1시간 +' + fmt(h1[I.COST]) + '원') +
+    k('클릭 · 노출', fmt(t[I.CLK]) + '<span style="font-size:13px;color:var(--mu)"> / ' + fmt(t[I.IMP]) + '</span>', '클릭률 ' + (t[I.IMP] ? (t[I.CLK] / t[I.IMP] * 100).toFixed(2) : '0') + '% · 1시간 +' + h1[I.CLK]) +
+    k('평균 클릭단가', fmt(cpc) + '원', '7일 평균 ' + (t7[I.CLK] ? fmt(t7[I.COST] / t7[I.CLK]) : '-') + '원') +
+    k('네이버 집계 전환', fmt(t[I.CONV]) + '건', (t[I.CAMT] ? '전환매출 ' + fmt(t[I.CAMT]) + '원 · ' : '') + '늦게 잡힐 수 있음') +
+    k('오늘 광고비율', pct == null ? '—' : pct.toFixed(1) + '%', sales ? '스토어 매출 ' + fmt(sales) + '원 · 목표 ' + target + '%' : '오늘 스토어 매출을 넣으세요', pct == null ? '' : (pct <= target ? 'ok' : 'bad')) +
+    k('시즌 누적 광고비율', sPct == null ? '—' : sPct.toFixed(1) + '%', ss ? (ss.slice(5).replace('-', '/') + '부터 광고비 ' + fmt(sCost) + '원') : '시즌 시작일을 설정하세요', sPct == null ? '' : (sPct <= target ? 'ok' : 'bad'));
+}
+
+function hourSum(H){
+  var out = {}; Object.keys(H || {}).forEach(function(cid){ var h = H[cid] || {}; Object.keys(h).forEach(function(hh){
+    var a = h[hh] || [], o = out[hh] || (out[hh] = [0, 0, 0, 0]); for (var i = 0; i < 4; i++) o[i] += +a[i] || 0; }); });
+  return out;
+}
+function renderChart(){
+  var svg = $('chart'), W = svg.clientWidth || 600, H = 190, pl = 44, pr = 8, pt = 10, pb = 22;
+  var T = hourSum(D.hour), Y = hourSum(D.hourY);
+  var max = 1; for (var h = 0; h < 24; h++) { var hh = String(h).padStart(2, '0'); max = Math.max(max, (T[hh] || [0,0,0])[2], (Y[hh] || [0,0,0])[2]); }
+  var step = Math.pow(10, Math.floor(Math.log10(max))); var top = Math.ceil(max / step) * step;
+  var bw = (W - pl - pr) / 24, s = '';
+  for (var g = 0; g <= 4; g++) { var gy = pt + (H - pt - pb) * (1 - g / 4);
+    s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + gy + '" y2="' + gy + '" stroke="#1d2230"/>' +
+         '<text x="' + (pl - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + fmt(top * g / 4) + '</text>'; }
+  for (var i = 0; i < 24; i++) {
+    var k = String(i).padStart(2, '0'), v = (T[k] || [0,0,0])[2], yv = (Y[k] || [0,0,0])[2];
+    var x = pl + i * bw, bh = (H - pt - pb) * v / top, yh = (H - pt - pb) * yv / top;
+    /* 어제 같은 시간 = 테두리만 (색 대신 모양으로 구분) */
+    if (yv) s += '<rect x="' + (x + 2) + '" y="' + (H - pb - yh) + '" width="' + Math.max(1, bw - 4) + '" height="' + yh + '" fill="none" stroke="#5d6678" stroke-dasharray="2 2"/>';
+    if (v) s += '<rect x="' + (x + 3) + '" y="' + (H - pb - bh) + '" width="' + Math.max(1, bw - 6) + '" height="' + bh + '" rx="2" fill="#60a5fa"/>';
+    s += '<rect class="hit" data-h="' + k + '" x="' + x + '" y="' + pt + '" width="' + bw + '" height="' + (H - pt - pb) + '" fill="transparent"/>';
+    if (i % 3 === 0) s += '<text x="' + (x + bw / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + i + '시</text>';
+  }
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.innerHTML = s;
+  $('chartSub').textContent = '파란 막대 = 오늘 · 점선 = 어제 같은 시간 · 올리면 숫자';
+  svg.querySelectorAll('.hit').forEach(function(r){
+    r.addEventListener('mousemove', function(ev){
+      var k = r.dataset.h, a = T[k] || [0,0,0,0], b = Y[k] || [0,0,0,0];
+      tip(ev, '<b>' + (+k) + '시</b><br>오늘 광고비 <b>' + fmt(a[2]) + '</b>원 · 클릭 <b>' + a[1] + '</b> · 전환 <b>' + a[3] + '</b><br>어제 광고비 ' + fmt(b[2]) + '원 · 클릭 ' + b[1] + ' · 전환 ' + b[3]);
+    });
+    r.addEventListener('mouseleave', function(){ $('tip').classList.add('hide'); });
+  });
+}
+function tip(ev, html){ var t = $('tip'); t.innerHTML = html; t.classList.remove('hide');
+  var x = ev.clientX + 14, y = ev.clientY + 14; if (x + 260 > innerWidth) x = ev.clientX - 270; t.style.left = x + 'px'; t.style.top = y + 'px'; }
+
+function statCells(id){
+  var c = cur(id), h = delta(id, 60);
+  var ctr = c[I.IMP] ? (c[I.CLK] / c[I.IMP] * 100).toFixed(2) + '%' : '-', cpc = c[I.CLK] ? fmt(c[I.COST] / c[I.CLK]) : '-';
+  return '<td class="num">' + fmt(c[I.IMP]) + '</td><td class="num">' + fmt(c[I.CLK]) + '<span class="dlt">1시간 +' + h[I.CLK] + '</span></td>' +
+    '<td class="num">' + ctr + '</td><td class="num">' + cpc + '</td><td class="num">' + fmt(c[I.COST]) + '<span class="dlt">+' + fmt(h[I.COST]) + '</span></td>' +
+    '<td class="num">' + (c[I.RNK] ? (c[I.RNK] / 10).toFixed(1) : '-') + '</td><td class="num">' + c[I.CONV] + '</td>';
+}
+function bidCell(kind, id, bid, note){
+  return '<div class="bid"><input type="number" step="10" min="50" id="b_' + id + '" value="' + (bid || '') + '">' +
+    '<button data-adj="0.9" data-id="' + id + '">-10%</button><button data-adj="1.1" data-id="' + id + '">+10%</button>' +
+    '<button class="ap" data-apply="' + kind + '" data-id="' + id + '" data-from="' + (bid || '') + '">적용</button></div>' + (note ? '<span class="dlt">' + note + '</span>' : '');
+}
+function lockCell(kind, id, lock){
+  return '<button class="sw' + (lock ? '' : ' on') + '" data-lock="' + kind + '" data-id="' + id + '" data-to="' + (lock ? '0' : '1') + '" title="누르면 ' + (lock ? '켜기' : '끄기') + '">' + (lock ? 'OFF' : 'ON') + '</button>';
+}
+var HEAD = '<th>켜기</th><th class="num">노출</th><th class="num">클릭</th><th class="num">클릭률</th><th class="num">클릭단가</th><th class="num">광고비</th><th class="num">평균순위</th><th class="num">전환</th>';
+
+function renderShop(S){
+  var groups = Object.keys(S.adgroups || {}).filter(function(g){ return String(S.adgroups[g].tp).toUpperCase() === 'SHOPPING'; });
+  if (!groups.length) { $('tblShop').innerHTML = '<div class="empty">쇼핑검색 광고그룹이 없습니다</div>'; return; }
+  var adsBy = {}; Object.keys(S.ads || {}).forEach(function(a){ var x = S.ads[a]; (adsBy[x.gid] = adsBy[x.gid] || []).push(a); });
+  var h = '<table><thead><tr><th>상품</th>' + HEAD + '<th>입찰가</th><th>추천 (참고)</th></tr></thead><tbody>';
+  groups.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; }).forEach(function(gid){
+    var g = S.adgroups[gid], c = S.campaigns[g.cid] || {};
+    h += '<tr class="grp' + (g.lock ? ' off' : '') + '"><td>📁 ' + esc(g.name) + ' <span class="dlt">' + esc(c.name || '') + '</span></td>' +
+      '<td>' + lockCell('adgroup', gid, g.lock) + '</td>' + statCells(gid) +'<td>' + bidCell('adgroup', gid, g.bid, '그룹 기본 입찰가') + '</td><td></td></tr>';
+    (adsBy[gid] || []).sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; }).forEach(function(aid){
+      var a = S.ads[aid], bid = a.useGroupBid ? g.bid : a.bid;
+      h += '<tr class="' + (a.lock || g.lock ? 'off' : '') + '"><td><div class="pname">' + (a.img ? '<img src="' + esc(a.img) + '" alt="" loading="lazy">' : '') +
+        '<span title="' + esc(a.name) + '">' + esc(a.name) + '</span></div></td><td>' + lockCell('ad', aid, a.lock) + '</td>' + statCells(aid) +
+        '<td>' + bidCell('ad', aid, bid, a.useGroupBid ? '그룹 입찰가 사용 중 — 적용하면 이 상품만 따로' : '') + '</td><td class="hint">' + hintFor(aid, bid) + '</td></tr>';
+    });
+  });
+  $('tblShop').innerHTML = h + '</tbody></table>';
+}
+
+function renderKw(S){
+  var ids = Object.keys(S.keywords || {});
+  $('kwCard').classList.toggle('hide', !ids.length);
+  if (!ids.length) return;
+  ids.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; });
+  var h = '<table><thead><tr><th>키워드</th>' + HEAD + '<th>입찰가</th><th>추천 (참고)</th></tr></thead><tbody>';
+  ids.forEach(function(kid){
+    var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, bid = k.useGroupBid ? g.bid : k.bid;
+    h += '<tr class="' + (k.lock ? 'off' : '') + '"><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + statCells(kid) +
+      '<td>' + bidCell('keyword', kid, bid, k.useGroupBid ? '그룹 입찰가 사용 중' : '') + '</td><td class="hint">' + hintFor(kid, bid) + '</td></tr>';
+  });
+  $('tblKw').innerHTML = h + '</tbody></table>';
+}
+
+function nameOf(kind, id){
+  var S = D.struct || {}, n = kind === 'ad' ? S.ads : kind === 'adgroup' ? S.adgroups : S.keywords;
+  var x = n && n[id]; return x ? (x.name || x.kw || id) : id;
+}
+function renderLog(){
+  if (!D.logs.length) { $('log').innerHTML = '<div class="empty">아직 변경 기록이 없습니다</div>'; return; }
+  $('log').innerHTML = D.logs.map(function(l){
+    var what = l.act === 'lock' ? (l.to ? '끄기' : '켜기') : ('입찰가 ' + fmt(l.from) + ' → ' + fmt(l.to) + '원');
+    return '<div><span class="' + (l.ok ? 'ok' : 'er') + '">' + (l.ok ? '✓' : '✕') + '</span> ' + kTime(l.t) + ' · ' + esc(nameOf(l.kind, l.id)) + ' · ' + what +
+      (l.reason ? ' · ' + esc(l.reason) : '') + (l.err ? ' · <span class="er">' + esc(l.err) + '</span>' : '') + ' <span style="color:var(--mu2)">' + esc(l.by || '') + '</span></div>';
+  }).join('');
+}
+
+/* ── 설정 · 매출 ── */
+function fillCfg(){
+  var c = D.cfg || {};
+  $('cAov').value = c.aov || ''; $('cMargin').value = c.margin || ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || '';
+  var s = D.sales[today()]; $('sAmt').value = s && s.amt != null ? s.amt : '';
+}
+function saveCfg(){
+  var c = { aov: +$('cAov').value || null, margin: +$('cMargin').value || null, target: +$('cTarget').value || 15,
+            maxBid: +$('cMax').value || 3000, season: $('cSeason').value || null, ts: Date.now() };
+  db.ref('adctl/config').set(c).then(function(){ D.cfg = c; $('cfgSt').textContent = '저장됨'; render(); })
+    .catch(function(e){ $('cfgSt').textContent = '실패: ' + (e.code || e.message); });
+}
+function saveSales(){
+  var v = $('sAmt').value === '' ? null : +$('sAmt').value, td = today();
+  var o = v == null ? null : { amt: v, src: 'manual', ts: Date.now() };
+  db.ref('adctl/sales/' + td).set(o).then(function(){ if (o) D.sales[td] = o; else delete D.sales[td]; $('salesSt').textContent = '저장됨'; render(); })
+    .catch(function(e){ $('salesSt').textContent = '실패: ' + (e.code || e.message); });
+}
+
+/* ── 버튼 ── */
+function call(name, data){ return fns.httpsCallable(name, { timeout: 300000 })(data).then(function(r){ return r.data; }); }
+function collectNow(){
+  var b = $('btnNow'); b.disabled = true; b.textContent = '받는 중…';
+  call('adsCollectNow', {}).then(load).catch(function(e){ alert('수집 실패: ' + (e && e.message || e)); load(); })
+    .then(function(){ b.disabled = false; b.textContent = '⟳ 지금 새로 받기'; });
+}
+document.addEventListener('click', function(ev){
+  var t = ev.target;
+  if (t.dataset.adj) {
+    var inp = $('b_' + t.dataset.id), v = +inp.value || 0;
+    inp.value = Math.max(50, Math.round(v * +t.dataset.adj / 10) * 10); return;
+  }
+  if (t.dataset.apply) {
+    var id = t.dataset.id, kind = t.dataset.apply, to = Math.round((+$('b_' + id).value || 0) / 10) * 10, from = +t.dataset.from || 0;
+    if (to < 50) { alert('입찰가는 50원 이상'); return; }
+    if (to === from) { alert('바뀐 값이 없습니다'); return; }
+    var reason = prompt(nameOf(kind, id) + '\n입찰가 ' + fmt(from) + ' → ' + fmt(to) + '원 으로 바꿉니다.\n이유(선택)를 적고 확인을 누르세요.', '');
+    if (reason === null) return;
+    t.disabled = true; t.textContent = '…';
+    call('adsSetBid', { kind: kind, id: id, bid: to, reason: reason }).then(load)
+      .catch(function(e){ alert('변경 실패: ' + (e && e.message || e)); t.disabled = false; t.textContent = '적용'; });
+    return;
+  }
+  if (t.dataset.lock) {
+    var lk = t.dataset.lock, lid = t.dataset.id, lockTo = t.dataset.to === '1';
+    var why = prompt(nameOf(lk, lid) + '\n광고를 ' + (lockTo ? '끕니다 (노출 중지)' : '켭니다') + '.\n이유(선택)', '');
+    if (why === null) return;
+    t.disabled = true;
+    call('adsSetLock', { kind: lk, id: lid, lock: lockTo, reason: why }).then(load)
+      .catch(function(e){ alert('변경 실패: ' + (e && e.message || e)); t.disabled = false; });
+  }
+});
+
+/* ── 시작 — wms_access.js 가 슈퍼관리자 확인을 마치면 ── */
+var _started = false;
+function start(){
+  if (_started) return; _started = true;
+  db = firebase.database(); fns = firebase.app().functions('asia-northeast3');
+  $('gate').classList.add('hide'); $('app').classList.remove('hide');
+  $('btnNow').addEventListener('click', collectNow);
+  $('btnCfg').addEventListener('click', saveCfg);
+  $('btnSales').addEventListener('click', saveSales);
+  window.addEventListener('resize', function(){ if (D.struct) renderChart(); });
+  load();
+  setInterval(function(){ if (!document.hidden) load(); }, 5 * 60 * 1000);   /* 5분마다 화면 갱신 (수집은 서버가 30분마다) */
+}
+(function wait(){
+  var A = window.WMSAccess;
+  if (A && A.ready && A.level >= 3) { start(); return; }
+  if (A && A.ready && A.level < 3) { $('gate').textContent = '슈퍼관리자만 볼 수 있습니다'; return; }
+  setTimeout(wait, 150);
+})();
+</script>
+</body>
+</html>
