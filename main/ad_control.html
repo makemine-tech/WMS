@@ -141,7 +141,10 @@ td.kwn{min-width:150px}
     </div>
 
     <div class="card">
-      <div class="card-h"><div class="card-t">쇼핑검색 · 상품별</div><div class="card-s">오늘 누적 · 「1시간」은 최근 1시간 변화 · 추천은 참고용</div></div>
+      <div class="card-h"><div class="card-t">쇼핑검색 · 상품별</div><div class="card-s">오늘 누적 · 「1시간」은 최근 1시간 변화 · 추천은 참고용</div>
+        <div style="flex:1"></div>
+        <span class="card-s" id="runCnt"></span>
+        <label class="card-s" style="display:flex;align-items:center;gap:.3rem;cursor:pointer"><input type="checkbox" id="showAll"> 꺼진·노출 안 되는 광고도 보기</label></div>
       <div class="tbl-wrap" id="tblShop"></div>
     </div>
     <div class="card" id="kwCard">
@@ -314,18 +317,32 @@ function lockCell(kind, id, lock){
 }
 var HEAD = '<th>켜기</th><th class="num">노출</th><th class="num">클릭</th><th class="num">클릭률</th><th class="num">클릭단가</th><th class="num">광고비</th><th class="num">평균순위</th><th class="num">전환</th>';
 
+/* 지금 실제로 집행(노출 가능) 중인가 — 네이버 status 는 위 단계가 꺼지면 아래도 PAUSED 로 내려온다.
+   캠페인·광고그룹·소재(키워드) 모두 ELIGIBLE 이고 끄기(userLock)가 아닌 것만. 꺼졌어도 오늘 노출이 있었던 건 보여 준다. */
+function eligible(x){ return x && !x.lock && String(x.status || '').toUpperCase() === 'ELIGIBLE'; }
+function groupRunning(S, gid){ var g = S.adgroups[gid]; return eligible(g) && eligible(S.campaigns[g.cid]); }
+function itemRunning(S, x, id){ return (groupRunning(S, x.gid) && eligible(x)) || cur(id)[I.IMP] > 0; }
+function showAll(){ return $('showAll') && $('showAll').checked; }
+
 function renderShop(S){
-  var groups = Object.keys(S.adgroups || {}).filter(function(g){ return String(S.adgroups[g].tp).toUpperCase() === 'SHOPPING'; });
-  if (!groups.length) { $('tblShop').innerHTML = '<div class="empty">쇼핑검색 광고그룹이 없습니다</div>'; return; }
-  var adsBy = {}; Object.keys(S.ads || {}).forEach(function(a){ var x = S.ads[a]; (adsBy[x.gid] = adsBy[x.gid] || []).push(a); });
+  var all = Object.keys(S.adgroups || {}).filter(function(g){ return String(S.adgroups[g].tp).toUpperCase() === 'SHOPPING'; });
+  var adsBy = {}, nRun = 0, nAll = 0;
+  Object.keys(S.ads || {}).forEach(function(a){
+    var x = S.ads[a]; if (!S.adgroups[x.gid] || String(S.adgroups[x.gid].tp).toUpperCase() !== 'SHOPPING') return;
+    nAll++; var run = itemRunning(S, x, a); if (run) nRun++;
+    if (run || showAll()) (adsBy[x.gid] = adsBy[x.gid] || []).push(a);
+  });
+  $('runCnt').textContent = '집행 중 ' + nRun + '개 · 숨김 ' + (nAll - nRun) + '개';
+  var groups = all.filter(function(g){ return showAll() || groupRunning(S, g) || (adsBy[g] && adsBy[g].length); });
+  if (!groups.length) { $('tblShop').innerHTML = '<div class="empty">' + (all.length ? '지금 집행 중인 쇼핑검색 광고가 없습니다 — 「꺼진·노출 안 되는 광고도 보기」로 전체 확인' : '쇼핑검색 광고그룹이 없습니다') + '</div>'; return; }
   var h = '<table><thead><tr><th>상품</th>' + HEAD + '<th>입찰가</th><th>추천 (참고)</th></tr></thead><tbody>';
   groups.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; }).forEach(function(gid){
     var g = S.adgroups[gid], c = S.campaigns[g.cid] || {};
-    h += '<tr class="grp' + (g.lock ? ' off' : '') + '"><td>📁 ' + esc(g.name) + ' <span class="dlt">' + esc(c.name || '') + '</span></td>' +
+    h += '<tr class="grp' + (groupRunning(S, gid) ? '' : ' off') + '"><td>📁 ' + esc(g.name) + ' <span class="dlt">' + esc(c.name || '') + (groupRunning(S, gid) ? '' : ' · 노출 안 됨') + '</span></td>' +
       '<td>' + lockCell('adgroup', gid, g.lock) + '</td>' + statCells(gid) +'<td>' + bidCell('adgroup', gid, g.bid, '그룹 기본 입찰가') + '</td><td></td></tr>';
     (adsBy[gid] || []).sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; }).forEach(function(aid){
       var a = S.ads[aid], bid = a.useGroupBid ? g.bid : a.bid;
-      h += '<tr class="' + (a.lock || g.lock ? 'off' : '') + '"><td><div class="pname">' + (a.img ? '<img src="' + esc(a.img) + '" alt="" loading="lazy">' : '') +
+      h += '<tr class="' + (itemRunning(S, a, aid) ? '' : 'off') + '"><td><div class="pname">' + (a.img ? '<img src="' + esc(a.img) + '" alt="" loading="lazy">' : '') +
         '<span title="' + esc(a.name) + '">' + esc(a.name) + '</span></div></td><td>' + lockCell('ad', aid, a.lock) + '</td>' + statCells(aid) +
         '<td>' + bidCell('ad', aid, bid, a.useGroupBid ? '그룹 입찰가 사용 중 — 적용하면 이 상품만 따로' : '') + '</td><td class="hint">' + hintFor(aid, bid) + '</td></tr>';
     });
@@ -334,14 +351,14 @@ function renderShop(S){
 }
 
 function renderKw(S){
-  var ids = Object.keys(S.keywords || {});
+  var ids = Object.keys(S.keywords || {}).filter(function(k){ return showAll() || itemRunning(S, S.keywords[k], k); });
   $('kwCard').classList.toggle('hide', !ids.length);
   if (!ids.length) return;
   ids.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; });
   var h = '<table><thead><tr><th>키워드</th>' + HEAD + '<th>입찰가</th><th>추천 (참고)</th></tr></thead><tbody>';
   ids.forEach(function(kid){
     var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, bid = k.useGroupBid ? g.bid : k.bid;
-    h += '<tr class="' + (k.lock ? 'off' : '') + '"><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + statCells(kid) +
+    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + statCells(kid) +
       '<td>' + bidCell('keyword', kid, bid, k.useGroupBid ? '그룹 입찰가 사용 중' : '') + '</td><td class="hint">' + hintFor(kid, bid) + '</td></tr>';
   });
   $('tblKw').innerHTML = h + '</tbody></table>';
@@ -423,6 +440,11 @@ function start(){
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
   $('btnSales').addEventListener('click', saveSales);
+  try { $('showAll').checked = localStorage.getItem('adctl_showAll') === '1'; } catch (e) {}
+  $('showAll').addEventListener('change', function(){
+    try { localStorage.setItem('adctl_showAll', $('showAll').checked ? '1' : '0'); } catch (e) {}
+    if (D.struct) { renderShop(D.struct); renderKw(D.struct); }
+  });
   window.addEventListener('resize', function(){ if (_open && D.struct) renderChart(); });
   load();
   setInterval(function(){ if (_open && !document.hidden) load(); }, 5 * 60 * 1000);   /* 5분마다 화면 갱신 (수집은 서버가 30분마다) */
