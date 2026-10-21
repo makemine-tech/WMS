@@ -117,20 +117,23 @@ let FIELDS = BASE_FIELDS.concat(['convAmt']);   /* convAmt(전환매출)를 못 
 function pack(x) {
   return [+x.impCnt || 0, +x.clkCnt || 0, +x.salesAmt || 0, +x.ccnt || 0, Math.round((+x.avgRnk || 0) * 10), +x.convAmt || 0];
 }
-async function statsSummary(api, ids, since, until) {
+/* idGroups: [[캠페인 id…], [광고그룹 id…], …] — 네이버는 한 번에 같은 종류의 ID만 받는다
+   (섞으면 400 「모든 ID는 동일한 타입이어야 합니다」, 2026-10-22 첫 수집) */
+async function statsSummary(api, idGroups, since, until) {
   const out = {};
-  for (let i = 0; i < ids.length; i += 50) {
-    const part = ids.slice(i, i + 50);
-    let res;
-    try {
-      res = await api.get('/stats', { ids: part, fields: JSON.stringify(FIELDS), timeRange: JSON.stringify({ since, until }) });
-    } catch (e) {
-      if (e.status === 400 && FIELDS.indexOf('convAmt') >= 0) {
-        FIELDS = BASE_FIELDS.slice();
-        res = await api.get('/stats', { ids: part, fields: JSON.stringify(FIELDS), timeRange: JSON.stringify({ since, until }) });
-      } else throw e;
+  for (const ids of idGroups) {
+    for (let i = 0; i < ids.length; i += 50) {
+      const part = ids.slice(i, i + 50);
+      const ask = () => api.get('/stats', { ids: part, fields: JSON.stringify(FIELDS), timeRange: JSON.stringify({ since, until }) });
+      let res;
+      try { res = await ask(); }
+      catch (e) {
+        if (e.status !== 400 || FIELDS.indexOf('convAmt') < 0) throw e;
+        const keep = FIELDS; FIELDS = BASE_FIELDS.slice();       /* 전환매출을 못 받는 계정일 수 있어 빼고 한 번 더 */
+        try { res = await ask(); } catch (e2) { FIELDS = keep; throw e2; }
+      }
+      ((res && res.data) || []).forEach((x) => { if (x && x.id) out[x.id] = pack(x); });
     }
-    ((res && res.data) || []).forEach((x) => { if (x && x.id) out[x.id] = pack(x); });
   }
   return out;
 }
@@ -148,7 +151,7 @@ async function statsHourly(api, id, since, until) {
 }
 
 function allIds(S) {
-  return [].concat(Object.keys(S.campaigns), Object.keys(S.adgroups), Object.keys(S.ads), Object.keys(S.keywords));
+  return [Object.keys(S.campaigns), Object.keys(S.adgroups), Object.keys(S.ads), Object.keys(S.keywords)].filter((a) => a.length);
 }
 
 /* ── 수집 1회 ─────────────────────────────────────────── */
