@@ -70,6 +70,27 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .kpi .v.ok{color:var(--g)} .kpi .v.bad{color:var(--r)}
 
 .grid2{display:grid;grid-template-columns:2fr 1fr;gap:.8rem;margin-bottom:.8rem}
+.grid3{display:grid;grid-template-columns:1.25fr 1fr 1.15fr;gap:.8rem;margin-bottom:.8rem}
+.grid3 .card{margin-bottom:0}
+.chip2{background:var(--s2);border:1px solid var(--br);color:var(--mu);border-radius:999px;padding:.2rem .65rem;font-size:11.5px;font-weight:700}
+.chip2.on{background:var(--b);border-color:var(--b);color:#0b0d12}
+.lg{display:inline-flex;align-items:center;gap:.3rem;margin-right:.7rem}
+.lg i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.calc{font-size:12.5px}
+.calc-in{display:grid;grid-template-columns:auto 1fr;gap:.5rem;align-items:center}
+.calc-in label{color:var(--mu)}
+.calc-in input{width:100%;text-align:right;font-family:var(--mo)}
+.calc-row{display:flex;gap:.35rem;align-items:center;min-width:0}
+.calc-row .btn{white-space:nowrap;flex:none}
+.calc-row input[type=number]{flex:1;min-width:0}
+.calc-row input[type=date]{width:auto;text-align:left;font-family:inherit}
+.calc-out{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.4rem;margin-top:.5rem}
+.calc-out > div{background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.4rem .5rem;min-width:0}
+.calc-out .k{font-size:11px;color:var(--mu)}
+.calc-out .v{font-family:var(--mo);font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v.pos{color:var(--g)} .v.neg{color:var(--r)} td.pos{color:var(--g)} td.neg{color:var(--r)}
+.ptbl td,.ptbl th{padding:.35rem .3rem;font-size:12px}
+.ptbl td:first-child{color:var(--mu);white-space:nowrap}
 .card{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.9rem 1rem;min-width:0;margin-bottom:.8rem}
 .grid2 .card{margin-bottom:0}
 .card-h{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.6rem;flex-wrap:wrap}
@@ -129,7 +150,8 @@ td.kwn{min-width:150px}
 .empty{color:var(--mu);font-size:12.5px;padding:1.2rem;text-align:center}
 .tip{position:fixed;z-index:50;pointer-events:none;background:#0f131b;border:1px solid var(--br);border-radius:8px;padding:.45rem .6rem;font-size:12px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.45)}
 .tip b{font-family:var(--mo)}
-@media (max-width:1000px){ .kpis{grid-template-columns:repeat(3,minmax(0,1fr))} .grid2{grid-template-columns:1fr} }
+@media (max-width:1300px){ .grid3{grid-template-columns:1fr 1fr} .grid3 > .card:first-child{grid-column:1/-1} }
+@media (max-width:1000px){ .kpis{grid-template-columns:repeat(3,minmax(0,1fr))} .grid2{grid-template-columns:1fr} .grid3{grid-template-columns:1fr} }
 @media (max-width:560px){ .kpis{grid-template-columns:repeat(2,minmax(0,1fr))} .wrap{padding:.8rem .75rem 2rem} }
 </style>
 </head>
@@ -176,10 +198,13 @@ td.kwn{min-width:150px}
     <div class="note">30분마다 네이버 검색광고 API에서 자동으로 받아 옵니다. 입찰가·켜기/끄기는 <b>대표님이 누를 때만</b> 바뀌고, 모든 변경은 아래 기록에 남습니다.
       네이버 전환(구매) 집계는 몇 시간 늦게 잡힐 수 있어요 — 스마트스토어 주문 연결 전까지는 <b>오늘 스토어 매출을 직접 입력</b>하면 광고비 비율을 계산합니다.</div>
     <div id="kpis" class="kpis"></div>
-    <div class="grid2">
+    <div class="grid3">
       <div class="card">
-        <div class="card-h"><div class="card-t">시간대별 광고비 (오늘)</div><div class="card-s" id="chartSub">막대에 올리면 어제 같은 시간과 비교</div></div>
+        <div class="card-h"><div class="card-t" id="chartTitle">일별 매출 · 마진 · 광고비</div>
+          <div style="flex:1"></div>
+          <button class="chip2 on" data-cv="day">일별 수익</button><button class="chip2" data-cv="hour">시간대 광고비</button></div>
         <svg class="chart" id="chart"></svg>
+        <div class="card-s" id="chartSub"></div>
       </div>
       <div class="card">
         <div class="card-h"><div class="card-t">기준 설정</div><div class="card-s">추천·손익분기 계산에 씀</div></div>
@@ -190,8 +215,19 @@ td.kwn{min-width:150px}
           <label>최고 입찰가(원)</label><input type="number" id="cMax" min="50" step="10" placeholder="3000">
           <label>시즌 시작일</label><input type="date" id="cSeason">
           <div class="row2"><button class="btn" id="btnCfg">설정 저장</button><span class="st" id="cfgSt"></span></div>
-          <label style="margin-top:.4rem">오늘 스토어 매출</label><input type="number" id="sAmt" min="0" step="1000" placeholder="스마트스토어 오늘 결제금액" style="margin-top:.4rem">
-          <div class="row2"><button class="btn" id="btnSales">매출 저장</button><span class="st" id="salesSt"></span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t">수익 계산</div><div class="card-s">마진율 · 목표 광고비율 기준</div></div>
+        <div class="calc">
+          <div class="calc-in"><label>매출 넣어 보기</label><input type="number" id="qAmt" min="0" step="10000" placeholder="예 3000000"></div>
+          <div class="calc-out" id="qOut"></div>
+          <div class="calc-in" style="margin-top:.7rem"><label>스토어 매출 입력</label>
+            <span class="calc-row"><input type="date" id="sDate"><input type="number" id="sAmt" min="0" step="1000" placeholder="그날 결제금액">
+            <button class="btn" id="btnSales">저장</button></span></div>
+          <span class="st" id="salesSt"></span>
+          <div class="tbl-wrap" style="margin-top:.5rem"><table class="ptbl"><thead><tr><th></th><th class="num">매출</th><th class="num">광고비</th><th class="num">마진</th><th class="num">순수익</th><th class="num">수익률</th></tr></thead><tbody id="pBody"></tbody></table></div>
+          <div class="card-s" id="pNote" style="margin-top:.35rem;line-height:1.6"></div>
         </div>
       </div>
     </div>
@@ -248,10 +284,11 @@ function minOf(hm){ return +hm.slice(0, 2) * 60 + +hm.slice(2); }
 /* ── 불러오기 ── */
 function load(){
   var t = today(), y = addDays(t, -1), since = addDays(t, -7);
+  var dFrom = [since, weekStart(t), (D.cfg && D.cfg.season) || since].sort()[0];
   var g = function(p){ return db.ref(p).get().then(function(s){ return s.val(); }); };
   return Promise.all([
     g('adctl/struct'), g('adctl/status'), g('adctl/snap/' + t), g('adctl/hour/' + t), g('adctl/hour/' + y),
-    db.ref('adctl/day').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
+    db.ref('adctl/day').orderByKey().startAt(dFrom).get().then(function(s){ return s.val(); }),
     g('adctl/config'), db.ref('adctl/sales').orderByKey().startAt(addDays(t, -60)).get().then(function(s){ return s.val(); }),
     db.ref('adctl/log').orderByKey().limitToLast(400).get().then(function(s){ return s.val(); }),
     g('adctl/rank'), g('adctl/target'), g('adctl/budget/' + t), g('adctl/budgetOff'), g('adctl/budgetChk'),
@@ -264,6 +301,9 @@ function load(){
     D.logs = Object.keys(r[8] || {}).map(function(k){ return r[8][k]; }).reverse();
     D.logsAll = D.logs; D.logs = D.logs.slice(0, 50);
     fillCfg(); render();
+    /* 처음 열 땐 설정을 몰라 시즌 시작일 전 날짜를 못 불렀으면 이어서 채운다 */
+    if (D.cfg.season && D.cfg.season < dFrom)
+      db.ref('adctl/day').orderByKey().startAt(D.cfg.season).endAt(dFrom).get().then(function(s){ Object.assign(D.days, s.val() || {}); render(); });
   }).catch(function(e){ $('warn').innerHTML = '<div class="warn">불러오지 못했습니다: ' + esc(e && (e.code || e.message)) + '</div>'; });
 }
 
@@ -279,7 +319,7 @@ function delta(id, mins){
   if (!base) return now;      /* 그만큼 앞선 스냅이 없으면 오늘 시작부터 */
   return sub(now, arr(D.snaps[base].s && D.snaps[base].s[id]));
 }
-function days7(id){ var t = z(); Object.keys(D.days).forEach(function(d){ t = add(t, arr(D.days[d][id])); }); return t; }
+function days7(id){ var t = z(), from = addDays(today(), -7); Object.keys(D.days).forEach(function(d){ if (d >= from) t = add(t, arr(D.days[d][id])); }); return t; }
 
 /* ── 손익분기 · 추천 (참고용) ──
    손익분기 클릭단가 = 객단가 × 마진율 × 구매전환율(최근 7일+오늘, 클릭 30 이상일 때만) */
@@ -309,7 +349,7 @@ function render(){
     $('kpis').innerHTML = ''; $('tblShop').innerHTML = ''; $('tblKw').innerHTML = ''; renderLog(); return;
   }
   $('warn').innerHTML = '';
-  renderKpis(S); renderChart(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
+  renderKpis(S); renderChart(); renderCalc(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
 }
 
 /* ── 오늘 하루 예산 (오른쪽 위) ── 지킴이(10분)가 기록한 값, 없으면 마지막 수집 스냅으로 계산 */
@@ -397,8 +437,96 @@ function hourSum(H){
     var a = h[hh] || [], o = out[hh] || (out[hh] = [0, 0, 0, 0]); for (var i = 0; i < 4; i++) o[i] += +a[i] || 0; }); });
   return out;
 }
+/* ── 수익 계산 ──
+   마진 = 매출 × 마진율 (광고비 빼기 전) · 순수익 = 마진 − 광고비 · 수익률 = 순수익 ÷ 매출 · 광고비율 = 광고비 ÷ 매출.
+   매출은 스마트스토어 연결 전까지 「스토어 매출 입력」한 날만 (src:'manual'), 연결되면 같은 자리(adctl/sales)에 자동으로 채워진다.
+   광고비는 네이버 캠페인 합 — 지난날은 adctl/day, 오늘은 마지막 수집. */
+function weekStart(d){ var x = new Date(d + 'T00:00:00Z'), w = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - w); return x.toISOString().slice(0, 10); }
+function adCostOn(d){
+  var S = D.struct || {}, c = 0;
+  if (d === today()) { Object.keys(S.campaigns || {}).forEach(function(cid){ c += cur(cid)[I.COST]; }); return c; }
+  var dd = D.days[d]; if (!dd) return null;
+  Object.keys(S.campaigns || {}).forEach(function(cid){ c += arr(dd[cid])[I.COST]; });
+  return c;
+}
+function salesOn(d){ var x = D.sales[d]; return x && x.amt != null ? +x.amt : null; }
+function marginRate(){ return (+D.cfg.margin || 0) / 100; }
+function period(from, to){
+  var o = { sales: 0, cost: 0, days: 0, sDays: 0 };
+  for (var d = from; d <= to; d = addDays(d, 1)) {
+    var c = adCostOn(d), sv = salesOn(d);
+    if (c != null) { o.cost += c; o.days++; }
+    if (sv != null) { o.sales += sv; o.sDays++; }
+  }
+  o.margin = o.sales * marginRate(); o.profit = o.margin - o.cost;
+  o.rate = o.sales ? o.profit / o.sales : null; o.adPct = o.sales ? o.cost / o.sales : null;
+  return o;
+}
+function pct1(x){ return x == null ? '—' : (x * 100).toFixed(1) + '%'; }
+function renderCalc(){
+  var m = marginRate(), tg = (+D.cfg.target || 15) / 100, q = +$('qAmt').value || 0;
+  function box(k, v, cls){ return '<div><div class="k">' + k + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>'; }
+  if (!m) $('qOut').innerHTML = '<div style="grid-column:1/-1" class="st">기준 설정에 마진율을 넣으면 계산됩니다</div>';
+  else {
+    var mg = q * m, ad = q * tg, pf = mg - ad;
+    $('qOut').innerHTML = box('마진 (' + Math.round(m * 100) + '%)', fmt(mg) + '원') + box('광고비 (' + Math.round(tg * 100) + '%)', fmt(ad) + '원') +
+      box('광고 뺀 수익', fmt(pf) + '원', pf >= 0 ? 'pos' : 'neg') + box('수익률', q ? pct1(pf / q) : '—', pf >= 0 ? 'pos' : 'neg');
+  }
+  var td = today(), ss = D.cfg.season || null;
+  var rows = [['오늘', td, td], ['이번 주', weekStart(td), td]];
+  if (ss && ss <= td) rows.push(['시즌 (' + ss.slice(5).replace('-', '/') + '~)', ss, td]);
+  var notes = [];
+  $('pBody').innerHTML = rows.map(function(r){
+    var o = period(r[1], r[2]);
+    if (o.sDays < o.days) notes.push(r[0] + ' 광고 ' + o.days + '일 중 매출 입력 ' + o.sDays + '일');
+    var cls = o.sales ? (o.profit >= 0 ? 'pos' : 'neg') : '';
+    return '<tr><td>' + r[0] + '</td><td class="num">' + (o.sales ? fmt(o.sales) : '—') + '</td><td class="num">' + fmt(o.cost) +
+      (o.adPct != null ? '<span class="dlt">' + pct1(o.adPct) + '</span>' : '') + '</td><td class="num">' + (o.sales && m ? fmt(o.margin) : '—') +
+      '</td><td class="num ' + cls + '">' + (o.sales && m ? fmt(o.profit) : '—') + '</td><td class="num ' + cls + '">' + (o.sales && m ? pct1(o.rate) : '—') + '</td></tr>';
+  }).join('');
+  $('pNote').textContent = (notes.length ? notes.join(' · ') + ' — 매출을 넣은 날만 계산합니다. ' : '') + '스마트스토어가 연결되면 매출이 자동으로 채워집니다.';
+}
+
+/* 왼쪽 그래프 — 일별(최근 8일): 매출 · 마진 · 광고비 막대, 올리면 순수익·수익률 / 시간대(오늘): 광고비 */
+var CV = 'day';
+var C3 = { sales: '#60a5fa', margin: '#2dd4bf', cost: '#fb923c' };
 function renderChart(){
+  if (CV === 'hour') return renderHourChart();
+  var svg = $('chart'), W = svg.clientWidth || 600, H = 190, pl = 54, pr = 8, pt = 10, pb = 22, td = today();
+  var days = []; for (var k = 7; k >= 0; k--) days.push(addDays(td, -k));
+  var m = marginRate();
+  var V = days.map(function(d){ var sv = salesOn(d), c = adCostOn(d); return { d: d, s: sv || 0, mg: sv ? sv * m : 0, c: c || 0, has: sv != null }; });
+  var max = 1; V.forEach(function(v){ max = Math.max(max, v.s, v.mg, v.c); });
+  var step = Math.pow(10, Math.floor(Math.log10(max))), top = Math.ceil(max / step) * step;
+  var gw = (W - pl - pr) / days.length, bw = Math.max(3, Math.min(18, (gw - 10) / 3)), s = '';
+  for (var g = 0; g <= 4; g++) { var gy = pt + (H - pt - pb) * (1 - g / 4);
+    s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + gy + '" y2="' + gy + '" stroke="#1d2230"/>' +
+         '<text x="' + (pl - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + fmt(top * g / 4) + '</text>'; }
+  V.forEach(function(v, i){
+    var x0 = pl + i * gw + (gw - bw * 3 - 4) / 2;
+    [[v.s, C3.sales], [v.mg, C3.margin], [v.c, C3.cost]].forEach(function(b, j){
+      if (!b[0]) return; var bh = (H - pt - pb) * b[0] / top;
+      s += '<rect x="' + (x0 + j * (bw + 2)) + '" y="' + (H - pb - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="' + b[1] + '"/>';
+    });
+    s += '<rect class="hit" data-i="' + i + '" x="' + (pl + i * gw) + '" y="' + pt + '" width="' + gw + '" height="' + (H - pt - pb) + '" fill="transparent"/>';
+    s += '<text x="' + (pl + i * gw + gw / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + (v.d === td ? '오늘' : v.d.slice(5).replace('-', '/')) + '</text>';
+  });
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.innerHTML = s;
+  $('chartTitle').textContent = '일별 매출 · 마진 · 광고비';
+  $('chartSub').innerHTML = '<span class="lg"><i style="background:' + C3.sales + '"></i>매출</span><span class="lg"><i style="background:' + C3.margin + '"></i>마진</span>' +
+    '<span class="lg"><i style="background:' + C3.cost + '"></i>광고비</span> 올리면 순수익·수익률' + (m ? '' : ' · 마진율을 넣으면 마진이 나옵니다');
+  svg.querySelectorAll('.hit').forEach(function(r){
+    r.addEventListener('mousemove', function(ev){
+      var v = V[+r.dataset.i], pf = v.mg - v.c;
+      tip(ev, '<b>' + (v.d === td ? '오늘' : v.d) + '</b><br>매출 <b>' + (v.has ? fmt(v.s) + '</b>원' : '</b>입력 안 함') + '<br>마진 <b>' + fmt(v.mg) + '</b>원 · 광고비 <b>' + fmt(v.c) + '</b>원' +
+        (v.has ? '<br>순수익 <b>' + fmt(pf) + '</b>원 · 수익률 <b>' + pct1(v.s ? pf / v.s : null) + '</b> · 광고비율 <b>' + pct1(v.s ? v.c / v.s : null) + '</b>' : ''));
+    });
+    r.addEventListener('mouseleave', function(){ $('tip').classList.add('hide'); });
+  });
+}
+function renderHourChart(){
   var svg = $('chart'), W = svg.clientWidth || 600, H = 190, pl = 44, pr = 8, pt = 10, pb = 22;
+  $('chartTitle').textContent = '시간대별 광고비 (오늘)';
   var T = hourSum(D.hour), Y = hourSum(D.hourY);
   var max = 1; for (var h = 0; h < 24; h++) { var hh = String(h).padStart(2, '0'); max = Math.max(max, (T[hh] || [0,0,0])[2], (Y[hh] || [0,0,0])[2]); }
   var step = Math.pow(10, Math.floor(Math.log10(max))); var top = Math.ceil(max / step) * step;
@@ -613,7 +741,8 @@ function renderLog(){
 function fillCfg(){
   var c = D.cfg || {};
   $('cAov').value = c.aov || ''; $('cMargin').value = c.margin || ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || '';
-  var s = D.sales[today()]; $('sAmt').value = s && s.amt != null ? s.amt : '';
+  if (!$('sDate').value) $('sDate').value = today();
+  var s = D.sales[$('sDate').value]; $('sAmt').value = s && s.amt != null ? s.amt : '';
 }
 function saveCfg(){
   var c = { aov: +$('cAov').value || null, margin: +$('cMargin').value || null, target: +$('cTarget').value || 15,
@@ -622,7 +751,7 @@ function saveCfg(){
     .catch(function(e){ $('cfgSt').textContent = '실패: ' + (e.code || e.message); });
 }
 function saveSales(){
-  var v = $('sAmt').value === '' ? null : +$('sAmt').value, td = today();
+  var v = $('sAmt').value === '' ? null : +$('sAmt').value, td = $('sDate').value || today();
   var o = v == null ? null : { amt: v, src: 'manual', ts: Date.now() };
   db.ref('adctl/sales/' + td).set(o).then(function(){ if (o) D.sales[td] = o; else delete D.sales[td]; $('salesSt').textContent = '저장됨'; render(); })
     .catch(function(e){ $('salesSt').textContent = '실패: ' + (e.code || e.message); });
@@ -727,6 +856,10 @@ function start(){
   $('btnCfg').addEventListener('click', saveCfg);
   $('btnSales').addEventListener('click', saveSales);
   $('btnBud').addEventListener('click', openBudget);
+  $('qAmt').addEventListener('input', renderCalc);
+  $('sDate').addEventListener('change', function(){ var s0 = D.sales[$('sDate').value]; $('sAmt').value = s0 && s0.amt != null ? s0.amt : ''; $('salesSt').textContent = ''; });
+  document.querySelectorAll('.chip2[data-cv]').forEach(function(b){ b.addEventListener('click', function(){
+    CV = b.dataset.cv; document.querySelectorAll('.chip2[data-cv]').forEach(function(x){ x.classList.toggle('on', x === b); }); renderChart(); }); });
   $('btnBudSave').addEventListener('click', saveBudget);
   $('btnNotifyTest').addEventListener('click', function(){
     $('budSt').textContent = '알림 보내는 중…';
