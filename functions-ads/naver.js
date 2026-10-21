@@ -49,6 +49,7 @@ function makeClient(apiKey, secret, customerId) {
   return {
     get: (uri, q) => req('GET', uri, q),
     put: (uri, q, body) => req('PUT', uri, q, body),
+    post: (uri, q, body) => req('POST', uri, q, body),
   };
 }
 

@@ -84,6 +84,18 @@ tr.off td{color:var(--mu2)}
 .sw{border:1px solid var(--br);border-radius:999px;padding:.15rem .55rem;font-size:11px;font-weight:800;background:var(--s3);color:var(--mu)}
 .sw.on{background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.5);color:var(--g)}
 .hint{font-size:11.5px;line-height:1.5;max-width:240px}
+.stars{font-size:13px;letter-spacing:.02em;color:var(--y);white-space:nowrap}
+.stars i{font-style:normal;color:#2f3646}
+.stars.s1,.stars.s2{color:var(--r)} .stars.none{color:var(--mu2)}
+.qi{display:inline-flex;gap:2px;vertical-align:middle}
+.qi b{width:6px;height:12px;border-radius:2px;background:#2a3040;display:block}
+.qi b.hi{background:var(--g)} .qi b.md{background:var(--y)} .qi b.lo{background:var(--r)}
+.rk{display:block;white-space:nowrap;font-size:12px} .rk b{font-size:13px;color:var(--tx)} .rk.mu{color:var(--mu2)}
+td.tgt{min-width:170px}
+.tgt select{font-size:12px;padding:.25rem .3rem}
+.tgt input{font-size:12px;padding:.25rem .35rem;text-align:right;font-family:var(--mo)}
+.pin{font-weight:800;color:var(--b);white-space:nowrap}
+.tbtn{margin-left:.35rem;background:var(--s3);border:1px solid var(--br);color:var(--mu);border-radius:6px;padding:.15rem .45rem;font-size:11px}
 .hint .u{color:var(--g)} .hint .d{color:var(--r)} .hint .n{color:var(--mu)}
 .dlt{font-size:10.5px;color:var(--mu);display:block;white-space:nowrap}
 td.kwn{min-width:150px}
@@ -141,7 +153,7 @@ td.kwn{min-width:150px}
     </div>
 
     <div class="card">
-      <div class="card-h"><div class="card-t">쇼핑검색 · 상품별</div><div class="card-s">오늘 누적 · 「1시간」은 최근 1시간 변화 · 추천은 참고용</div>
+      <div class="card-h"><div class="card-t">쇼핑검색 · 상품별</div><div class="card-s">오늘 누적 · 「1시간」은 최근 1시간 변화 · 효율 ★ = 최근 7일+오늘 전환매출÷광고비 (★4 = 목표 광고비율 달성) · 품질 = 네이버 품질지수 7칸 · 목표 순위 「반영」= 그 순위 금액으로 자동 맞춤</div>
         <div style="flex:1"></div>
         <span class="card-s" id="runCnt"></span>
         <label class="card-s" style="display:flex;align-items:center;gap:.3rem;cursor:pointer"><input type="checkbox" id="showAll"> 꺼진·노출 안 되는 광고도 보기</label></div>
@@ -163,7 +175,7 @@ td.kwn{min-width:150px}
 /* ── 데이터 (functions-ads 가 기록 — 설명은 functions-ads/index.js 머리말)
    adctl/struct · snap/{날짜}/{HHmm} · hour/{날짜}/{캠페인} · day/{날짜} · status · log · config · sales/{날짜}
    통계 배열 = [노출, 클릭, 광고비, 전환수, 평균순위×10, 전환매출] ── */
-var db, fns, D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [] };
+var db, fns, D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [], rank: {}, target: {} };
 var I = { IMP: 0, CLK: 1, COST: 2, CONV: 3, RNK: 4, CAMT: 5 };
 
 function $(id){ return document.getElementById(id); }
@@ -187,8 +199,10 @@ function load(){
     g('adctl/struct'), g('adctl/status'), g('adctl/snap/' + t), g('adctl/hour/' + t), g('adctl/hour/' + y),
     db.ref('adctl/day').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
     g('adctl/config'), db.ref('adctl/sales').orderByKey().startAt(addDays(t, -60)).get().then(function(s){ return s.val(); }),
-    db.ref('adctl/log').orderByKey().limitToLast(50).get().then(function(s){ return s.val(); })
+    db.ref('adctl/log').orderByKey().limitToLast(50).get().then(function(s){ return s.val(); }),
+    g('adctl/rank'), g('adctl/target')
   ]).then(function(r){
+    D.rank = r[9] || {}; D.target = r[10] || {};
     D.struct = r[0]; D.status = r[1]; D.snaps = r[2] || {}; D.hour = r[3] || {}; D.hourY = r[4] || {};
     D.days = r[5] || {}; D.cfg = r[6] || {}; D.sales = r[7] || {};
     D.logs = Object.keys(r[8] || {}).map(function(k){ return r[8][k]; }).reverse();
@@ -305,7 +319,52 @@ function statCells(id){
   var ctr = c[I.IMP] ? (c[I.CLK] / c[I.IMP] * 100).toFixed(2) + '%' : '-', cpc = c[I.CLK] ? fmt(c[I.COST] / c[I.CLK]) : '-';
   return '<td class="num">' + fmt(c[I.IMP]) + '</td><td class="num">' + fmt(c[I.CLK]) + '<span class="dlt">1시간 +' + h[I.CLK] + '</span></td>' +
     '<td class="num">' + ctr + '</td><td class="num">' + cpc + '</td><td class="num">' + fmt(c[I.COST]) + '<span class="dlt">+' + fmt(h[I.COST]) + '</span></td>' +
-    '<td class="num">' + (c[I.RNK] ? (c[I.RNK] / 10).toFixed(1) : '-') + '</td><td class="num">' + c[I.CONV] + '</td>';
+    '<td class="num">' + c[I.CONV] + '</td>';
+}
+/* ── 효율 별점 (우리 기준) ──
+   최근 7일 + 오늘의 전환매출 ÷ 광고비(ROAS). 기준선 = 목표 광고비율(기본 15%)이면 100÷15 = 667%.
+   ★5 기준의 1.5배 이상 · ★4 기준 이상 · ★3 기준의 0.7배 · ★2 0.4배 · ★1 그 아래(또는 클릭 20 넘는데 전환 0).
+   클릭 10 미만은 아직 판단 안 함(–). 전환매출은 네이버 전환추적 값이라 늦게 잡힐 수 있다. */
+function roasOf(id){ var a = add(days7(id), cur(id)); return { cost: a[I.COST], clk: a[I.CLK], conv: a[I.CONV], amt: a[I.CAMT], roas: a[I.COST] ? a[I.CAMT] / a[I.COST] : null }; }
+function starsOf(id){
+  var r = roasOf(id), T = 100 / (+D.cfg.target || 15);
+  if (r.clk < 10) return { n: 0, r: r, T: T };
+  if (!r.amt) return { n: r.clk >= 20 ? 1 : 0, r: r, T: T };
+  var x = r.roas, n = x >= T * 1.5 ? 5 : x >= T ? 4 : x >= T * 0.7 ? 3 : x >= T * 0.4 ? 2 : 1;
+  return { n: n, r: r, T: T };
+}
+function starsCell(id){
+  var s = starsOf(id), r = s.r;
+  var tipT = '최근 7일+오늘 · 광고비 ' + fmt(r.cost) + '원 · 클릭 ' + r.clk + ' · 전환 ' + r.conv + ' · 전환매출 ' + fmt(r.amt) + '원' +
+    (r.roas != null ? ' · ROAS ' + Math.round(r.roas * 100) + '%' : '') + ' (기준 ' + Math.round(s.T * 100) + '% = 광고비율 ' + (+D.cfg.target || 15) + '%)';
+  if (!s.n) return '<td title="' + esc(tipT) + '"><span class="stars none">–</span><span class="dlt">' + (r.clk < 10 ? '데이터 부족' : '판단 보류') + '</span></td>';
+  return '<td title="' + esc(tipT) + '"><span class="stars s' + s.n + '">' + '★★★★★'.slice(0, s.n) + '<i>' + '★★★★★'.slice(s.n) + '</i></span>' +
+    '<span class="dlt">' + (r.roas != null && r.amt ? 'ROAS ' + Math.round(r.roas * 100) + '%' : '전환 0') + '</span></td>';
+}
+/* 품질지수 — 네이버 1~7칸 */
+function qiCell(qi){
+  if (qi == null) return '<td><span class="dlt">-</span></td>';
+  var h = '<span class="qi" title="품질지수 ' + qi + '/7">';
+  for (var i = 1; i <= 7; i++) h += '<b class="' + (i <= qi ? (qi >= 5 ? 'hi' : qi >= 3 ? 'md' : 'lo') : '') + '"></b>';
+  return '<td>' + h + '</span><span class="dlt">' + qi + '/7</span></td>';
+}
+/* PC / 모바일 평균 노출순위 (오늘, 오늘 노출 없으면 최근 7일) */
+function rankCell(id){
+  var R = D.rank && D.rank[id];
+  if (!R || (!R.mo && !R.pc)) return '<td class="num"><span class="dlt">-</span></td>';
+  function one(lbl, v){ return v ? '<span class="rk">' + lbl + ' <b>' + (+v[0]).toFixed(1) + '</b>위</span>' : '<span class="rk mu">' + lbl + ' -</span>'; }
+  return '<td class="num" title="평균 노출순위 · 노출 모바일 ' + ((R.mo || [])[1] || 0) + ' / PC ' + ((R.pc || [])[1] || 0) + '">' + one('모', R.mo) + one('PC', R.pc) +
+    (R.d7 ? '<span class="dlt">최근 7일</span>' : '') + '</td>';
+}
+/* 목표 순위 — 「반영」하면 서버가 그 순위 금액으로 맞추고 30분마다 따라간다 */
+function targetCell(kind, id){
+  var T = D.target && D.target[id];
+  if (T) return '<td class="tgt"><span class="pin">📌 ' + (T.dev === 'pc' ? 'PC' : '모바일') + ' ' + T.rank + '위</span> <span class="dlt">상한 ' + fmt(T.cap) + '원' +
+    (T.note ? ' · ' + esc(T.note) : '') + '</span><button class="tbtn" data-tclear="' + kind + '" data-id="' + id + '">해제</button></td>';
+  return '<td class="tgt"><div class="bid"><select id="td_' + id + '"><option value="mo">모바일</option><option value="pc">PC</option></select>' +
+    '<input type="number" min="1" max="15" step="1" id="tr_' + id + '" placeholder="위" style="width:46px">' +
+    '<input type="number" min="50" step="10" id="tc_' + id + '" placeholder="상한" style="width:64px">' +
+    '<button class="ap" data-tset="' + kind + '" data-id="' + id + '">반영</button></div></td>';
 }
 function bidCell(kind, id, bid, note){
   return '<div class="bid"><input type="number" step="10" min="50" id="b_' + id + '" value="' + (bid || '') + '">' +
@@ -315,7 +374,7 @@ function bidCell(kind, id, bid, note){
 function lockCell(kind, id, lock){
   return '<button class="sw' + (lock ? '' : ' on') + '" data-lock="' + kind + '" data-id="' + id + '" data-to="' + (lock ? '0' : '1') + '" title="누르면 ' + (lock ? '켜기' : '끄기') + '">' + (lock ? 'OFF' : 'ON') + '</button>';
 }
-var HEAD = '<th>켜기</th><th class="num">노출</th><th class="num">클릭</th><th class="num">클릭률</th><th class="num">클릭단가</th><th class="num">광고비</th><th class="num">평균순위</th><th class="num">전환</th>';
+var HEAD = '<th>켜기</th><th>효율</th><th>품질</th><th class="num">순위 모바일·PC</th><th class="num">노출</th><th class="num">클릭</th><th class="num">클릭률</th><th class="num">클릭단가</th><th class="num">광고비</th><th class="num">전환</th>';
 
 /* 지금 실제로 집행(노출 가능) 중인가 — 네이버 status 는 위 단계가 꺼지면 아래도 PAUSED 로 내려온다.
    캠페인·광고그룹·소재(키워드) 모두 ELIGIBLE 이고 끄기(userLock)가 아닌 것만. 꺼졌어도 오늘 노출이 있었던 건 보여 준다. */
@@ -335,16 +394,16 @@ function renderShop(S){
   $('runCnt').textContent = '집행 중 ' + nRun + '개 · 숨김 ' + (nAll - nRun) + '개';
   var groups = all.filter(function(g){ return showAll() || groupRunning(S, g) || (adsBy[g] && adsBy[g].length); });
   if (!groups.length) { $('tblShop').innerHTML = '<div class="empty">' + (all.length ? '지금 집행 중인 쇼핑검색 광고가 없습니다 — 「꺼진·노출 안 되는 광고도 보기」로 전체 확인' : '쇼핑검색 광고그룹이 없습니다') + '</div>'; return; }
-  var h = '<table><thead><tr><th>상품</th>' + HEAD + '<th>입찰가</th><th>추천 (참고)</th></tr></thead><tbody>';
+  var h = '<table><thead><tr><th>상품</th>' + HEAD + '<th>입찰가</th><th>목표 순위</th><th>추천 (참고)</th></tr></thead><tbody>';
   groups.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; }).forEach(function(gid){
     var g = S.adgroups[gid], c = S.campaigns[g.cid] || {};
     h += '<tr class="grp' + (groupRunning(S, gid) ? '' : ' off') + '"><td>📁 ' + esc(g.name) + ' <span class="dlt">' + esc(c.name || '') + (groupRunning(S, gid) ? '' : ' · 노출 안 됨') + '</span></td>' +
-      '<td>' + lockCell('adgroup', gid, g.lock) + '</td>' + statCells(gid) +'<td>' + bidCell('adgroup', gid, g.bid, '그룹 기본 입찰가') + '</td><td></td></tr>';
+      '<td>' + lockCell('adgroup', gid, g.lock) + '</td>' + starsCell(gid) + '<td></td><td></td>' + statCells(gid) +'<td>' + bidCell('adgroup', gid, g.bid, '그룹 기본 입찰가') + '</td><td></td><td></td></tr>';
     (adsBy[gid] || []).sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; }).forEach(function(aid){
       var a = S.ads[aid], bid = a.useGroupBid ? g.bid : a.bid;
       h += '<tr class="' + (itemRunning(S, a, aid) ? '' : 'off') + '"><td><div class="pname">' + (a.img ? '<img src="' + esc(a.img) + '" alt="" loading="lazy">' : '') +
-        '<span title="' + esc(a.name) + '">' + esc(a.name) + '</span></div></td><td>' + lockCell('ad', aid, a.lock) + '</td>' + statCells(aid) +
-        '<td>' + bidCell('ad', aid, bid, a.useGroupBid ? '그룹 입찰가 사용 중 — 적용하면 이 상품만 따로' : '') + '</td><td class="hint">' + hintFor(aid, bid) + '</td></tr>';
+        '<span title="' + esc(a.name) + '">' + esc(a.name) + '</span></div></td><td>' + lockCell('ad', aid, a.lock) + '</td>' + starsCell(aid) + qiCell(a.qi) + rankCell(aid) + statCells(aid) +
+        '<td>' + bidCell('ad', aid, bid, a.useGroupBid ? '그룹 입찰가 사용 중 — 적용하면 이 상품만 따로' : '') + '</td>' + targetCell('ad', aid) + '<td class="hint">' + hintFor(aid, bid) + '</td></tr>';
     });
   });
   $('tblShop').innerHTML = h + '</tbody></table>';
@@ -355,11 +414,11 @@ function renderKw(S){
   $('kwCard').classList.toggle('hide', !ids.length);
   if (!ids.length) return;
   ids.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; });
-  var h = '<table><thead><tr><th>키워드</th>' + HEAD + '<th>입찰가</th><th>추천 (참고)</th></tr></thead><tbody>';
+  var h = '<table><thead><tr><th>키워드</th>' + HEAD + '<th>입찰가</th><th>목표 순위</th><th>추천 (참고)</th></tr></thead><tbody>';
   ids.forEach(function(kid){
     var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, bid = k.useGroupBid ? g.bid : k.bid;
-    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + statCells(kid) +
-      '<td>' + bidCell('keyword', kid, bid, k.useGroupBid ? '그룹 입찰가 사용 중' : '') + '</td><td class="hint">' + hintFor(kid, bid) + '</td></tr>';
+    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + starsCell(kid) + qiCell(k.qi) + rankCell(kid) + statCells(kid) +
+      '<td>' + bidCell('keyword', kid, bid, k.useGroupBid ? '그룹 입찰가 사용 중' : '') + '</td>' + targetCell('keyword', kid) + '<td class="hint">' + hintFor(kid, bid) + '</td></tr>';
   });
   $('tblKw').innerHTML = h + '</tbody></table>';
 }
@@ -371,7 +430,7 @@ function nameOf(kind, id){
 function renderLog(){
   if (!D.logs.length) { $('log').innerHTML = '<div class="empty">아직 변경 기록이 없습니다</div>'; return; }
   $('log').innerHTML = D.logs.map(function(l){
-    var what = l.act === 'lock' ? (l.to ? '끄기' : '켜기') : ('입찰가 ' + fmt(l.from) + ' → ' + fmt(l.to) + '원');
+    var what = l.act === 'lock' ? (l.to ? '끄기' : '켜기') : l.act === 'target' ? (l.to ? '📌 목표 순위' : '목표 순위 해제') : ('입찰가 ' + fmt(l.from) + ' → ' + fmt(l.to) + '원' + (l.auto ? ' 🤖' : ''));
     return '<div><span class="' + (l.ok ? 'ok' : 'er') + '">' + (l.ok ? '✓' : '✕') + '</span> ' + kTime(l.t) + ' · ' + esc(nameOf(l.kind, l.id)) + ' · ' + what +
       (l.reason ? ' · ' + esc(l.reason) : '') + (l.err ? ' · <span class="er">' + esc(l.err) + '</span>' : '') + ' <span style="color:var(--mu2)">' + esc(l.by || '') + '</span></div>';
   }).join('');
@@ -420,6 +479,30 @@ document.addEventListener('click', function(ev){
       .catch(function(e){ alert('변경 실패: ' + (e && e.message || e)); t.disabled = false; t.textContent = '적용'; });
     return;
   }
+  if (t.dataset.tset) {
+    var tid = t.dataset.id, tk = t.dataset.tset, dev = $('td_' + tid).value, rk = +$('tr_' + tid).value, cap = +$('tc_' + tid).value || null;
+    if (!(rk >= 1 && rk <= 15)) { alert('목표 순위를 1~15 사이로 넣으세요'); return; }
+    var msg = nameOf(tk, tid) + '\n목표: ' + (dev === 'pc' ? 'PC' : '모바일') + ' ' + rk + '위' + (cap ? ' · 상한 ' + fmt(cap) + '원' : ' · 상한 = 설정 최고 입찰가') +
+      (tk === 'keyword' ? '\n\n네이버 순위별 예상 입찰가로 바로 맞추고, 30분마다 다시 맞춥니다.'
+                        : '\n\n쇼핑 상품은 네이버가 순위별 금액을 알려 주지 않아\n지금 순위를 보고 바로 한 번 조정한 뒤, 1시간마다 순위를 보며 조금씩 올리고 내립니다.') +
+      '\n\n반영할까요?';
+    if (!confirm(msg)) return;
+    t.disabled = true; t.textContent = '…';
+    call('adsSetTarget', { kind: tk, id: tid, dev: dev, rank: rk, cap: cap }).then(function(r){
+      var a = r && r.applied;
+      if (a && a.to != null) alert('입찰가 ' + fmt(a.from) + ' → ' + fmt(a.to) + '원 으로 맞췄습니다');
+      else if (a && a.skip === 'on-target') alert('이미 목표 근처입니다 — 계속 지켜봅니다');
+      return load();
+    }).catch(function(e){ alert('반영 실패: ' + (e && e.message || e)); t.disabled = false; t.textContent = '반영'; });
+    return;
+  }
+  if (t.dataset.tclear) {
+    if (!confirm(nameOf(t.dataset.tclear, t.dataset.id) + '\n목표 순위 추적을 해제합니다 (입찰가는 지금 금액 그대로).')) return;
+    t.disabled = true;
+    call('adsSetTarget', { kind: t.dataset.tclear, id: t.dataset.id, rank: null }).then(load)
+      .catch(function(e){ alert('해제 실패: ' + (e && e.message || e)); t.disabled = false; });
+    return;
+  }
   if (t.dataset.lock) {
     var lk = t.dataset.lock, lid = t.dataset.id, lockTo = t.dataset.to === '1';
     var why = prompt(nameOf(lk, lid) + '\n광고를 ' + (lockTo ? '끕니다 (노출 중지)' : '켭니다') + '.\n이유(선택)', '');
@@ -454,7 +537,7 @@ WMS2FA.guard({
   onUnlock: function(){ $('gate').classList.add('hide'); $('app').classList.remove('hide'); start(); },
   onLock: function(){
     _open = false;
-    D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [] };
+    D = { struct: null, status: null, snaps: {}, hour: {}, hourY: {}, days: {}, cfg: {}, sales: {}, logs: [], rank: {}, target: {} };
     ['kpis', 'tblShop', 'tblKw', 'log', 'warn'].forEach(function(id){ $(id).innerHTML = ''; });
     $('chart').innerHTML = ''; $('tip').classList.add('hide');
     $('app').classList.add('hide');
