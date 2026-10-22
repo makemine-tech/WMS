@@ -234,6 +234,7 @@ td.kwn{min-width:150px}
           <label>목표 광고비율(%)</label><input type="number" id="cTarget" min="1" max="100" step="1" placeholder="15">
           <label>최고 입찰가(원)</label><input type="number" id="cMax" min="50" step="10" placeholder="3000">
           <label>시즌 시작일</label><input type="date" id="cSeason">
+          <label>이익 상한</label><label style="display:flex;gap:.35rem;align-items:center;color:var(--tx)"><input type="checkbox" id="cBeOn" style="width:auto"> 클릭당 이익을 넘는 입찰은 자동으로 막기</label>
           <div class="row2"><button class="btn" id="btnCfg">설정 저장</button><span class="st" id="cfgSt"></span></div>
         </div>
       </div>
@@ -256,6 +257,13 @@ td.kwn{min-width:150px}
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-h"><div class="card-t">상품별 손익</div><div class="card-s">스마트스토어 실제 판매 ↔ 그 상품의 쇼핑검색 광고비(상품번호로 짝지음) · 순수익 = 매출 − 원가 − 수수료 − 쇼핑 광고비</div>
+        <div style="flex:1"></div>
+        <button class="chip2 on" data-pv="1">오늘</button><button class="chip2" data-pv="7">최근 7일</button></div>
+      <div class="tbl-wrap" id="tblProd"></div>
+      <div class="card-s" id="prodNote" style="margin-top:.35rem;line-height:1.6"></div>
+    </div>
     <div class="card">
       <div class="card-h"><div class="card-t">시간대별 목표 순위</div><div class="card-s">목표 순위를 건 상품·키워드에 그 시간 동안 더할 순위 · <b>+3</b> = 3위 목표가 6위로(입찰가 낮춤) · <b>−1</b> = 2위로(올림) · 30분마다 반영</div></div>
       <div class="hs" id="hsGrid"></div>
@@ -325,9 +333,9 @@ function load(){
     db.ref('adctl/log').orderByKey().limitToLast(400).get().then(function(s){ return s.val(); }),
     g('adctl/rank'), g('adctl/target'), g('adctl/budget/' + t), g('adctl/budgetOff'), g('adctl/budgetChk'),
     db.ref('adctl/hour').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
-    g('adctl/storeStatus')
+    g('adctl/storeStatus'), g('adctl/be'), g('adctl/kwvol')
   ]).then(function(r){
-    D.storeSt = r[15] || null;
+    D.storeSt = r[15] || null; D.be = r[16] || {}; D.kwvol = (r[17] && r[17].k) || {};
     D.rank = r[9] || {}; D.target = r[10] || {};
     D.budget = r[11] || {}; D.budgetOff = r[12] || {}; D.budgetChk = r[13] || null; D.hour7 = r[14] || {};
     D.struct = r[0]; D.status = r[1]; D.snaps = r[2] || {}; D.hour = r[3] || {}; D.hourY = r[4] || {};
@@ -383,7 +391,7 @@ function render(){
     $('kpis').innerHTML = ''; $('tblShop').innerHTML = ''; $('tblKw').innerHTML = ''; renderLog(); return;
   }
   $('warn').innerHTML = '';
-  renderKpis(S); renderChart(); renderCalc(); renderHS(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
+  renderKpis(S); renderChart(); renderCalc(); renderProd(S); renderHS(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
 }
 
 /* ── 오늘 하루 예산 (오른쪽 위) ── 지킴이(10분)가 기록한 값, 없으면 마지막 수집 스냅으로 계산 */
@@ -771,6 +779,14 @@ function targetCell(kind, id){
     '<input type="number" min="50" step="10" id="tc_' + id + '" placeholder="상한" style="width:64px">' +
     '<button class="ap" data-tset="' + kind + '" data-id="' + id + '">반영</button></div></td>';
 }
+/* 이익 상한 — 서버(adctl/be)가 계산한 클릭당 이익·입찰 상한. 목표 순위 추적이 이 금액을 넘겨 올리지 않음 */
+function beNote(id, bid){
+  var B = D.be || {}, x = B.items && B.items[id];
+  if (!x) return B.off ? '' : '이익 상한: 전환 데이터 모으는 중';
+  var over = bid && bid > x[3], off = D.cfg.beOn === false;
+  return '<span style="color:' + (over && !off ? 'var(--r)' : 'var(--mu)') + '" title="최근 7일+오늘 클릭 ' + x[0] + '번 · 전환매출 ' + fmt(x[1]) + '원 (클릭 적으면 같은 종류 평균을 섞음)">클릭당 이익 ' + fmt(x[2]) + '원 · 이익 상한 ' + fmt(x[3]) + '원' + (off ? ' (꺼짐)' : over ? ' — 넘음' : '') + '</span>';
+}
+function joinNote(a, b){ return [a, b].filter(Boolean).join('<br>'); }
 function bidCell(kind, id, bid, note){
   return '<div class="bid"><input type="number" step="10" min="50" id="b_' + id + '" value="' + (bid || '') + '">' +
     '<button data-adj="0.9" data-id="' + id + '">-10%</button><button data-adj="1.1" data-id="' + id + '">+10%</button>' +
@@ -808,7 +824,7 @@ function renderShop(S){
       var a = S.ads[aid], bid = a.useGroupBid ? g.bid : a.bid;
       h += '<tr class="' + (itemRunning(S, a, aid) ? '' : 'off') + '"><td><div class="pname">' + (a.img ? '<img src="' + esc(a.img) + '" alt="" loading="lazy">' : '') +
         '<span title="' + esc(a.name) + '">' + esc(a.name) + '</span></div></td><td>' + lockCell('ad', aid, a.lock) + '</td>' + starsCell(aid) + qiCell(a.qi) + rankCell(aid) + statCells(aid) +
-        '<td>' + bidCell('ad', aid, bid, a.useGroupBid ? '그룹 입찰가 사용 중 — 적용하면 이 상품만 따로' : '') + '</td>' + targetCell('ad', aid) + '<td class="hint">' + hintFor(aid, bid) + '</td>' + alarmCell('ad', aid, bid) + '</tr>';
+        '<td>' + bidCell('ad', aid, bid, joinNote(a.useGroupBid ? '그룹 입찰가 사용 중 — 적용하면 이 상품만 따로' : '', beNote(aid, bid))) + '</td>' + targetCell('ad', aid) + '<td class="hint">' + hintFor(aid, bid) + '</td>' + alarmCell('ad', aid, bid) + '</tr>';
     });
   });
   $('tblShop').innerHTML = h + '</tbody></table>';
@@ -817,6 +833,9 @@ function renderShop(S){
 /* 파워링크 표 정렬 — 제목을 누르면 큰 순 → 작은 순 → (다시 누르면) 큰 순. 값이 없는 줄은 늘 맨 아래.
    처음엔 광고비 큰 순. 화면을 다시 그려도(30분 새로 받기 등) 고른 정렬 유지 */
 var KW_SORT = { key: 'cost', dir: -1 };
+/* 키워드 월 검색 수 — 서버가 하루 한 번 검색광고 키워드 도구에서 받아 둔 최근 30일 [PC, 모바일, 경쟁정도] */
+function kwVol(kw){ return (D.kwvol || {})[String(kw || '').replace(/\s+/g, '')] || null; }
+function volCell(kw){ var v = kwVol(kw); return '<td class="num"' + (v ? ' title="최근 30일 · PC ' + fmt(v[0]) + ' · 모바일 ' + fmt(v[1]) + ' · 경쟁 ' + esc(v[2]) + '"' : '') + '>' + (v ? fmt(v[0] + v[1]) + '<span class="dlt">모바일 ' + Math.round(v[1] / Math.max(1, v[0] + v[1]) * 100) + '%</span>' : '—') + '</td>'; }
 function kwVal(S, kid, key){
   var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, c = cur(kid), R = D.rank && D.rank[kid];
   switch (key) {
@@ -829,6 +848,7 @@ function kwVal(S, kid, key){
     case 'cost': return c[I.COST];
     case 'conv': return c[I.CONV];
     case 'bid': var b = k.useGroupBid ? g.bid : k.bid; return b == null ? null : +b;
+    case 'vol': var v = kwVol(k.kw); return v ? v[0] + v[1] : null;
   }
   return null;
 }
@@ -847,13 +867,13 @@ function renderKw(S){
     return x === y ? cur(b)[I.COST] - cur(a)[I.COST] : (x - y) * KW_SORT.dir;
   });
   var allOn = ids.every(function(k){ return !KW_UNSEL[k]; });
-  var KHEAD = '<th>켜기</th><th>효율</th>' + sortTh('품질', 'qi').replace(' class="num ', ' class="') + sortTh('순위 모바일·PC', 'rank') + sortTh('노출', 'imp') + sortTh('클릭', 'clk') +
+  var KHEAD = '<th>켜기</th><th>효율</th>' + sortTh('품질', 'qi').replace(' class="num ', ' class="') + sortTh('순위 모바일·PC', 'rank') + sortTh('월 검색', 'vol') + sortTh('노출', 'imp') + sortTh('클릭', 'clk') +
     sortTh('클릭률', 'ctr') + sortTh('클릭단가', 'cpc') + sortTh('광고비', 'cost') + sortTh('전환', 'conv');
   var h = '<table><thead><tr><th><input type="checkbox" id="kwAll" title="전체 선택"' + (allOn ? ' checked' : '') + '></th><th>키워드</th>' + KHEAD + sortTh('입찰가', 'bid').replace(' class="num ', ' class="') + '<th>목표 순위</th><th>추천 (참고)</th><th>경고</th></tr></thead><tbody>';
   ids.forEach(function(kid){
     var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, bid = k.useGroupBid ? g.bid : k.bid;
-    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td><input type="checkbox" class="kwSel" value="' + kid + '"' + (KW_UNSEL[kid] ? '' : ' checked') + '></td><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + starsCell(kid) + qiCell(k.qi) + rankCell(kid) + statCells(kid) +
-      '<td>' + bidCell('keyword', kid, bid, k.useGroupBid ? '그룹 입찰가 사용 중' : '') + '</td>' + targetCell('keyword', kid) + '<td class="hint">' + hintFor(kid, bid) + '</td>' + alarmCell('keyword', kid, bid) + '</tr>';
+    h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td><input type="checkbox" class="kwSel" value="' + kid + '"' + (KW_UNSEL[kid] ? '' : ' checked') + '></td><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + starsCell(kid) + qiCell(k.qi) + rankCell(kid) + volCell(k.kw) + statCells(kid) +
+      '<td>' + bidCell('keyword', kid, bid, joinNote(k.useGroupBid ? '그룹 입찰가 사용 중' : '', beNote(kid, bid))) + '</td>' + targetCell('keyword', kid) + '<td class="hint">' + hintFor(kid, bid) + '</td>' + alarmCell('keyword', kid, bid) + '</tr>';
   });
   $('tblKw').innerHTML = h + '</tbody></table>';
 }
@@ -874,7 +894,7 @@ function renderLog(){
 /* ── 설정 · 매출 ── */
 function fillCfg(){
   var c = D.cfg || {};
-  $('cAov').value = c.aov || ''; $('cCost').value = c.cost || ''; $('cFee').value = c.fee != null ? c.fee : ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || '';
+  $('cAov').value = c.aov || ''; $('cCost').value = c.cost || ''; $('cFee').value = c.fee != null ? c.fee : ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || ''; $('cBeOn').checked = c.beOn !== false;
   showDerived();
   if (!$('sDate').value) $('sDate').value = today();
   var s = D.sales[$('sDate').value]; $('sAmt').value = s && s.amt != null ? s.amt : '';
@@ -898,7 +918,7 @@ function storeLine(){
 }
 function saveCfg(){
   var c = { aov: +$('cAov').value || null, cost: +$('cCost').value || null, fee: $('cFee').value === '' ? null : +$('cFee').value, target: +$('cTarget').value || 15,
-            maxBid: +$('cMax').value || 3000, season: $('cSeason').value || null, ts: Date.now() };
+            maxBid: +$('cMax').value || 3000, season: $('cSeason').value || null, beOn: $('cBeOn').checked, ts: Date.now() };
   db.ref('adctl/config').update(c).then(function(){ D.cfg = Object.assign({}, D.cfg, c); $('cfgSt').textContent = '저장됨'; render(); })
     .catch(function(e){ $('cfgSt').textContent = '실패: ' + (e.code || e.message); });
 }
@@ -907,6 +927,51 @@ function saveSales(){
   var o = v == null ? null : { amt: v, src: 'manual', ts: Date.now() };
   db.ref('adctl/sales/' + td).set(o).then(function(){ if (o) D.sales[td] = o; else delete D.sales[td]; $('salesSt').textContent = '저장됨'; render(); })
     .catch(function(e){ $('salesSt').textContent = '실패: ' + (e.code || e.message); });
+}
+
+/* ── 상품별 손익 — 스토어 판매(adctl/sales/{날짜}.p = { 상품번호: [수량, 금액] })와
+   쇼핑검색 소재(struct.ads[id].mallId = 같은 상품번호)의 광고비를 짝지음. 파워링크는 상품을 가리지 않아 따로 한 줄.
+   원가 = 매출 × 원가율, 수수료 = 그 기간 실제 수수료율(네이버 정산 예정금액이 있으면) 또는 설정 수수료율 ── */
+var PV = 1;
+function costOnDay(id, d){ if (d === today()) return cur(id)[I.COST]; var dd = D.days[d]; return dd ? arr(dd[id])[I.COST] : 0; }
+function renderProd(S){
+  var td = today(), days = []; for (var k = PV - 1; k >= 0; k--) days.push(addDays(td, -k));
+  var k0 = costCfg(), P = {}, sales = 0, fee = 0;
+  function row(pid){ return P[pid] || (P[pid] = { qty: 0, amt: 0, ad: 0, ads: [] }); }
+  days.forEach(function(d){
+    var rec = D.sales[d]; if (!rec) return;
+    var e = econ(+rec.amt || 0, 0, rec); sales += e.sales; fee += e.fee;
+    Object.keys(rec.p || {}).forEach(function(pid){ var q = rec.p[pid] || []; var o = row(pid); o.qty += +q[0] || 0; o.amt += +q[1] || 0; if (rec.pn && rec.pn[pid]) o.sname = rec.pn[pid]; });
+  });
+  var feeRate = sales ? fee / sales : k0.fee, kwCost = 0;
+  Object.keys(S.ads || {}).forEach(function(aid){
+    var a = S.ads[aid]; if (!/SHOPPING/i.test(a.type || '')) return;
+    var c = 0; days.forEach(function(d){ c += costOnDay(aid, d); });
+    if (!a.mallId) return;
+    if (c > 0 || P[a.mallId]) { var o = row(String(a.mallId)); o.ad += c; o.ads.push(aid); if (!o.name || a.status === 'ELIGIBLE') o.name = a.name; }
+  });
+  Object.keys(S.keywords || {}).forEach(function(kid){ days.forEach(function(d){ kwCost += costOnDay(kid, d); }); });
+  var ids = Object.keys(P).sort(function(a, b){ return (P[b].amt - P[b].ad) - (P[a].amt - P[a].ad) || P[b].ad - P[a].ad; });
+  if (!ids.length) { $('tblProd').innerHTML = '<div class="empty">이 기간 판매도 쇼핑 광고비도 없습니다</div>'; $('prodNote').textContent = ''; return; }
+  var T = { qty: 0, amt: 0, ad: 0, base: 0, pf: 0 };
+  var h = '<table><thead><tr><th>상품</th><th class="num">판매</th><th class="num">매출</th><th class="num">쇼핑 광고비</th><th class="num">원가·수수료</th><th class="num">순수익</th><th class="num">광고 대비 매출</th></tr></thead><tbody>';
+  ids.forEach(function(pid){
+    var o = P[pid], base = o.amt * (k0.cogs + feeRate), pf = o.amt - base - o.ad;
+    T.qty += o.qty; T.amt += o.amt; T.ad += o.ad; T.base += base; T.pf += pf;
+    var roas = o.ad ? o.amt / o.ad : null, be = k0.ok && (1 - k0.cogs - feeRate) > 0 ? 1 / (1 - k0.cogs - feeRate) : null;
+    h += '<tr><td><span title="상품번호 ' + esc(pid) + '">' + esc(o.sname || o.name || ('상품 ' + pid)) + '</span>' + (o.ads.length ? '' : '<span class="dlt">쇼핑 광고 없음</span>') + '</td>' +
+      '<td class="num">' + (o.qty ? fmt(o.qty) + '개' : '—') + '</td><td class="num">' + (o.amt ? fmt(o.amt) : '—') + '</td><td class="num">' + (o.ad ? fmt(o.ad) : '—') + '</td>' +
+      '<td class="num">' + (o.amt && k0.ok ? fmt(base) : '—') + '</td><td class="num ' + (k0.ok ? (pf >= 0 ? 'pos' : 'neg') : '') + '">' + (k0.ok ? fmt(pf) : '—') + '</td>' +
+      '<td class="num ' + (roas != null && be ? (roas >= be ? 'pos' : 'neg') : '') + '">' + (roas != null ? Math.round(roas * 100) + '%' : (o.amt ? '광고 없이 판매' : '—')) + '</td></tr>';
+  });
+  var allPf = T.pf - kwCost;
+  h += '<tr class="grp"><td>파워링크 <span class="dlt">상품을 가리지 않는 광고비</span></td><td></td><td></td><td class="num">' + fmt(kwCost) + '</td><td></td><td class="num neg">−' + fmt(kwCost) + '</td><td></td></tr>';
+  h += '<tr class="grp"><td>합계</td><td class="num">' + fmt(T.qty) + '개</td><td class="num">' + fmt(T.amt) + '</td><td class="num">' + fmt(T.ad + kwCost) + '</td><td class="num">' + (k0.ok ? fmt(T.base) : '—') + '</td>' +
+    '<td class="num ' + (k0.ok ? (allPf >= 0 ? 'pos' : 'neg') : '') + '">' + (k0.ok ? fmt(allPf) : '—') + '</td><td class="num">' + (T.ad + kwCost ? Math.round(T.amt / (T.ad + kwCost) * 100) + '%' : '—') + '</td></tr>';
+  $('tblProd').innerHTML = h + '</tbody></table>';
+  var beR = k0.ok && (1 - k0.cogs - feeRate) > 0 ? Math.round(100 / (1 - k0.cogs - feeRate)) : null;
+  $('prodNote').textContent = (beR ? '광고 대비 매출(ROAS)이 ' + beR + '% 넘어야 그 상품 광고가 본전 — 초록은 넘음, 빨강은 못 넘음. ' : '기준 설정에 원가·수수료를 넣으면 순수익이 나옵니다. ') +
+    '원가는 기준 설정 원가율(' + (k0.ok ? Math.round(k0.cogs * 100) + '%' : '—') + ')로 모든 상품에 같게 잡음. 어드부스트(GFA) 광고비는 아직 빠져 있음.';
 }
 
 /* ── 시간대별 목표 순위 (adctl/config/hourShift = { HH: 더할 순위 }) ──
@@ -975,6 +1040,10 @@ function collectNow(){
 document.addEventListener('click', function(ev){
   var t = ev.target;
   if (t.dataset && t.dataset.qpick) { QPICK = t.dataset.qpick; renderCalc(); return; }
+  if (t.dataset && t.dataset.pv) {
+    PV = +t.dataset.pv; document.querySelectorAll('.chip2[data-pv]').forEach(function(x){ x.classList.toggle('on', x === t); });
+    if (D.struct) renderProd(D.struct); return;
+  }
   var st = t.closest && t.closest('th[data-ksort]');
   if (st) {   /* 파워링크 표 정렬 — 같은 제목이면 방향만 바꿈, 새 제목이면 큰 순부터 */
     var key = st.dataset.ksort;

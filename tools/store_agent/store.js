@@ -101,7 +101,7 @@ async function storeDays(api, days) {
 /* settle = 네이버 정산 예정금액 합(수수료 뺀 값) · settleN = 그 값이 있던 상품주문 수 · rows = 취소 안 된 상품주문 수
    — 화면은 settleN === rows 일 때만 실제 수수료(amt − settle)를 쓰고, 아니면 기준 설정의 수수료율로 계산 */
 function sumDay(rows, day) {
-  const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {}, settle: 0, settleN: 0, rows: 0 };
+  const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {}, pn: {}, settle: 0, settleN: 0, rows: 0 };   /* pn = 상품번호별 상품명 */
   const orders = new Set();
   rows.forEach((x) => {
     const po = x.productOrder || {}, od = x.order || {};
@@ -115,7 +115,7 @@ function sumDay(rows, day) {
     const hh = kst(when).toISOString().slice(11, 13);
     o.h[hh] = (o.h[hh] || 0) + pay;
     const pid = String(po.productId || '');
-    if (pid) { const q = o.p[pid] || [0, 0]; q[0] += +po.quantity || 0; q[1] += pay; o.p[pid] = q; }
+    if (pid) { const q = o.p[pid] || [0, 0]; q[0] += +po.quantity || 0; q[1] += pay; o.p[pid] = q; if (po.productName) o.pn[pid] = String(po.productName).slice(0, 60); }
   });
   o.n = orders.size;
   return o;

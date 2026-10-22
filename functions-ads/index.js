@@ -225,9 +225,14 @@ async function collect(trigger) {
   }
   await db().ref().update(clean(up));
 
+  /* 손익분기 입찰 상한 · 키워드 월 검색 수 */
+  let be = null;
+  try { be = await breakEven(S, s, today); await db().ref('adctl/be').set(clean(be)); } catch (e) { logger.warn('손익분기 계산 실패', { e: e.message }); }
+  try { await keywordVolumes(api, S); } catch (e) { logger.warn('키워드 검색 수 실패', { e: e.message }); }
+
   /* 목표 순위 추적 — 대표님이 「반영」으로 정해 둔 것만 */
   let track = 0;
-  try { track = await applyTargets(api, S, rank); } catch (e) { logger.warn('목표 순위 추적 실패', { e: e.message }); }
+  try { track = await applyTargets(api, S, rank, be); } catch (e) { logger.warn('목표 순위 추적 실패', { e: e.message }); }
 
   const status = { ts: t0, ok: true, trigger, ms: Date.now() - t0, track,
     n: { campaigns: Object.keys(S.campaigns).length, adgroups: Object.keys(S.adgroups).length, ads: Object.keys(S.ads).length,
@@ -240,6 +245,67 @@ async function collect(trigger) {
   await Promise.all(Object.keys(snapDays).map((d) => db().ref('adctl/snap/' + d).remove()));
   logger.info('adsCollect', status);
   return status;
+}
+
+/* ── 손익분기 입찰 상한 (2026-10-22 대표님 ②) ─────────────────
+   클릭 1번이 벌어 오는 이익 = (전환매출 ÷ 클릭) × 남는 비율, 남는 비율 = (객단가 × (1 − 수수료) − 원가) ÷ 객단가.
+   이보다 비싸게 클릭을 사면 팔릴수록 손해 → 입찰 상한 = 클릭당 이익 × 1.25 (실제 클릭단가는 입찰가보다 낮게 나오므로 여유).
+   전환매출은 네이버 광고 전환(최근 7일 + 오늘). 클릭이 적은 키워드는 같은 종류(파워링크/쇼핑) 평균을 섞는다:
+     클릭당 전환매출 = (그 항목 전환매출 + 30 × 평균) ÷ (그 항목 클릭 + 30)  — 클릭 30번어치 평균을 미리 깔고 시작.
+   종류 전체 클릭이 50번 미만이거나 네이버 전환이 3건 미만이면 아직 판단할 근거가 없어 상한을 걸지 않는다.
+   (2026-10-22: 파워링크 전환 집계가 0 — 집계가 늦고 빠지는데 0 으로 계산하면 전부 최저가로 떨어짐)
+   adctl/be = { ts, m:남는 비율, pool:{kw:[클릭,전환매출,전환수], shop:[…]}, items:{ id:[클릭, 전환매출, 클릭당 이익, 입찰 상한] } } */
+const BE_PRIOR = 30, BE_MIN_POOL = 50, BE_MIN_CONV = 3, BE_BID_X = 1.25;
+function profitRate(cfg) {
+  const aov = +cfg.aov || 0, cost = +cfg.cost || 0, fee = cfg.fee != null && cfg.fee !== '' ? +cfg.fee / 100 : 0;
+  if (aov && cost) return (aov * (1 - fee) - cost) / aov;
+  if (+cfg.margin) return +cfg.margin / 100;
+  return null;
+}
+async function breakEven(S, sToday, today) {
+  const cfg = (await db().ref('adctl/config').once('value')).val() || {};
+  const m = profitRate(cfg);
+  if (!(m > 0)) return { ts: Date.now(), m: m, off: '기준 설정에 객단가·원가·수수료가 없음' };
+  const days = (await db().ref('adctl/day').orderByKey().startAt(addDays(today, -7)).endAt(addDays(today, -1)).once('value')).val() || {};
+  const sum = {};
+  [sToday].concat(Object.keys(days).map((d) => days[d])).forEach((D) => Object.keys(D || {}).forEach((id) => {
+    const a = D[id] || [], o = sum[id] || (sum[id] = [0, 0, 0]); o[0] += +a[1] || 0; o[1] += +a[5] || 0; o[2] += +a[3] || 0;
+  }));
+  const kind = {};
+  Object.keys(S.keywords || {}).forEach((id) => { kind[id] = 'kw'; });
+  Object.keys(S.ads || {}).forEach((id) => { if (/SHOPPING/i.test(S.ads[id].type)) kind[id] = 'shop'; });
+  const pool = { kw: [0, 0, 0], shop: [0, 0, 0] };
+  Object.keys(kind).forEach((id) => { const o = sum[id]; if (o) { pool[kind[id]][0] += o[0]; pool[kind[id]][1] += o[1]; pool[kind[id]][2] += o[2]; } });
+  const items = {};
+  Object.keys(kind).forEach((id) => {
+    const P = pool[kind[id]], o = sum[id] || [0, 0];
+    if (P[0] < BE_MIN_POOL || P[2] < BE_MIN_CONV) return;
+    const rpc = (o[1] + BE_PRIOR * P[1] / P[0]) / (o[0] + BE_PRIOR);
+    const per = Math.round(rpc * m), capBid = Math.round(per * BE_BID_X / 10) * 10;
+    items[id] = [o[0], o[1], per, capBid];
+  });
+  return { ts: Date.now(), m: Math.round(m * 1000) / 1000, pool, items };
+}
+
+/* ── 키워드 월 검색 수 (검색광고 키워드 도구 /keywordstool, 최근 30일) — 하루 한 번
+   adctl/kwvol = { ts, k:{ 키워드: [PC, 모바일, 경쟁정도] } } — 「< 10」 은 5 로 */
+function qc(v) { return typeof v === 'number' ? v : /</.test(String(v)) ? 5 : (+v || 0); }
+async function keywordVolumes(api, S) {
+  const cur = (await db().ref('adctl/kwvol/ts').once('value')).val();
+  if (cur && Date.now() - cur < 20 * 3600e3) return;
+  const words = Array.from(new Set(Object.keys(S.keywords || {}).map((id) => String(S.keywords[id].kw || '').replace(/\s+/g, '')).filter(Boolean)));
+  const out = {};
+  for (let i = 0; i < words.length; i += 5) {
+    const part = words.slice(i, i + 5);
+    try {
+      const r = await api.get('/keywordstool', { hintKeywords: part.join(','), showDetail: 1 });
+      ((r && r.keywordList) || []).forEach((x) => {
+        const w = String(x.relKeyword || '').replace(/\s+/g, '');
+        if (part.some((p) => p.toUpperCase() === w.toUpperCase())) out[w] = [qc(x.monthlyPcQcCnt), qc(x.monthlyMobileQcCnt), String(x.compIdx || '')];
+      });
+    } catch (e) { logger.warn('keywordstool 실패', { part, e: e.message }); }
+  }
+  await db().ref('adctl/kwvol').set(clean({ ts: Date.now(), k: out }));
 }
 
 async function collectSafe(trigger) {
@@ -357,13 +423,15 @@ function curBid(S, kind, id) {
    금액을 직접 깎으면 순위 보정이 되올리므로, 목표 순위를 바꿔 추적이 알아서 맞추게 한다.
    조정된 목표가 바뀌는 시각엔 실제 순위 보정 기준(base)을 새로 잡는다. */
 async function hourShiftCfg() { return ((await db().ref('adctl/config/hourShift').once('value')).val()) || {}; }
-async function trackOne(api, S, rank, id, T0, maxBid, now, shift) {
+async function trackOne(api, S, rank, id, T0, maxBid, now, shift, beCap) {
   const hk = kst(now).toISOString().slice(11, 13), sh = Math.round(+((shift || {})[hk]) || 0);
   const eff = Math.max(1, Math.min(15, T0.rank + sh));
   const T = Object.assign({}, T0, { rank: eff });   /* 복사 — 일괄 반영 때 여러 키워드가 같은 목표 객체를 나눠 쓰므로 */
   if (T0.effRank !== eff) { T.base = null; await db().ref('adctl/target/' + id).update({ effRank: eff, base: null }); }
   const tag = sh ? ' · ' + (+hk) + '시 조정 ' + T0.rank + '→' + eff + '위' : '';
-  const cap = Math.min(+T.cap || maxBid, maxBid);
+  /* 손익분기 입찰 상한(beCap) — 이보다 비싸게 사면 팔릴수록 손해. 목표 상한·최고 입찰가보다 낮을 때만 씀 */
+  const capT = Math.min(+T.cap || maxBid, maxBid), beOn = beCap > 0 && beCap < capT;
+  const cap = beOn ? beCap : capT, capWhy = beOn ? ' · 이익 상한 ' + beCap + '원' : '';
   const bid = curBid(S, T.kind, id);
   if (bid == null) return { id, skip: 'no-bid' };
   let want = null, why = '';
@@ -400,7 +468,7 @@ async function trackOne(api, S, rank, id, T0, maxBid, now, shift) {
     await db().ref('adctl/target/' + id).update({ adj, base: B ? T.base : T.cur });   /* 기준이 없던 목표는 지금부터 잰다 */
     if (!B) T.base = T.cur;
     want = est * adj * 100 / w;
-    why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '') + (adj !== 1 ? ' × 보정 ' + adj : '') + fb + tag;
+    why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '') + (adj !== 1 ? ' × 보정 ' + adj : '') + fb + tag + capWhy;
   } else {
     if (now - (+T.lastAdj || 0) < 55 * 60e3) return { id, skip: 'wait' };
     const RR = rank[id] || {}, R = RR[T.dev];
@@ -410,17 +478,17 @@ async function trackOne(api, S, rank, id, T0, maxBid, now, shift) {
     if (rk == null) {
       if (hh < 8) { await db().ref('adctl/target/' + id).update({ note: '새벽이라 노출이 적어 아침까지 기다림', chk: now }); return { id, skip: 'night' }; }
       if (now - (+T.lastAdj || 0) < 2 * 3600e3) { await db().ref('adctl/target/' + id).update({ note: '노출 기록 없음 — 2시간 지켜본 뒤 올림', chk: now }); return { id, skip: 'wait-noimp' }; }
-      want = bid * 1.1; why = '노출 기록 없음' + tag;
+      want = bid * 1.1; why = '노출 기록 없음' + tag + capWhy;
     }
-    else if (rk > T.rank + 0.5) { want = bid * (rk - T.rank > 2 ? 1.2 : 1.1); why = src + rk + '위' + tag; }
-    else if (rk < T.rank - 0.7) { want = bid * 0.93; why = src + rk + '위' + tag; }
+    else if (rk > T.rank + 0.5) { want = bid * (rk - T.rank > 2 ? 1.2 : 1.1); why = src + rk + '위' + tag + capWhy; }
+    else if (rk < T.rank - 0.7) { want = bid * 0.93; why = src + rk + '위' + tag + capWhy; }
     else { await db().ref('adctl/target/' + id).update({ note: '목표 근처 (' + src + rk + '위)', chk: now }); return { id, skip: 'on-target', rk }; }
   }
   const raw = Math.round(want / 10) * 10;
   const minBid = T.kind === 'keyword' ? 70 : 50;   /* 파워링크 최소 입찰가 70원 (50원 보내면 400 Invalid value), 쇼핑 50원 */
   const to = Math.max(minBid, Math.min(cap, raw)), atCap = raw > cap;
   if (to === bid || (Math.abs(to - bid) < Math.max(10, bid * 0.05) && !(atCap && bid < cap))) {
-    await db().ref('adctl/target/' + id).update({ note: atCap ? '상한 ' + cap + '원에 닿음 — 목표 순위가 안 나오면 상한을 올리세요' : '목표 근처 · ' + why, chk: now });
+    await db().ref('adctl/target/' + id).update({ note: atCap ? (beOn ? '이익 상한 ' + cap + '원에 닿음 — 이보다 비싸면 팔릴수록 손해' : '상한 ' + cap + '원에 닿음 — 목표 순위가 안 나오면 상한을 올리세요') : '목표 근처 · ' + why, chk: now });
     return { id, skip: 'small', atCap };
   }
   const r = await putBid(api, T.kind, id, to);
@@ -431,12 +499,17 @@ async function trackOne(api, S, rank, id, T0, maxBid, now, shift) {
     reason: '목표 ' + (T.dev === 'pc' ? 'PC' : '모바일') + ' ' + T.rank + '위 추적 · ' + why, ok: true, auto: true });
   return { id, from: r.from, to: r.to, atCap };
 }
-async function applyTargets(api, S, rank) {
+async function beCapOf(be, id) {
+  const on = (await db().ref('adctl/config/beOn').once('value')).val();
+  if (on === false || !be || !be.items || !be.items[id]) return null;
+  return be.items[id][3];
+}
+async function applyTargets(api, S, rank, be) {
   const all = (await db().ref('adctl/target').once('value')).val() || {};
   const ids = Object.keys(all); if (!ids.length) return 0;
   const maxBid = await maxBidCfg(), shift = await hourShiftCfg(), now = Date.now(); let n = 0;
   for (const id of ids) {
-    try { const r = await trackOne(api, S, rank, id, all[id], maxBid, now, shift); if (r.to != null) n++; }
+    try { const r = await trackOne(api, S, rank, id, all[id], maxBid, now, shift, await beCapOf(be, id)); if (r.to != null) n++; }
     catch (e) { logger.warn('추적 실패', { id, e: e.message }); await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120), chk: now }); }
   }
   return n;
@@ -467,9 +540,9 @@ exports.adsSetTargetBulk = onCall(OPTS, async (req) => {
   const api = client();
   const S = (await db().ref('adctl/struct').once('value')).val() || {};
   const rk = (await db().ref('adctl/rank').once('value')).val() || {};
-  const shift = await hourShiftCfg();
+  const shift = await hourShiftCfg(), be = (await db().ref('adctl/be').once('value')).val();
   const res = await pool(ids, 3, async (id) => {
-    try { return await trackOne(api, S, rk, id, T, maxBid, now, shift); }
+    try { return await trackOne(api, S, rk, id, T, maxBid, now, shift, await beCapOf(be, id)); }
     catch (e) { await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120) }); return { id, err: e.message }; }
   });
   return { ok: true, n: ids.length, changed: res.filter((r) => r && r.to != null).length,
@@ -496,7 +569,7 @@ exports.adsSetTarget = onCall(OPTS, async (req) => {
   const S = (await db().ref('adctl/struct').once('value')).val() || {};
   const rk = (await db().ref('adctl/rank').once('value')).val() || {};
   let applied;
-  try { applied = await trackOne(client(), S, rk, id, T, maxBid, Date.now(), await hourShiftCfg()); }
+  try { applied = await trackOne(client(), S, rk, id, T, maxBid, Date.now(), await hourShiftCfg(), await beCapOf((await db().ref('adctl/be').once('value')).val(), id)); }
   catch (e) { await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120) }); throw new HttpsError('internal', e.message); }
   return { ok: true, applied };
 });
@@ -664,6 +737,8 @@ function cleanDay(o) {
   Object.keys(o.p || {}).slice(0, 500).forEach((k) => {
     if (/^\d{1,20}$/.test(k) && Array.isArray(o.p[k])) out.p[k] = [num(o.p[k][0]), num(o.p[k][1])];
   });
+  out.pn = {};   /* 상품번호별 상품명 */
+  Object.keys(o.pn || {}).slice(0, 500).forEach((k) => { if (/^\d{1,20}$/.test(k)) out.pn[k] = String(o.pn[k]).replace(/[\u0000-\u001f]/g, '').slice(0, 60); });
   return out;
 }
 
