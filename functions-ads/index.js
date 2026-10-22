@@ -17,8 +17,7 @@
      adsSetBid       입찰가 변경 { kind:'ad'|'adgroup'|'keyword', id, bid, reason } — 손으로 정하면 그 대상의 목표 순위 추적은 꺼짐
      adsSetLock      켜기/끄기  { kind, id, lock:true|false, reason }
      adsSetTarget    목표 순위  { kind:'ad'|'keyword', id, dev:'mo'|'pc', rank:1~15 | null(해제), cap } — 바로 한 번 맞추고 30분마다 추적
-     adsStoreCollect 30분마다 스마트스토어 매출(커머스 API) → adctl/sales (고정 IP 경유, 비밀값 NAVER_COMMERCE_CLIENT_ID·SECRET)
-     adsStoreNow     화면의 「스토어 매출 지금 받기」 — 슈퍼관리자
+     adsStoreIngest  스마트스토어 매출 받는 창구 — 네이버에 IP 를 등록한 컴퓨터(tools/store_agent)가 10분마다 보냄
 
    DB (adctl/ — 읽기는 슈퍼관리자, 쓰기는 이 함수만. config·sales 만 화면에서 씀)
      adctl/struct              캠페인·광고그룹·소재(상품)·키워드 이름/입찰가/상태/품질지수(qi) (매 수집 덮어씀)
@@ -611,66 +610,49 @@ exports.adsBudgetNow = onCall(OPTS, async (req) => {
   catch (e) { throw new HttpsError('internal', e.message); }
 });
 
-/* ── 스마트스토어 매출 (커머스 API) ─────────────────────────
-   adctl/sales/{날짜} = { amt, src:'store', h:{HH:금액}, n:주문수, paid:결제 합계, cancel:취소·반품 합계, p:{상품번호:[수량,금액]}, ts }
-     amt = 그날 결제된 상품주문 중 취소·반품을 뺀 금액 (화면의 광고비율·수익 계산이 이 값을 씀)
-   adctl/storeStatus = 마지막 수집 결과
-   커머스API센터에 등록한 IP 로만 나가야 하므로 VPC 커넥터 → Cloud NAT 고정 IP 경유 */
-const STORE_ID = defineSecret('NAVER_COMMERCE_CLIENT_ID');
+/* ── 스마트스토어 매출 받는 창구 ─────────────────────────
+   커머스 API 는 커머스API센터에 등록한 IP 에서만 불러진다 → 등록한 컴퓨터(tools/store_agent)가
+   10분마다 주문을 받아 하루 매출로 합친 뒤 여기로 보낸다. 이 함수는 네이버를 부르지 않고 저장만 한다.
+   요청: POST { ts, host, days:{ 날짜:{ amt, paid, cancel, n, h:{HH:금액}, p:{상품번호:[수량,금액]} } } }  또는 { ts, host, err } (네이버에서 못 받음)
+         헤더 X-Store-Sign = hex( HMAC-SHA256(NAVER_COMMERCE_CLIENT_SECRET, ts + "." + 본문) ) — 10분 안의 요청만
+   저장: adctl/sales/{날짜} = { …, src:'store', ts }   (amt = 그날 결제 중 취소·반품 뺀 금액)
+         adctl/storeStatus = { ts, ok, host, days:{ 날짜:[금액,건수] } } */
+const { onRequest } = require('firebase-functions/v2/https');
+const crypto = require('crypto');
 const STORE_SECRET = defineSecret('NAVER_COMMERCE_CLIENT_SECRET');
-const STORE_OPTS = { region: REGION, secrets: [STORE_ID, STORE_SECRET], timeoutSeconds: 300, memory: '256MiB',
-  vpcConnector: 'wms-egress', vpcConnectorEgressSettings: 'ALL_TRAFFIC' };
-const OFF = ['CANCELED', 'CANCELED_BY_NOPAYMENT', 'RETURNED'];
-const { makeStore } = require('./store');
 
-async function storeDay(api, day) {
-  const from = day + 'T00:00:00.000+09:00', to = addDays(day, 1) + 'T00:00:00.000+09:00';
-  const rows = await api.details(await api.paidIds(from, to));
-  const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {}, src: 'store', ts: Date.now() };
-  const orders = new Set();
-  rows.forEach((x) => {
-    const po = x.productOrder || {}, od = x.order || {};
-    const pay = +po.totalPaymentAmount || 0;
-    const when = od.paymentDate ? Date.parse(od.paymentDate) : null;
-    if (when == null || kday(when) !== day) return;          /* 결제일이 그날인 것만 */
-    o.paid += pay;
-    if (OFF.indexOf(po.productOrderStatus) >= 0) { o.cancel += pay; return; }
-    o.amt += pay; orders.add(od.orderId);
-    const hh = kst(when).toISOString().slice(11, 13);
-    o.h[hh] = (o.h[hh] || 0) + pay;
-    const pid = String(po.productId || '');
-    if (pid) { const q = o.p[pid] || [0, 0]; q[0] += +po.quantity || 0; q[1] += pay; o.p[pid] = q; }
+function num(v) { const n = Math.round(+v); return Number.isFinite(n) && n >= 0 && n < 1e11 ? n : 0; }
+function cleanDay(o) {
+  const out = { amt: num(o.amt), paid: num(o.paid), cancel: num(o.cancel), n: num(o.n), h: {}, p: {}, src: 'store', ts: Date.now() };
+  Object.keys(o.h || {}).forEach((k) => { if (/^\d\d$/.test(k) && +k < 24) out.h[k] = num(o.h[k]); });
+  Object.keys(o.p || {}).slice(0, 500).forEach((k) => {
+    if (/^\d{1,20}$/.test(k) && Array.isArray(o.p[k])) out.p[k] = [num(o.p[k][0]), num(o.p[k][1])];
   });
-  o.n = orders.size;
-  return o;
+  return out;
 }
 
-async function storeCollect(trigger) {
-  const t0 = Date.now(), today = kday(t0), api = makeStore(STORE_ID.value(), STORE_SECRET.value());
-  const days = [addDays(today, -1), today];                     /* 어제 것도 다시 — 늦은 취소 반영 */
-  const up = {}, got = {};
-  for (const d of days) { const o = await storeDay(api, d); up['adctl/sales/' + d] = o; got[d] = [o.amt, o.n]; }
-  up['adctl/storeStatus'] = { ts: t0, ok: true, trigger, ms: Date.now() - t0, days: got };
-  await db().ref().update(clean(up));
-  logger.info('storeCollect', up['adctl/storeStatus']);
-  return up['adctl/storeStatus'];
-}
+exports.adsStoreIngest = onRequest({ region: REGION, secrets: [STORE_SECRET], timeoutSeconds: 60, memory: '256MiB' }, async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).send('POST only'); return; }
+  const raw = req.rawBody ? req.rawBody.toString('utf8') : '';
+  const sign = String(req.get('X-Store-Sign') || '');
+  let body = null; try { body = JSON.parse(raw); } catch (e) { /* 아래에서 거절 */ }
+  const ts = body && +body.ts;
+  if (!body || !ts || Math.abs(Date.now() - ts) > 10 * 60e3) { res.status(400).send('bad request'); return; }
+  const want = crypto.createHmac('sha256', String(STORE_SECRET.value()).trim()).update(ts + '.' + raw).digest('hex');
+  if (sign.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sign), Buffer.from(want))) { res.status(401).send('bad sign'); return; }
 
-async function storeSafe(trigger) {
-  try { return await storeCollect(trigger); }
-  catch (e) {
-    const st = { ts: Date.now(), ok: false, trigger, err: String(e && e.message || e).slice(0, 400) };
-    await db().ref('adctl/storeStatus').update(st).catch(() => {});
-    logger.error('storeCollect 실패', st);
-    return st;
+  if (body.err) {   /* 수집기가 네이버에서 못 받았을 때 — 화면에 실패로 보이게 */
+    await db().ref('adctl/storeStatus').update({ ts: Date.now(), ok: false, host: String(body.host || '').slice(0, 40), err: String(body.err).slice(0, 300) });
+    res.json({ ok: true }); return;
   }
-}
-
-exports.adsStoreCollect = onSchedule(Object.assign({ schedule: 'every 30 minutes', timeZone: 'Asia/Seoul' }, STORE_OPTS), async () => { await storeSafe('schedule'); });
-
-exports.adsStoreNow = onCall(STORE_OPTS, async (req) => {
-  await requireSuper(req);
-  const st = await storeSafe('manual');
-  if (!st.ok) throw new HttpsError('internal', st.err || '스토어 매출 받기 실패');
-  return st;
+  const today = kday(), oldest = addDays(today, -3), up = {}, got = {};
+  Object.keys(body.days || {}).forEach((d) => {
+    if (!/^\d{4}-\d\d-\d\d$/.test(d) || d < oldest || d > today) return;
+    const o = cleanDay(body.days[d] || {});
+    up['adctl/sales/' + d] = o; got[d] = [o.amt, o.n];
+  });
+  up['adctl/storeStatus'] = { ts: Date.now(), ok: true, host: String(body.host || '').slice(0, 40), days: got };
+  await db().ref().update(clean(up));
+  logger.info('adsStoreIngest', up['adctl/storeStatus']);
+  res.json({ ok: true, days: got });
 });

@@ -230,7 +230,7 @@ td.kwn{min-width:150px}
             <button class="btn" id="btnSales">저장</button></span></div>
           <span class="st" id="salesSt"></span>
           <div class="calc-in" style="margin-top:.5rem"><label>스마트스토어 자동</label>
-            <span class="calc-row"><span class="card-s" id="storeSt" style="flex:1;line-height:1.5"></span><button class="btn" id="btnStore">⟳ 스토어 매출 받기</button></span></div>
+            <span class="card-s" id="storeSt" style="line-height:1.5"></span></div>
           <div class="tbl-wrap" style="margin-top:.5rem"><table class="ptbl"><thead><tr><th></th><th class="num">매출</th><th class="num">광고비</th><th class="num">마진</th><th class="num">순수익</th><th class="num">수익률</th></tr></thead><tbody id="pBody"></tbody></table></div>
           <div class="card-s" id="pNote" style="margin-top:.35rem;line-height:1.6"></div>
         </div>
@@ -762,16 +762,15 @@ function salesNote(){
   $('salesSt').textContent = s && s.src === 'store'
     ? '스토어 자동 · ' + (s.n || 0) + '건' + (s.cancel ? ' · 취소·반품 ' + fmt(s.cancel) + '원 뺌' : '') : '';
 }
+/* 네이버에 IP 를 등록한 컴퓨터(tools/store_agent)가 10분마다 보냄 — 40분 넘게 소식 없으면 그 컴퓨터를 의심 */
 function storeLine(){
-  var st = D.storeSt, s = D.sales[today()];
-  $('storeSt').textContent = !st ? '아직 연결 전 — 고정 IP 등록이 끝나면 30분마다 자동으로 받습니다'
-    : st.ok ? '마지막 받음 ' + kTime(st.ts) + (s && s.src === 'store' ? ' · 오늘 ' + fmt(s.amt) + '원 ' + (s.n || 0) + '건' : '')
-    : '실패 ' + kTime(st.ts) + ' — ' + (st.err || '');
-}
-function storeNow(){
-  var b = $('btnStore'); b.disabled = true; b.textContent = '받는 중…';
-  call('adsStoreNow', {}).then(load).catch(function(e){ alert('스토어 매출 받기 실패: ' + (e && e.message || e)); load(); })
-    .then(function(){ b.disabled = false; b.textContent = '⟳ 스토어 매출 받기'; });
+  var st = D.storeSt, s = D.sales[today()], el = $('storeSt');
+  var late = st && Date.now() - st.ts > 40 * 60e3;
+  el.textContent = !st ? '아직 연결 전 — 수집 컴퓨터에 설치하면 10분마다 자동으로 들어옵니다'
+    : !st.ok ? '실패 ' + kTime(st.ts) + ' — ' + (st.err || '')
+    : '마지막 받음 ' + kTime(st.ts) + (st.host ? ' (' + st.host + ')' : '') + (s && s.src === 'store' ? ' · 오늘 ' + fmt(s.amt) + '원 ' + (s.n || 0) + '건' : '') +
+      (late ? ' · 40분 넘게 소식 없음 — 수집 컴퓨터가 켜져 있는지 확인' : '');
+  el.style.color = st && (!st.ok || late) ? '#f87171' : '';
 }
 function saveCfg(){
   var c = { aov: +$('cAov').value || null, margin: +$('cMargin').value || null, target: +$('cTarget').value || 15,
@@ -884,7 +883,6 @@ function start(){
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
   $('btnSales').addEventListener('click', saveSales);
-  $('btnStore').addEventListener('click', storeNow);
   $('btnBud').addEventListener('click', openBudget);
   $('qAmt').addEventListener('input', renderCalc);
   $('sDate').addEventListener('change', function(){ var s0 = D.sales[$('sDate').value]; $('sAmt').value = s0 && s0.amt != null ? s0.amt : ''; salesNote(); });

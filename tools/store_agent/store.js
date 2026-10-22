@@ -2,7 +2,7 @@
    스마트스토어 커머스 API 클라이언트 (조회만 — 주문 상태를 바꾸는 호출은 넣지 않음)
    인증: POST /external/v1/oauth2/token  (form-urlencoded, grant_type=client_credentials, type=SELF)
          client_secret_sign = base64( bcrypt(client_id + "_" + timestamp, client_secret) )
-   커머스API센터에 등록한 「API 호출 IP」에서만 호출됨 → 이 함수는 고정 IP(Cloud NAT)로 나간다.
+   커머스API센터에 등록한 「API 호출 IP」에서만 불러진다 → 그 IP 를 쓰는 컴퓨터에서 agent.js 로 돌린다.
 =========================================================== */
 const bcrypt = require('bcryptjs');
 
@@ -72,4 +72,32 @@ function makeStore(clientId, clientSecret) {
   return { paidIds, details };
 }
 
-module.exports = { makeStore };
+/* 하루 매출 — 결제일이 그날(한국시간)인 상품주문, 취소·반품은 amt 에서 뺌 */
+const OFF = ['CANCELED', 'CANCELED_BY_NOPAYMENT', 'RETURNED'];
+function kst(t) { return new Date((t || Date.now()) + 9 * 3600e3); }
+function kday(t) { return kst(t).toISOString().slice(0, 10); }
+function addDays(d, n) { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
+
+async function storeDay(api, day) {
+  const from = day + 'T00:00:00.000+09:00', to = addDays(day, 1) + 'T00:00:00.000+09:00';
+  const rows = await api.details(await api.paidIds(from, to));
+  const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {} };
+  const orders = new Set();
+  rows.forEach((x) => {
+    const po = x.productOrder || {}, od = x.order || {};
+    const pay = +po.totalPaymentAmount || 0;
+    const when = od.paymentDate ? Date.parse(od.paymentDate) : null;
+    if (when == null || kday(when) !== day) return;
+    o.paid += pay;
+    if (OFF.indexOf(po.productOrderStatus) >= 0) { o.cancel += pay; return; }
+    o.amt += pay; orders.add(od.orderId);
+    const hh = kst(when).toISOString().slice(11, 13);
+    o.h[hh] = (o.h[hh] || 0) + pay;
+    const pid = String(po.productId || '');
+    if (pid) { const q = o.p[pid] || [0, 0]; q[0] += +po.quantity || 0; q[1] += pay; o.p[pid] = q; }
+  });
+  o.n = orders.size;
+  return o;
+}
+
+module.exports = { makeStore, storeDay, kday, addDays };
