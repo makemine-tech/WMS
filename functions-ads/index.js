@@ -28,7 +28,7 @@
      adctl/target/{id}         목표 순위 (adsSetTarget)
      adctl/status              마지막 수집 결과
      adctl/log/{push}          입찰·켜기끄기·목표 변경 기록 (누가·언제·전→후·이유, 자동 추적은 by:'auto')
-     adctl/config              화면 설정 (객단가·마진율·목표 광고비율·최고 입찰가·시즌 시작일)
+     adctl/config              화면 설정 (객단가·원가·수수료·목표 광고비율·최고 입찰가·시즌 시작일 · hourShift{HH:순위 더하기} 시간대별 목표 순위 조정)
      adctl/sales/{날짜}        스토어 매출 — 커머스 API 자동(src:'store', h:{HH:금액}), 연결 안 된 날은 화면 수동 입력(src:'manual')
      adctl/storeStatus         스토어 매출 마지막 수집 결과
    날짜·시각은 모두 한국시간(KST).
@@ -353,7 +353,16 @@ function curBid(S, kind, id) {
   const g = (S.adgroups || {})[x.gid] || {};
   return x.useGroupBid ? g.bid : x.bid;
 }
-async function trackOne(api, S, rank, id, T, maxBid, now) {
+/* 시간대별 목표 순위 조정 (2026-10-22) — adctl/config/hourShift = { HH: 더할 순위 } (예 02~06시 +3 → 3위 목표가 6위)
+   금액을 직접 깎으면 순위 보정이 되올리므로, 목표 순위를 바꿔 추적이 알아서 맞추게 한다.
+   조정된 목표가 바뀌는 시각엔 실제 순위 보정 기준(base)을 새로 잡는다. */
+async function hourShiftCfg() { return ((await db().ref('adctl/config/hourShift').once('value')).val()) || {}; }
+async function trackOne(api, S, rank, id, T0, maxBid, now, shift) {
+  const hk = kst(now).toISOString().slice(11, 13), sh = Math.round(+((shift || {})[hk]) || 0);
+  const eff = Math.max(1, Math.min(15, T0.rank + sh));
+  const T = Object.assign({}, T0, { rank: eff });   /* 복사 — 일괄 반영 때 여러 키워드가 같은 목표 객체를 나눠 쓰므로 */
+  if (T0.effRank !== eff) { T.base = null; await db().ref('adctl/target/' + id).update({ effRank: eff, base: null }); }
+  const tag = sh ? ' · ' + (+hk) + '시 조정 ' + T0.rank + '→' + eff + '위' : '';
   const cap = Math.min(+T.cap || maxBid, maxBid);
   const bid = curBid(S, T.kind, id);
   if (bid == null) return { id, skip: 'no-bid' };
@@ -391,7 +400,7 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
     await db().ref('adctl/target/' + id).update({ adj, base: B ? T.base : T.cur });   /* 기준이 없던 목표는 지금부터 잰다 */
     if (!B) T.base = T.cur;
     want = est * adj * 100 / w;
-    why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '') + (adj !== 1 ? ' × 보정 ' + adj : '') + fb;
+    why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '') + (adj !== 1 ? ' × 보정 ' + adj : '') + fb + tag;
   } else {
     if (now - (+T.lastAdj || 0) < 55 * 60e3) return { id, skip: 'wait' };
     const RR = rank[id] || {}, R = RR[T.dev];
@@ -401,10 +410,10 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
     if (rk == null) {
       if (hh < 8) { await db().ref('adctl/target/' + id).update({ note: '새벽이라 노출이 적어 아침까지 기다림', chk: now }); return { id, skip: 'night' }; }
       if (now - (+T.lastAdj || 0) < 2 * 3600e3) { await db().ref('adctl/target/' + id).update({ note: '노출 기록 없음 — 2시간 지켜본 뒤 올림', chk: now }); return { id, skip: 'wait-noimp' }; }
-      want = bid * 1.1; why = '노출 기록 없음';
+      want = bid * 1.1; why = '노출 기록 없음' + tag;
     }
-    else if (rk > T.rank + 0.5) { want = bid * (rk - T.rank > 2 ? 1.2 : 1.1); why = src + rk + '위'; }
-    else if (rk < T.rank - 0.7) { want = bid * 0.93; why = src + rk + '위'; }
+    else if (rk > T.rank + 0.5) { want = bid * (rk - T.rank > 2 ? 1.2 : 1.1); why = src + rk + '위' + tag; }
+    else if (rk < T.rank - 0.7) { want = bid * 0.93; why = src + rk + '위' + tag; }
     else { await db().ref('adctl/target/' + id).update({ note: '목표 근처 (' + src + rk + '위)', chk: now }); return { id, skip: 'on-target', rk }; }
   }
   const raw = Math.round(want / 10) * 10;
@@ -425,9 +434,9 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
 async function applyTargets(api, S, rank) {
   const all = (await db().ref('adctl/target').once('value')).val() || {};
   const ids = Object.keys(all); if (!ids.length) return 0;
-  const maxBid = await maxBidCfg(), now = Date.now(); let n = 0;
+  const maxBid = await maxBidCfg(), shift = await hourShiftCfg(), now = Date.now(); let n = 0;
   for (const id of ids) {
-    try { const r = await trackOne(api, S, rank, id, all[id], maxBid, now); if (r.to != null) n++; }
+    try { const r = await trackOne(api, S, rank, id, all[id], maxBid, now, shift); if (r.to != null) n++; }
     catch (e) { logger.warn('추적 실패', { id, e: e.message }); await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120), chk: now }); }
   }
   return n;
@@ -458,8 +467,9 @@ exports.adsSetTargetBulk = onCall(OPTS, async (req) => {
   const api = client();
   const S = (await db().ref('adctl/struct').once('value')).val() || {};
   const rk = (await db().ref('adctl/rank').once('value')).val() || {};
+  const shift = await hourShiftCfg();
   const res = await pool(ids, 3, async (id) => {
-    try { return await trackOne(api, S, rk, id, T, maxBid, now); }
+    try { return await trackOne(api, S, rk, id, T, maxBid, now, shift); }
     catch (e) { await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120) }); return { id, err: e.message }; }
   });
   return { ok: true, n: ids.length, changed: res.filter((r) => r && r.to != null).length,
@@ -486,7 +496,7 @@ exports.adsSetTarget = onCall(OPTS, async (req) => {
   const S = (await db().ref('adctl/struct').once('value')).val() || {};
   const rk = (await db().ref('adctl/rank').once('value')).val() || {};
   let applied;
-  try { applied = await trackOne(client(), S, rk, id, T, maxBid, Date.now()); }
+  try { applied = await trackOne(client(), S, rk, id, T, maxBid, Date.now(), await hourShiftCfg()); }
   catch (e) { await db().ref('adctl/target/' + id).update({ note: '오류: ' + String(e.message).slice(0, 120) }); throw new HttpsError('internal', e.message); }
   return { ok: true, applied };
 });
