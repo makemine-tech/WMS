@@ -88,6 +88,9 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .calc-row input[type=number]{flex:1;min-width:0}
 .calc-row input[type=date]{width:auto;text-align:left;font-family:inherit}
 .calc-qty{margin-top:.5rem;font-size:12.5px;color:var(--mu)}
+.qpick{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.45rem}
+.qpick button{font-size:11.5px;padding:.25rem .55rem;border-radius:999px;border:1px solid var(--br);background:var(--s2);color:var(--mu);cursor:pointer}
+.qpick button.on{border-color:var(--b);color:var(--tx)}
 .calc-qty b{color:var(--tx);font-family:var(--mo)} .calc-qty .qn{color:var(--y);font-size:15px}
 .calc-out{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.4rem;margin-top:.5rem}
 .calc-out > div{background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.4rem .5rem;min-width:0}
@@ -112,6 +115,7 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th{text-align:left;color:var(--mu);font-weight:700;font-size:11.5px;padding:.45rem .35rem;border-bottom:1px solid var(--br);white-space:nowrap}
 th.num,td.num{text-align:right;font-family:var(--mo)}
+th.sortable{cursor:pointer;user-select:none} th.sortable:hover{color:var(--tx)} th.sortable.on{color:var(--b)}
 td{padding:.42rem .35rem;border-bottom:1px solid #1d2230;vertical-align:middle}
 tr.grp td{background:var(--s2);font-weight:800}
 tr.off td{color:var(--mu2)}
@@ -229,6 +233,7 @@ td.kwn{min-width:150px}
         <div class="card-h"><div class="card-t">수익 계산</div><div class="card-s">매출 − 원가 − 수수료 − 광고비</div></div>
         <div class="calc">
           <div class="calc-in"><label>매출 넣어 보기</label><input type="number" id="qAmt" min="0" step="10000" placeholder="예 3000000"></div>
+          <div class="qpick" id="qPick"></div>
           <div class="calc-qty" id="qQty"></div>
           <div class="calc-out" id="qOut"></div>
           <div class="calc-in" style="margin-top:.7rem"><label>스토어 매출 입력</label>
@@ -514,7 +519,24 @@ function showDerived(){
   $('cDerived').innerHTML = '네이버 정산금액 <b>' + fmt(st) + '원</b> · 개당 수익 <b class="' + (unit >= 0 ? 'pos' : 'neg') + '">' + fmt(unit) + '원</b> (' + pct1(be) + ')' +
     (unit > 0 ? ' — 광고비율이 <b>' + pct1(be) + '</b>를 넘으면 적자' : '');
 }
+/* 「매출 넣어 보기」 — 스마트스토어 매출을 바로 가져옴. 처음엔 오늘 매출, 칩으로 이번 주·시즌, 손으로 고치면 그 값 유지(「직접」) */
+var QPICK = 'today';
+function qPeriods(){
+  var td = today(), ss = D.cfg.season || null, P = [['today', '오늘', td, td], ['week', '이번 주', weekStart(td), td]];
+  if (ss && ss <= td) P.push(['season', '시즌', ss, td]);
+  return P;
+}
+function fillQ(){
+  if (QPICK === 'manual') return;
+  var p = qPeriods().filter(function(x){ return x[0] === QPICK; })[0] || qPeriods()[0];
+  var o = period(p[2], p[3]); $('qAmt').value = o.sales ? Math.round(o.sales) : '';
+}
 function renderCalc(){
+  fillQ();
+  $('qPick').innerHTML = qPeriods().map(function(p){
+    var o = period(p[2], p[3]);
+    return '<button data-qpick="' + p[0] + '" class="' + (QPICK === p[0] ? 'on' : '') + '">' + p[1] + ' 매출 ' + (o.sales ? fmt(o.sales) + '원' : '없음') + '</button>';
+  }).join('') + (QPICK === 'manual' ? '<button class="on" disabled>직접 입력</button>' : '');
   var k = costCfg(), tg = (+D.cfg.target || 15) / 100, q = +$('qAmt').value || 0;
   function box(lb, v, cls){ return '<div><div class="k">' + lb + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>'; }
   /* 기준 객단가로 환산한 판매 수량 — 매출 ÷ 객단가 (예: 23,900,000 ÷ 23,900 = 1,000개) */
@@ -776,13 +798,42 @@ function renderShop(S){
   $('tblShop').innerHTML = h + '</tbody></table>';
 }
 
+/* 파워링크 표 정렬 — 제목을 누르면 큰 순 → 작은 순 → (다시 누르면) 큰 순. 값이 없는 줄은 늘 맨 아래.
+   처음엔 광고비 큰 순. 화면을 다시 그려도(30분 새로 받기 등) 고른 정렬 유지 */
+var KW_SORT = { key: 'cost', dir: -1 };
+function kwVal(S, kid, key){
+  var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, c = cur(kid), R = D.rank && D.rank[kid];
+  switch (key) {
+    case 'qi': return k.qi == null ? null : +k.qi;
+    case 'rank': var r = R && R.mo && R.mo[1] > 0 ? R.mo[0] : (R && R.pc && R.pc[1] > 0 ? R.pc[0] : null); return r;
+    case 'imp': return c[I.IMP];
+    case 'clk': return c[I.CLK];
+    case 'ctr': return c[I.IMP] ? c[I.CLK] / c[I.IMP] : null;
+    case 'cpc': return c[I.CLK] ? c[I.COST] / c[I.CLK] : null;
+    case 'cost': return c[I.COST];
+    case 'conv': return c[I.CONV];
+    case 'bid': var b = k.useGroupBid ? g.bid : k.bid; return b == null ? null : +b;
+  }
+  return null;
+}
+function sortTh(label, key){
+  var on = KW_SORT.key === key;
+  return '<th class="num sortable' + (on ? ' on' : '') + '" data-ksort="' + key + '" title="눌러서 정렬">' + label + (on ? (KW_SORT.dir < 0 ? ' ▼' : ' ▲') : '') + '</th>';
+}
 function renderKw(S){
   var ids = Object.keys(S.keywords || {}).filter(function(k){ return showAll() || itemRunning(S, S.keywords[k], k); });
   $('kwCard').classList.toggle('hide', !ids.length);
   if (!ids.length) return;
-  ids.sort(function(a, b){ return cur(b)[I.COST] - cur(a)[I.COST]; });
+  ids.sort(function(a, b){
+    var x = kwVal(S, a, KW_SORT.key), y = kwVal(S, b, KW_SORT.key);
+    if (x == null && y == null) return cur(b)[I.COST] - cur(a)[I.COST];
+    if (x == null) return 1; if (y == null) return -1;
+    return x === y ? cur(b)[I.COST] - cur(a)[I.COST] : (x - y) * KW_SORT.dir;
+  });
   var allOn = ids.every(function(k){ return !KW_UNSEL[k]; });
-  var h = '<table><thead><tr><th><input type="checkbox" id="kwAll" title="전체 선택"' + (allOn ? ' checked' : '') + '></th><th>키워드</th>' + HEAD + '<th>입찰가</th><th>목표 순위</th><th>추천 (참고)</th><th>경고</th></tr></thead><tbody>';
+  var KHEAD = '<th>켜기</th><th>효율</th>' + sortTh('품질', 'qi').replace(' class="num ', ' class="') + sortTh('순위 모바일·PC', 'rank') + sortTh('노출', 'imp') + sortTh('클릭', 'clk') +
+    sortTh('클릭률', 'ctr') + sortTh('클릭단가', 'cpc') + sortTh('광고비', 'cost') + sortTh('전환', 'conv');
+  var h = '<table><thead><tr><th><input type="checkbox" id="kwAll" title="전체 선택"' + (allOn ? ' checked' : '') + '></th><th>키워드</th>' + KHEAD + sortTh('입찰가', 'bid').replace(' class="num ', ' class="') + '<th>목표 순위</th><th>추천 (참고)</th><th>경고</th></tr></thead><tbody>';
   ids.forEach(function(kid){
     var k = S.keywords[kid], g = S.adgroups[k.gid] || {}, bid = k.useGroupBid ? g.bid : k.bid;
     h += '<tr class="' + (itemRunning(S, k, kid) ? '' : 'off') + '"><td><input type="checkbox" class="kwSel" value="' + kid + '"' + (KW_UNSEL[kid] ? '' : ' checked') + '></td><td class="kwn">' + esc(k.kw) + '<span class="dlt">' + esc(g.name || '') + '</span></td><td>' + lockCell('keyword', kid, k.lock) + '</td>' + starsCell(kid) + qiCell(k.qi) + rankCell(kid) + statCells(kid) +
@@ -851,6 +902,14 @@ function collectNow(){
 }
 document.addEventListener('click', function(ev){
   var t = ev.target;
+  if (t.dataset && t.dataset.qpick) { QPICK = t.dataset.qpick; renderCalc(); return; }
+  var st = t.closest && t.closest('th[data-ksort]');
+  if (st) {   /* 파워링크 표 정렬 — 같은 제목이면 방향만 바꿈, 새 제목이면 큰 순부터 */
+    var key = st.dataset.ksort;
+    KW_SORT = KW_SORT.key === key ? { key: key, dir: -KW_SORT.dir } : { key: key, dir: -1 };
+    if (D.struct) renderKw(D.struct);
+    return;
+  }
   if (t.dataset.adj) {
     var inp = $('b_' + t.dataset.id), v = +inp.value || 0;
     inp.value = Math.max(50, Math.round(v * +t.dataset.adj / 10) * 10); return;
@@ -942,7 +1001,7 @@ function start(){
   ['cAov', 'cCost', 'cFee'].forEach(function(id){ $(id).addEventListener('input', showDerived); });
   $('btnSales').addEventListener('click', saveSales);
   $('btnBud').addEventListener('click', openBudget);
-  $('qAmt').addEventListener('input', renderCalc);
+  $('qAmt').addEventListener('input', function(){ QPICK = 'manual'; renderCalc(); });
   $('sDate').addEventListener('change', function(){ var s0 = D.sales[$('sDate').value]; $('sAmt').value = s0 && s0.amt != null ? s0.amt : ''; salesNote(); });
   document.querySelectorAll('.chip2[data-cv]').forEach(function(b){ b.addEventListener('click', function(){
     CV = b.dataset.cv; document.querySelectorAll('.chip2[data-cv]').forEach(function(x){ x.classList.toggle('on', x === b); }); renderChart(); }); });
