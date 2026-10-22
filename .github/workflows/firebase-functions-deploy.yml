@@ -1,0 +1,64 @@
+# 서버 함수 자동 배포
+#  - main 에 functions-* 폴더가 바뀌어 올라오면, 바뀐 묶음(codebase)만 배포
+#  - GitHub → Actions → 「Deploy Firebase Functions」 → Run workflow 로 직접 배포도 가능(휴대폰에서도)
+name: Deploy Firebase Functions
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'functions-*/**'
+  workflow_dispatch:
+    inputs:
+      codebases:
+        description: '배포할 묶음 (쉼표로 구분: ads,picktalk,settle,speech / 전부는 all)'
+        required: true
+        default: 'all'
+concurrency:
+  group: functions-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 바뀐 묶음 찾기
+        id: pick
+        env:
+          INPUT: ${{ github.event.inputs.codebases }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          ALL="ads picktalk settle speech"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "$INPUT" = "all" ]; then LIST="$ALL"; else LIST=$(echo "$INPUT" | tr ',' ' '); fi
+          else
+            if git cat-file -e "$BEFORE" 2>/dev/null; then
+              CHANGED=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+            else
+              CHANGED=$(git show --name-only --format= "$GITHUB_SHA")
+            fi
+            LIST=$(echo "$CHANGED" | grep -oE '^functions-[a-z]+/' | sed 's#functions-##; s#/##' | sort -u | tr '\n' ' ')
+          fi
+          ONLY=""
+          for c in $LIST; do
+            case " $ALL " in *" $c "*) ONLY="$ONLY,functions:$c" ;; *) echo "모르는 묶음: $c"; exit 1 ;; esac
+          done
+          echo "dirs=$LIST" >> "$GITHUB_OUTPUT"
+          echo "only=${ONLY#,}" >> "$GITHUB_OUTPUT"
+          echo "배포 대상: $LIST"
+      - uses: actions/setup-node@v4
+        if: steps.pick.outputs.only != ''
+        with:
+          node-version: 22
+      - name: 패키지 설치
+        if: steps.pick.outputs.only != ''
+        run: for c in ${{ steps.pick.outputs.dirs }}; do (cd "functions-$c" && npm ci); done
+      - uses: google-github-actions/auth@v2
+        if: steps.pick.outputs.only != ''
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MAKECHANGO_WMS }}
+      - name: 배포
+        if: steps.pick.outputs.only != ''
+        run: npx -y firebase-tools@15 deploy --only "${{ steps.pick.outputs.only }}" --project makechango-wms --non-interactive

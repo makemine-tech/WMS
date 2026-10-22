@@ -2,6 +2,7 @@
 #   1) 파일   : WMS·MAKE-WMS 를 Dropbox\MAKEWON\파일\ 로 그대로 맞춤(node_modules·작업용 복사본·.git 제외)
 #   2) git기록: 저장소 전체 기록 묶음(.bundle) — 날짜별, 최근 14개 보관
 #   3) firebase: Realtime Database 전체 내보내기(.zip) — 날짜별, 최근 60개 보관
+#   +  claude설정: Claude 기억(메모)·설정 파일
 # 설치·등록: tools\backup\install_backup_task.ps1
 
 $ErrorActionPreference = 'Continue'
@@ -48,6 +49,23 @@ foreach ($r in $Repos) {
   if ($LASTEXITCODE -ge 8) { Write-Log "[파일] $r 실패 (코드 $LASTEXITCODE)"; $fail += "파일 $r" }
   else { Write-Log "[파일] $r 완료" }
 }
+
+# 1-2) Claude 기억·설정 (로그인 정보 파일은 넣지 않음)
+$claude = Join-Path $env:USERPROFILE '.claude'
+$cDest  = Join-Path $Dest 'claude설정'
+New-Item -ItemType Directory -Force $cDest | Out-Null
+foreach ($f in 'settings.json', 'CLAUDE.md', 'keybindings.json') {
+  $p = Join-Path $claude $f
+  if (Test-Path $p) { Copy-Item $p $cDest -Force }
+}
+Get-ChildItem (Join-Path $claude 'projects') -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+  $mem = Join-Path $_.FullName 'memory'
+  if (Test-Path $mem) {
+    robocopy $mem (Join-Path $cDest "기억\$($_.Name)") /MIR /R:2 /W:5 /NP /NFL /NDL /NJH /NJS | Out-Null
+    if ($LASTEXITCODE -ge 8) { $fail += "기억 $($_.Name)" }
+  }
+}
+Write-Log '[claude] 기억·설정 복사 완료'
 
 # 2) git 전체 기록 묶음
 foreach ($r in $Repos) {
