@@ -45,7 +45,9 @@ const REGION = 'asia-northeast3';
 const SA_KEY = defineSecret('NAVER_SA_API_KEY');
 const SA_SECRET = defineSecret('NAVER_SA_SECRET_KEY');
 const SA_CUSTOMER = defineSecret('NAVER_SA_CUSTOMER_ID');
-const SECRETS = [SA_KEY, SA_SECRET, SA_CUSTOMER];
+const DL_ID = defineSecret('NAVER_DATALAB_CLIENT_ID');          /* 데이터랩 검색어 트렌드 (NAVER API HUB) */
+const DL_SECRET = defineSecret('NAVER_DATALAB_CLIENT_SECRET');
+const SECRETS = [SA_KEY, SA_SECRET, SA_CUSTOMER, DL_ID, DL_SECRET];
 const OPTS = { region: REGION, secrets: SECRETS, timeoutSeconds: 300, memory: '256MiB' };
 
 const BASE_FIELDS = ['impCnt', 'clkCnt', 'salesAmt', 'ccnt', 'avgRnk'];
@@ -229,6 +231,7 @@ async function collect(trigger) {
   let be = null;
   try { be = await breakEven(S, s, today); await db().ref('adctl/be').set(clean(be)); } catch (e) { logger.warn('손익분기 계산 실패', { e: e.message }); }
   try { await keywordVolumes(api, S); } catch (e) { logger.warn('키워드 검색 수 실패', { e: e.message }); }
+  try { await seasonTrend(S, false); } catch (e) { logger.warn('데이터랩 실패', { e: e.message }); await db().ref('adctl/trend/err').set(String(e.message).slice(0, 300)).catch(() => {}); }
 
   /* 목표 순위 추적 — 대표님이 「반영」으로 정해 둔 것만 */
   let track = 0;
@@ -307,6 +310,58 @@ async function keywordVolumes(api, S) {
   }
   await db().ref('adctl/kwvol').set(clean({ ts: Date.now(), k: out }));
 }
+
+/* ── 시즌 검색 추이 (네이버 데이터랩 검색어 트렌드, NAVER API HUB) — 하루 한 번
+   데이터랩은 실제 검색 수가 아니라 「요청한 기간·묶음 전체에서 가장 높은 날 = 100」 상대값을 준다.
+   그래서 묶음마다 키워드 도구의 최근 30일 실제 검색 수(adctl/kwvol)로 눈금을 맞춘다:
+     눈금 = 최근 30일 실제 검색 합 ÷ 최근 30일 상대값 합 → 하루 추정 검색 = 상대값 × 눈금 (지난 해도 같은 눈금)
+   묶음(최대 5개, 한 번에 받아야 서로 비교 가능): ① 목표 순위를 건 키워드 전체(검색 많은 20개) ② 검색 많은 4개 각각.
+   adctl/config/trendGroups = [{ name, keywords[] }] 가 있으면 그걸 씀.
+   adctl/trend = { ts, start, end, groups:[{ name, kws[], vol30, scale, r:[start 부터 하루씩 상대값] }] } */
+const DL_URL = 'https://naverapihub.apigw.ntruss.com/search-trend/v1/search';
+async function seasonTrend(S, force) {
+  const cur = (await db().ref('adctl/trend/ts').once('value')).val();
+  if (!force && cur && Date.now() - cur < 20 * 3600e3) return null;
+  const id = String(DL_ID.value() || '').trim(), sec = String(DL_SECRET.value() || '').trim();
+  if (!id || !sec) throw new Error('데이터랩 열쇠 없음 (NAVER_DATALAB_CLIENT_ID · SECRET)');
+  const vol = ((await db().ref('adctl/kwvol/k').once('value')).val()) || {};
+  const v30 = (w) => { const x = vol[String(w).replace(/\s+/g, '')]; return x ? (+x[0] || 0) + (+x[1] || 0) : 0; };
+  let groups = (await db().ref('adctl/config/trendGroups').once('value')).val();
+  if (!Array.isArray(groups) || !groups.length) {
+    const T = (await db().ref('adctl/target').once('value')).val() || {};
+    const words = Array.from(new Set(Object.keys(T).filter((k) => T[k].kind === 'keyword' && (S.keywords || {})[k])
+      .map((k) => String(S.keywords[k].kw || '').replace(/\s+/g, '')).filter(Boolean)));
+    words.sort((a, b) => v30(b) - v30(a));
+    if (!words.length) throw new Error('목표 순위를 건 파워링크 키워드가 없어 묶음을 못 만듦');
+    groups = [{ name: '우리 키워드 전체', keywords: words.slice(0, 20) }].concat(words.slice(0, 4).map((w) => ({ name: w, keywords: [w] })));
+  }
+  groups = groups.slice(0, 5).map((g) => ({ name: String(g.name).slice(0, 40), keywords: (g.keywords || []).slice(0, 20).map(String) }));
+  const today = kday(), y = +today.slice(0, 4);
+  const start = (y - 2) + '-09-01', end = addDays(today, -1);
+  const r = await fetch(DL_URL, { method: 'POST', signal: AbortSignal.timeout(30000),
+    headers: { 'X-NCP-APIGW-API-KEY-ID': id, 'X-NCP-APIGW-API-KEY': sec, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startDate: start, endDate: end, timeUnit: 'date', keywordGroups: groups.map((g) => ({ groupName: g.name, keywords: g.keywords })) }) });
+  const txt = await r.text();
+  if (!r.ok) throw new Error('데이터랩 ' + r.status + ' ' + txt.slice(0, 200));
+  const res = JSON.parse(txt);
+  const n = Math.round((Date.parse(end) - Date.parse(start)) / 864e5) + 1;
+  const out = (res.results || []).map((x, i) => {
+    const arr = new Array(n).fill(0);
+    (x.data || []).forEach((p) => { const k = Math.round((Date.parse(p.period) - Date.parse(start)) / 864e5); if (k >= 0 && k < n) arr[k] = Math.round(+p.ratio * 100) / 100; });
+    const kws = (groups[i] || {}).keywords || x.keywords || [];
+    const vol30 = kws.reduce((s, w) => s + v30(w), 0), last = arr.slice(-30).reduce((s, v) => s + v, 0);
+    return { name: x.title || (groups[i] || {}).name, kws, vol30, scale: vol30 && last ? Math.round(vol30 / last * 1000) / 1000 : null, r: arr };
+  });
+  const doc = { ts: Date.now(), start, end, groups: out, err: null };
+  await db().ref('adctl/trend').set(clean(doc));
+  return { start, end, groups: out.map((g) => ({ name: g.name, vol30: g.vol30, scale: g.scale, days: g.r.length })) };
+}
+exports.adsTrendNow = onCall(OPTS, async (req) => {
+  await requireSuper(req);
+  const S = (await db().ref('adctl/struct').once('value')).val() || {};
+  try { return await seasonTrend(S, true); }
+  catch (e) { await db().ref('adctl/trend/err').set(String(e.message).slice(0, 300)).catch(() => {}); throw new HttpsError('internal', e.message); }
+});
 
 async function collectSafe(trigger) {
   try { return await collect(trigger); }

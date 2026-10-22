@@ -123,6 +123,9 @@ th.num,td.num{text-align:right;font-family:var(--mo)}
 .hs .sg{font-size:10.5px;margin-top:.15rem;min-height:1.1em;color:var(--mu)} .hs .sg.d{color:#7db3ff} .hs .sg.u{color:#ffb27d}
 @media (max-width:1300px){ .hs{grid-template-columns:repeat(12,minmax(0,1fr))} }
 @media (max-width:560px){ .hs{grid-template-columns:repeat(6,minmax(0,1fr))} }
+.tmini{flex:1;min-width:0;display:flex;align-items:center;gap:.6rem;color:var(--tx);text-decoration:none;font-size:12.5px;overflow:hidden}
+.tmini svg{flex:none} .tmini b{font-family:var(--mo)} .tmini .tm-s{color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tmini .tm-d{font-family:var(--mo);font-weight:800;color:var(--y);white-space:nowrap}
 th.sortable{cursor:pointer;user-select:none} th.sortable:hover{color:var(--tx)} th.sortable.on{color:var(--b)}
 td{padding:.42rem .35rem;border-bottom:1px solid #1d2230;vertical-align:middle}
 tr.grp td{background:var(--s2);font-weight:800}
@@ -192,7 +195,7 @@ td.kwn{min-width:150px}
     <a href="/index.html">홈으로</a>
   </div>
   <div class="top-in bud-row">
-    <div class="top-sp"></div>
+    <a class="tmini" id="trendMini" href="#trendCard" title="시즌 검색 추이 그래프로"></a>
     <div class="bud" id="budShop"></div>
     <div class="bud" id="budPl"></div>
     <button class="btn" id="btnBud" title="하루 예산 · 다시 켜는 시각 · 알림">⚙ 하루 예산</button>
@@ -216,6 +219,14 @@ td.kwn{min-width:150px}
     <div class="note">30분마다 네이버 검색광고 API에서 자동으로 받아 옵니다. 입찰가·켜기/끄기는 <b>대표님이 누를 때만</b> 바뀌고, 모든 변경은 아래 기록에 남습니다.
       스마트스토어 매출·주문은 10분마다 자동으로 들어오고, 네이버 광고 구매전환 집계는 몇 시간 늦게 잡힐 수 있어요.</div>
     <div id="kpis" class="kpis"></div>
+    <div class="card" id="trendCard">
+      <div class="card-h"><div class="card-t">시즌 검색 추이</div><div class="card-s" id="trendSub">네이버 데이터랩 · 빼빼로데이 기준 D-day로 해마다 겹쳐 봄</div>
+        <div style="flex:1"></div><span id="trendChips"></span><button class="btn" id="btnTrend" title="데이터랩에서 지금 다시 받기">⟳</button></div>
+      <svg class="chart" id="trendChart" style="height:230px"></svg>
+      <div class="card-s" id="trendLegend" style="margin-top:.2rem"></div>
+      <div class="tbl-wrap" id="trendFc" style="margin-top:.5rem"></div>
+      <div class="card-s" id="trendNote" style="margin-top:.35rem;line-height:1.6"></div>
+    </div>
     <div class="grid3">
       <div class="card">
         <div class="card-h"><div class="card-t" id="chartTitle">일별 매출 · 비용 · 수익</div>
@@ -333,9 +344,9 @@ function load(){
     db.ref('adctl/log').orderByKey().limitToLast(400).get().then(function(s){ return s.val(); }),
     g('adctl/rank'), g('adctl/target'), g('adctl/budget/' + t), g('adctl/budgetOff'), g('adctl/budgetChk'),
     db.ref('adctl/hour').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
-    g('adctl/storeStatus'), g('adctl/be'), g('adctl/kwvol')
+    g('adctl/storeStatus'), g('adctl/be'), g('adctl/kwvol'), g('adctl/trend')
   ]).then(function(r){
-    D.storeSt = r[15] || null; D.be = r[16] || {}; D.kwvol = (r[17] && r[17].k) || {};
+    D.storeSt = r[15] || null; D.be = r[16] || {}; D.kwvol = (r[17] && r[17].k) || {}; D.trend = r[18] || null;
     D.rank = r[9] || {}; D.target = r[10] || {};
     D.budget = r[11] || {}; D.budgetOff = r[12] || {}; D.budgetChk = r[13] || null; D.hour7 = r[14] || {};
     D.struct = r[0]; D.status = r[1]; D.snaps = r[2] || {}; D.hour = r[3] || {}; D.hourY = r[4] || {};
@@ -391,7 +402,7 @@ function render(){
     $('kpis').innerHTML = ''; $('tblShop').innerHTML = ''; $('tblKw').innerHTML = ''; renderLog(); return;
   }
   $('warn').innerHTML = '';
-  renderKpis(S); renderChart(); renderCalc(); renderProd(S); renderHS(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
+  renderKpis(S); renderTrend(); renderChart(); renderCalc(); renderProd(S); renderHS(); renderShop(S); renderKw(S); renderLog(); renderBudget(S);
 }
 
 /* ── 오늘 하루 예산 (오른쪽 위) ── 지킴이(10분)가 기록한 값, 없으면 마지막 수집 스냅으로 계산 */
@@ -929,6 +940,121 @@ function saveSales(){
     .catch(function(e){ $('salesSt').textContent = '실패: ' + (e.code || e.message); });
 }
 
+/* ── 시즌 검색 추이 (adctl/trend — 서버가 네이버 데이터랩에서 하루 한 번) ──
+   해마다 빼빼로데이(11/11 · 기준 설정 peakDay 로 바꿀 수 있음)를 D-0 으로 놓고 D-60 ~ D+5 를 겹쳐 그림.
+   추정 검색 = 데이터랩 상대값 × 눈금(최근 30일 실제 검색 ÷ 최근 30일 상대값) — 지난 해도 같은 눈금.
+   올해 앞으로 = 작년 같은 D-day 값 × 성장률(올해 최근 7일 ÷ 작년 같은 D-day 7일, 0.2~5배), 작년 값이 없으면 재작년.
+   광고비·매출 예상 = 앞으로 하루 검색 × (지난 7일 광고비 ÷ 지난 7일 검색) — 검색이 늘면 같은 비율로 는다고 본 단순 추정 */
+var TG = 0;
+function trendInfo(gi){
+  var T = D.trend; if (!T || !T.groups || !T.groups.length) return null;
+  var g = T.groups[gi] || T.groups[0], sc = +g.scale || 0;
+  var y = +today().slice(0, 4), pk = D.cfg.peakDay || '11-11';
+  function rAt(d){ var i = Math.round((Date.parse(d) - Date.parse(T.start)) / 864e5); return i >= 0 && i < g.r.length ? +g.r[i] : null; }
+  function dateOf(Y, k){ return addDays(Y + '-' + pk, k); }
+  var kOf = function(d){ return Math.round((Date.parse(d) - Date.parse(y + '-' + pk)) / 864e5); };
+  var kToday = kOf(today()), endK = kOf(T.end), a = 0, b = 0, b2 = 0;
+  for (var k = endK - 6; k <= endK; k++) { a += rAt(dateOf(y, k)) || 0; b += rAt(dateOf(y - 1, k)) || 0; b2 += rAt(dateOf(y - 2, k)) || 0; }
+  var gr = b ? Math.max(0.2, Math.min(5, a / b)) : null, gr2 = b2 ? Math.max(0.2, Math.min(5, a / b2)) : null;
+  /* 작년·재작년 곡선을 각자 성장률로 맞춰 평균 — 해마다 요일이 달라 한 해만 쓰면 들쭉날쭉 */
+  function proj(k){
+    var v = rAt(dateOf(y - 1, k)), w = rAt(dateOf(y - 2, k)), xs = [];
+    if (v && gr != null) xs.push(v * gr); if (w && gr2 != null) xs.push(w * gr2);
+    return xs.length ? xs.reduce(function(s, x){ return s + x; }, 0) / xs.length : null;
+  }
+  var pkK = null, pkV = -1;
+  for (var j = -45; j <= 3; j++) { var v2 = rAt(dateOf(y - 1, j)); if (v2 != null && v2 > pkV) { pkV = v2; pkK = j; } }
+  var now7 = a / 7;
+  return { T: T, g: g, sc: sc, y: y, pk: pk, rAt: rAt, dateOf: dateOf, kToday: kToday, endK: endK, gr: gr, proj: proj, pkK: pkK, pkV: pkV, now7: now7 };
+}
+function dlab(k){ return k === 0 ? 'D-day' : k < 0 ? 'D' + k : 'D+' + k; }
+function renderTrend(){
+  var T = D.trend, X = trendInfo(TG), X0 = trendInfo(0);
+  if (!X) {
+    $('trendMini').innerHTML = '<span class="tm-s">📈 시즌 검색 추이 — ' + (T && T.err ? '받기 실패: ' + esc(T.err) : '데이터랩에서 받는 중 (30분 안에 들어옴)') + '</span>';
+    $('trendChart').innerHTML = ''; $('trendFc').innerHTML = ''; $('trendChips').innerHTML = '';
+    $('trendNote').textContent = T && T.err ? '데이터랩 오류: ' + T.err : '서버가 다음 수집 때 데이터랩에서 받아 옵니다.'; return;
+  }
+  /* 묶음 고르기 */
+  $('trendChips').innerHTML = T.groups.map(function(g, i){ return '<button class="chip2' + (i === TG ? ' on' : '') + '" data-tg="' + i + '">' + esc(g.name) + '</button>'; }).join('');
+  /* 위쪽 한 줄 — 우리 키워드 전체 기준 */
+  var nowE = X0.now7 * X0.sc, pkE = X0.pkV * (X0.gr || 1) * X0.sc;
+  var spark = (function(){
+    var W = 150, H = 30, k0 = -40, k1 = 3, mx = 1, pts = [], cur = [];
+    for (var k = k0; k <= k1; k++) { var v = X0.rAt(X0.dateOf(X0.y - 1, k)) || 0, c = k <= X0.endK ? X0.rAt(X0.dateOf(X0.y, k)) : null; mx = Math.max(mx, v, c || 0); }
+    for (var k2 = k0; k2 <= k1; k2++) {
+      var x = (k2 - k0) / (k1 - k0) * W, v1 = X0.rAt(X0.dateOf(X0.y - 1, k2)) || 0, v0 = k2 <= X0.endK ? X0.rAt(X0.dateOf(X0.y, k2)) : null;
+      pts.push(x.toFixed(1) + ',' + (H - v1 / mx * (H - 2)).toFixed(1)); if (v0 != null) cur.push(x.toFixed(1) + ',' + (H - v0 / mx * (H - 2)).toFixed(1));
+    }
+    var tx = (X0.kToday - k0) / (k1 - k0) * W;
+    return '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><polyline points="' + pts.join(' ') + '" fill="none" stroke="#5d6678" stroke-width="1.2"/>' +
+      (cur.length ? '<polyline points="' + cur.join(' ') + '" fill="none" stroke="#60a5fa" stroke-width="1.8"/>' : '') +
+      '<line x1="' + tx + '" x2="' + tx + '" y1="0" y2="' + H + '" stroke="#fbbf24" stroke-dasharray="2 2"/></svg>';
+  })();
+  $('trendMini').innerHTML = spark + '<span class="tm-d">빼빼로데이 ' + dlab(X0.kToday) + '</span><span class="tm-s">검색 하루 약 <b>' + fmt(nowE) + '</b>회' +
+    (X0.gr != null ? ' · 작년 이맘때보다 <b>' + (X0.gr >= 1 ? '+' : '') + Math.round((X0.gr - 1) * 100) + '%</b>' : '') +
+    (X0.pkK != null && nowE ? ' · 작년 피크 ' + dlab(X0.pkK) + ' → 올해 예상 하루 약 <b>' + fmt(pkE) + '</b>회 (지금의 ×' + (pkE / nowE).toFixed(1) + ')' : '') + '</span>';
+  /* 큰 그래프 */
+  var svg = $('trendChart'), W = Math.max(svg.clientWidth || 0, (svg.parentNode.clientWidth || 0) - 34, 360), H = 230, pl = 54, pr = 10, pt = 10, pb = 24, k0 = -60, k1 = 5, s = '';
+  var L = [{ y: X.y - 2, c: '#5d6678', d: '4 3' }, { y: X.y - 1, c: '#8b94a8', d: '' }, { y: X.y, c: '#60a5fa', d: '' }];
+  var mx = 1;
+  for (var k = k0; k <= k1; k++) { L.forEach(function(l){ var v = (l.y === X.y && k > X.endK) ? null : X.rAt(X.dateOf(l.y, k)); if (v != null) mx = Math.max(mx, v); }); if (k > X.endK) { var p = X.proj(k); if (p != null) mx = Math.max(mx, p); } }
+  var top = mx * X.sc || mx, stp = Math.pow(10, Math.floor(Math.log10(top))); top = Math.ceil(top / stp) * stp;
+  function px(k){ return pl + (k - k0) / (k1 - k0) * (W - pl - pr); }
+  function py(r){ return H - pb - (r * (X.sc || 1)) / top * (H - pt - pb); }
+  for (var gI = 0; gI <= 4; gI++) { var gy = pt + (H - pt - pb) * (1 - gI / 4);
+    s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + gy + '" y2="' + gy + '" stroke="#1d2230"/><text x="' + (pl - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + fmt(top * gI / 4) + '</text>'; }
+  for (var kt = -60; kt <= 0; kt += 10) s += '<text x="' + px(kt) + '" y="' + (H - 6) + '" text-anchor="middle">' + dlab(kt) + '</text>';
+  s += '<line x1="' + px(0) + '" x2="' + px(0) + '" y1="' + pt + '" y2="' + (H - pb) + '" stroke="#f87171" stroke-dasharray="3 3"/>';
+  if (X.kToday >= k0 && X.kToday <= k1) s += '<line x1="' + px(X.kToday) + '" x2="' + px(X.kToday) + '" y1="' + pt + '" y2="' + (H - pb) + '" stroke="#fbbf24" stroke-dasharray="2 2"/><text x="' + (px(X.kToday) + 4) + '" y="' + (pt + 10) + '" fill="#fbbf24">오늘</text>';
+  L.forEach(function(l){
+    var pts = []; for (var k = k0; k <= k1; k++) { if (l.y === X.y && k > X.endK) break; var v = X.rAt(X.dateOf(l.y, k)); if (v != null) pts.push(px(k).toFixed(1) + ',' + py(v).toFixed(1)); }
+    if (pts.length) s += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + l.c + '" stroke-width="' + (l.y === X.y ? 2.2 : 1.4) + '"' + (l.d ? ' stroke-dasharray="' + l.d + '"' : '') + '/>';
+  });
+  var pp = []; for (var kp = X.endK; kp <= k1; kp++) { var pv = kp === X.endK ? X.rAt(X.dateOf(X.y, kp)) : X.proj(kp); if (pv != null) pp.push(px(kp).toFixed(1) + ',' + py(pv).toFixed(1)); }
+  if (pp.length > 1) s += '<polyline points="' + pp.join(' ') + '" fill="none" stroke="#60a5fa" stroke-width="1.8" stroke-dasharray="5 4"/>';
+  for (var kh = k0; kh <= k1; kh++) s += '<rect class="hit" data-k="' + kh + '" x="' + (px(kh) - (W - pl - pr) / (k1 - k0) / 2) + '" y="' + pt + '" width="' + ((W - pl - pr) / (k1 - k0)) + '" height="' + (H - pt - pb) + '" fill="transparent"/>';
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.innerHTML = s;
+  svg.querySelectorAll('.hit').forEach(function(r){
+    r.addEventListener('mousemove', function(ev){
+      var k = +r.dataset.k, row = L.map(function(l){ var v = (l.y === X.y && k > X.endK) ? null : X.rAt(X.dateOf(l.y, k)); return l.y + ' (' + X.dateOf(l.y, k).slice(5).replace('-', '/') + ') <b>' + (v != null ? fmt(v * X.sc) + '</b>회' : '</b>—'); });
+      var p = k > X.endK ? X.proj(k) : null;
+      tip(ev, '<b>' + dlab(k) + '</b><br>' + row.join('<br>') + (p != null ? '<br>올해 예상 <b>' + fmt(p * X.sc) + '</b>회' : ''));
+    });
+    r.addEventListener('mouseleave', function(){ $('tip').classList.add('hide'); });
+  });
+  $('trendLegend').innerHTML = '<span class="lg"><i style="background:#5d6678"></i>' + (X.y - 2) + '</span><span class="lg"><i style="background:#8b94a8"></i>' + (X.y - 1) + '</span><span class="lg"><i style="background:#60a5fa"></i>' + X.y + ' (점선 = 예상)</span>' +
+    '<span class="lg"><i style="background:#fbbf24"></i>오늘</span><span class="lg"><i style="background:#f87171"></i>빼빼로데이</span> · 단위: 하루 추정 검색 수 · 올리면 해마다 같은 D-day 값';
+  /* 앞으로 — 우리 키워드 전체 기준 광고비·매출 */
+  var td = today(), cost7 = 0, sales7 = 0, srch7 = 0, ssrch = 0, cDays = 0, sDays = 0;
+  for (var q = 1; q <= 7; q++) {
+    var d = addDays(td, -q), c = adCostOn(d), sv = salesOn(d), r0 = X0.rAt(d);
+    if (r0 == null) continue;
+    if (c != null) { cost7 += c; srch7 += r0 * X0.sc; cDays++; }
+    if (sv != null && D.sales[d] && D.sales[d].src === 'store') { sales7 += sv; ssrch += r0 * X0.sc; sDays++; }
+  }
+  /* 매출은 스토어 자동 수집이 3일 넘게 쌓여야 예상 — 하루 이틀 값으로 곱하면 크게 틀림 */
+  var cps = srch7 ? cost7 / srch7 : null, sps = sDays >= 3 && ssrch ? sales7 / ssrch : null, bud = (+((D.cfg.budget || {}).pl) || 0) + (+((D.cfg.budget || {}).shop) || 0);
+  var ks = [X0.kToday, -14, -10, -7, -5, -3, -2, -1, 0].filter(function(k, i, a){ return k >= X0.kToday && k <= 0 && a.indexOf(k) === i; }).sort(function(a, b){ return a - b; });
+  var h = '<table class="ptbl"><thead><tr><th></th><th class="num">예상 하루 검색</th><th class="num">지금 대비</th><th class="num">예상 광고비</th><th class="num">예상 매출</th><th class="num">하루 예산</th></tr></thead><tbody>';
+  ks.forEach(function(k){
+    var pr0 = k <= X0.endK ? X0.rAt(X0.dateOf(X0.y, k)) : X0.proj(k), e = pr0 != null ? pr0 * X0.sc : null, ac = e != null && cps != null ? e * cps : null;
+    h += '<tr><td>' + dlab(k) + ' <span class="dlt">' + X0.dateOf(X0.y, k).slice(5).replace('-', '/') + (k === X0.pkK ? ' · 작년 피크' : '') + '</span></td><td class="num">' + (e != null ? fmt(e) : '—') + '</td>' +
+      '<td class="num">' + (e != null && nowE ? '×' + (e / nowE).toFixed(1) : '—') + '</td><td class="num">' + (ac != null ? fmt(ac) : '—') + '</td>' +
+      '<td class="num">' + (e != null && sps != null ? fmt(e * sps) : '—') + '</td><td class="num ' + (bud && ac != null ? (ac > bud ? 'neg' : 'pos') : '') + '">' + (bud ? (ac != null && ac > bud ? '모자람 ' : '') + fmt(bud) : '—') + '</td></tr>';
+  });
+  $('trendFc').innerHTML = h + '</tbody></table>';
+  $('trendSub').textContent = '네이버 데이터랩 · 빼빼로데이 기준 D-day로 해마다 겹쳐 봄 · ' + esc(X.g.name) + ' (키워드 ' + X.g.kws.length + '개, 최근 30일 실제 ' + fmt(X.g.vol30) + '회)';
+  $('trendNote').textContent = '예상은 「' + X0.g.name + '」 기준 — 작년 같은 D-day 곡선 × 올해 성장률(' + (X0.gr != null ? '×' + X0.gr.toFixed(2) : '작년 자료 없음') + '). ' +
+    (cps != null ? '광고비는 지난 ' + cDays + '일 「검색 1회당 광고비 ' + cps.toFixed(1) + '원」이 그대로라고 본 추정. ' : '광고비 예상은 지난 광고 기록이 쌓이면 나옵니다. ') +
+    (sps != null ? '매출은 지난 ' + sDays + '일 「검색 1회당 매출 ' + sps.toFixed(1) + '원」 기준. ' : '매출 예상은 스토어 자동 매출이 3일 쌓이면 나옵니다(지금 ' + sDays + '일). ') +
+    '하루 예산은 쇼핑검색 + 파워링크 합 — 「모자람」이면 그날 예산 지킴이가 광고를 끌 수 있음. 데이터랩은 어제까지만 있음.';
+}
+document.addEventListener('click', function(ev){
+  var b = ev.target.closest && ev.target.closest('[data-tg]'); if (!b) return;
+  TG = +b.dataset.tg; renderTrend();
+});
+
 /* ── 상품별 손익 — 스토어 판매(adctl/sales/{날짜}.p = { 상품번호: [수량, 금액] })와
    쇼핑검색 소재(struct.ads[id].mallId = 같은 상품번호)의 광고비를 짝지음. 파워링크는 상품을 가리지 않아 따로 한 줄.
    원가 = 매출 × 원가율, 수수료 = 그 기간 실제 수수료율(네이버 정산 예정금액이 있으면) 또는 설정 수수료율 ── */
@@ -1139,6 +1265,11 @@ function start(){
   db = firebase.database(); fns = firebase.app().functions('asia-northeast3');
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
+  $('btnTrend').addEventListener('click', function(){
+    var b = $('btnTrend'); b.disabled = true; b.textContent = '…';
+    call('adsTrendNow', {}).then(load).catch(function(e){ alert('데이터랩 받기 실패: ' + (e && e.message || e)); load(); })
+      .then(function(){ b.disabled = false; b.textContent = '⟳'; });
+  });
   $('hsGrid').addEventListener('change', function(ev){ var t = ev.target; if (t.classList.contains('hsSel')) { HS[t.dataset.h] = +t.value; $('hsSt').textContent = '저장 안 됨'; renderHS(); } });
   $('hsSave').addEventListener('click', saveHS);
   $('hsFill').addEventListener('click', function(){ var sg = hourSuggest(); if (!sg.ready) return; Object.keys(sg.h).forEach(function(x){ if (sg.h[x].v != null) HS[x] = sg.h[x].v; }); $('hsSt').textContent = '제안으로 채움 — 저장해야 적용'; renderHS(); });
@@ -1161,7 +1292,7 @@ function start(){
     try { localStorage.setItem('adctl_showAll', $('showAll').checked ? '1' : '0'); } catch (e) {}
     if (D.struct) { renderShop(D.struct); renderKw(D.struct); }
   });
-  window.addEventListener('resize', function(){ if (_open && D.struct) renderChart(); });
+  window.addEventListener('resize', function(){ if (_open && D.struct) { renderChart(); renderTrend(); } });
   load();
   setInterval(function(){ if (_open && !document.hidden) load(); }, 5 * 60 * 1000);   /* 5분마다 화면 갱신 (수집은 서버가 30분마다) */
 }
