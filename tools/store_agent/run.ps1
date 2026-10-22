@@ -16,7 +16,11 @@ $env:NAVER_COMMERCE_CLIENT_SECRET = $cred.GetNetworkCredential().Password
 
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) { $node = 'C:\Program Files\nodejs\node.exe' }
-$out = & $node (Join-Path $PSScriptRoot 'agent.js') 2>&1 | Out-String
-Write-Log ($out.Trim() -replace "`r?`n", ' / ')
-Write-Output $out.Trim()
-exit $LASTEXITCODE
+# node 는 UTF-8 로 말하므로 한글이 안 깨지게 맞추고, 오류 줄도 글자 그대로 받음
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$ErrorActionPreference = 'Continue'
+$out = (& $node (Join-Path $PSScriptRoot 'agent.js') 2>&1 | ForEach-Object { "$_" }) -join ' / '
+$code = $LASTEXITCODE
+Write-Log $out
+Write-Output $out
+exit $code

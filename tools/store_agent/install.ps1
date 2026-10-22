@@ -25,9 +25,19 @@ $home2 = Join-Path $env:LOCALAPPDATA 'MakewonStore'
 New-Item -ItemType Directory -Force $home2 | Out-Null
 Write-Host ''
 Write-Host '커머스API센터 → 애플리케이션 상세 화면의 값을 붙여넣으세요. (Ctrl+V 또는 마우스 오른쪽 클릭)'
-$id = (Read-Host '애플리케이션 ID').Trim()
-$secret = Read-Host '애플리케이션 시크릿 (입력해도 화면에 안 보임)' -AsSecureString
-if (-not $id -or $secret.Length -eq 0) { Write-Host 'ID 와 시크릿을 둘 다 넣어야 합니다.' -ForegroundColor Yellow; exit 1 }
+$id = (Read-Host '애플리케이션 ID') -replace '[^\x21-\x7E]', ''
+$sec = Read-Host '애플리케이션 시크릿 (입력해도 화면에 안 보임)' -AsSecureString
+$plain = ([Net.NetworkCredential]::new('', $sec).Password) -replace '[^\x21-\x7E]', ''
+if (-not $id -or -not $plain) { Write-Host 'ID 와 시크릿을 둘 다 넣어야 합니다.' -ForegroundColor Yellow; exit 1 }
+# 네이버 시크릿은 $2a$04$ 로 시작하는 29자 — 아니면 ID 를 넣었거나 다른 값을 넣은 것
+if ($plain -notmatch '^\$2[aby]?\$\d\d\$') {
+  Write-Host "시크릿 모양이 아닙니다 (넣은 길이 $($plain.Length)자). 시크릿은 `$2a`$ 로 시작합니다." -ForegroundColor Yellow
+  Write-Host '커머스API센터에서 시크릿의 「복사」 버튼으로 다시 복사한 뒤, 이 파일을 다시 실행하세요.' -ForegroundColor Yellow
+  exit 1
+}
+if ($plain -eq $id) { Write-Host 'ID 와 시크릿이 같습니다. 시크릿 칸에는 시크릿을 넣어야 합니다.' -ForegroundColor Yellow; exit 1 }
+$secret = ConvertTo-SecureString $plain -AsPlainText -Force
+$plain = $null
 New-Object System.Management.Automation.PSCredential($id, $secret) | Export-Clixml (Join-Path $home2 'keys.xml')
 Write-Host '키 저장 완료 (이 컴퓨터의 이 사용자만 풀 수 있게 암호화)'
 

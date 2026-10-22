@@ -9,8 +9,11 @@ const bcrypt = require('bcryptjs');
 const BASE = 'https://api.commerce.naver.com/external';
 
 function makeStore(clientId, clientSecret) {
-  clientId = String(clientId || '').trim(); clientSecret = String(clientSecret || '').trim();
+  /* 붙여넣기에 섞여 들어오는 빈칸·보이지 않는 글자 제거 (ID·시크릿은 영문·숫자·기호만) */
+  clientId = String(clientId || '').replace(/[^\x21-\x7E]/g, ''); clientSecret = String(clientSecret || '').replace(/[^\x21-\x7E]/g, '');
   if (!clientId || !clientSecret) throw new Error('스토어 API 키가 설정되지 않았습니다 (NAVER_COMMERCE_CLIENT_ID · NAVER_COMMERCE_CLIENT_SECRET)');
+  if (!/^\$2[aby]?\$\d\d\$/.test(clientSecret))
+    throw new Error('시크릿 모양이 아닙니다 (길이 ' + clientSecret.length + '자, $2a$ 로 시작해야 함) — 설치.cmd 를 다시 실행해 시크릿을 넣으세요');
   let token = null, tokenUntil = 0;
 
   async function getToken() {

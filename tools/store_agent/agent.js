@@ -8,7 +8,7 @@ const os = require('os');
 const { makeStore, storeDay, kday, addDays } = require('./store');
 
 const INGEST = 'https://asia-northeast3-makechango-wms.cloudfunctions.net/adsStoreIngest';
-const ID = process.env.NAVER_COMMERCE_CLIENT_ID, SECRET = String(process.env.NAVER_COMMERCE_CLIENT_SECRET || '').trim();
+const ID = process.env.NAVER_COMMERCE_CLIENT_ID, SECRET = String(process.env.NAVER_COMMERCE_CLIENT_SECRET || '').replace(/[^\x21-\x7E]/g, '');
 
 async function send(body) {
   const raw = JSON.stringify(body);
