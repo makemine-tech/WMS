@@ -62,7 +62,10 @@ input,select{font-family:inherit;font-size:13px;color:var(--tx);background:var(-
 .note b{color:var(--tx)}
 .warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.4);color:var(--y);border-radius:10px;padding:.7rem .9rem;font-size:12.5px;line-height:1.7;margin-bottom:1rem}
 
-.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.7rem;margin-bottom:1rem}
+.kpis{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,4fr);gap:1rem;margin-bottom:1rem}
+.kgrp-t{font-size:12px;color:var(--mu);margin:0 0 .35rem .15rem;font-weight:600}
+.kgrp-c{display:grid;grid-auto-columns:minmax(0,1fr);grid-auto-flow:column;gap:.7rem}
+.kgrp.biz .kpi{border-color:#2f4a3a;background:#121c18}
 .kpi{background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:.8rem .95rem;min-width:0}
 .kpi .k{font-size:12px;color:var(--mu);margin-bottom:.3rem}
 .kpi .v{font-family:var(--mo);font-size:22px;font-weight:700;letter-spacing:-.02em}
@@ -153,8 +156,9 @@ td.kwn{min-width:150px}
 .tip{position:fixed;z-index:50;pointer-events:none;background:#0f131b;border:1px solid var(--br);border-radius:8px;padding:.45rem .6rem;font-size:12px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.45)}
 .tip b{font-family:var(--mo)}
 @media (max-width:1300px){ .grid3{grid-template-columns:1fr 1fr} .grid3 > .card:first-child{grid-column:1/-1} }
-@media (max-width:1000px){ .kpis{grid-template-columns:repeat(3,minmax(0,1fr))} .grid2{grid-template-columns:1fr} .grid3{grid-template-columns:1fr} }
-@media (max-width:560px){ .kpis{grid-template-columns:repeat(2,minmax(0,1fr))} .wrap{padding:.8rem .75rem 2rem} }
+@media (max-width:1300px){ .kpis{grid-template-columns:minmax(0,1fr)} .kpis .biz{order:-1} }
+@media (max-width:1000px){ .kgrp-c{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr))} .grid2{grid-template-columns:1fr} .grid3{grid-template-columns:1fr} }
+@media (max-width:560px){ .kgrp-c{grid-template-columns:repeat(2,minmax(0,1fr))} .wrap{padding:.8rem .75rem 2rem} }
 </style>
 </head>
 <body>
@@ -198,7 +202,7 @@ td.kwn{min-width:150px}
   <div class="wrap">
     <div id="warn"></div>
     <div class="note">30분마다 네이버 검색광고 API에서 자동으로 받아 옵니다. 입찰가·켜기/끄기는 <b>대표님이 누를 때만</b> 바뀌고, 모든 변경은 아래 기록에 남습니다.
-      네이버 전환(구매) 집계는 몇 시간 늦게 잡힐 수 있어요 — 스마트스토어 주문 연결 전까지는 <b>오늘 스토어 매출을 직접 입력</b>하면 광고비 비율을 계산합니다.</div>
+      스마트스토어 매출·주문은 10분마다 자동으로 들어오고, 네이버 광고 구매전환 집계는 몇 시간 늦게 잡힐 수 있어요.</div>
     <div id="kpis" class="kpis"></div>
     <div class="grid3">
       <div class="card">
@@ -432,13 +436,27 @@ function renderKpis(S){
   }
   var sPct = (ss && sSales) ? sCost / sSales * 100 : null;
   function k(lbl, v, s, cls){ return '<div class="kpi"><div class="k">' + lbl + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div><div class="s">' + (s || '') + '</div></div>'; }
-  $('kpis').innerHTML =
+  function small(x){ return '<span style="font-size:13px;color:var(--mu)">' + x + '</span>'; }
+  /* 오른쪽 — 오늘 장사: 스토어 매출 · 순수익(매출 − 원가 − 수수료 − 광고비) · 주문 · 광고로 들어온 구매 */
+  var rec = D.sales[td] || null, e = econ(sales, t[I.COST], rec), kc = costCfg();
+  var qty = 0; Object.keys((rec && rec.p) || {}).forEach(function(p){ qty += +(rec.p[p] || [])[0] || 0; });
+  var orders = rec && rec.n != null ? +rec.n : null;
+  var conv = t[I.CONV], camt = t[I.CAMT];
+  var biz =
+    k('오늘 매출', sales ? fmt(sales) + '원' : '—', !rec ? '스토어 매출이 아직 없음' : rec.src === 'store' ? '스마트스토어 자동' + (rec.cancel ? ' · 취소·반품 ' + fmt(rec.cancel) + '원 뺌' : '') : '직접 입력') +
+    k('오늘 순수익', sales && kc.ok ? fmt(e.profit) + '원' + small(' ' + pct1(e.rate)) : '—',
+      sales && kc.ok ? '원가 ' + fmt(e.cogs) + ' · 수수료 ' + fmt(e.fee) + ' · 광고비 ' + fmt(e.ad) : (kc.ok ? '매출이 들어오면 계산' : '기준 설정에 원가·수수료를 넣으세요'),
+      sales && kc.ok ? (e.profit >= 0 ? 'ok' : 'bad') : '') +
+    k('주문', orders != null ? fmt(orders) + '건' + small(qty ? ' · ' + fmt(qty) + '개' : '') : '—', orders ? '주문당 ' + fmt(sales / orders) + '원' : (rec && rec.src === 'store' ? '아직 주문 없음' : '스마트스토어 자동일 때 나옴')) +
+    k('광고 구매전환', fmt(conv) + '건', (camt ? '전환매출 ' + fmt(camt) + '원' + (sales ? ' (매출의 ' + pct1(camt / sales) + ')' : '') + ' · ' : '') + '늦게 잡힐 수 있음');
+  var ad =
     k('오늘 광고비', fmt(t[I.COST]) + '원', '최근 1시간 +' + fmt(h1[I.COST]) + '원') +
-    k('클릭 · 노출', fmt(t[I.CLK]) + '<span style="font-size:13px;color:var(--mu)"> / ' + fmt(t[I.IMP]) + '</span>', '클릭률 ' + (t[I.IMP] ? (t[I.CLK] / t[I.IMP] * 100).toFixed(2) : '0') + '% · 1시간 +' + h1[I.CLK]) +
+    k('클릭 · 노출', fmt(t[I.CLK]) + small(' / ' + fmt(t[I.IMP])), '클릭률 ' + (t[I.IMP] ? (t[I.CLK] / t[I.IMP] * 100).toFixed(2) : '0') + '% · 1시간 +' + h1[I.CLK]) +
     k('평균 클릭단가', fmt(cpc) + '원', '7일 평균 ' + (t7[I.CLK] ? fmt(t7[I.COST] / t7[I.CLK]) : '-') + '원') +
-    k('네이버 집계 전환', fmt(t[I.CONV]) + '건', (t[I.CAMT] ? '전환매출 ' + fmt(t[I.CAMT]) + '원 · ' : '') + '늦게 잡힐 수 있음') +
-    k('오늘 광고비율', pct == null ? '—' : pct.toFixed(1) + '%', sales ? '스토어 매출 ' + fmt(sales) + '원 · 목표 ' + target + '%' : '오늘 스토어 매출을 넣으세요', pct == null ? '' : (pct <= target ? 'ok' : 'bad')) +
+    k('오늘 광고비율', pct == null ? '—' : pct.toFixed(1) + '%', sales ? '목표 ' + target + '% 이하' : '오늘 매출이 들어오면 계산', pct == null ? '' : (pct <= target ? 'ok' : 'bad')) +
     k('시즌 누적 광고비율', sPct == null ? '—' : sPct.toFixed(1) + '%', ss ? (ss.slice(5).replace('-', '/') + '부터 광고비 ' + fmt(sCost) + '원') : '시즌 시작일을 설정하세요', sPct == null ? '' : (sPct <= target ? 'ok' : 'bad'));
+  $('kpis').innerHTML = '<div class="kgrp"><div class="kgrp-t">광고</div><div class="kgrp-c">' + ad + '</div></div>' +
+    '<div class="kgrp biz"><div class="kgrp-t">매출 · 수익</div><div class="kgrp-c">' + biz + '</div></div>';
 }
 
 function hourSum(H){
