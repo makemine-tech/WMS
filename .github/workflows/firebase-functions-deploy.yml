@@ -61,4 +61,13 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MAKECHANGO_WMS }}
       - name: 배포
         if: steps.pick.outputs.only != ''
-        run: npx -y firebase-tools@15 deploy --only "${{ steps.pick.outputs.only }}" --project makechango-wms --non-interactive
+        shell: bash
+        run: |
+          set +e
+          npx -y firebase-tools@15 deploy --only "${{ steps.pick.outputs.only }}" --project makechango-wms --non-interactive --force 2>&1 | tee deploy.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # 로그는 로그인해야 보이므로, 실패 이유 줄을 누구나 보이는 주석(annotation)으로 남김
+            grep -iE "error|denied|permission|failed|missing|required" deploy.log | tail -n 12 | while IFS= read -r l; do echo "::error::${l:0:400}"; done
+          fi
+          exit $status
