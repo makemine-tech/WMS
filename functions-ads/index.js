@@ -463,7 +463,7 @@ exports.adsSetLock = onCall(OPTS, async (req) => {
      한 번 바꾼 뒤 55분은 기다렸다가 다시 본다 (오늘 평균 순위가 따라오는 시간).
    상한 = min(목표의 상한, 설정 최고 입찰가). 상한에 닿으면 더 올리지 않고 note 에 남긴다. */
 const DEV = { mo: 'MOBILE', pc: 'PC' };
-const KW_MIN_IMP = 10;   /* 파워링크 실제 순위 보정 — 바꾼 뒤 노출이 이만큼 모여야 판단 (바꾼 뒤 노출 10회 이상일 때) */
+const KW_MIN_IMP = 10;   /* 파워링크 실제 순위 보정 — 바꾼 뒤 노출이 이만큼 모여야 판단 (바꾼 뒤 노출 10회 이상) */
 async function estimateBid(api, id, dev, rank) {
   const r = await api.post('/estimate/average-position-bid/id', {}, { device: DEV[dev], items: [{ key: id, position: rank }] });
   const e = r && r.estimate && r.estimate[0];
