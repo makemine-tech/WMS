@@ -198,19 +198,28 @@ td.kwn{min-width:150px}
     <a class="tmini" id="trendMini" href="#trendCard" title="시즌 검색 추이 그래프로"></a>
     <div class="bud" id="budShop"></div>
     <div class="bud" id="budPl"></div>
+    <span class="st" id="bizm" style="white-space:nowrap"></span>
     <button class="btn" id="btnBud" title="하루 예산 · 다시 켜는 시각 · 알림">⚙ 하루 예산</button>
   </div>
   <div class="bud-edit hide" id="budEdit"><div class="bud-edit-in">
     <label>쇼핑검색 하루 예산</label><input type="number" id="bShop" min="0" step="1000" placeholder="원 (비우면 안 지킴)">
     <label>파워링크 하루 예산</label><input type="number" id="bPl" min="0" step="1000" placeholder="원 (비우면 안 지킴)">
     <label>다음 날 다시 켜는 시각</label><span><select id="bHour"></select> <span class="st" id="bHourRec"></span></span>
+    <label>자동 증액</label><span style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap"><label style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" id="bAuto" style="width:auto"> 검색 곡선·소진 속도 따라 올림</label>
+      한도 쇼핑 <input type="number" id="bMaxShop" min="0" step="1000" placeholder="원" style="width:96px"> 파워링크 <input type="number" id="bMaxPl" min="0" step="1000" placeholder="원" style="width:96px"></span>
+    <label>시즌 피크일</label><span><input type="text" id="bPeak" placeholder="11-11" style="width:70px"> <span class="st">월-일 · 시즌 그래프와 배송 마감의 기준</span></span>
+    <label>배송 마감</label><span style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">피크
+      <select id="bCutDays"><option value="-3">3일 전</option><option value="-2">2일 전</option><option value="-1">1일 전</option><option value="0">당일</option></select>
+      <select id="bCutHour"></select> 이후 → 하루 예산 <input type="number" id="bCutPct" min="0" max="100" step="10" style="width:60px">% · 목표 순위 +<input type="number" id="bCutRank" min="0" max="10" step="1" style="width:50px">위 <span class="st">(피크 날 끝까지)</span></span>
     <div class="row2">
       <button class="btn p" id="btnBudSave">저장</button>
       <button class="btn" id="btnNotifyTest">🔔 알림 시험</button>
       <span class="st" id="budSt"></span>
     </div>
     <div class="row2 st">10분마다 오늘 광고비를 확인합니다. 80% · 90%에 휴대폰 알림(픽앤톡에서 알림을 허용한 기기), 100%가 되면 그 종류에서 돌고 있는 캠페인을 끄고 알립니다.
-      끈 캠페인은 다음 날 위 시각에 다시 켜집니다. 오늘 예산을 올리면 바로 다시 켜집니다. 네이버 통계가 늦게 잡혀 끄는 시점에 조금 넘을 수 있어요.</div>
+      끈 캠페인은 다음 날 위 시각에 다시 켜집니다. 오늘 예산을 올리면 바로 다시 켜집니다. 네이버 통계가 늦게 잡혀 끄는 시점에 조금 넘을 수 있어요.<br>
+      자동 증액을 켜면 오늘 예산 = 기본 예산과 「데이터랩 곡선으로 본 오늘 예상 광고비 × 1.2」 중 큰 값(한도까지), 22시 전에 85%를 쓰고 오늘 매출이 본전을 넘으면 +25%씩(한도까지).
+      이때 네이버 캠페인의 하루 예산도 같이 맞춥니다(네이버 쪽 예산이 낮으면 거기서 먼저 멈추므로). 배송 마감 뒤엔 위 비율로 줄이고 목표 순위를 낮춥니다. 비즈머니가 오늘 예산 2일치보다 적으면 알림.</div>
   </div></div>
   </div>
 
@@ -344,8 +353,9 @@ function load(){
     db.ref('adctl/log').orderByKey().limitToLast(400).get().then(function(s){ return s.val(); }),
     g('adctl/rank'), g('adctl/target'), g('adctl/budget/' + t), g('adctl/budgetOff'), g('adctl/budgetChk'),
     db.ref('adctl/hour').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
-    g('adctl/storeStatus'), g('adctl/be'), g('adctl/kwvol'), g('adctl/trend')
+    g('adctl/storeStatus'), g('adctl/be'), g('adctl/kwvol'), g('adctl/trend'), g('adctl/bizmoney')
   ]).then(function(r){
+    D.bizmoney = r[19] || null;
     D.storeSt = r[15] || null; D.be = r[16] || {}; D.kwvol = (r[17] && r[17].k) || {}; D.trend = r[18] || null;
     D.rank = r[9] || {}; D.target = r[10] || {};
     D.budget = r[11] || {}; D.budgetOff = r[12] || {}; D.budgetChk = r[13] || null; D.hour7 = r[14] || {};
@@ -417,7 +427,9 @@ function renderBudget(S){
     var st = D.budget && D.budget[t];
     var spent = st && st.spent != null && (!D.status || st.ts >= (D.status.ts || 0) - 60e3) ? st.spent : sp[t];
     if (st && st.ts) ts = Math.max(ts || 0, st.ts);
-    var bud = +B[t] || 0, pct = bud ? spent / bud * 100 : null;
+    /* 오늘 예산 = 지킴이가 정한 eff(자동 증액·마감 반영), 없으면 기본 예산 */
+    var base = +B[t] || 0, bud = st && +st.eff > 0 ? +st.eff : base, pct = bud ? spent / bud * 100 : null;
+    var auto = st && +st.eff > 0 && +st.eff !== base ? (st.phase === 'cutoff' ? '🚚 ' : '📈 ') + '기본 ' + fmt(base) + ' → ' + esc(st.why || '') : '';
     var offN = Object.keys(D.budgetOff || {}).filter(function(k){ return D.budgetOff[k].tp === t; }).length;
     var el = $(t === 'shop' ? 'budShop' : 'budPl');
     el.className = 'bud' + (!bud ? ' none' : pct >= 100 ? ' w90 over' : pct >= 90 ? ' w90' : pct >= 80 ? ' w80' : '');
@@ -425,8 +437,10 @@ function renderBudget(S){
       (bud ? ' / ' + fmt(bud) + '원' : '원') + '</span></div>' +
       '<div class="bar2"><i style="width:' + (bud ? Math.min(100, pct).toFixed(1) : 0) + '%"></i></div>' +
       '<div class="bs">' + (!bud ? '예산 미설정 — ⚙ 하루 예산' : (pct >= 100 ? '⛔ 소진' + (offN ? ' · 캠페인 ' + offN + '개 꺼짐 (' + (D.cfg.reopenHour != null ? D.cfg.reopenHour : 9) + '시 다시 켬)' : '') :
-        Math.round(pct) + '% · 남은 ' + fmt(bud - spent) + '원')) + '</div>';
+        Math.round(pct) + '% · 남은 ' + fmt(bud - spent) + '원')) + (auto ? '<br><span title="' + auto + '">' + auto + '</span>' : '') + '</div>';
   });
+  var bm = D.bizmoney;
+  $('bizm').innerHTML = bm && bm.amt >= 0 ? '💳 비즈머니 <b style="color:' + (bm.need2 && bm.amt < bm.need2 ? 'var(--r)' : 'var(--tx)') + '">' + fmt(bm.amt) + '</b>원' : '';
   var c = D.budgetChk;
   $('btnBud').title = '하루 예산 · 다시 켜는 시각 · 알림' + (c && c.ts ? ' · 마지막 예산 점검 ' + kTime(c.ts) + (c.err ? ' · 오류: ' + c.err : '') : '');
 }
@@ -446,13 +460,24 @@ function openBudget(){
   p.classList.toggle('hide');
   if (p.classList.contains('hide')) return;
   $('bShop').value = B.shop || ''; $('bPl').value = B.pl || '';
+  var A = D.cfg.budgetAuto || {}, C = Object.assign({ days: -1, hour: 15, pct: 50, rank: 3 }, D.cfg.cutoff || {});
+  $('bAuto').checked = !!A.on; $('bMaxShop').value = A.maxShop || ''; $('bMaxPl').value = A.maxPl || '';
+  $('bPeak').value = D.cfg.peakDay || '11-11';
+  $('bCutDays').value = String(C.days); $('bCutPct').value = C.pct; $('bCutRank').value = C.rank;
+  $('bCutHour').innerHTML = Array.from({ length: 24 }, function(_, i){ return '<option value="' + i + '"' + (i === +C.hour ? ' selected' : '') + '>' + i + '시</option>'; }).join('');
   var sel = $('bHour'), cur0 = D.cfg && D.cfg.reopenHour != null ? +D.cfg.reopenHour : 9, rec = recommendHour();
   sel.innerHTML = Array.from({ length: 24 }, function(_, i){ return '<option value="' + i + '"' + (i === cur0 ? ' selected' : '') + '>' + i + '시</option>'; }).join('');
   $('bHourRec').innerHTML = rec ? '추천 <b>' + rec.h + '시</b> (최근 7일 ' + rec.by + '이 하루 중 쌓이기 시작하는 시각) <button class="tbtn" id="btnRec">적용</button>' : '추천은 며칠 데이터가 쌓이면 나옵니다';
 }
 function saveBudget(){
   var b = { shop: +$('bShop').value || null, pl: +$('bPl').value || null };
-  var u = { budget: b, reopenHour: +$('bHour').value, ts: Date.now() };
+  var pk = String($('bPeak').value || '11-11').trim();
+  if (!/^\d{2}-\d{2}$/.test(pk)) { $('budSt').textContent = '시즌 피크일은 11-11 처럼 월-일로 넣으세요'; return; }
+  var mxS = +$('bMaxShop').value || null, mxP = +$('bMaxPl').value || null;
+  if ($('bAuto').checked && !(mxS > (b.shop || 0)) && !(mxP > (b.pl || 0))) { $('budSt').textContent = '자동 증액은 한도가 기본 예산보다 커야 움직입니다'; }
+  var u = { budget: b, reopenHour: +$('bHour').value, ts: Date.now(),
+    budgetAuto: { on: $('bAuto').checked, maxShop: mxS, maxPl: mxP }, peakDay: pk,
+    cutoff: { days: +$('bCutDays').value, hour: +$('bCutHour').value, pct: Math.max(0, Math.min(100, +$('bCutPct').value || 0)), rank: Math.max(0, Math.min(10, +$('bCutRank').value || 0)) } };
   $('budSt').textContent = '저장 중…';
   db.ref('adctl/config').update(u).then(function(){
     D.cfg = Object.assign({}, D.cfg, u);

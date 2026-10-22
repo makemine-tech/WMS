@@ -477,7 +477,13 @@ function curBid(S, kind, id) {
 /* 시간대별 목표 순위 조정 (2026-10-22) — adctl/config/hourShift = { HH: 더할 순위 } (예 02~06시 +3 → 3위 목표가 6위)
    금액을 직접 깎으면 순위 보정이 되올리므로, 목표 순위를 바꿔 추적이 알아서 맞추게 한다.
    조정된 목표가 바뀌는 시각엔 실제 순위 보정 기준(base)을 새로 잡는다. */
-async function hourShiftCfg() { return ((await db().ref('adctl/config/hourShift').once('value')).val()) || {}; }
+async function hourShiftCfg() {
+  const cfg = (await db().ref('adctl/config').once('value')).val() || {}, m = Object.assign({}, cfg.hourShift || {});
+  /* 배송 마감 뒤(피크 날 끝까지) — 모든 시간에 cutoff.rank 를 더 얹음 */
+  const ph = seasonPhase(cfg, Date.now());
+  if (ph.after && +ph.C.rank) for (let h = 0; h < 24; h++) { const k = String(h).padStart(2, '0'); m[k] = (+m[k] || 0) + +ph.C.rank; }
+  return m;
+}
 async function trackOne(api, S, rank, id, T0, maxBid, now, shift, beCap) {
   const hk = kst(now).toISOString().slice(11, 13), sh = Math.round(+((shift || {})[hk]) || 0);
   const eff = Math.max(1, Math.min(15, T0.rank + sh));
@@ -672,6 +678,85 @@ exports.adsNotifyTest = onCall(OPTS, async (req) => {
    주의: 네이버 통계는 몇 분~수십 분 늦게 잡혀서 끄는 시점에 이미 조금 넘을 수 있다 (10분 간격 + 통계 지연). */
 const BTYPE = { SHOPPING: 'shop', WEB_SITE: 'pl' };
 const BNAME = { shop: '쇼핑검색', pl: '파워링크' };
+/* ── 시즌 · 자동 예산 (2026-10-22 대표님) ─────────────────
+   시즌(어떤 행사든 같은 틀): adctl/config/peakDay = 'MM-DD'(기본 11-11),
+     adctl/config/cutoff = { days:-1, hour:15, pct:50, rank:3 } — 피크 D-1 15시에 배송 마감 → 그 뒤 피크 날 끝까지
+     하루 예산은 기본의 pct%, 목표 순위는 +rank (늦게 사면 제때 못 받으니 덜 민다). 피크 다음 날부터 원래대로.
+   자동 증액: adctl/config/budgetAuto = { on, maxShop, maxPl } — 한도는 대표님이 직접 정하고 수시로 바꿈.
+     오늘 쓸 예산(eff) = max(기본 예산, 오늘 예상 광고비 × 1.2) — 한도 안에서.
+       오늘 예상 광고비 = 데이터랩 곡선으로 본 오늘 예상 검색 × 지난 7일 「검색 1회당 광고비」(종류별)
+     소진 속도: 22시 전에 eff 의 85%를 썼고 오늘 매출이 본전 이상(매출 ÷ 광고비 ≥ 1 ÷ 남는 비율)이면 +25% (한도까지).
+     하루 안에서는 eff 를 줄이지 않음(마감 때만 줄임). 자동 증액이 켜져 있으면 네이버 캠페인 하루 예산도 eff 에 맞춤
+     (네이버 캠페인 자체 예산이 낮으면 우리가 올려도 네이버가 먼저 멈추므로).
+   비즈머니: 1시간마다 잔액 확인 → adctl/bizmoney, 남은 돈이 오늘 예산 2일치보다 적으면 하루 한 번 알림. */
+function seasonPhase(cfg, now) {
+  const pk = cfg.peakDay || '11-11', C = Object.assign({ days: -1, hour: 15, pct: 50, rank: 3 }, cfg.cutoff || {});
+  const today = kday(now), peak = today.slice(0, 4) + '-' + pk;
+  const cutAt = Date.parse(addDays(peak, +C.days) + 'T' + String(+C.hour).padStart(2, '0') + ':00:00+09:00');
+  const endAt = Date.parse(addDays(peak, 1) + 'T00:00:00+09:00');
+  return { peak, C, after: now >= cutAt && now < endAt, cutAt };
+}
+async function forecastToday(cfg, today, typeOf) {
+  const T = (await db().ref('adctl/trend').once('value')).val();
+  if (!T || !T.groups || !T.groups.length) return null;
+  const g = T.groups[0], sc = +g.scale || 0, y = +today.slice(0, 4), pk = cfg.peakDay || '11-11';
+  const rAt = (d) => { const i = Math.round((Date.parse(d) - Date.parse(T.start)) / 864e5); return i >= 0 && i < g.r.length ? +g.r[i] : null; };
+  const dOf = (Y, k) => addDays(Y + '-' + pk, k), kOf = (d) => Math.round((Date.parse(d) - Date.parse(y + '-' + pk)) / 864e5);
+  const endK = kOf(T.end), kT = kOf(today);
+  let a = 0, b = 0, b2 = 0;
+  for (let k = endK - 6; k <= endK; k++) { a += rAt(dOf(y, k)) || 0; b += rAt(dOf(y - 1, k)) || 0; b2 += rAt(dOf(y - 2, k)) || 0; }
+  const xs = [], v1 = rAt(dOf(y - 1, kT)), v2 = rAt(dOf(y - 2, kT));
+  if (v1 && b) xs.push(v1 * Math.max(0.2, Math.min(5, a / b))); if (v2 && b2) xs.push(v2 * Math.max(0.2, Math.min(5, a / b2)));
+  if (!xs.length || !sc) return null;
+  const search = xs.reduce((s, x) => s + x, 0) / xs.length * sc;
+  /* 지난 7일 종류별 광고비 ÷ 그날 검색 */
+  const days = (await db().ref('adctl/day').orderByKey().startAt(addDays(today, -7)).endAt(addDays(today, -1)).once('value')).val() || {};
+  const cost = { shop: 0, pl: 0 }; let srch = 0;
+  Object.keys(days).forEach((d) => {
+    const r0 = rAt(d); if (r0 == null) return; srch += r0 * sc;
+    Object.keys(days[d] || {}).forEach((id) => { const t = typeOf[id]; if (t) cost[t] += +(days[d][id] || [])[2] || 0; });
+  });
+  if (!srch) return null;
+  return { search: Math.round(search), need: { shop: Math.round(search * cost.shop / srch), pl: Math.round(search * cost.pl / srch) } };
+}
+async function budgetPlan(cfg, camps, spent, state, today, now, hh) {
+  const B = cfg.budget || {}, A = cfg.budgetAuto || {}, ph = seasonPhase(cfg, now), out = { phase: ph.after ? 'cutoff' : 'normal' };
+  const typeOf = {}; camps.forEach((c) => { const t = BTYPE[c.campaignTp]; if (t) typeOf[c.nccCampaignId] = t; });
+  let fc = null; if (A.on) { try { fc = await forecastToday(cfg, today, typeOf); } catch (e) { logger.warn('예상 광고비 실패', { e: e.message }); } }
+  const sales = +(((await db().ref('adctl/sales/' + today).once('value')).val()) || {}).amt || 0, tot = spent.shop + spent.pl;
+  const m = profitRate(cfg), roasOK = !(m > 0) || tot < 10000 || sales / tot >= 1 / m;
+  for (const t of ['shop', 'pl']) {
+    const base = +B[t] || 0, max = +(t === 'shop' ? A.maxShop : A.maxPl) || 0, prev = +((state[t] || {}).eff) || 0;
+    let eff = base, why = '기본 예산';
+    if (base > 0 && ph.after) { eff = Math.round(base * (+ph.C.pct || 0) / 100 / 1000) * 1000; why = '배송 마감 뒤 ' + ph.C.pct + '%'; }
+    else if (base > 0 && A.on && max > base) {
+      if (fc && fc.need[t] * 1.2 > eff) { eff = Math.min(max, Math.ceil(fc.need[t] * 1.2 / 1000) * 1000); why = '오늘 예상 광고비 ' + fc.need[t].toLocaleString('ko-KR') + '원 × 1.2'; }
+      if (prev > eff) { eff = prev; why = (state[t] || {}).why || why; }
+      if (hh < 22 && spent[t] >= eff * 0.85 && eff < max) {
+        if (roasOK) { eff = Math.min(max, Math.ceil(eff * 1.25 / 1000) * 1000); why = '빨리 소진 + 본전 넘음 → +25%'; }
+        else why += ' · 빨리 소진 중이지만 오늘 매출이 본전 아래라 더 안 올림';
+      }
+    }
+    out[t] = { base, eff, max, why };
+  }
+  out.search = fc ? fc.search : null; out.roasOK = roasOK;
+  return out;
+}
+/* 네이버 캠페인 하루 예산을 맞춤 — 자동 증액이 켜져 있을 때 · 마감 뒤에만 (그 외엔 대표님이 네이버에서 정한 대로 둠) */
+async function syncNaverBudget(api, camps, t, eff, reason) {
+  const changed = [];
+  for (const c of camps.filter((x) => BTYPE[x.campaignTp] === t && !x.userLock && String(x.status || '').toUpperCase() === 'ELIGIBLE')) {
+    if (!c.useDailyBudget || +c.dailyBudget === eff || !(eff > 0)) continue;
+    try {
+      const cur = await api.get('/ncc/campaigns/' + c.nccCampaignId);
+      const from = cur.dailyBudget; cur.dailyBudget = eff; cur.useDailyBudget = true;
+      await api.put('/ncc/campaigns/' + c.nccCampaignId, { fields: 'budget' }, cur);
+      await writeLog({ email: 'auto' }, { kind: 'campaign', id: c.nccCampaignId, act: 'budget', from, to: eff, reason: '네이버 캠페인 하루 예산 맞춤 · ' + reason, ok: true, auto: true });
+      changed.push(c.name);
+    } catch (e) { logger.warn('네이버 캠페인 예산 바꾸기 실패', { cid: c.nccCampaignId, e: e.message }); }
+  }
+  return changed;
+}
 async function setCampaignLock(api, cid, lock) {
   const cur = await api.get('/ncc/campaigns/' + cid);
   cur.userLock = lock;
@@ -691,6 +776,21 @@ async function budgetCheck(trigger) {
   const state = (await db().ref('adctl/budget/' + today).once('value')).val() || {};
   const up = {}, done = [];
   const who = { email: 'auto' };
+  const plan = await budgetPlan(cfg, camps, spent, state, today, now, hh), A = cfg.budgetAuto || {};
+
+  /* 0) 비즈머니 잔액 — 1시간마다, 오늘 예산 2일치보다 적으면 하루 한 번 알림 */
+  try {
+    const bm = (await db().ref('adctl/bizmoney').once('value')).val() || {};
+    if (!bm.ts || now - bm.ts > 3600e3) {
+      const r = await api.get('/billing/bizmoney');
+      const amt = +((r && r.bizmoney) != null ? r.bizmoney : -1), need2 = 2 * ((plan.shop.eff || 0) + (plan.pl.eff || 0));
+      up['adctl/bizmoney'] = { amt, ts: now, need2, alerted: bm.alerted || null };
+      if (amt >= 0 && need2 > 0 && amt < need2 && bm.alerted !== today) {
+        up['adctl/bizmoney'].alerted = today;
+        await notifyAdmins('💳 비즈머니가 모자랄 수 있어요', '잔액 ' + amt.toLocaleString('ko-KR') + '원 — 오늘 예산 2일치(' + need2.toLocaleString('ko-KR') + '원)보다 적습니다. 바닥나면 광고가 모두 멈춰요.', 'adctl-bizmoney-' + today);
+      }
+    }
+  } catch (e) { logger.warn('비즈머니 확인 실패', { e: e.message }); }
 
   /* 1) 지난날 예산으로 끈 캠페인 — 다시 켤 시각이 되면 켠다 */
   for (const cid of Object.keys(off)) {
@@ -712,8 +812,21 @@ async function budgetCheck(trigger) {
 
   /* 2) 오늘 예산 */
   for (const t of ['shop', 'pl']) {
-    const bud = +B[t] || 0, st = Object.assign({}, state[t] || {});
-    st.spent = spent[t]; st.budget = bud; st.ts = now;
+    const P = plan[t], bud = P.eff, st = Object.assign({}, state[t] || {}), prevEff = +st.eff || 0;
+    st.spent = spent[t]; st.budget = bud; st.base = P.base; st.eff = P.eff; st.max = P.max || null; st.why = P.why; st.phase = plan.phase; st.ts = now;
+    if (plan.search != null) st.search = plan.search;
+    /* 자동 증액 켜짐 · 마감 뒤엔 네이버 캠페인 하루 예산도 맞춤 */
+    if (bud > 0 && (A.on || plan.phase === 'cutoff')) {
+      const ch = await syncNaverBudget(api, camps, t, bud, P.why);
+      if (ch.length) st.naverSync = now;
+    }
+    if (bud > prevEff && prevEff > 0 && plan.phase !== 'cutoff') {
+      await notifyAdmins('📈 ' + BNAME[t] + ' 하루 예산 자동 증액', prevEff.toLocaleString('ko-KR') + '원 → ' + bud.toLocaleString('ko-KR') + '원 (' + P.why + ', 한도 ' + (P.max || 0).toLocaleString('ko-KR') + '원)', 'adctl-' + t + '-auto-' + today + '-' + bud);
+    }
+    if (plan.phase === 'cutoff' && !st.cutNotified) {
+      st.cutNotified = now;
+      await notifyAdmins('🚚 배송 마감 — ' + BNAME[t] + ' 광고 줄임', '하루 예산 ' + P.base.toLocaleString('ko-KR') + '원 → ' + bud.toLocaleString('ko-KR') + '원 · 목표 순위 낮춤 (피크 날 끝까지)', 'adctl-' + t + '-cut-' + today);
+    }
     st.pct = bud ? Math.round(spent[t] / bud * 1000) / 10 : null;
     if (bud > 0) {
       for (const thr of [80, 90]) {
