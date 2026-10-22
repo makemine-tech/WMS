@@ -229,6 +229,8 @@ td.kwn{min-width:150px}
             <span class="calc-row"><input type="date" id="sDate"><input type="number" id="sAmt" min="0" step="1000" placeholder="그날 결제금액">
             <button class="btn" id="btnSales">저장</button></span></div>
           <span class="st" id="salesSt"></span>
+          <div class="calc-in" style="margin-top:.5rem"><label>스마트스토어 자동</label>
+            <span class="calc-row"><span class="card-s" id="storeSt" style="flex:1;line-height:1.5"></span><button class="btn" id="btnStore">⟳ 스토어 매출 받기</button></span></div>
           <div class="tbl-wrap" style="margin-top:.5rem"><table class="ptbl"><thead><tr><th></th><th class="num">매출</th><th class="num">광고비</th><th class="num">마진</th><th class="num">순수익</th><th class="num">수익률</th></tr></thead><tbody id="pBody"></tbody></table></div>
           <div class="card-s" id="pNote" style="margin-top:.35rem;line-height:1.6"></div>
         </div>
@@ -295,8 +297,10 @@ function load(){
     g('adctl/config'), db.ref('adctl/sales').orderByKey().startAt(addDays(t, -60)).get().then(function(s){ return s.val(); }),
     db.ref('adctl/log').orderByKey().limitToLast(400).get().then(function(s){ return s.val(); }),
     g('adctl/rank'), g('adctl/target'), g('adctl/budget/' + t), g('adctl/budgetOff'), g('adctl/budgetChk'),
-    db.ref('adctl/hour').orderByKey().startAt(since).get().then(function(s){ return s.val(); })
+    db.ref('adctl/hour').orderByKey().startAt(since).get().then(function(s){ return s.val(); }),
+    g('adctl/storeStatus')
   ]).then(function(r){
+    D.storeSt = r[15] || null;
     D.rank = r[9] || {}; D.target = r[10] || {};
     D.budget = r[11] || {}; D.budgetOff = r[12] || {}; D.budgetChk = r[13] || null; D.hour7 = r[14] || {};
     D.struct = r[0]; D.status = r[1]; D.snaps = r[2] || {}; D.hour = r[3] || {}; D.hourY = r[4] || {};
@@ -750,6 +754,24 @@ function fillCfg(){
   $('cAov').value = c.aov || ''; $('cMargin').value = c.margin || ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || '';
   if (!$('sDate').value) $('sDate').value = today();
   var s = D.sales[$('sDate').value]; $('sAmt').value = s && s.amt != null ? s.amt : '';
+  salesNote(); storeLine();
+}
+/* 고른 날짜가 스토어 자동이면 알려 줌 — 직접 넣어도 다음 수집 때 자동 값으로 바뀜 */
+function salesNote(){
+  var s = D.sales[$('sDate').value];
+  $('salesSt').textContent = s && s.src === 'store'
+    ? '스토어 자동 · ' + (s.n || 0) + '건' + (s.cancel ? ' · 취소·반품 ' + fmt(s.cancel) + '원 뺌' : '') : '';
+}
+function storeLine(){
+  var st = D.storeSt, s = D.sales[today()];
+  $('storeSt').textContent = !st ? '아직 연결 전 — 고정 IP 등록이 끝나면 30분마다 자동으로 받습니다'
+    : st.ok ? '마지막 받음 ' + kTime(st.ts) + (s && s.src === 'store' ? ' · 오늘 ' + fmt(s.amt) + '원 ' + (s.n || 0) + '건' : '')
+    : '실패 ' + kTime(st.ts) + ' — ' + (st.err || '');
+}
+function storeNow(){
+  var b = $('btnStore'); b.disabled = true; b.textContent = '받는 중…';
+  call('adsStoreNow', {}).then(load).catch(function(e){ alert('스토어 매출 받기 실패: ' + (e && e.message || e)); load(); })
+    .then(function(){ b.disabled = false; b.textContent = '⟳ 스토어 매출 받기'; });
 }
 function saveCfg(){
   var c = { aov: +$('cAov').value || null, margin: +$('cMargin').value || null, target: +$('cTarget').value || 15,
@@ -862,9 +884,10 @@ function start(){
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
   $('btnSales').addEventListener('click', saveSales);
+  $('btnStore').addEventListener('click', storeNow);
   $('btnBud').addEventListener('click', openBudget);
   $('qAmt').addEventListener('input', renderCalc);
-  $('sDate').addEventListener('change', function(){ var s0 = D.sales[$('sDate').value]; $('sAmt').value = s0 && s0.amt != null ? s0.amt : ''; $('salesSt').textContent = ''; });
+  $('sDate').addEventListener('change', function(){ var s0 = D.sales[$('sDate').value]; $('sAmt').value = s0 && s0.amt != null ? s0.amt : ''; salesNote(); });
   document.querySelectorAll('.chip2[data-cv]').forEach(function(b){ b.addEventListener('click', function(){
     CV = b.dataset.cv; document.querySelectorAll('.chip2[data-cv]').forEach(function(x){ x.classList.toggle('on', x === b); }); renderChart(); }); });
   $('btnBudSave').addEventListener('click', saveBudget);
