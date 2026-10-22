@@ -5,7 +5,7 @@
 =========================================================== */
 const crypto = require('crypto');
 const os = require('os');
-const { makeStore, storeDay, kday, addDays } = require('./store');
+const { makeStore, storeDays, kday, addDays } = require('./store');
 
 const INGEST = 'https://asia-northeast3-makechango-wms.cloudfunctions.net/adsStoreIngest';
 const ID = process.env.NAVER_COMMERCE_CLIENT_ID, SECRET = String(process.env.NAVER_COMMERCE_CLIENT_SECRET || '').replace(/[^\x21-\x7E]/g, '');
@@ -23,7 +23,7 @@ async function send(body) {
   const today = kday(), days = {};
   try {
     const api = makeStore(ID, SECRET);
-    for (const d of [addDays(today, -1), today]) days[d] = await storeDay(api, d);   /* 어제 것도 다시 — 늦은 취소 반영 */
+    Object.assign(days, await storeDays(api, [addDays(today, -1), today]));   /* 어제 것도 다시 — 늦은 취소 반영 */
   } catch (e) {
     const err = String(e && e.message || e).slice(0, 300);
     console.error('네이버에서 받기 실패: ' + err);

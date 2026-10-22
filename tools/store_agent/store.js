@@ -47,17 +47,22 @@ function makeStore(clientId, clientSecret) {
     throw last;
   }
 
-  /* 결제(PAYED)가 [from, to) 안에 일어난 상품주문번호 — 한 번에 최대 24시간, 넘치면 more 로 이어 받음 */
-  async function paidIds(fromIso, toIso) {
-    const ids = new Set();
-    let from = fromIso, seq;
-    for (let n = 0; n < 50; n++) {
-      const d = await req('GET', '/v1/pay-order/seller/product-orders/last-changed-statuses',
-        { lastChangedFrom: from, lastChangedTo: toIso, lastChangedType: 'PAYED', moreSequence: seq });
-      const data = (d && d.data) || {};
-      (data.lastChangeStatuses || []).forEach((x) => ids.add(x.productOrderId));
-      if (!data.more || !data.more.moreFrom) break;
-      from = data.more.moreFrom; seq = data.more.moreSequence;
+  /* [from, to) 사이에 마지막으로 바뀐 상품주문번호 — 종류(결제·발주확인·발송…)를 가리지 않음.
+     (2026-10-22: 결제(PAYED)만 거르면 그 뒤 발주확인·발송으로 넘어간 아침 주문이 빠졌음)
+     네이버는 한 번에 24시간까지만 받으므로 나눠서, 넘치면 more 로 이어 받음 */
+  async function changedIds(fromIso, toIso) {
+    const ids = new Set(), end = Date.parse(toIso);
+    for (let t0 = Date.parse(fromIso); t0 < end; t0 += 24 * 3600e3) {
+      const t1 = Math.min(end, t0 + 24 * 3600e3);
+      let from = iso(t0), seq;
+      for (let n = 0; n < 50; n++) {
+        const d = await req('GET', '/v1/pay-order/seller/product-orders/last-changed-statuses',
+          { lastChangedFrom: from, lastChangedTo: iso(t1), moreSequence: seq });
+        const data = (d && d.data) || {};
+        (data.lastChangeStatuses || []).forEach((x) => ids.add(x.productOrderId));
+        if (!data.more || !data.more.moreFrom) break;
+        from = data.more.moreFrom; seq = data.more.moreSequence;
+      }
     }
     return Array.from(ids);
   }
@@ -72,7 +77,7 @@ function makeStore(clientId, clientSecret) {
     return out;
   }
 
-  return { paidIds, details };
+  return { changedIds, details };
 }
 
 /* 하루 매출 — 결제일이 그날(한국시간)인 상품주문, 취소·반품은 amt 에서 뺌 */
@@ -81,11 +86,21 @@ function kst(t) { return new Date((t || Date.now()) + 9 * 3600e3); }
 function kday(t) { return kst(t).toISOString().slice(0, 10); }
 function addDays(d, n) { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
 
-async function storeDay(api, day) {
-  const from = day + 'T00:00:00.000+09:00', to = addDays(day, 1) + 'T00:00:00.000+09:00';
-  const rows = await api.details(await api.paidIds(from, to));
-  /* settle = 네이버 정산 예정금액 합(수수료 뺀 값) · settleN = 그 값이 있던 상품주문 수 · rows = 취소 안 된 상품주문 수
-     — 화면은 settleN === rows 일 때만 실제 수수료(amt − settle)를 쓰고, 아니면 기준 설정의 수수료율로 계산 */
+/* 한국시간 ISO (네이버가 받는 모양) */
+function iso(t) { return new Date(t + 9 * 3600e3).toISOString().replace('Z', '+09:00'); }
+
+/* 여러 날 매출 — 첫날 0시부터 지금까지 바뀐 주문을 한 번에 받아 결제일(한국시간)별로 나눔.
+   결제 뒤 발주확인·발송으로 넘어간 주문도 마지막 변경이 이 구간 안이라 빠지지 않음 */
+async function storeDays(api, days) {
+  const rows = await api.details(await api.changedIds(days[0] + 'T00:00:00.000+09:00', iso(Date.now())));
+  const out = {};
+  days.forEach((d) => { out[d] = sumDay(rows, d); });
+  return out;
+}
+
+/* settle = 네이버 정산 예정금액 합(수수료 뺀 값) · settleN = 그 값이 있던 상품주문 수 · rows = 취소 안 된 상품주문 수
+   — 화면은 settleN === rows 일 때만 실제 수수료(amt − settle)를 쓰고, 아니면 기준 설정의 수수료율로 계산 */
+function sumDay(rows, day) {
   const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {}, settle: 0, settleN: 0, rows: 0 };
   const orders = new Set();
   rows.forEach((x) => {
@@ -106,4 +121,4 @@ async function storeDay(api, day) {
   return o;
 }
 
-module.exports = { makeStore, storeDay, kday, addDays };
+module.exports = { makeStore, storeDays, sumDay, kday, addDays, iso };
