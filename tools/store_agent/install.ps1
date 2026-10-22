@@ -24,11 +24,19 @@ if (-not (Test-Path (Join-Path $PSScriptRoot 'node_modules\bcryptjs'))) {
 $home2 = Join-Path $env:LOCALAPPDATA 'MakewonStore'
 New-Item -ItemType Directory -Force $home2 | Out-Null
 Write-Host ''
-Write-Host '커머스API센터 → 애플리케이션 상세 화면의 값을 붙여넣으세요. (Ctrl+V 또는 마우스 오른쪽 클릭)'
-$id = (Read-Host '애플리케이션 ID') -replace '[^\x21-\x7E]', ''
-$sec = Read-Host '애플리케이션 시크릿 (입력해도 화면에 안 보임)' -AsSecureString
-$plain = ([Net.NetworkCredential]::new('', $sec).Password) -replace '[^\x21-\x7E]', ''
-if (-not $id -or -not $plain) { Write-Host 'ID 와 시크릿을 둘 다 넣어야 합니다.' -ForegroundColor Yellow; exit 1 }
+# 이 창에서는 Ctrl+V 가 붙여넣기 대신 제어 글자를 넣으므로, 복사해 둔 값(클립보드)을 직접 읽는다
+function Read-Clip { ((Get-Clipboard -Raw) -as [string]) -replace '[^\x21-\x7E]', '' }
+Write-Host '커머스API센터 → 애플리케이션 상세 화면을 열어 두세요. 여기에는 붙여넣지 않습니다.'
+Write-Host ''
+Read-Host '1) 애플리케이션 ID 를 복사(복사 버튼 또는 Ctrl+C)한 뒤, 이 창으로 와서 엔터' | Out-Null
+$id = Read-Clip
+if (-not $id) { Write-Host '복사된 값이 없습니다. 다시 실행해서 ID 를 복사한 뒤 엔터를 누르세요.' -ForegroundColor Yellow; exit 1 }
+Write-Host "   ID 읽음: $id"
+Read-Host '2) 애플리케이션 시크릿을 복사(복사 버튼 또는 Ctrl+C)한 뒤, 이 창으로 와서 엔터' | Out-Null
+$plain = Read-Clip
+if (-not $plain) { Write-Host '복사된 값이 없습니다. 다시 실행해서 시크릿을 복사한 뒤 엔터를 누르세요.' -ForegroundColor Yellow; exit 1 }
+cmd /c 'echo off | clip'   # 클립보드에서 시크릿 지움
+Write-Host "   시크릿 읽음 ($($plain.Length)자, 화면에는 안 보여 줌)"
 # 네이버 시크릿은 $2a$04$ 로 시작하는 29자 — 아니면 ID 를 넣었거나 다른 값을 넣은 것
 if ($plain -notmatch '^\$2[aby]?\$\d\d\$') {
   Write-Host "시크릿 모양이 아닙니다 (넣은 길이 $($plain.Length)자). 시크릿은 `$2a`$ 로 시작합니다." -ForegroundColor Yellow
