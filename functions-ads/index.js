@@ -342,6 +342,7 @@ exports.adsSetLock = onCall(OPTS, async (req) => {
      한 번 바꾼 뒤 55분은 기다렸다가 다시 본다 (오늘 평균 순위가 따라오는 시간).
    상한 = min(목표의 상한, 설정 최고 입찰가). 상한에 닿으면 더 올리지 않고 note 에 남긴다. */
 const DEV = { mo: 'MOBILE', pc: 'PC' };
+const KW_MIN_IMP = 10;   /* 파워링크 실제 순위 보정 — 바꾼 뒤 노출이 이만큼 모여야 판단 */
 async function estimateBid(api, id, dev, rank) {
   const r = await api.post('/estimate/average-position-bid/id', {}, { device: DEV[dev], items: [{ key: id, position: rank }] });
   const e = r && r.estimate && r.estimate[0];
@@ -368,7 +369,29 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
     /* 광고그룹의 기기별 입찰 가중치(%)가 걸려 있으면 실제 입찰 = 입찰가 × 가중치 — 그만큼 나눠서 맞춘다 */
     const g = (S.adgroups || {})[((S.keywords || {})[id] || {}).gid] || {};
     const w = +(T.dev === 'pc' ? g.pcW : g.moW) || 100;
-    want = est * 100 / w; why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '');
+    /* 실제 순위 보정 (2026-10-22: 예상가대로 넣어도 빼빼로만들기 3위 목표가 4.9위) — 마지막으로 입찰가를 바꾼 뒤의 노출만 본다.
+       오늘 누적 [평균순위, 노출] 에서 바꿀 때 적어 둔 기준(base)을 빼면 그 뒤 노출의 평균순위가 나온다.
+       목표보다 0.5위 넘게 밀림 → 보정 +10% (2위 넘게 밀리면 +20%), 0.7위 넘게 위 → −7%, 노출 10회 미만이면 판단 보류 */
+    const RR = rank[id] || {}, R = !RR.d7 && RR[T.dev] ? RR[T.dev] : null;
+    const curImp = R ? +R[1] || 0 : 0, curRk = R ? +R[0] || 0 : 0;
+    const B = T.base ? (T.base.d === today ? T.base : { imp: 0, rk: 0 }) : null;   /* 기준이 어제 것이면 오늘 노출은 전부 바꾼 뒤 */
+    const dImp = B ? curImp - (+B.imp || 0) : 0;
+    let adj = +T.adj || 1, fb = '';
+    if (B && dImp >= KW_MIN_IMP) {
+      const recent = Math.round((curRk * curImp - (+B.rk || 0) * (+B.imp || 0)) / dImp * 10) / 10;
+      if (recent > T.rank + 0.5) { const k = recent - T.rank > 2 ? 1.2 : 1.1; adj *= k; fb = ' · 최근 노출 ' + dImp + '회 ' + recent + '위 → 보정 +' + Math.round((k - 1) * 100) + '%'; }
+      else if (recent < T.rank - 0.7) { adj *= 0.93; fb = ' · 최근 노출 ' + dImp + '회 ' + recent + '위 → 보정 −7%'; }
+      else fb = ' · 최근 노출 ' + dImp + '회 ' + recent + '위';
+    } else fb = ' · 최근 노출 ' + Math.max(0, dImp) + '회 (' + KW_MIN_IMP + '회 모이면 순위 확인)';
+    /* 상한에 닿으면 보정을 더 키우지 않음 */
+    const capAdj = Math.min(+T.cap || maxBid, maxBid) * w / 100 / est;
+    if (adj > (+T.adj || 1) && adj > capAdj) adj = Math.max(+T.adj || 1, capAdj);
+    adj = Math.round(Math.max(0.7, Math.min(3, adj)) * 100) / 100;
+    T.adj = adj; T.cur = { d: today, imp: curImp, rk: curRk };
+    await db().ref('adctl/target/' + id).update({ adj, base: B ? T.base : T.cur });   /* 기준이 없던 목표는 지금부터 잰다 */
+    if (!B) T.base = T.cur;
+    want = est * adj * 100 / w;
+    why = '예상 입찰가 ' + est + '원' + (w !== 100 ? ' (가중치 ' + w + '%)' : '') + (adj !== 1 ? ' × 보정 ' + adj : '') + fb;
   } else {
     if (now - (+T.lastAdj || 0) < 55 * 60e3) return { id, skip: 'wait' };
     const RR = rank[id] || {}, R = RR[T.dev];
@@ -392,7 +415,9 @@ async function trackOne(api, S, rank, id, T, maxBid, now) {
     return { id, skip: 'small', atCap };
   }
   const r = await putBid(api, T.kind, id, to);
-  await db().ref('adctl/target/' + id).update({ lastAdj: now, chk: now, note: (atCap ? '상한 ' + cap + '원까지만 · ' : '') + why });
+  const done = { lastAdj: now, chk: now, note: (atCap ? '상한 ' + cap + '원까지만 · ' : '') + why };
+  if (T.kind === 'keyword' && T.cur) done.base = T.cur;   /* 입찰가를 바꿨으니 여기부터 다시 잰다 */
+  await db().ref('adctl/target/' + id).update(done);
   await writeLog({ email: 'auto' }, { kind: T.kind, id, act: 'bid', from: r.from, to: r.to,
     reason: '목표 ' + (T.dev === 'pc' ? 'PC' : '모바일') + ' ' + T.rank + '위 추적 · ' + why, ok: true, auto: true });
   return { id, from: r.from, to: r.to, atCap };
