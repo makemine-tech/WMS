@@ -84,7 +84,9 @@ function addDays(d, n) { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.ge
 async function storeDay(api, day) {
   const from = day + 'T00:00:00.000+09:00', to = addDays(day, 1) + 'T00:00:00.000+09:00';
   const rows = await api.details(await api.paidIds(from, to));
-  const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {} };
+  /* settle = 네이버 정산 예정금액 합(수수료 뺀 값) · settleN = 그 값이 있던 상품주문 수 · rows = 취소 안 된 상품주문 수
+     — 화면은 settleN === rows 일 때만 실제 수수료(amt − settle)를 쓰고, 아니면 기준 설정의 수수료율로 계산 */
+  const o = { amt: 0, paid: 0, cancel: 0, n: 0, h: {}, p: {}, settle: 0, settleN: 0, rows: 0 };
   const orders = new Set();
   rows.forEach((x) => {
     const po = x.productOrder || {}, od = x.order || {};
@@ -93,7 +95,8 @@ async function storeDay(api, day) {
     if (when == null || kday(when) !== day) return;
     o.paid += pay;
     if (OFF.indexOf(po.productOrderStatus) >= 0) { o.cancel += pay; return; }
-    o.amt += pay; orders.add(od.orderId);
+    o.amt += pay; orders.add(od.orderId); o.rows++;
+    if (po.expectedSettlementAmount != null && Number.isFinite(+po.expectedSettlementAmount)) { o.settle += +po.expectedSettlementAmount; o.settleN++; }
     const hh = kst(when).toISOString().slice(11, 13);
     o.h[hh] = (o.h[hh] || 0) + pay;
     const pid = String(po.productId || '');

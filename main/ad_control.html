@@ -202,7 +202,7 @@ td.kwn{min-width:150px}
     <div id="kpis" class="kpis"></div>
     <div class="grid3">
       <div class="card">
-        <div class="card-h"><div class="card-t" id="chartTitle">일별 매출 · 마진 · 광고비</div>
+        <div class="card-h"><div class="card-t" id="chartTitle">일별 매출 · 비용 · 수익</div>
           <div style="flex:1"></div>
           <button class="chip2 on" data-cv="day">일별 수익</button><button class="chip2" data-cv="hour">시간대 광고비</button></div>
         <svg class="chart" id="chart"></svg>
@@ -211,8 +211,10 @@ td.kwn{min-width:150px}
       <div class="card">
         <div class="card-h"><div class="card-t">기준 설정</div><div class="card-s">추천·손익분기 계산에 씀</div></div>
         <div class="frm">
-          <label>객단가(원)</label><input type="number" id="cAov" min="0" step="100" placeholder="예 25000">
-          <label>마진율(%)</label><input type="number" id="cMargin" min="0" max="100" step="1" placeholder="예 30">
+          <label>객단가(원)</label><input type="number" id="cAov" min="0" step="100" placeholder="예 23900">
+          <label>원가(원)</label><input type="number" id="cCost" min="0" step="100" placeholder="예 13900">
+          <label>수수료(%)</label><input type="number" id="cFee" min="0" max="50" step="0.01" placeholder="예 5.63">
+          <div class="row2 card-s" id="cDerived" style="line-height:1.6"></div>
           <label>목표 광고비율(%)</label><input type="number" id="cTarget" min="1" max="100" step="1" placeholder="15">
           <label>최고 입찰가(원)</label><input type="number" id="cMax" min="50" step="10" placeholder="3000">
           <label>시즌 시작일</label><input type="date" id="cSeason">
@@ -220,7 +222,7 @@ td.kwn{min-width:150px}
         </div>
       </div>
       <div class="card">
-        <div class="card-h"><div class="card-t">수익 계산</div><div class="card-s">마진율 · 목표 광고비율 기준</div></div>
+        <div class="card-h"><div class="card-t">수익 계산</div><div class="card-s">매출 − 원가 − 수수료 − 광고비</div></div>
         <div class="calc">
           <div class="calc-in"><label>매출 넣어 보기</label><input type="number" id="qAmt" min="0" step="10000" placeholder="예 3000000"></div>
           <div class="calc-qty" id="qQty"></div>
@@ -231,7 +233,7 @@ td.kwn{min-width:150px}
           <span class="st" id="salesSt"></span>
           <div class="calc-in" style="margin-top:.5rem"><label>스마트스토어 자동</label>
             <span class="card-s" id="storeSt" style="line-height:1.5"></span></div>
-          <div class="tbl-wrap" style="margin-top:.5rem"><table class="ptbl"><thead><tr><th></th><th class="num">매출</th><th class="num">광고비</th><th class="num">마진</th><th class="num">순수익</th><th class="num">수익률</th></tr></thead><tbody id="pBody"></tbody></table></div>
+          <div class="tbl-wrap" style="margin-top:.5rem"><table class="ptbl"><thead><tr><th></th><th class="num">매출</th><th class="num">원가·수수료</th><th class="num">광고비</th><th class="num">순수익</th><th class="num">수익률</th></tr></thead><tbody id="pBody"></tbody></table></div>
           <div class="card-s" id="pNote" style="margin-top:.35rem;line-height:1.6"></div>
         </div>
       </div>
@@ -457,31 +459,55 @@ function adCostOn(d){
   return c;
 }
 function salesOn(d){ var x = D.sales[d]; return x && x.amt != null ? +x.amt : null; }
-function marginRate(){ return (+D.cfg.margin || 0) / 100; }
+/* 비용 기준 (2026-10-22 대표님) — 원가율 = 원가 ÷ 객단가, 수수료 = 매출 × 수수료율
+   예) 객단가 23,900원 · 원가 13,900원 · 수수료 5.63% → 네이버 정산 22,554원 · 개당 수익 8,654원(36.2%)
+   원가는 매출 × 원가율로 잡는다 (상품이 여럿이어도 객단가 기준 비율). 원가를 안 넣었으면 예전 마진율 설정으로. */
+function costCfg(){
+  var c = D.cfg || {}, aov = +c.aov || 0, cost = +c.cost || 0, fee = c.fee != null && c.fee !== '' ? +c.fee / 100 : null;
+  if (aov && cost) return { ok: true, cogs: cost / aov, fee: fee || 0, feeSet: fee != null };
+  if (+c.margin) return { ok: true, cogs: 1 - c.margin / 100, fee: 0, feeSet: true, legacy: true };
+  return { ok: false, cogs: 0, fee: fee || 0, feeSet: fee != null };
+}
+/* 하루 손익 — 순수익 = 매출 − 수수료 − 원가 − 광고비.
+   수수료는 스마트스토어가 준 네이버 정산 예정금액이 그날 모든 주문에 있으면 실제값(매출 − 정산), 아니면 수수료율 */
+function econ(sales, ad, rec){
+  var k = costCfg(), real = !!(rec && rec.src === 'store' && +rec.rows > 0 && +rec.settleN === +rec.rows);
+  var fee = real ? Math.max(0, sales - +rec.settle) : sales * k.fee, cogs = sales * k.cogs;
+  var profit = sales - fee - cogs - ad;
+  return { sales: sales, fee: fee, cogs: cogs, ad: ad, profit: profit, rate: sales ? profit / sales : null, realFee: real };
+}
 function period(from, to){
-  var o = { sales: 0, cost: 0, days: 0, sDays: 0 };
+  var o = { sales: 0, cost: 0, fee: 0, cogs: 0, days: 0, sDays: 0 };
   for (var d = from; d <= to; d = addDays(d, 1)) {
     var c = adCostOn(d), sv = salesOn(d);
     if (c != null) { o.cost += c; o.days++; }
-    if (sv != null) { o.sales += sv; o.sDays++; }
+    if (sv != null) { var e = econ(sv, 0, D.sales[d]); o.sales += sv; o.fee += e.fee; o.cogs += e.cogs; o.sDays++; }
   }
-  o.margin = o.sales * marginRate(); o.profit = o.margin - o.cost;
+  o.profit = o.sales - o.fee - o.cogs - o.cost;
   o.rate = o.sales ? o.profit / o.sales : null; o.adPct = o.sales ? o.cost / o.sales : null;
   return o;
 }
 function pct1(x){ return x == null ? '—' : (x * 100).toFixed(1) + '%'; }
+/* 기준 설정 아래 — 넣는 대로 정산금액·개당 수익·손익분기 광고비율 */
+function showDerived(){
+  var aov = +$('cAov').value || 0, cost = +$('cCost').value || 0, fee = ($('cFee').value === '' ? 0 : +$('cFee').value) / 100;
+  if (!aov || !cost) { $('cDerived').textContent = '객단가·원가·수수료를 넣으면 네이버 정산금액과 개당 수익이 나옵니다'; return; }
+  var st = aov * (1 - fee), unit = st - cost, be = unit / aov;
+  $('cDerived').innerHTML = '네이버 정산금액 <b>' + fmt(st) + '원</b> · 개당 수익 <b class="' + (unit >= 0 ? 'pos' : 'neg') + '">' + fmt(unit) + '원</b> (' + pct1(be) + ')' +
+    (unit > 0 ? ' — 광고비율이 <b>' + pct1(be) + '</b>를 넘으면 적자' : '');
+}
 function renderCalc(){
-  var m = marginRate(), tg = (+D.cfg.target || 15) / 100, q = +$('qAmt').value || 0;
-  function box(k, v, cls){ return '<div><div class="k">' + k + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>'; }
+  var k = costCfg(), tg = (+D.cfg.target || 15) / 100, q = +$('qAmt').value || 0;
+  function box(lb, v, cls){ return '<div><div class="k">' + lb + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>'; }
   /* 기준 객단가로 환산한 판매 수량 — 매출 ÷ 객단가 (예: 23,900,000 ÷ 23,900 = 1,000개) */
   var aov = +D.cfg.aov || 0;
   $('qQty').innerHTML = !aov ? '<span class="st">기준 설정에 객단가를 넣으면 환산 수량이 나옵니다</span>' :
     '기준 객단가 <b>' + fmt(aov) + '원</b> · 환산 수량 <b class="qn">' + (q ? (q / aov).toLocaleString('ko-KR', { maximumFractionDigits: 1 }) : '0') + '개</b>';
-  if (!m) $('qOut').innerHTML = '<div style="grid-column:1/-1" class="st">기준 설정에 마진율을 넣으면 계산됩니다</div>';
+  if (!k.ok) $('qOut').innerHTML = '<div style="grid-column:1/-1" class="st">기준 설정에 객단가·원가·수수료를 넣으면 계산됩니다</div>';
   else {
-    var mg = q * m, ad = q * tg, pf = mg - ad;
-    $('qOut').innerHTML = box('마진 (' + Math.round(m * 100) + '%)', fmt(mg) + '원') + box('광고비 (' + Math.round(tg * 100) + '%)', fmt(ad) + '원') +
-      box('광고 뺀 수익', fmt(pf) + '원', pf >= 0 ? 'pos' : 'neg') + box('수익률', q ? pct1(pf / q) : '—', pf >= 0 ? 'pos' : 'neg');
+    var e = econ(q, q * tg, null);
+    $('qOut').innerHTML = box('원가+수수료', fmt(e.cogs + e.fee) + '원') + box('광고비 (' + Math.round(tg * 100) + '%)', fmt(e.ad) + '원') +
+      box('순수익', fmt(e.profit) + '원', e.profit >= 0 ? 'pos' : 'neg') + box('수익률', q ? pct1(e.rate) : '—', e.profit >= 0 ? 'pos' : 'neg');
   }
   var td = today(), ss = D.cfg.season || null;
   var rows = [['오늘', td, td], ['이번 주', weekStart(td), td]];
@@ -489,48 +515,60 @@ function renderCalc(){
   var notes = [];
   $('pBody').innerHTML = rows.map(function(r){
     var o = period(r[1], r[2]);
-    if (o.sDays < o.days) notes.push(r[0] + ' 광고 ' + o.days + '일 중 매출 입력 ' + o.sDays + '일');
-    var cls = o.sales ? (o.profit >= 0 ? 'pos' : 'neg') : '';
-    return '<tr><td>' + r[0] + '</td><td class="num">' + (o.sales ? fmt(o.sales) : '—') + '</td><td class="num">' + fmt(o.cost) +
-      (o.adPct != null ? '<span class="dlt">' + pct1(o.adPct) + '</span>' : '') + '</td><td class="num">' + (o.sales && m ? fmt(o.margin) : '—') +
-      '</td><td class="num ' + cls + '">' + (o.sales && m ? fmt(o.profit) : '—') + '</td><td class="num ' + cls + '">' + (o.sales && m ? pct1(o.rate) : '—') + '</td></tr>';
+    if (o.sDays < o.days) notes.push(r[0] + ' 광고 ' + o.days + '일 중 매출 있는 날 ' + o.sDays + '일');
+    var cls = o.sales && k.ok ? (o.profit >= 0 ? 'pos' : 'neg') : '';
+    return '<tr><td>' + r[0] + '</td><td class="num">' + (o.sales ? fmt(o.sales) : '—') + '</td><td class="num">' + (o.sales && k.ok ? fmt(o.cogs + o.fee) : '—') +
+      '</td><td class="num">' + fmt(o.cost) + (o.adPct != null ? '<span class="dlt">' + pct1(o.adPct) + '</span>' : '') +
+      '</td><td class="num ' + cls + '">' + (o.sales && k.ok ? fmt(o.profit) : '—') + '</td><td class="num ' + cls + '">' + (o.sales && k.ok ? pct1(o.rate) : '—') + '</td></tr>';
   }).join('');
-  $('pNote').textContent = (notes.length ? notes.join(' · ') + ' — 매출을 넣은 날만 계산합니다. ' : '') + '스마트스토어가 연결되면 매출이 자동으로 채워집니다.';
+  var feeNote = k.legacy ? '원가 대신 예전 마진율로 계산 중 — 기준 설정에 원가·수수료를 넣으세요.'
+    : '순수익 = 매출 − 원가(매출 × ' + (aov && +D.cfg.cost ? fmt(+D.cfg.cost) + '÷' + fmt(aov) : '원가율') + ') − 수수료 − 광고비. 수수료는 네이버 정산 예정금액이 있는 날은 실제값, 없으면 ' + (k.feeSet ? (k.fee * 100).toFixed(2) + '%' : '0% (수수료를 넣으세요)') + '.';
+  $('pNote').textContent = (notes.length ? notes.join(' · ') + ' — 매출 있는 날만 원가·수수료를 뺍니다. ' : '') + feeNote;
 }
 
-/* 왼쪽 그래프 — 일별(최근 8일): 매출 · 마진 · 광고비 막대, 올리면 순수익·수익률 / 시간대(오늘): 광고비 */
+/* 왼쪽 그래프 — 일별(최근 8일): 날마다 막대 2개. 왼쪽 = 매출, 오른쪽 = 아래부터 원가 · 수수료 · 광고비를 쌓음.
+   오른쪽 막대 위 남는 칸(초록 점선) = 순수익, 비용이 매출을 넘으면 넘은 만큼 빨간 점선 = 적자 */
 var CV = 'day';
-var C3 = { sales: '#60a5fa', margin: '#2dd4bf', cost: '#fb923c' };
+var C3 = { sales: '#60a5fa', cogs: '#64748b', fee: '#a78bfa', cost: '#fb923c', profit: '#4ade80', loss: '#f87171' };
 function renderChart(){
   if (CV === 'hour') return renderHourChart();
   var svg = $('chart'), W = svg.clientWidth || 600, H = 190, pl = 54, pr = 8, pt = 10, pb = 22, td = today();
   var days = []; for (var k = 7; k >= 0; k--) days.push(addDays(td, -k));
-  var m = marginRate();
-  var V = days.map(function(d){ var sv = salesOn(d), c = adCostOn(d); return { d: d, s: sv || 0, mg: sv ? sv * m : 0, c: c || 0, has: sv != null }; });
-  var max = 1; V.forEach(function(v){ max = Math.max(max, v.s, v.mg, v.c); });
+  var V = days.map(function(d){ var sv = salesOn(d), e = econ(sv || 0, adCostOn(d) || 0, D.sales[d]); e.d = d; e.has = sv != null; return e; });
+  var max = 1; V.forEach(function(v){ max = Math.max(max, v.sales, v.cogs + v.fee + v.ad); });
   var step = Math.pow(10, Math.floor(Math.log10(max))), top = Math.ceil(max / step) * step;
-  var gw = (W - pl - pr) / days.length, bw = Math.max(3, Math.min(18, (gw - 10) / 3)), s = '';
-  for (var g = 0; g <= 4; g++) { var gy = pt + (H - pt - pb) * (1 - g / 4);
+  var gw = (W - pl - pr) / days.length, bw = Math.max(4, Math.min(24, (gw - 12) / 2)), ph = H - pt - pb, s = '';
+  function Y(v){ return H - pb - ph * v / top; }
+  for (var g = 0; g <= 4; g++) { var gy = pt + ph * (1 - g / 4);
     s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + gy + '" y2="' + gy + '" stroke="#1d2230"/>' +
          '<text x="' + (pl - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + fmt(top * g / 4) + '</text>'; }
   V.forEach(function(v, i){
-    var x0 = pl + i * gw + (gw - bw * 3 - 4) / 2;
-    [[v.s, C3.sales], [v.mg, C3.margin], [v.c, C3.cost]].forEach(function(b, j){
-      if (!b[0]) return; var bh = (H - pt - pb) * b[0] / top;
-      s += '<rect x="' + (x0 + j * (bw + 2)) + '" y="' + (H - pb - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="' + b[1] + '"/>';
+    var x0 = pl + i * gw + (gw - bw * 2 - 3) / 2, x1 = x0 + bw + 3;
+    if (v.sales) s += '<rect x="' + x0 + '" y="' + Y(v.sales) + '" width="' + bw + '" height="' + (H - pb - Y(v.sales)) + '" rx="2" fill="' + C3.sales + '"/>';
+    var acc = 0;
+    [[v.cogs, C3.cogs], [v.fee, C3.fee], [v.ad, C3.cost]].forEach(function(b){
+      if (!b[0]) return;
+      s += '<rect x="' + x1 + '" y="' + Y(acc + b[0]) + '" width="' + bw + '" height="' + (Y(acc) - Y(acc + b[0])) + '" fill="' + b[1] + '"/>';
+      acc += b[0];
     });
-    s += '<rect class="hit" data-i="' + i + '" x="' + (pl + i * gw) + '" y="' + pt + '" width="' + gw + '" height="' + (H - pt - pb) + '" fill="transparent"/>';
+    if (v.sales && v.sales !== acc) {
+      var lo = Math.min(v.sales, acc), hi = Math.max(v.sales, acc), col = v.sales > acc ? C3.profit : C3.loss;
+      s += '<rect x="' + (x1 + 0.5) + '" y="' + Y(hi) + '" width="' + (bw - 1) + '" height="' + Math.max(1, Y(lo) - Y(hi)) + '" fill="' + col + '" fill-opacity="0.12" stroke="' + col + '" stroke-dasharray="3 2"/>';
+    }
+    s += '<rect class="hit" data-i="' + i + '" x="' + (pl + i * gw) + '" y="' + pt + '" width="' + gw + '" height="' + ph + '" fill="transparent"/>';
     s += '<text x="' + (pl + i * gw + gw / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + (v.d === td ? '오늘' : v.d.slice(5).replace('-', '/')) + '</text>';
   });
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.innerHTML = s;
-  $('chartTitle').textContent = '일별 매출 · 마진 · 광고비';
-  $('chartSub').innerHTML = '<span class="lg"><i style="background:' + C3.sales + '"></i>매출</span><span class="lg"><i style="background:' + C3.margin + '"></i>마진</span>' +
-    '<span class="lg"><i style="background:' + C3.cost + '"></i>광고비</span> 올리면 순수익·수익률' + (m ? '' : ' · 마진율을 넣으면 마진이 나옵니다');
+  $('chartTitle').textContent = '일별 매출 · 비용 · 수익';
+  function lg(c, t, dash){ return '<span class="lg"><i style="background:' + c + (dash ? ';opacity:.45;outline:1px dashed ' + c : '') + '"></i>' + t + '</span>'; }
+  $('chartSub').innerHTML = lg(C3.sales, '매출') + lg(C3.cogs, '원가') + lg(C3.fee, '수수료') + lg(C3.cost, '광고비') + lg(C3.profit, '순수익', 1) +
+    (costCfg().ok ? '' : ' · 기준 설정에 원가·수수료를 넣으세요');
   svg.querySelectorAll('.hit').forEach(function(r){
     r.addEventListener('mousemove', function(ev){
-      var v = V[+r.dataset.i], pf = v.mg - v.c;
-      tip(ev, '<b>' + (v.d === td ? '오늘' : v.d) + '</b><br>매출 <b>' + (v.has ? fmt(v.s) + '</b>원' : '</b>입력 안 함') + '<br>마진 <b>' + fmt(v.mg) + '</b>원 · 광고비 <b>' + fmt(v.c) + '</b>원' +
-        (v.has ? '<br>순수익 <b>' + fmt(pf) + '</b>원 · 수익률 <b>' + pct1(v.s ? pf / v.s : null) + '</b> · 광고비율 <b>' + pct1(v.s ? v.c / v.s : null) + '</b>' : ''));
+      var v = V[+r.dataset.i];
+      tip(ev, '<b>' + (v.d === td ? '오늘' : v.d) + '</b><br>매출 <b>' + (v.has ? fmt(v.sales) + '</b>원' : '</b>없음') +
+        '<br>원가 <b>' + fmt(v.cogs) + '</b>원 · 수수료 <b>' + fmt(v.fee) + '</b>원' + (v.realFee ? ' (네이버 정산)' : '') + ' · 광고비 <b>' + fmt(v.ad) + '</b>원' +
+        (v.has ? '<br>순수익 <b>' + fmt(v.profit) + '</b>원 · 수익률 <b>' + pct1(v.rate) + '</b> · 광고비율 <b>' + pct1(v.sales ? v.ad / v.sales : null) + '</b>' : ''));
     });
     r.addEventListener('mouseleave', function(){ $('tip').classList.add('hide'); });
   });
@@ -751,7 +789,8 @@ function renderLog(){
 /* ── 설정 · 매출 ── */
 function fillCfg(){
   var c = D.cfg || {};
-  $('cAov').value = c.aov || ''; $('cMargin').value = c.margin || ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || '';
+  $('cAov').value = c.aov || ''; $('cCost').value = c.cost || ''; $('cFee').value = c.fee != null ? c.fee : ''; $('cTarget').value = c.target || ''; $('cMax').value = c.maxBid || ''; $('cSeason').value = c.season || '';
+  showDerived();
   if (!$('sDate').value) $('sDate').value = today();
   var s = D.sales[$('sDate').value]; $('sAmt').value = s && s.amt != null ? s.amt : '';
   salesNote(); storeLine();
@@ -773,7 +812,7 @@ function storeLine(){
   el.style.color = st && (!st.ok || late) ? '#f87171' : '';
 }
 function saveCfg(){
-  var c = { aov: +$('cAov').value || null, margin: +$('cMargin').value || null, target: +$('cTarget').value || 15,
+  var c = { aov: +$('cAov').value || null, cost: +$('cCost').value || null, fee: $('cFee').value === '' ? null : +$('cFee').value, target: +$('cTarget').value || 15,
             maxBid: +$('cMax').value || 3000, season: $('cSeason').value || null, ts: Date.now() };
   db.ref('adctl/config').update(c).then(function(){ D.cfg = Object.assign({}, D.cfg, c); $('cfgSt').textContent = '저장됨'; render(); })
     .catch(function(e){ $('cfgSt').textContent = '실패: ' + (e.code || e.message); });
@@ -882,6 +921,7 @@ function start(){
   db = firebase.database(); fns = firebase.app().functions('asia-northeast3');
   $('btnNow').addEventListener('click', collectNow);
   $('btnCfg').addEventListener('click', saveCfg);
+  ['cAov', 'cCost', 'cFee'].forEach(function(id){ $(id).addEventListener('input', showDerived); });
   $('btnSales').addEventListener('click', saveSales);
   $('btnBud').addEventListener('click', openBudget);
   $('qAmt').addEventListener('input', renderCalc);

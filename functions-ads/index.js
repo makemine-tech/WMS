@@ -638,7 +638,7 @@ exports.adsBudgetNow = onCall(OPTS, async (req) => {
 /* ── 스마트스토어 매출 받는 창구 ─────────────────────────
    커머스 API 는 커머스API센터에 등록한 IP 에서만 불러진다 → 등록한 컴퓨터(tools/store_agent)가
    10분마다 주문을 받아 하루 매출로 합친 뒤 여기로 보낸다. 이 함수는 네이버를 부르지 않고 저장만 한다.
-   요청: POST { ts, host, days:{ 날짜:{ amt, paid, cancel, n, h:{HH:금액}, p:{상품번호:[수량,금액]} } } }  또는 { ts, host, err } (네이버에서 못 받음)
+   요청: POST { ts, host, days:{ 날짜:{ amt, paid, cancel, n, h:{HH:금액}, p:{상품번호:[수량,금액]}, settle, settleN, rows } } }  또는 { ts, host, err } (네이버에서 못 받음)
          헤더 X-Store-Sign = hex( HMAC-SHA256(NAVER_COMMERCE_CLIENT_SECRET, ts + "." + 본문) ) — 10분 안의 요청만
    저장: adctl/sales/{날짜} = { …, src:'store', ts }   (amt = 그날 결제 중 취소·반품 뺀 금액)
          adctl/storeStatus = { ts, ok, host, days:{ 날짜:[금액,건수] } } */
@@ -648,7 +648,8 @@ const STORE_SECRET = defineSecret('NAVER_COMMERCE_CLIENT_SECRET');
 
 function num(v) { const n = Math.round(+v); return Number.isFinite(n) && n >= 0 && n < 1e11 ? n : 0; }
 function cleanDay(o) {
-  const out = { amt: num(o.amt), paid: num(o.paid), cancel: num(o.cancel), n: num(o.n), h: {}, p: {}, src: 'store', ts: Date.now() };
+  const out = { amt: num(o.amt), paid: num(o.paid), cancel: num(o.cancel), n: num(o.n), h: {}, p: {}, src: 'store', ts: Date.now(),
+    settle: num(o.settle), settleN: num(o.settleN), rows: num(o.rows) };   /* 네이버 정산 예정금액 — 실제 수수료 = amt − settle */
   Object.keys(o.h || {}).forEach((k) => { if (/^\d\d$/.test(k) && +k < 24) out.h[k] = num(o.h[k]); });
   Object.keys(o.p || {}).slice(0, 500).forEach((k) => {
     if (/^\d{1,20}$/.test(k) && Array.isArray(o.p[k])) out.p[k] = [num(o.p[k][0]), num(o.p[k][1])];
