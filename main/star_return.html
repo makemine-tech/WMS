@@ -103,6 +103,12 @@
   details > summary { cursor:pointer; list-style:none; }
   details > summary::-webkit-details-marker { display:none; }
 
+  #mdl { position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.65); display:none; align-items:flex-start; justify-content:center; padding:40px 16px; overflow:auto; }
+  .mdl-box { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1rem; width:100%; max-width:820px; }
+  .mdl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:.6rem; }
+  .mdl-grid label { font-size:.72rem; font-weight:800; color:var(--muted); display:flex; flex-direction:column; gap:.25rem; }
+  .mdl-box input:not([type=checkbox]), .mdl-box select { background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.45rem .6rem; font-size:.85rem; }
+  .mdl-box input.eGot { width:5rem; }
   #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#111827; border:1px solid var(--border); color:var(--text);
            border-radius:10px; padding:.6rem 1rem; font-size:.84rem; font-weight:700; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; max-width:90vw; }
   #toast.on { opacity:1; }
@@ -168,13 +174,15 @@
       <button class="btn" id="lookAllBtn" onclick="lookAll()">🔎 주문 조회 대기 <span id="nLook">0</span>건 찾기</button>
       <button class="btn p" id="pushBtn" onclick="pushAll()">📤 이벗에 반영 (<span id="nReady">0</span>건)</button>
       <button class="btn" onclick="downloadXlsx()">📥 엑셀</button>
+      <button class="btn r" onclick="delSelected()">🗑 선택 삭제 (<span id="nSel">0</span>)</button>
     </div>
     <div class="chips" style="margin-bottom:.5rem" id="perChips"></div>
     <div class="chips" style="margin-bottom:.7rem" id="stChips"></div>
-    <div class="scroll-x"><table class="lst"><thead><tr><th>검수 시각</th><th>반품 송장</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th></tr></thead>
-      <tbody id="listBody"><tr><td colspan="8" class="dim">불러오는 중…</td></tr></tbody></table></div>
+    <div class="scroll-x"><table class="lst"><thead><tr><th><input type="checkbox" id="selAll" title="보이는 줄 모두 체크" onchange="selAllRows(this.checked)"></th><th>검수 시각</th><th>반품 송장</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th><th>관리</th></tr></thead>
+      <tbody id="listBody"><tr><td colspan="10" class="dim">불러오는 중…</td></tr></tbody></table></div>
   </div>
 </div>
+<div id="mdl" onclick="if(event.target===this)closeEdit()"></div>
 <div id="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
@@ -387,7 +395,7 @@ function renderCur(lastCode){
   var h = '<div class="cur-top"><div>반품 송장<br><b>' + esc(r.rno) + '</b></div>'
     + '<div>원송장<br><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : esc(r.orig || '')) + '</b>'
     + (r.origDate ? ' <span class="sm dim">' + esc(r.origDate) + '</span>' : '') + (r.self ? ' <span class="tag b">반송</span>' : '') + '</div>'
-    + '<div>수령자<br><b style="font-family:inherit">' + esc(so.map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ') || '-') + '</b></div>'
+    + '<div>수령자<br><b style="font-family:inherit">' + esc(rmanOf(r) || '-') + '</b></div>'
     + '<div>상태<br><span class="st s-' + st.k + '">' + st.t + '</span></div></div>';
   noteHits(r).forEach(function(x){ h += '<div class="banner yel">📌 사전 특이사항 ' + x.t + '입니다 — ' + esc(x.n.memo || '') + ' <span class="mono sm">(' + esc(x.n.val) + ')</span></div>'; });
   if (r.trace === 'err') h += '<div class="banner red">우체국 원송장 조회 실패: ' + esc(r.traceErr || '') + '</div>';
@@ -481,14 +489,111 @@ function renderList(){
     var j = judge(r), st = stOf(r), so = starOrders(r);
     var good = 0, badn = 0; (r.items || []).forEach(function(it){ if (it.got > 0){ if (it.q === '2') badn += it.got; else good += it.got; } });
     var names = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return it.name; });
-    return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})"><td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
+    return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
+      + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
+      + '<td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
       + '<td class="mono sm">' + esc(r.rno) + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || '') + '</td>'
-      + '<td class="sm">' + esc(so.map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ')) + '</td>'
+      + '<td class="sm">' + esc(rmanOf(r)) + (r.rmanEdit ? ' <span class="tag b">수정</span>' : '') + '</td>'
       + '<td class="sm">' + (names.length ? esc(names[0]) + (names.length > 1 ? ' 외 ' + (names.length - 1) : '') + '<div>정상 <b style="color:var(--accent)">' + good + '</b> · 불량 <b style="color:var(--red)">' + badn + '</b></div>' : '<span class="dim">-</span>') + '</td>'
       + '<td>' + j.block.map(function(b){ return '<span class="tag r">' + esc(b) + '</span>'; }).join('') + j.info.map(function(b){ return '<span class="tag y">' + esc(b) + '</span>'; }).join('') + '</td>'
-      + '<td><span class="st s-' + st.k + '">' + st.t + '</span></td><td class="sm">' + esc(r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' · ' + hm(r.ebut.at) : '') : '') + '</td></tr>';
-  }).join('') : '<tr><td colspan="8" class="dim">해당 기간·상태의 반품이 없습니다</td></tr>';
+      + '<td><span class="st s-' + st.k + '">' + st.t + '</span></td><td class="sm">' + esc(r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' · ' + hm(r.ebut.at) : '') : '')
+      + (r.edited ? '<div class="dim">✏️ ' + esc(r.edited.by || '') + ' ' + hm(r.edited.at) + ' 수정</div>' : '') + '</td>'
+      + '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn sm" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button> <button class="btn sm r" onclick="delRec(\'' + r.rno + '\')">🗑</button></td></tr>';
+  }).join('') : '<tr><td colspan="10" class="dim">해당 기간·상태의 반품이 없습니다</td></tr>';
+  Object.keys(SEL).forEach(function(k){ if (!RECS[k]) delete SEL[k]; });
+  $('nSel').textContent = Object.keys(SEL).length;
+  $('selAll').checked = rows.length > 0 && rows.every(function(r){ return SEL[r.rno]; });
 }
+
+/* ── 목록에서 지우기 · 고르기 ── */
+var SEL = {};
+function selRow(k, on){ if (on) SEL[k] = 1; else delete SEL[k]; $('nSel').textContent = Object.keys(SEL).length; }
+function selAllRows(on){ listRows().forEach(function(r){ if (on) SEL[r.rno] = 1; else delete SEL[r.rno]; }); renderList(); }
+function delWarn(ks){
+  var done = ks.filter(function(k){ return RECS[k] && RECS[k].state === 'done'; }).length, saving = ks.filter(function(k){ return RECS[k] && RECS[k].state === 'saving'; }).length;
+  return (done ? '\n\n⚠️ 이벗에 이미 반영된 ' + done + '건은 여기 기록만 지워지고 이벗 반품입고는 그대로 남습니다.' : '')
+    + (saving ? '\n⚠️ 지금 반영 중인 ' + saving + '건이 있습니다 — 이벗에 들어갔는지 먼저 확인하세요.' : '');
+}
+function delRec(k){
+  var r = RECS[k]; if (!r) return;
+  if (!confirm('반품 송장 ' + k + ' 기록을 지울까요?' + delWarn([k]))) return;
+  base.child('recs/' + k).remove().then(function(){ if (CUR === k){ CUR = null; renderCur(); } delete SEL[k]; toast('지웠습니다 — ' + k); });
+}
+function delSelected(){
+  var ks = Object.keys(SEL).filter(function(k){ return RECS[k]; });
+  if (!ks.length){ toast('지울 줄을 먼저 체크하세요'); return; }
+  if (!confirm('체크한 ' + ks.length + '건을 지울까요?' + delWarn(ks))) return;
+  var up = {}; ks.forEach(function(k){ up['recs/' + k] = null; });
+  base.update(up).then(function(){ if (CUR && SEL[CUR]){ CUR = null; renderCur(); } SEL = {}; toast(ks.length + '건 지웠습니다'); });
+}
+
+/* ── 목록에서 고치기 (반품송장·원송장·수령자·수량·정상/불량·특이사항·상태) ── */
+var EDIT = null;
+function editRec(k){
+  var r = RECS[k]; if (!r) return;
+  if (r.state === 'saving' && stOf(r).k === 'saving'){ toast('지금 이벗에 반영 중입니다 — 끝난 뒤 고치세요'); return; }
+  EDIT = k;
+  var h = '<div class="mdl-box"><div class="card-h">✏️ 반품 기록 수정 <span class="sp"></span><button class="btn sm" onclick="closeEdit()">닫기</button></div>'
+    + (r.state === 'done' ? '<div class="banner yel">이벗에 이미 반영된 건입니다. 여기서 고쳐도 <b>이벗 반품입고는 바뀌지 않습니다</b> — 이벗은 직접 고쳐 주세요.</div>' : '')
+    + '<div class="mdl-grid">'
+    + '<label>반품 송장<input id="eRno" class="mono" value="' + esc(r.rno) + '" inputmode="numeric"></label>'
+    + '<label>원송장<input id="eOrig" class="mono" value="' + esc(r.orig || '') + '" inputmode="numeric"></label>'
+    + '<label>수령자<input id="eRman" value="' + esc(rmanOf(r)) + '"></label>'
+    + '<label>상태<select id="eState">' + [['scan', '검수 중'], ['ready', '반영 대기'], ['done', '반영 완료 (이벗에 손으로 넣음)'], ['fail', '반영 실패·확인']].map(function(o){
+        return '<option value="' + o[0] + '"' + ((r.state === o[0] || (r.state === 'saving' && o[0] === 'fail')) ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>'
+    + '</div><div class="sm dim" style="margin:.2rem 0 .6rem">원송장을 바꾸면 이벗에서 주문·상품을 다시 불러옵니다 (아래 상품 수정은 버려짐).</div>';
+  if ((r.items || []).length){
+    h += '<table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>반품 수량</th><th>정상 / 불량</th></tr></thead><tbody>'
+      + r.items.map(function(it, i){ return '<tr><td class="sm">' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '</td><td class="mono sm">' + esc(it.nicn) + '</td><td class="cnt">' + it.qty + '</td>'
+        + '<td><input type="number" min="0" class="eGot mono" data-i="' + i + '" value="' + (it.got || 0) + '"></td>'
+        + '<td><select class="eQ" data-i="' + i + '"><option value="1"' + (it.q !== '2' ? ' selected' : '') + '>정상</option><option value="2"' + (it.q === '2' ? ' selected' : '') + '>불량</option></select></td></tr>'; }).join('')
+      + '</tbody></table>';
+  }
+  if ((r.extras || []).length){
+    h += '<div class="lbl" style="margin-top:.7rem">반품 대상 아닌 상품 — 체크를 풀면 지워집니다</div>'
+      + r.extras.map(function(x, i){ return '<label class="sm" style="margin-right:1rem"><input type="checkbox" class="eX" data-i="' + i + '" checked> <span class="mono">' + esc(x.code) + '</span> × ' + x.n + '</label>'; }).join('');
+  }
+  h += '<div class="lbl" style="margin-top:.7rem">특이사항 메모</div><textarea class="memo" id="eMemo">' + esc(r.memo || '') + '</textarea>'
+    + '<div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn p" onclick="saveEdit()">저장</button><button class="btn" onclick="closeEdit()">취소</button></div></div>';
+  var m = $('mdl'); m.innerHTML = h; m.style.display = 'flex';
+}
+function closeEdit(){ EDIT = null; $('mdl').style.display = 'none'; $('mdl').innerHTML = ''; }
+function saveEdit(){
+  var k = EDIT, r0 = RECS[k]; if (!r0) { closeEdit(); return; }
+  var r = JSON.parse(JSON.stringify(r0));
+  var rno = digits($('eRno').value), orig = digits($('eOrig').value), rman = $('eRman').value.trim(), state = $('eState').value;
+  if (rno.length < 10 || rno.length > 15){ toast('반품 송장은 10~15자리 숫자'); return; }
+  if (orig && (orig.length < 10 || orig.length > 15)){ toast('원송장은 10~15자리 숫자'); return; }
+  if (rno !== k && RECS[rno]){ toast('반품 송장 ' + rno + ' 기록이 이미 있습니다'); return; }
+  var origChanged = orig !== (r.orig || '');
+  if (origChanged){
+    Object.assign(r, { orig: orig || null, origDate: null, self: !!orig && orig === rno, trace: orig ? 'ok' : 'err', traceErr: orig ? null : '원송장 없음', look: orig ? 'wait' : null, orders: [], items: [], locas: {} });
+  } else {
+    [].forEach.call(document.querySelectorAll('.eGot'), function(e){ r.items[+e.dataset.i].got = Math.max(0, parseInt(e.value, 10) || 0); });
+    [].forEach.call(document.querySelectorAll('.eQ'), function(e){ r.items[+e.dataset.i].q = e.value; });
+  }
+  var keepX = []; [].forEach.call(document.querySelectorAll('.eX'), function(e){ if (e.checked) keepX.push(r.extras[+e.dataset.i]); });
+  if (r.extras) r.extras = keepX;
+  var auto = starOrders(r).map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ');
+  r.rmanEdit = rman && rman !== auto ? rman : null;
+  r.memo = $('eMemo').value.trim();
+  r.rno = rno;
+  if (state !== r0.state){
+    if (r0.state === 'done' && !confirm('이벗에 반영된 건의 상태를 바꿉니다. 「반영 대기」로 두고 다시 반영하면 이벗에 두 번 들어갈 수 있습니다. 계속할까요?')) return;
+    if (state === 'ready'){ var j = judge(r); if (j.block.length){ toast('반영 대기로 올릴 수 없습니다: ' + j.block[0]); return; } }
+    if (state === 'done' && !r.ebut) r.ebut = { at: Date.now(), msg: '이벗에 손으로 반영 (목록에서 표시)', by: byName() };
+    r.state = state; r.saveAt = null;
+  }
+  r.edited = { at: Date.now(), by: byName() }; r.upd = Date.now();
+  var up = {}; if (rno !== k) up['recs/' + k] = null; up['recs/' + rno] = r;
+  base.update(up).then(function(){
+    if (CUR === k) CUR = rno;
+    if (SEL[k]){ delete SEL[k]; }
+    closeEdit(); toast('✔ 고쳤습니다 — ' + rno);
+    if (origChanged && orig && H.ok) lookup(rno);
+  }).catch(function(e){ toast('저장 실패: ' + (e.code || e.message)); });
+}
+function rmanOf(r){ return r.rmanEdit || starOrders(r).map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', '); }
 
 /* ── 사전 특이사항 ── */
 function addNote(){
@@ -520,7 +625,7 @@ function downloadXlsx(){
     var a = [['검수일시', '작업자', '반품송장', '원송장', '원송장 접수일', '이벗 주문코드', '수령자', '상품명', '옵션', '바코드', '주문수량', '반품수량', '상태', '특이사항', '진행', '이벗 반영 결과']];
     rows.forEach(function(r){
       var j = judge(r), so = starOrders(r), flag = j.block.concat(j.info).join(' / '), st = stOf(r).t, eb = r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' ' + hm(r.ebut.at) : '') : '';
-      var rman = so.map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ');
+      var rman = rmanOf(r);
       var head = [hm(r.at), r.by || '', r.rno, r.orig || '', r.origDate || '', so.map(function(o){ return o.code; }).join(','), rman];
       var lines = (r.items || []).filter(function(it){ return it.got > 0; });
       lines.forEach(function(it){ a.push(head.concat([it.name, it.opt, it.nicn, it.qty, it.got, it.q === '2' ? '불량' : '정상', flag, st, eb])); });
