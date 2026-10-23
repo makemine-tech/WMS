@@ -109,6 +109,12 @@
   .mdl-grid label { font-size:.72rem; font-weight:800; color:var(--muted); display:flex; flex-direction:column; gap:.25rem; }
   .mdl-box input:not([type=checkbox]), .mdl-box select { background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.45rem .6rem; font-size:.85rem; }
   .mdl-box input.eGot { width:5rem; }
+  .btn.mobbtn { background:#0f1d33; border-color:#1e3a66; color:#bfdbfe; }
+  .phs { display:flex; gap:.4rem; flex-wrap:wrap; }
+  .phs img { width:96px; height:96px; object-fit:cover; border-radius:8px; border:1px solid var(--border); display:block; }
+  .mob { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start; }
+  .mob .qr { background:#fff; padding:10px; border-radius:10px; }
+  .mob .url { font-family:'Space Mono',monospace; font-size:.82rem; background:#0a0c10; border:1px solid var(--border); border-radius:8px; padding:.5rem .6rem; word-break:break-all; }
   #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#111827; border:1px solid var(--border); color:var(--text);
            border-radius:10px; padding:.6rem 1rem; font-size:.84rem; font-weight:700; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; max-width:90vw; }
   #toast.on { opacity:1; }
@@ -127,6 +133,8 @@
     </div>
     <div class="hdr-r">
       <div class="helper" title="이벗에 로그인된 크롬 탭에서 「이벗 반품 도우미」를 눌러야 주문 조회·이벗 반영이 됩니다"><span class="dot" id="hDot"></span><span id="hTxt">이벗 도우미 연결 안 됨</span></div>
+      <button class="btn mobbtn" onclick="showMobile('android')">📱 모바일 안드로이드</button>
+      <button class="btn mobbtn" onclick="showMobile('ios')">📱 모바일 아이폰</button>
       <button class="btn" onclick="openEbut()">이벗 열기</button>
       <a class="back" href="star_picking.html">‹ 피킹으로</a>
     </div>
@@ -159,7 +167,7 @@
       <input class="m" id="nMemo" placeholder="안내할 내용 (예: 고객사 요청 — 불량 확인 후 따로 보관)">
       <button class="btn p" onclick="addNote()">추가</button>
     </div>
-    <div class="scroll-x"><table><thead><tr><th>종류</th><th>번호 / 바코드</th><th>내용</th><th>등록</th><th>맞은 건</th><th></th></tr></thead><tbody id="notesBody"></tbody></table></div>
+    <div class="scroll-x"><table><thead><tr><th>종류</th><th>번호 / 바코드</th><th>내용</th><th>등록</th><th>상태</th><th></th></tr></thead><tbody id="notesBody"></tbody></table></div>
   </details>
 
   <!-- 스캔 -->
@@ -193,7 +201,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="wms_sync.js"></script>
+<script src="star_return_core.js"></script>
 <script src="/wms_access.js" data-page="star_return" data-floor="2"></script>
 <script>
 /* ============================================================
@@ -207,21 +217,12 @@
 ============================================================ */
 var $ = function(id){ return document.getElementById(id); };
 var db = null, gid = null, me = null, base = null;
-var RECS = {}, NOTES = {}, CUR = null;
+var RECS = {}, NOTES = {}, PHOTOS = {}, CUR = null;
 var PER = 'today', STF = 'all';
-var STAR_CUST = '446';
 var HELPER_JS = 'https://makewon.com/ebut_helper.js';
 
-function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
-function digits(v){ return String(v == null ? '' : v).replace(/\D/g, ''); }
-function pad(n){ return String(n).padStart(2, '0'); }
-function dayOf(ts){ var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
-function hm(ts){ var d = new Date(ts); return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 var toastT = null;
 function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2600); }
-var actx = null;
-function beep(ok){ try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); var o = actx.createOscillator(), g = actx.createGain();
-  o.frequency.value = ok ? 1046 : 220; o.type = ok ? 'sine' : 'square'; g.gain.value = .08; o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + (ok ? .09 : .35)); } catch(e){} }
 function byName(){ return (me && (me.email || '').split('@')[0]) || ''; }
 
 /* ── 이벗 도우미 연결 (postMessage) ── */
@@ -248,7 +249,7 @@ function setHelper(ok, login){
   $('hDot').className = 'dot' + (ok ? (login === false ? ' warn' : ' on') : '');
   $('hTxt').textContent = ok ? (login === false ? '이벗 로그아웃됨 — 다시 로그인' : '이벗 도우미 연결됨') : '이벗 도우미 연결 안 됨';
   if (ok && login !== false && CUR && RECS[CUR] && RECS[CUR].look === 'wait') lookup(CUR);
-  renderList();
+  renderList(); autoLook();
 }
 function ping(){ return hcall('ping', {}, 8000).then(function(r){ setHelper(true, r.login); return r; }, function(){ setHelper(false); }); }
 setInterval(function(){ if (H.win) ping(); }, 30000);
@@ -262,47 +263,8 @@ function openEbut(){
 }
 $('bmLink').href = "javascript:(function(){var s=document.createElement('script');s.src='" + HELPER_JS + "?v='+Date.now();document.head.appendChild(s);})();";
 
-/* ── 판정 ── */
-function starOrders(r){ return (r.orders || []).filter(function(o){ return o.cust === STAR_CUST; }); }
-function noteHits(r){
-  var out = [], keys = [r.rno, r.orig].filter(Boolean), codes = {};
-  (r.items || []).forEach(function(it){ if (it.got > 0 && it.nicn) codes[it.nicn] = 1; });
-  (r.extras || []).forEach(function(x){ codes[x.code] = 1; });
-  Object.keys(NOTES).forEach(function(k){ var n = NOTES[k]; if (!n) return;
-    if (n.kind === 'inv' && keys.indexOf(n.val) >= 0) out.push({ k: k, t: '송장', n: n });
-    if (n.kind === 'item' && codes[n.val]) out.push({ k: k, t: '상품', n: n }); });
-  return out;
-}
-/* 막힘(이벗에 못 넣음) / 알림(넣되 확인) */
-function judge(r){
-  var block = [], info = [];
-  if (r.trace === 'err') block.push('원송장 조회 실패');
-  else if (r.trace === 'busy') block.push('원송장 조회 중');
-  else if (r.look === 'wait' || r.look === 'busy') block.push('이벗 주문 조회 대기');
-  else if (r.look === 'err') block.push('이벗 주문 조회 실패');
-  else if (r.look === 'none') block.push('이벗에서 원송장 주문 못 찾음');
-  else if (r.look === 'ok'){
-    var st = starOrders(r);
-    if (!st.length) block.push('다른 고객사 주문 (' + (r.orders || []).map(function(o){ return o.custName || o.cust; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(', ') + ')');
-    else if (!(r.items || []).length && st.every(function(o){ return o.ret !== '-'; })) block.push('이벗에서 이미 반품처리됨 (' + st.map(function(o){ return o.ret; }).join(',') + ')');
-    else if (!(r.items || []).some(function(it){ return it.got > 0; })) block.push('반품 상품 스캔 없음');
-  }
-  if ((r.extras || []).length) info.push('반품 대상 아닌 상품 ' + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
-  (r.items || []).forEach(function(it){ if (it.got > it.qty) info.push('주문보다 많음: ' + it.name); });
-  if ((r.items || []).some(function(it){ return it.got > 0 && it.got < it.qty; }) || ((r.items || []).some(function(it){ return !it.got; }) && (r.items || []).some(function(it){ return it.got > 0; }))) info.push('부분 반품');
-  if (r.self) info.push('반송 (원송장 = 반품송장)');
-  noteHits(r).forEach(function(h){ info.push('📌 사전 특이사항 ' + h.t + ': ' + (h.n.memo || h.n.val)); });
-  if (r.memo) info.push('메모: ' + r.memo);
-  return { block: block, info: info };
-}
-function stOf(r){
-  if (r.state === 'saving' && Date.now() - (r.saveAt || 0) > 120000) return { k: 'fail', t: '확인 필요' };
-  return { scan: { k: 'scan', t: '검수 중' }, ready: { k: 'ready', t: '반영 대기' }, saving: { k: 'saving', t: '반영 중' }, done: { k: 'done', t: '반영 완료' }, fail: { k: 'fail', t: '반영 실패' } }[r.state] || { k: 'scan', t: '검수 중' };
-}
-function locked(r){ return r.state === 'done' || r.state === 'saving'; }
-
 /* ── 저장 ── */
-function save(r, fields){ Object.assign(r, fields || {}); r.upd = Date.now(); RECS[r.rno] = r; return base.child('recs/' + r.rno).set(r); }
+function save(r, fields){ Object.assign(r, fields || {}); r.upd = Date.now(); RECS[r.rno] = r; markNotes(r); return base.child('recs/' + r.rno).set(r); }
 
 /* ── ① 반품 송장 스캔 ── */
 $('rnoIn').addEventListener('keydown', function(e){
@@ -329,20 +291,36 @@ function trace(no){
 }
 
 /* ── ② 이벗 주문·상품 ── */
+/* 바뀐 칸만 쓰기 — 휴대폰이 같은 기록에 메모·수량을 쓰는 중이어도 덮지 않게 */
+function patch(no, fields){
+  var r = RECS[no]; if (!r) return Promise.resolve();
+  Object.assign(r, fields); r.upd = Date.now(); markNotes(r);
+  return base.child('recs/' + no).update(Object.assign({}, fields, { upd: r.upd }));
+}
 function lookup(no){
-  var r = RECS[no]; if (!r || !r.orig || r.look === 'busy') return Promise.resolve();
-  save(r, { look: 'busy' }); renderCur();
+  var r = RECS[no]; if (!r || !r.orig || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) < 120000)) return Promise.resolve();
+  patch(no, { look: 'busy', lookBusyAt: Date.now() }); renderCur();
   return hcall('find', { orig: r.orig, origDate: r.origDate }, 60000).then(function(d){
-    var old = {}; (r.items || []).forEach(function(it){ old[it.bopt + '|' + it.ordlist] = it; });
+    var r2 = RECS[no] || r, old = {}; (r2.items || []).forEach(function(it){ old[it.bopt + '|' + it.ordlist] = it; });
     var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}; return { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0, q: o.q || '1' }; });
-    save(RECS[no], { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: items, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
+    patch(no, { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: items, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
     if (CUR === no){ renderCur(); var j = judge(RECS[no]); beep(!j.block.length || j.block[0] === '반품 상품 스캔 없음'); }
   }, function(e){
     var m = String(e.message || e);
-    if (m === 'NOHELPER' || m === 'LOGIN'){ save(RECS[no], { look: 'wait' }); if (m === 'LOGIN') setHelper(true, false); }
-    else save(RECS[no], { look: 'err', lookErr: m === 'TIMEOUT' ? '도우미 응답 없음' : m });
+    if (m === 'NOHELPER' || m === 'LOGIN'){ patch(no, { look: 'wait' }); if (m === 'LOGIN') setHelper(true, false); }
+    else patch(no, { look: 'err', lookErr: m === 'TIMEOUT' ? '도우미 응답 없음' : m });
     if (CUR === no) renderCur();
   });
+}
+/* 휴대폰에서 스캔한 반품(원송장만 있고 상품 대기) → 도우미가 연결돼 있으면 이 PC 가 알아서 이벗에서 상품을 찾아 채움 */
+var autoBusy = false;
+function autoLook(){
+  if (autoBusy || !H.ok || H.login === false) return;
+  var k = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r && r.orig && !locked(r) && (r.look === 'wait' || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) > 120000)); })
+    .sort(function(a, b){ return RECS[a].at - RECS[b].at; })[0];
+  if (!k) return;
+  autoBusy = true;
+  lookup(k).then(function(){ autoBusy = false; setTimeout(autoLook, 300); });
 }
 function lookAll(){
   if (!H.ok){ toast('먼저 이벗 도우미를 연결하세요'); $('setupCard').open = true; return; }
@@ -357,21 +335,10 @@ function focusItem(){ setTimeout(function(){ var i = $('itemIn'); if (i) i.focus
 function onItemScan(code){
   var r = RECS[CUR]; if (!r || locked(r)) return;
   code = String(code || '').trim(); if (!code) return;
-  var c2 = code.replace(/\s+/g, ''), hits = (r.items || []).filter(function(it){ return it.nicn && (it.nicn === c2 || digits(it.nicn) && digits(it.nicn) === digits(c2) && digits(c2).length >= 8); });
-  var note = Object.keys(NOTES).map(function(k){ return NOTES[k]; }).filter(function(n){ return n && n.kind === 'item' && n.val === c2; })[0];
-  if (hits.length){
-    var it = hits.filter(function(x){ return x.got < x.qty; })[0] || hits[hits.length - 1];
-    it.got = (it.got || 0) + 1;
-    save(r); renderCur(c2); beep(it.got <= it.qty);
-    if (it.got > it.qty) toast('⚠️ 주문 수량(' + it.qty + ')보다 많이 스캔됨');
-  } else {
-    r.extras = r.extras || [];
-    var x = r.extras.filter(function(e){ return e.code === c2; })[0];
-    if (x) x.n++; else r.extras.push({ code: c2, n: 1 });
-    save(r); renderCur(c2); beep(false);
-    toast('⚠️ 이 반품 주문에 없는 상품입니다 — 특이사항으로 기록');
-  }
-  if (note){ toast('📌 사전 특이사항 상품: ' + (note.memo || note.val)); beep(false); }
+  var a = applyItem(r, code);
+  save(r); renderCur(a.code); beep(!!a.hit && !a.over);
+  if (a.over) toast('⚠️ 주문 수량(' + a.hit.qty + ')보다 많이 스캔됨');
+  if (!a.hit) toast('⚠️ 이 반품 주문에 없는 상품입니다 — 특이사항으로 기록');
 }
 function setQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.items[i].q = q; save(r); renderCur(); focusItem(); }
 function addGot(i, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = Math.max(0, (it.got || 0) + d); save(r); renderCur(); focusItem(); }
@@ -427,6 +394,9 @@ function renderCur(lastCode){
     h += '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">'
       + r.extras.map(function(x, i){ return '<span class="tag r mono">' + esc(x.code) + ' × ' + x.n + '</span>' + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
   }
+  var ph = PHOTOS[r.rno] || {}, pk = Object.keys(ph).sort(function(a, b){ return (ph[a].at || 0) - (ph[b].at || 0); });
+  h += '<div class="lbl" style="margin-top:.7rem">📷 사진 ' + (pk.length ? pk.length + '장' : '— 휴대폰 화면에서 찍으면 여기 같이 보입니다') + '</div>'
+    + (pk.length ? '<div class="phs">' + pk.map(function(k){ var p = ph[k]; return '<a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="' + esc((p.by || '') + ' ' + hm(p.at)) + '"><img src="' + esc(p.url) + '" alt=""></a>'; }).join('') + '</div>' : '');
   h += '<div class="lbl" style="margin-top:.7rem">특이사항 메모</div><textarea class="memo" ' + (lk ? 'disabled' : '') + ' placeholder="예: 박스 파손, 구성품 누락, 엉뚱한 상품 동봉 …" onchange="setMemo(this.value)">' + esc(r.memo || '') + '</textarea>';
   h += '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem">';
   if (r.state === 'scan' || !r.state) h += '<button class="btn p" onclick="finishCur()">✔ 검수 완료 → 반영 대기</button>';
@@ -496,7 +466,7 @@ function renderList(){
     return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
       + '<td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
-      + '<td class="mono sm">' + esc(r.rno) + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || '') + '</td>'
+      + '<td class="mono sm">' + esc(r.rno) + (PHOTOS[r.rno] ? '<div class="tag b">📷 ' + Object.keys(PHOTOS[r.rno]).length + '</div>' : '') + (/^m-/.test(r.dev || '') ? '<div class="tag b">📱</div>' : '') + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || '') + '</td>'
       + '<td class="sm">' + esc(rmanOf(r)) + (r.rmanEdit ? ' <span class="tag b">수정</span>' : '') + '</td>'
       + '<td class="sm">' + (names.length ? esc(names[0]) + (names.length > 1 ? ' 외 ' + (names.length - 1) : '') + '<div>정상 <b style="color:var(--accent)">' + good + '</b> · 불량 <b style="color:var(--red)">' + badn + '</b></div>' : '<span class="dim">-</span>') + '</td>'
       + '<td>' + j.block.map(function(b){ return '<span class="tag r">' + esc(b) + '</span>'; }).join('') + j.info.map(function(b){ return '<span class="tag y">' + esc(b) + '</span>'; }).join('') + '</td>'
@@ -518,16 +488,47 @@ function delWarn(ks){
   return (done ? '\n\n⚠️ 이벗에 이미 반영된 ' + done + '건은 여기 기록만 지워지고 이벗 반품입고는 그대로 남습니다.' : '')
     + (saving ? '\n⚠️ 지금 반영 중인 ' + saving + '건이 있습니다 — 이벗에 들어갔는지 먼저 확인하세요.' : '');
 }
+/* ── 휴대폰 화면 링크 안내 (안드로이드 / 아이폰) ── */
+function showMobile(os){
+  var url = location.origin + '/star_return_m.html?os=' + os, ios = os === 'ios';
+  var h = '<div class="mdl-box"><div class="card-h">📱 반품 검수 — 휴대폰 ' + (ios ? '아이폰' : '안드로이드') + ' <span class="sp"></span><button class="btn sm" onclick="closeEdit()">닫기</button></div>'
+    + '<div class="mob"><div class="qr" id="mobQr"></div><div style="flex:1;min-width:260px">'
+    + '<div class="lbl">링크 주소</div><div class="url" id="mobUrl">' + esc(url) + '</div>'
+    + '<div style="display:flex;gap:.4rem;margin-top:.5rem"><button class="btn p sm" onclick="copyMobile()">📋 주소 복사</button></div>'
+    + '<div class="lbl" style="margin-top:.9rem">쓰는 방법</div><ol class="setup" style="padding-left:1.2rem">'
+    + '<li>휴대폰 ' + (ios ? '<b>기본 카메라</b>' : '<b>카메라</b> 또는 <b>크롬</b>') + '으로 왼쪽 QR을 비추거나, 위 주소를 카톡 등으로 보내서 엽니다' + (ios ? ' — <b>사파리</b>로 열어 주세요' : ' — <b>크롬</b>으로 열어 주세요') + '.</li>'
+    + '<li>구글 로그인(작업 그룹 계정)을 합니다. 처음 한 번만.</li>'
+    + '<li>「📷 반품 송장 스캔」을 누르고 카메라 사용을 <b>허용</b>합니다.</li>'
+    + '<li>' + (ios ? '사파리 아래 <b>공유(□↑) → 홈 화면에 추가</b>' : '크롬 오른쪽 위 <b>⋮ → 홈 화면에 추가</b>') + ' 하면 앱처럼 바로 열립니다.</li>'
+    + '</ol><div class="sm dim" style="margin-top:.4rem;line-height:1.7">원송장 주문의 상품 목록은 <b>이벗 도우미가 연결된 이 PC</b>가 자동으로 채워 줍니다 — 휴대폰으로 검수하는 동안 이 화면과 이벗 탭을 켜 두세요. 사진·메모는 PC 없이도 됩니다.</div>'
+    + '</div></div></div>';
+  var m = $('mdl'); m.innerHTML = h; m.style.display = 'flex';
+  var draw = function(){ try { new QRCode($('mobQr'), { text: url, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M }); } catch(e){ $('mobQr').textContent = 'QR 실패'; } };
+  if (window.QRCode) draw();
+  else { var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; s.onload = draw; s.onerror = function(){ $('mobQr').textContent = 'QR 불러오기 실패'; }; document.head.appendChild(s); }
+}
+function copyMobile(){
+  var t = $('mobUrl').textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function(){ toast('주소를 복사했습니다'); }, function(){ toast('복사가 안 됩니다 — 주소를 길게 눌러 복사하세요'); });
+}
+
+/* 기록을 지우면 그 반품의 사진(DB 목록 + Storage 파일)도 같이 지움 */
+function dropPhotos(ks){
+  ks.forEach(function(k){ var ph = PHOTOS[k]; if (!ph) return;
+    Object.keys(ph).forEach(function(id){ if (ph[id].path) firebase.storage().ref(ph[id].path).delete().catch(function(){}); });
+    base.child('photos/' + k).remove(); });
+}
 function delRec(k){
   var r = RECS[k]; if (!r) return;
   if (!confirm('반품 송장 ' + k + ' 기록을 지울까요?' + delWarn([k]))) return;
+  dropPhotos([k]);
   base.child('recs/' + k).remove().then(function(){ if (CUR === k){ CUR = null; renderCur(); } delete SEL[k]; toast('지웠습니다 — ' + k); });
 }
 function delSelected(){
   var ks = Object.keys(SEL).filter(function(k){ return RECS[k]; });
   if (!ks.length){ toast('지울 줄을 먼저 체크하세요'); return; }
   if (!confirm('체크한 ' + ks.length + '건을 지울까요?' + delWarn(ks))) return;
-  var up = {}; ks.forEach(function(k){ up['recs/' + k] = null; });
+  var up = {}; ks.forEach(function(k){ up['recs/' + k] = null; }); dropPhotos(ks);
   base.update(up).then(function(){ if (CUR && SEL[CUR]){ CUR = null; renderCur(); } SEL = {}; toast(ks.length + '건 지웠습니다'); });
 }
 
@@ -589,7 +590,7 @@ function saveEdit(){
     r.state = state; r.saveAt = null;
   }
   r.edited = { at: Date.now(), by: byName() }; r.upd = Date.now();
-  var up = {}; if (rno !== k) up['recs/' + k] = null; up['recs/' + rno] = r;
+  var up = {}; if (rno !== k){ up['recs/' + k] = null; if (PHOTOS[k]){ up['photos/' + rno] = PHOTOS[k]; up['photos/' + k] = null; } } up['recs/' + rno] = r;
   base.update(up).then(function(){
     if (CUR === k) CUR = rno;
     if (SEL[k]){ delete SEL[k]; }
@@ -597,8 +598,6 @@ function saveEdit(){
     if (origChanged && orig && H.ok) lookup(rno);
   }).catch(function(e){ toast('저장 실패: ' + (e.code || e.message)); });
 }
-function rmanOf(r){ return r.rmanEdit || starOrders(r).map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', '); }
-
 /* ── 사전 특이사항 ── */
 function addNote(){
   var kind = $('nKind').value, val = kind === 'inv' ? digits($('nVal').value) : $('nVal').value.replace(/\s+/g, ''), memo = $('nMemo').value.trim();
@@ -607,14 +606,18 @@ function addNote(){
   base.child('notes').push({ kind: kind, val: val, memo: memo, at: Date.now(), by: byName() }).then(function(){ $('nVal').value = ''; $('nMemo').value = ''; toast('사전 특이사항 추가'); });
 }
 function delNote(k){ if (!confirm('이 사전 특이사항을 지울까요?')) return; base.child('notes/' + k).remove(); }
+function unfindNote(k){ if (!confirm('「찾음」을 취소하고 다시 대기 중으로 돌릴까요?')) return; base.child('notes/' + k + '/found').remove(); }
 function renderNotes(){
   var ks = Object.keys(NOTES).sort(function(a, b){ return (NOTES[b].at || 0) - (NOTES[a].at || 0); });
-  $('notesCnt').textContent = ks.length ? '(' + ks.length + '건)' : '';
-  var hitBy = {}; Object.keys(RECS).forEach(function(rk){ noteHits(RECS[rk]).forEach(function(h){ (hitBy[h.k] = hitBy[h.k] || []).push(rk); }); });
-  $('notesBody').innerHTML = ks.length ? ks.map(function(k){ var n = NOTES[k];
+  var wait = ks.filter(function(k){ return !NOTES[k].found; }), found = ks.filter(function(k){ return NOTES[k].found; })
+    .sort(function(a, b){ return NOTES[b].found.at - NOTES[a].found.at; });
+  $('notesCnt').textContent = ks.length ? '(대기 ' + wait.length + ' · 찾음 ' + found.length + ')' : '';
+  var row = function(k){ var n = NOTES[k], f = n.found;
     return '<tr><td class="sm">' + (n.kind === 'inv' ? '송장' : '상품') + '</td><td class="mono sm">' + esc(n.val) + '</td><td class="sm">' + esc(n.memo) + '</td><td class="sm dim">' + hm(n.at) + ' ' + esc(n.by || '') + '</td>'
-      + '<td class="sm">' + (hitBy[k] ? '<b style="color:var(--yellow)">' + hitBy[k].length + '건</b> <span class="mono dim">' + esc(hitBy[k].slice(0, 3).join(', ')) + '</span>' : '<span class="dim">-</span>') + '</td>'
-      + '<td><button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; }).join('') : '<tr><td colspan="6" class="dim">등록된 사전 특이사항이 없습니다</td></tr>';
+      + '<td class="sm">' + (f ? '<b style="color:var(--accent)">✔ 찾음</b> ' + hm(f.at) + ' · ' + esc(f.by || '') + '<div class="mono dim" style="cursor:pointer" onclick="CUR=\'' + f.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">반품 ' + esc(f.rno) + '</div>' : '<b style="color:var(--yellow)">⏳ 대기 중</b>') + '</td>'
+      + '<td style="white-space:nowrap">' + (f ? '<button class="btn sm" onclick="unfindNote(\'' + k + '\')">되돌리기</button> ' : '') + '<button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; };
+  $('notesBody').innerHTML = (wait.length ? wait.map(row).join('') : '<tr><td colspan="6" class="dim">찾는 중인 사전 특이사항이 없습니다</td></tr>')
+    + (found.length ? '<tr><td colspan="6" class="lbl" style="padding-top:1rem">✔ 찾음 ' + found.length + '건</td></tr>' + found.map(row).join('') : '');
 }
 
 /* ── 엑셀 ── */
@@ -655,8 +658,10 @@ WMSync.onAuth(function(st){
     RECS = s.val() || {}; renderList(); renderNotes();
     var a = document.activeElement;   /* 스캔 중(입력칸에 커서)일 땐 다른 PC 변경으로 화면을 다시 그리지 않음 — 커서가 튐 */
     if (CUR && !(a && (a.id === 'itemIn' || a.tagName === 'TEXTAREA'))) renderCur();
+    autoLook();
   });
   base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); if (CUR) renderCur(); });
+  base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; renderList(); if (CUR) renderCur(); });
   $('rnoIn').focus();
 });
 </script>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d0f14">
+<title>반품 검수 (휴대폰)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap');
+  *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  :root { --bg:#0d0f14; --surface:#151820; --surface2:#1b1f29; --border:#2a2f3d; --accent:#4af0a8; --text:#e8eaf0; --muted:#7c8494; --red:#f05050; --yellow:#fbbf24; --blue:#3b82f6; }
+  body { font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text); padding:12px 12px calc(90px + env(safe-area-inset-bottom)); font-size:15px; }
+  .mono { font-family:'Space Mono',monospace; }
+  .dim { color:var(--muted); }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
+  .top h1 { font-size:18px; font-weight:900; }
+  .top h1 b { color:var(--accent); }
+  .who { font-size:11px; color:var(--muted); }
+  .os { font-size:11px; font-weight:800; color:var(--blue); border:1px solid #1e3a66; border-radius:12px; padding:2px 8px; }
+
+  .big { width:100%; border:0; border-radius:14px; padding:16px; font:900 17px 'Noto Sans KR',sans-serif; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .big.g { background:var(--accent); color:#06281a; }
+  .big.b { background:var(--blue); color:#fff; }
+  .big.d { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+  .big:disabled { opacity:.4; }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .man { display:flex; gap:6px; margin-top:8px; }
+  .man input { flex:1; min-width:0; background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:11px; font:700 15px 'Space Mono',monospace; }
+  .man button { background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:10px; padding:0 14px; font:800 14px 'Noto Sans KR',sans-serif; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:12px; margin-top:12px; }
+  .lbl { font-size:12px; font-weight:800; color:var(--muted); margin:2px 0 8px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; font-size:14px; }
+  .kv span { color:var(--muted); }
+  .kv b { font-family:'Space Mono',monospace; word-break:break-all; }
+  .banner { border-radius:10px; padding:10px 12px; font-size:14px; font-weight:700; margin-top:8px; line-height:1.55; }
+  .banner.red { background:#2a1414; border:1px solid #5a2525; color:#fca5a5; }
+  .banner.yel { background:#2a2410; border:1px solid #5a4b20; color:#fde68a; }
+  .banner.grn { background:#10261c; border:1px solid #1f5a3d; color:#a7f3d0; }
+  .banner.blu { background:#0f1d33; border:1px solid #1e3a66; color:#bfdbfe; }
+
+  .item { border:1px solid var(--border); border-radius:12px; padding:10px; margin-top:8px; background:var(--surface2); }
+  .item.hot { border-color:var(--accent); }
+  .item .nm { font-weight:800; font-size:14.5px; }
+  .item .bc { font-family:'Space Mono',monospace; font-size:12px; color:var(--muted); margin-top:2px; }
+  .item .ctl { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .cnt { font-family:'Space Mono',monospace; font-weight:700; font-size:20px; min-width:64px; text-align:center; }
+  .cnt.full { color:var(--accent); } .cnt.over { color:var(--red); }
+  .pm { width:44px; height:44px; border-radius:10px; border:1px solid var(--border); background:#0a0c10; color:var(--text); font:900 20px sans-serif; }
+  .q { display:flex; flex:1; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  .q button { flex:1; height:44px; border:0; background:transparent; color:var(--muted); font:900 15px 'Noto Sans KR',sans-serif; }
+  .q button.on1 { background:var(--accent); color:#06281a; }
+  .q button.on2 { background:var(--red); color:#fff; }
+  textarea { width:100%; background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:10px; font:14px 'Noto Sans KR',sans-serif; min-height:64px; }
+
+  .photos { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; }
+  .ph { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background:#0a0c10; border:1px solid var(--border); }
+  .ph img { width:100%; height:100%; object-fit:cover; display:block; }
+  .ph .x { position:absolute; right:4px; top:4px; width:26px; height:26px; border-radius:50%; border:0; background:rgba(0,0,0,.65); color:#fff; font-weight:900; }
+  .ph .up { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--muted); }
+
+  .recent .r { display:flex; justify-content:space-between; align-items:center; padding:9px 2px; border-bottom:1px solid #1f2430; font-size:13.5px; }
+  .st { border-radius:6px; padding:2px 7px; font-size:11.5px; font-weight:800; white-space:nowrap; }
+  .st.s-scan { background:#1f2533; color:#cbd5e1; } .st.s-ready { background:#0f1d33; color:#93c5fd; } .st.s-saving { background:#2a2410; color:#fde68a; }
+  .st.s-done { background:#10261c; color:#6ee7b7; } .st.s-fail { background:#2a1414; color:#fca5a5; }
+
+  .foot { position:fixed; left:0; right:0; bottom:0; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:rgba(13,15,20,.96); border-top:1px solid var(--border); display:flex; gap:8px; z-index:5; }
+  .foot .big { padding:14px; }
+
+  /* 카메라 바코드 읽기 */
+  #scanOv { position:fixed; inset:0; z-index:30; background:#000; display:none; flex-direction:column; }
+  #scanOv.on { display:flex; }
+  #reader { flex:1; width:100%; }
+  #reader video { object-fit:cover; }
+  .sc-top { padding:12px; padding-top:calc(12px + env(safe-area-inset-top)); display:flex; justify-content:space-between; align-items:center; color:#fff; font-weight:800; }
+  .sc-msg { padding:10px 14px; text-align:center; font-size:14px; color:#fff; min-height:44px; }
+  .sc-last { font-family:'Space Mono',monospace; color:var(--accent); }
+  .sc-bot { padding:12px; padding-bottom:calc(12px + env(safe-area-inset-bottom)); }
+
+  #toast { position:fixed; left:50%; top:14px; transform:translateX(-50%); background:#111827; border:1px solid var(--border); color:var(--text); border-radius:10px;
+           padding:10px 14px; font-size:14px; font-weight:700; opacity:0; transition:opacity .2s; pointer-events:none; z-index:60; width:max-content; max-width:92vw; text-align:center; }
+  #toast.on { opacity:1; }
+  #viewer { position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.92); display:none; align-items:center; justify-content:center; }
+  #viewer img { max-width:100%; max-height:100%; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div><h1>↩ 반품 <b>검수</b></h1><div class="who" id="who">로그인 확인 중…</div></div>
+    <div style="display:flex;gap:6px;align-items:center"><span class="os" id="osTag"></span><a href="star_return.html" class="who" style="color:var(--muted)">PC 화면</a></div>
+  </div>
+
+  <div id="startBox">
+    <button class="big g" onclick="openScan('rno')">📷 반품 송장 스캔</button>
+    <div class="man"><input id="rnoIn" inputmode="numeric" placeholder="또는 송장번호 직접 입력" autocomplete="off"><button onclick="manualRno()">확인</button></div>
+  </div>
+
+  <div id="cur"></div>
+
+  <div class="card recent">
+    <div class="lbl">오늘 검수한 반품</div>
+    <div id="recent" class="dim" style="font-size:13px">불러오는 중…</div>
+  </div>
+
+  <div class="foot" id="foot" style="display:none"></div>
+
+  <div id="scanOv">
+    <div class="sc-top"><span id="scTitle">반품 송장 스캔</span><button class="big d" style="width:auto;padding:8px 14px;font-size:14px" onclick="closeScan()">닫기</button></div>
+    <div id="reader"></div>
+    <div class="sc-msg" id="scMsg">바코드를 네모 안에 맞춰 주세요</div>
+    <div class="sc-bot" id="scBot"></div>
+  </div>
+  <div id="viewer" onclick="this.style.display='none'"><img id="viewImg" alt=""></div>
+  <input type="file" id="camIn" accept="image/*" capture="environment" style="display:none">
+  <input type="file" id="albumIn" accept="image/*" multiple style="display:none">
+  <div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="wms_sync.js"></script>
+<script src="star_return_core.js"></script>
+<script src="/wms_access.js" data-page="star_return_m" data-floor="2"></script>
+<script>
+/* ============================================================
+   스타 3PL 반품입고 — 휴대폰 검수 화면 (대표님 2026-10-24)
+   휴대폰 카메라로 ① 반품 송장 ② 상품 바코드를 읽고, 상품마다 정상/불량 · 특이사항 · 📷 사진까지 한 화면에서.
+   PC 반품입고관리(star_return.html)와 같은 기록을 씀 → PC 목록에 바로 쌓이고 사진도 같이 보임.
+   원송장 주문의 상품 목록은 이벗 도우미가 연결된 PC 가 자동으로 채움(look=wait → PC autoLook).
+   ?os=android → 크롬 자체 바코드 읽기(BarcodeDetector) 우선 / ?os=ios → 사파리용(ZXing) — 둘 다 html5-qrcode
+   사진: Storage star_return/{gid}/{반품송장}/{시각}.jpg (긴 변 1600px JPEG 로 줄여 올림), 목록은 DB photos/{반품송장}/{id}
+   이 화면은 기록 전체를 덮어쓰지 않고(update) 바뀐 칸만 씀 — PC 가 같은 기록에 상품을 채우는 중이어도 안 지워지게
+============================================================ */
+var $ = function(id){ return document.getElementById(id); };
+var db = null, gid = null, me = null, base = null;
+var RECS = {}, NOTES = {}, PHOTOS = {}, CUR = null, photoRef = null;
+var OS = (/[?&]os=(android|ios)/.exec(location.search) || [])[1] || (/iPhone|iPad|iPod/.test(navigator.userAgent) ? 'ios' : 'android');
+$('osTag').textContent = OS === 'ios' ? ' 아이폰' : ' 안드로이드';
+
+var toastT = null;
+function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2400); }
+function byName(){ return (me && (me.email || '').split('@')[0]) || ''; }
+function vib(ms){ try { navigator.vibrate && navigator.vibrate(ms); } catch(e){} }
+
+/* ── 기록 쓰기: 바뀐 칸만 ── */
+function upd(r, fields){
+  Object.assign(r, fields); r.upd = Date.now(); RECS[r.rno] = r; markNotes(r);
+  var u = Object.assign({}, fields, { upd: r.upd });
+  return base.child('recs/' + r.rno).update(u);
+}
+
+/* ── 카메라 바코드 읽기 ── */
+var scanner = null, scanMode = null, lastCode = '', lastAt = 0;
+var FORMATS = typeof Html5QrcodeSupportedFormats !== 'undefined' ? [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E, Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.CODABAR, Html5QrcodeSupportedFormats.QR_CODE] : [];
+function openScan(mode){
+  if (typeof Html5Qrcode === 'undefined'){ toast('바코드 읽기 프로그램을 못 불러왔습니다 — 인터넷 확인'); return; }
+  scanMode = mode; lastCode = ''; lastAt = 0;
+  $('scTitle').textContent = mode === 'rno' ? '① 반품 송장 스캔' : '② 상품 바코드 스캔 (여러 개 계속)';
+  $('scMsg').innerHTML = mode === 'rno' ? '송장 바코드를 네모 안에 맞춰 주세요' : '상품 바코드를 하나씩 비추면 자동으로 셉니다';
+  $('scBot').innerHTML = mode === 'item' ? '<button class="big g" onclick="closeScan()">✔ 상품 스캔 끝</button>' : '';
+  $('scanOv').classList.add('on');
+  scanner = new Html5Qrcode('reader', { formatsToSupport: FORMATS, verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: OS === 'android' } });
+  var box = Math.min(window.innerWidth - 40, 340);
+  scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: { width: box, height: Math.round(box * 0.45) }, disableFlip: true }, onCode, function(){})
+    .catch(function(e){ closeScan(); toast('카메라를 못 열었습니다 — ' + (OS === 'ios' ? '설정 > Safari > 카메라 「허용」' : '주소창 왼쪽 자물쇠 > 카메라 「허용」') + ' 후 다시'); console.error(e); });
+}
+function closeScan(){
+  $('scanOv').classList.remove('on');
+  if (scanner){ var s = scanner; scanner = null; s.stop().then(function(){ s.clear(); }).catch(function(){}); }
+}
+function onCode(text){
+  var code = String(text || '').trim(), now = Date.now();
+  if (!code || (code === lastCode && now - lastAt < 1800)) return;   /* 같은 바코드를 계속 비추고 있을 때 중복 방지 */
+  lastCode = code; lastAt = now;
+  if (scanMode === 'rno'){
+    var no = digits(code);
+    if (no.length < 10 || no.length > 15){ beep(false); $('scMsg').textContent = '송장 바코드가 아닙니다: ' + code; return; }
+    closeScan(); startRno(no);
+  } else {
+    var r = RECS[CUR]; if (!r || locked(r)) return;
+    var a = applyItem(r, code);
+    upd(r, { items: r.items || [], extras: r.extras || [] });
+    beep(!!a.hit && !a.over); vib(a.hit && !a.over ? 40 : [80, 60, 80]);
+    $('scMsg').innerHTML = a.hit ? '✔ <span class="sc-last">' + esc(a.code) + '</span> ' + esc(a.hit.name) + ' — 반품 ' + a.hit.got + ' / 주문 ' + a.hit.qty + (a.over ? ' <b style="color:#f05050">주문보다 많음</b>' : '')
+      : '<b style="color:#f05050">⚠️ 이 주문에 없는 상품</b> <span class="sc-last">' + esc(a.code) + '</span> — 특이사항으로 기록';
+    if (a.note) $('scMsg').innerHTML += '<br><b style="color:#fbbf24">📌 사전 특이사항 상품: ' + esc(a.note.memo || a.note.val) + '</b>';
+    render(a.code);
+  }
+}
+
+/* ── ① 반품 송장 ── */
+function manualRno(){ var no = digits($('rnoIn').value); $('rnoIn').value = ''; if (no.length < 10 || no.length > 15){ toast('송장번호는 10~15자리 숫자'); return; } startRno(no); }
+function startRno(no){
+  var r = RECS[no];
+  if (r){ openRec(no); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); return; }
+  /* 휴대폰은 최근 3일만 받아 두므로, 더 오래된 같은 송장 기록이 있는지 서버에서 한 번 더 확인 (덮어쓰기 방지) */
+  base.child('recs/' + no).once('value').then(function(sn){
+    if (sn.exists()){ RECS[no] = sn.val(); openRec(no); toast('예전에 스캔한 송장입니다 — 이어서 봅니다'); return; }
+    r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: 'busy', items: [], extras: [], dev: 'm-' + OS };
+    RECS[no] = r;
+    return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40); trace(no); });
+  });
+}
+function trace(no){
+  var fn = firebase.app().functions('asia-northeast3').httpsCallable('epostReturnOrigin', { timeout: 60000 });
+  fn({ nos: [no] }).then(function(res){
+    var x = ((res.data && res.data.rows) || [])[0] || {}, r = RECS[no];
+    if (x.err) upd(r, { trace: 'err', traceErr: x.err });
+    else if (x.orig) upd(r, { trace: 'ok', orig: x.orig, origDate: x.origDate || null, self: false, look: 'wait' });
+    else upd(r, { trace: 'ok', orig: no, origDate: null, self: true, look: 'wait' });   /* 반품원등기번호 없음 = 반송 */
+    render();
+  }).catch(function(e){ upd(RECS[no], { trace: 'err', traceErr: String((e && (e.message || e.code)) || e) }); render(); beep(false); });
+}
+
+/* ── 화면 ── */
+function openRec(no){
+  CUR = no;
+  if (photoRef) photoRef.off();
+  photoRef = base.child('photos/' + no); photoRef.on('value', function(s){ PHOTOS = s.val() || {}; render(); });
+  render(); window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function closeCur(){ CUR = null; if (photoRef){ photoRef.off(); photoRef = null; } PHOTOS = {}; render(); }
+function setQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.items[i].q = q; upd(r, { items: r.items }); vib(20); render(); }
+function addGot(i, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = Math.max(0, (it.got || 0) + d); upd(r, { items: r.items }); render(); }
+function delExtra(i){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras.splice(i, 1); upd(r, { extras: r.extras }); render(); }
+function setMemo(v){ var r = RECS[CUR]; if (!r || locked(r)) return; upd(r, { memo: String(v || '').trim() }); }
+function finish(){
+  var r = RECS[CUR]; if (!r) return;
+  var j = judge(r);
+  if (j.block.length){ beep(false); toast('아직 넣을 수 없습니다: ' + j.block[0]); return; }
+  upd(r, { state: 'ready', checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); vib(60); toast('✔ 검수 완료 — PC 에서 이벗에 반영됩니다'); closeCur(); });
+}
+function retry(){ var r = RECS[CUR]; if (!r) return; if (r.trace !== 'ok'){ upd(r, { trace: 'busy' }); render(); trace(r.rno); } else { upd(r, { look: 'wait' }); render(); toast('PC 에 다시 찾아 달라고 했습니다'); } }
+
+function render(lastCode){
+  var r = CUR && RECS[CUR], box = $('cur'), foot = $('foot');
+  $('startBox').style.display = r ? 'none' : 'block';
+  renderRecent();
+  if (!r){ box.innerHTML = ''; foot.style.display = 'none'; return; }
+  var j = judge(r), st = stOf(r), lk = locked(r), h = '';
+  h += '<div class="card"><div class="kv"><span>반품 송장</span><b>' + esc(r.rno) + '</b>'
+    + '<span>원송장</span><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : esc(r.orig || '')) + (r.self ? ' <span class="dim">(반송)</span>' : '') + '</b>'
+    + '<span>수령자</span><b style="font-family:inherit">' + esc(rmanOf(r) || '-') + '</b>'
+    + '<span>상태</span><b style="font-family:inherit"><span class="st s-' + st.k + '">' + st.t + '</span></b></div>';
+  noteHits(r).forEach(function(x){ h += '<div class="banner yel">📌 사전 특이사항 ' + x.t + ' — ' + esc(x.n.memo || '') + '</div>'; });
+  if (r.trace === 'err') h += '<div class="banner red">우체국 원송장 조회 실패: ' + esc(r.traceErr || '') + '</div>';
+  if (r.look === 'wait' || r.look === 'busy') h += '<div class="banner blu">⏳ PC 가 이벗에서 원송장 주문 상품을 찾는 중… <div style="font-weight:400;font-size:12.5px;margin-top:2px">이벗 도우미가 연결된 PC 반품입고관리가 켜져 있어야 합니다. 그동안 사진·메모는 먼저 하셔도 됩니다.</div></div>';
+  if (r.look === 'err') h += '<div class="banner red">이벗 주문 조회 실패: ' + esc(r.lookErr || '') + '</div>';
+  j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + '</div>'; });
+  if (r.state === 'done') h += '<div class="banner grn">✔ 이벗 반영 완료</div>';
+  h += '</div>';
+
+  if ((r.items || []).length){
+    h += '<div class="card"><div class="lbl">② 상품 — 스캔하면 반품 수량이 올라갑니다</div>';
+    if (!lk) h += '<button class="big b" onclick="openScan(\'item\')">📷 상품 바코드 스캔</button>';
+    r.items.forEach(function(it, i){
+      h += '<div class="item' + (lastCode && it.nicn === lastCode ? ' hot' : '') + '"><div class="nm">' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '</div><div class="bc">' + esc(it.nicn) + '</div>'
+        + '<div class="ctl">' + (lk ? '' : '<button class="pm" onclick="addGot(' + i + ',-1)">−</button>')
+        + '<div class="cnt ' + (it.got > it.qty ? 'over' : it.got === it.qty ? 'full' : '') + '">' + (it.got || 0) + '<span class="dim" style="font-size:13px"> / ' + it.qty + '</span></div>'
+        + (lk ? '' : '<button class="pm" onclick="addGot(' + i + ',1)">+</button>')
+        + '<div class="q"><button class="' + (it.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setQ(' + i + ',\'1\')">정상</button><button class="' + (it.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setQ(' + i + ',\'2\')">불량</button></div></div></div>';
+    });
+    if ((r.extras || []).length) h += '<div class="banner red">⚠️ 반품 대상 아닌 상품 (이 주문에 없음)<div style="margin-top:4px">' + r.extras.map(function(x, i){ return '<span class="mono">' + esc(x.code) + ' × ' + x.n + '</span>' + (lk ? '' : ' <button class="pm" style="width:auto;height:30px;padding:0 10px;font-size:13px" onclick="delExtra(' + i + ')">지우기</button>'); }).join('<br>') + '</div></div>';
+    h += '</div>';
+  }
+
+  var pk = Object.keys(PHOTOS).sort(function(a, b){ return (PHOTOS[a].at || 0) - (PHOTOS[b].at || 0); });
+  h += '<div class="card"><div class="lbl">📷 사진 ' + (pk.length ? pk.length + '장' : '') + '</div>'
+    + (lk ? '' : '<div class="row"><button class="big d" onclick="$(\'camIn\').click()">📸 사진 찍기</button><button class="big d" onclick="$(\'albumIn\').click()">🖼 앨범에서</button></div>')
+    + '<div class="photos">' + pk.map(function(k){ var p = PHOTOS[k];
+      return '<div class="ph"><img src="' + esc(p.url) + '" alt="" onclick="viewPhoto(\'' + esc(p.url) + '\')">' + (lk ? '' : '<button class="x" onclick="delPhoto(\'' + k + '\')">×</button>') + '</div>'; }).join('')
+    + Object.keys(UPLOADING).map(function(){ return '<div class="ph"><div class="up">올리는 중…</div></div>'; }).join('') + '</div></div>';
+
+  h += '<div class="card"><div class="lbl">특이사항 메모</div><textarea ' + (lk ? 'disabled' : '') + ' placeholder="박스 파손, 구성품 누락, 엉뚱한 상품 …" onchange="setMemo(this.value)">' + esc(r.memo || '') + '</textarea></div>';
+  box.innerHTML = h;
+
+  foot.style.display = 'flex';
+  foot.innerHTML = '<button class="big d" style="flex:0 0 30%" onclick="closeCur()">닫기</button>'
+    + (r.state === 'scan' || !r.state ? '<button class="big g" onclick="finish()">✔ 검수 완료</button>'
+       : (r.trace === 'err' || r.look === 'err' || r.look === 'none') ? '<button class="big d" onclick="retry()">🔁 다시 조회</button>'
+       : '<button class="big d" disabled>' + st.t + '</button>');
+  if ((r.trace === 'err' || r.look === 'err' || r.look === 'none') && (r.state === 'scan' || !r.state)) foot.innerHTML += '<button class="big d" style="flex:0 0 25%" onclick="retry()">🔁</button>';
+}
+function renderRecent(){
+  var today = dayOf(Date.now()), rows = Object.keys(RECS).map(function(k){ return RECS[k]; }).filter(function(r){ return r && dayOf(r.at) === today; }).sort(function(a, b){ return b.at - a.at; });
+  $('recent').innerHTML = rows.length ? rows.map(function(r){ var st = stOf(r), g = 0, b = 0;
+    (r.items || []).forEach(function(it){ if (it.got > 0){ if (it.q === '2') b += it.got; else g += it.got; } });
+    return '<div class="r" onclick="openRec(\'' + r.rno + '\')"><div><span class="mono">' + esc(r.rno) + '</span><div class="dim" style="font-size:12px">' + hm(r.at) + ' · ' + esc(rmanOf(r) || '-') + ' · 정상 ' + g + ' / 불량 ' + b + '</div></div><span class="st s-' + st.k + '">' + st.t + '</span></div>'; }).join('')
+    : '오늘 검수한 반품이 없습니다';
+}
+
+/* ── 사진 ── */
+var UPLOADING = {};
+function shrink(file){
+  return new Promise(function(res, rej){
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function(){
+      var M = 1600, w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, M / Math.max(w, h));
+      var c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      c.toBlob(function(b){ b ? res(b) : rej(new Error('사진 변환 실패')); }, 'image/jpeg', 0.8);
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); rej(new Error('사진을 못 읽었습니다')); };
+    img.src = url;
+  });
+}
+function uploadFiles(files){
+  var r = RECS[CUR]; if (!r || !files || !files.length) return;
+  [].forEach.call(files, function(f){
+    var tmp = 'u' + Date.now() + Math.random().toString(36).slice(2, 6); UPLOADING[tmp] = 1; render();
+    var path = 'star_return/' + gid + '/' + r.rno + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg';
+    shrink(f).then(function(b){
+      var ref = firebase.storage().ref(path);
+      return ref.put(b, { contentType: 'image/jpeg' }).then(function(){ return ref.getDownloadURL(); });
+    }).then(function(url){
+      return base.child('photos/' + r.rno).push({ path: path, url: url, at: Date.now(), by: byName() });
+    }).then(function(){ delete UPLOADING[tmp]; vib(30); render(); }, function(e){ delete UPLOADING[tmp]; render(); toast('사진 올리기 실패: ' + (e.code || e.message)); });
+  });
+}
+$('camIn').addEventListener('change', function(){ uploadFiles(this.files); this.value = ''; });
+$('albumIn').addEventListener('change', function(){ uploadFiles(this.files); this.value = ''; });
+function delPhoto(k){
+  var p = PHOTOS[k]; if (!p || !confirm('이 사진을 지울까요?')) return;
+  base.child('photos/' + CUR + '/' + k).remove();
+  if (p.path) firebase.storage().ref(p.path).delete().catch(function(){});
+}
+function viewPhoto(u){ $('viewImg').src = u; $('viewer').style.display = 'flex'; }
+
+/* ── 시작 ── */
+WMSync.init('star_return', { requireAuth: true });
+WMSync.onAuth(function(st){
+  if (!st.user){ $('who').textContent = '로그인 필요'; return; }
+  if (!st.groupId){ $('who').textContent = '작업 그룹 미등록 — 관리자에게 초대코드를 받으세요'; return; }
+  me = st.user; gid = st.groupId; db = firebase.database();
+  base = db.ref('wms_sync/groups/' + gid + '/star_return');
+  $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid;
+  base.child('recs').orderByChild('at').startAt(Date.now() - 3 * 864e5).on('value', function(s){
+    RECS = s.val() || {};
+    var a = document.activeElement;
+    if (!(a && a.tagName === 'TEXTAREA')) render(); else renderRecent();
+  });
+  base.child('notes').on('value', function(s){ NOTES = s.val() || {}; if (CUR) render(); });
+});
+</script>
+</body>
+</html>

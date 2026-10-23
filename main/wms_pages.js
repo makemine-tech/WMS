@@ -41,6 +41,7 @@ var WMS_PAGES=[
     {key:'star_instock', file:'star_instock.html', label:'입고 관리', floor:2, gate:true},
     {key:'star_picking', file:'star_picking.html', label:'피킹 (송장정렬)', floor:2, gate:true},
     {key:'star_return',  file:'star_return.html',  label:'└ 스타 3PL 반품입고관리 (반품 스캔·이벗 반영)', floor:2, gate:true},
+    {key:'star_return_m', file:'star_return_m.html', label:'  └ 반품 검수 (휴대폰 · 카메라 스캔·사진)', floor:2, gate:true},
     {key:'ebut_helper_guide', file:'ebut_helper_guide.html', label:'  └ 이벗 도우미 연결 움직이는 안내', floor:0, gate:true},
     {key:'star_extract', file:'star_extract.html', label:'데이터 추출', floor:2, gate:true},
     {key:'stock_check',       file:'stock_check.html',       label:'재고조사풀 (업체별 재고조사 모음)', floor:2, gate:true},
