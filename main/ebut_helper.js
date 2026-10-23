@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24';
+  var VER = '2026-10-24b';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -201,7 +201,8 @@
     busy++; if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
-      if (m.cmd !== 'ping') say('✔ 완료 — 연결됨');
+      if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');
+      else say(data.login ? '🟢 반품입고관리와 연결됨' : '⚠️ 이벗 로그아웃됨 — 다시 로그인한 뒤 도우미를 다시 눌러 주세요');
     }, function(err){
       var msg = String((err && err.message) || err);
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: false, err: msg }, e.origin);
