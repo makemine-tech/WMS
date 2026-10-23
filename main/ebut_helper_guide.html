@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>이벗 도우미 연결 안내</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap');
+  *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+  :root { --bg:#0d0f14; --surface:#151820; --surface2:#1b1f29; --border:#2a2f3d; --accent:#4af0a8; --text:#e8eaf0; --muted:#6b7280; --blue:#2563eb; }
+  body { font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text); padding:16px; }
+  body.embed { padding:0; background:transparent; }
+  .wrap { max-width:960px; margin:0 auto; }
+  h1 { font-size:1.2rem; font-weight:900; margin-bottom:.7rem; }
+  h1 span { color:var(--accent); }
+  body.embed h1 { display:none; }
+
+  /* 무대 960×540 — 폭에 맞춰 줄임 */
+  .fit { position:relative; width:100%; overflow:hidden; border-radius:14px; }
+  .stage { position:absolute; left:0; top:0; width:960px; height:540px; transform-origin:0 0; background:#05070a; font-size:13px; }
+
+  /* 가짜 크롬 창 */
+  .chrome { position:absolute; inset:10px; border-radius:12px; overflow:hidden; background:#202124; border:1px solid #3c4043; }
+  .tabs { height:38px; display:flex; align-items:flex-end; gap:4px; padding:0 10px; background:#202124; }
+  .tab { height:30px; padding:0 14px; display:flex; align-items:center; gap:6px; border-radius:9px 9px 0 0; color:#9aa0a6; font-size:12px; max-width:220px; white-space:nowrap;
+         transition:background .3s, color .3s, opacity .4s, transform .4s; }
+  .tab.on { background:#35363a; color:#e8eaed; }
+  .tab.hid { opacity:0; transform:translateY(8px); pointer-events:none; }
+  .tab i { width:14px; height:14px; border-radius:3px; display:inline-block; }
+  .addr { height:40px; background:#35363a; display:flex; align-items:center; padding:0 12px; gap:10px; }
+  .addr .nav { color:#9aa0a6; letter-spacing:6px; font-size:14px; }
+  .url { flex:1; height:28px; border-radius:14px; background:#202124; color:#e8eaed; display:flex; align-items:center; padding:0 14px; font-size:12.5px; }
+  .bmbar { height:32px; background:#35363a; border-top:1px solid #4a4c50; display:flex; align-items:center; gap:6px; padding:0 10px; position:relative; }
+  .bm { height:24px; padding:0 10px; border-radius:12px; display:flex; align-items:center; gap:5px; color:#e8eaed; font-size:12px; }
+  .bm.helper { background:#1d3b2e; color:var(--accent); font-weight:700; border:1px dashed transparent; transition:transform .35s cubic-bezier(.3,1.6,.5,1), opacity .3s; }
+  .bm.helper.hid { opacity:0; transform:scale(.4); }
+  .bmslot { width:140px; height:24px; border-radius:12px; border:1px dashed transparent; transition:border-color .3s, background .3s; }
+  .bmslot.hot { border-color:var(--accent); background:rgba(74,240,168,.08); }
+  .view { position:absolute; left:0; right:0; top:110px; bottom:0; background:var(--bg); transition:opacity .35s; }
+  .view.hid { opacity:0; pointer-events:none; }
+
+  /* 반품입고관리 화면 */
+  .rv { padding:18px 22px; }
+  .rv-top { display:flex; align-items:flex-end; justify-content:space-between; }
+  .rv-badge { font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; color:var(--accent); border:1px solid rgba(74,240,168,.35); border-radius:20px; padding:2px 8px; display:inline-block; margin-bottom:5px; }
+  .rv-h { font-size:21px; font-weight:900; }
+  .rv-h b { color:var(--accent); }
+  .rv-r { display:flex; gap:8px; align-items:center; }
+  .ind { display:flex; align-items:center; gap:7px; padding:7px 11px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); font-weight:700; font-size:12px; transition:border-color .4s, box-shadow .4s; }
+  .ind .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); transition:background .4s, box-shadow .4s; }
+  .ind.on { border-color:var(--accent); box-shadow:0 0 0 4px rgba(74,240,168,.12); }
+  .ind.on .dot { background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  .btn { padding:7px 12px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); font-weight:700; font-size:12px; }
+  .card { margin-top:14px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+  .card-h { font-weight:800; font-size:13.5px; margin-bottom:9px; }
+  .card ol { padding-left:18px; line-height:2; color:#c7cbd6; font-size:12.5px; }
+  .src { display:inline-block; background:#1d3b2e; border:1px dashed var(--accent); color:var(--accent); border-radius:8px; padding:3px 10px; font-weight:800; transition:box-shadow .3s; }
+  .src.glow { box-shadow:0 0 0 5px rgba(74,240,168,.25); }
+  .scan { margin-top:14px; height:46px; border-radius:10px; border:2px solid var(--border); background:#0a0c10; color:var(--muted); display:flex; align-items:center; padding:0 14px; font-family:'Space Mono',monospace; }
+
+  /* 이벗 화면 */
+  .login { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#f3f5f9; transition:opacity .35s; }
+  .login.hid { opacity:0; pointer-events:none; }
+  .lg-card { width:300px; background:#fff; border-radius:14px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,.12); color:#111; }
+  .lg-card h3 { font-size:17px; margin-bottom:14px; }
+  .lg-in { height:36px; border:1px solid #d6dae1; border-radius:8px; margin-bottom:9px; display:flex; align-items:center; padding:0 11px; color:#333; font-size:13px; }
+  .lg-btn { height:38px; border-radius:8px; background:#16a34a; color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .dash { position:absolute; inset:0; display:flex; background:#f3f5f9; color:#111; }
+  .side { width:150px; background:#1f2937; color:#cbd5e1; padding:14px 12px; font-size:12px; line-height:2.4; }
+  .side b { color:#fff; display:block; margin-bottom:6px; }
+  .main { flex:1; padding:16px; }
+  .topb { height:38px; border-radius:8px; background:#111827; color:#fff; display:flex; align-items:center; padding:0 12px; font-weight:800; font-size:12.5px; margin-bottom:12px; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .kpi { height:74px; background:#fff; border-radius:10px; border-top:3px solid #f59e0b; padding:10px; font-size:12px; font-weight:700; }
+  .kpi:nth-child(2) { border-color:#ef4444; } .kpi:nth-child(3) { border-color:#22c55e; } .kpi:nth-child(4) { border-color:#22c55e; }
+  .chart { margin-top:12px; height:150px; background:#fff; border-radius:10px; }
+  .hbox { position:absolute; right:14px; bottom:14px; width:265px; background:#0d0f14; color:#e8eaf0; border:2px solid var(--accent); border-radius:12px; padding:10px 13px;
+          box-shadow:0 8px 26px rgba(0,0,0,.35); font-size:12px; line-height:1.6; transition:transform .45s cubic-bezier(.3,1.4,.5,1), opacity .3s; }
+  .hbox.hid { opacity:0; transform:translateY(30px); }
+  .hbox b { color:var(--accent); }
+  .hbox .m { font-weight:700; }
+
+  /* 커서·끌기·클릭 */
+  .cursor { position:absolute; left:480px; top:300px; width:22px; height:22px; z-index:20; transition:left .9s cubic-bezier(.5,0,.25,1), top .9s cubic-bezier(.5,0,.25,1), transform .12s; pointer-events:none; filter:drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+  .cursor.down { transform:scale(.82); }
+  .ghost { position:absolute; z-index:19; opacity:0; background:#1d3b2e; border:1px dashed var(--accent); color:var(--accent); border-radius:8px; padding:3px 10px; font-weight:800; font-size:12.5px;
+           transition:left .9s cubic-bezier(.5,0,.25,1), top .9s cubic-bezier(.5,0,.25,1), opacity .2s; pointer-events:none; white-space:nowrap; box-shadow:0 6px 18px rgba(0,0,0,.4); }
+  .ripple { position:absolute; z-index:18; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%; border:2px solid var(--accent); opacity:0; pointer-events:none; }
+  .ripple.go { animation:rip .55s ease-out; }
+  @keyframes rip { from { opacity:1; transform:scale(.4); } to { opacity:0; transform:scale(3.4); } }
+
+  /* 마지막 장면: 이럴 땐 */
+  .tips { position:absolute; inset:0; z-index:25; background:rgba(5,7,10,.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; transition:opacity .4s; }
+  .tips.hid { opacity:0; pointer-events:none; }
+  .tips h2 { font-size:22px; font-weight:900; margin-bottom:6px; }
+  .tip { width:600px; display:flex; gap:14px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 16px; font-size:14px; line-height:1.6;
+         transition:opacity .4s, transform .4s; }
+  .tip.hid { opacity:0; transform:translateY(14px); }
+  .tip .e { font-size:24px; }
+  .tip b { color:var(--accent); }
+
+  /* 자막·조작 */
+  .cap { display:flex; align-items:center; gap:12px; margin-top:10px; min-height:52px; }
+  .num { width:34px; height:34px; border-radius:10px; background:var(--accent); color:#06281a; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:15px; }
+  .txt { font-size:15px; font-weight:700; line-height:1.5; }
+  .txt small { display:block; font-size:12px; color:var(--muted); font-weight:400; }
+  .bar { height:4px; border-radius:2px; background:var(--surface2); margin-top:8px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; background:var(--accent); }
+  .ctl { display:flex; align-items:center; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .ctl button { background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:6px 11px; font:700 12px 'Noto Sans KR',sans-serif; cursor:pointer; }
+  .ctl button:hover { border-color:var(--accent); }
+  .ctl button.on { border-color:var(--accent); color:var(--accent); }
+  .ctl .sp { flex:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>↩ 이벗 도우미 <span>설치·연결</span> 안내</h1>
+  <div class="fit" id="fit">
+    <div class="stage" id="stage">
+      <div class="chrome">
+        <div class="tabs">
+          <div class="tab on" id="tabR"><i style="background:#4af0a8"></i>스타 3PL 반품입고관리</div>
+          <div class="tab hid" id="tabE"><i style="background:#16a34a"></i>이벗WMS</div>
+        </div>
+        <div class="addr"><span class="nav">‹ › ⟳</span><div class="url" id="url">makewon.com/star_return.html</div></div>
+        <div class="bmbar" id="bmbar">
+          <div class="bm">📁 업무</div><div class="bm">N NAVER</div><div class="bm">📦 이벗매니저 로그인</div>
+          <div class="bmslot" id="slot"><div class="bm helper hid" id="bm">↩ 이벗 반품 도우미</div></div>
+        </div>
+
+        <div class="view" id="vR">
+          <div class="rv">
+            <div class="rv-top">
+              <div><div class="rv-badge">STAR 3PL RETURN</div><div class="rv-h">스타 3PL <b>반품입고관리</b></div></div>
+              <div class="rv-r"><div class="ind" id="ind"><span class="dot"></span><span id="indT">이벗 도우미 연결 안 됨</span></div><div class="btn" id="open">이벗 열기</div></div>
+            </div>
+            <div class="card">
+              <div class="card-h">🔌 이벗 도우미 설치·연결 방법</div>
+              <ol>
+                <li>이 버튼을 크롬 <b>즐겨찾기 막대</b>로 끌어다 놓습니다 → <span class="src" id="src">↩ 이벗 반품 도우미</span></li>
+                <li>오른쪽 위 <b>「이벗 열기」</b>로 이벗을 열고 로그인합니다.</li>
+                <li>이벗 탭에서 즐겨찾기의 <b>↩ 이벗 반품 도우미</b>를 누르면 연결됩니다.</li>
+              </ol>
+            </div>
+            <div class="scan">반품 송장번호 스캔 후 Enter</div>
+          </div>
+        </div>
+
+        <div class="view hid" id="vE">
+          <div class="dash">
+            <div class="side"><b>메이크마인디자인(주)</b>판매관리(OMS)<br>재고관리(WMS)<br>기초정보<br>통계<br>정산관리</div>
+            <div class="main"><div class="topb">이벗WMS · 대시보드</div>
+              <div class="kpis"><div class="kpi">발송대기</div><div class="kpi">발송지연</div><div class="kpi">매칭필요</div><div class="kpi">출력대기</div></div>
+              <div class="chart"></div></div>
+          </div>
+          <div class="login" id="login"><div class="lg-card"><h3>이벗3PL 로그인</h3><div class="lg-in" id="lgId"></div><div class="lg-in" id="lgPw"></div><div class="lg-btn" id="lgBtn">로그인</div></div></div>
+          <div class="hbox hid" id="hbox"><b>↩ 반품입고 이벗 도우미</b><div class="m" id="hmsg">반품입고관리와 연결 중…</div><div style="color:#6b7280;font-size:11px">이 탭을 닫으면 연결이 끊깁니다</div></div>
+        </div>
+      </div>
+
+      <div class="ghost" id="ghost">↩ 이벗 반품 도우미</div>
+      <div class="ripple" id="rip"></div>
+      <svg class="cursor" id="cur" viewBox="0 0 24 24"><path d="M3 2l7.5 19 2.6-7.9L21 10.5z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>
+
+      <div class="tips hid" id="tips">
+        <h2>이럴 땐 도우미를 다시 눌러 주세요</h2>
+        <div class="tip hid"><span class="e">🔄</span><div>이벗이 <b>로그아웃</b>됐을 때 → 다시 로그인한 뒤 즐겨찾기 버튼 다시 클릭</div></div>
+        <div class="tip hid"><span class="e">🗂️</span><div>이벗 탭을 <b>닫았거나 새로 고쳤을 때</b> → 이벗 탭에서 버튼 다시 클릭</div></div>
+        <div class="tip hid"><span class="e">🚫</span><div>창이 안 열리면 → 주소창 오른쪽 <b>팝업 차단</b> 아이콘에서 허용</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cap"><div class="num" id="num">1</div><div class="txt" id="txt"></div></div>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="ctl">
+    <button onclick="go(cur - 1)">⏮ 이전</button>
+    <button id="pp" onclick="togglePlay()">⏸ 멈춤</button>
+    <button onclick="go(cur + 1)">다음 ⏭</button>
+    <span class="sp"></span>
+    <span id="dots"></span>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   이벗 도우미 설치·연결 모션 안내 (대표님 2026-10-24) — star_return.html 설치 상자 안에 iframe(?embed=1)으로도 씀
+   장면마다 처음 상태를 맞춘 뒤(setState) 커서 동작을 차례로 재생, 끝나면 다음 장면 → 마지막 다음은 처음부터
+============================================================ */
+var $ = function(id){ return document.getElementById(id); };
+if (/[?&]embed=1/.test(location.search)) document.body.classList.add('embed');
+
+var STAGE_W = 960, STAGE_H = 540, scale = 1;
+function fit(){ scale = $('fit').clientWidth / STAGE_W; $('stage').style.transform = 'scale(' + scale + ')'; $('fit').style.height = (STAGE_H * scale) + 'px'; }
+window.addEventListener('resize', fit); fit();
+
+var SCENES = [
+  { t: '이 버튼을 즐겨찾기 막대로 끌어다 놓습니다', s: '처음 한 번만 — 반품입고관리의 「🔌 이벗 도우미 설치·연결 방법」을 펼치면 있습니다' },
+  { t: '「이벗 열기」를 눌러 이벗을 열고 로그인합니다', s: '이벗이 이미 열려 있으면 그 탭을 그대로 써도 됩니다' },
+  { t: '이벗 탭에서 즐겨찾기 「↩ 이벗 반품 도우미」를 누릅니다', s: '오른쪽 아래에 도우미 상자가 뜨고 🟢 연결됨으로 바뀝니다' },
+  { t: '반품입고관리 오른쪽 위가 🟢 이면 연결 끝', s: '이제 반품 송장 스캔 → 상품 스캔 → 「이벗에 반영」을 쓸 수 있습니다' },
+  { t: '연결이 끊기면 버튼만 다시 누르면 됩니다', s: '설치(①)는 다시 할 필요 없습니다' }
+];
+var cur = 0, run = 0, playing = true;
+
+/* ── 기본 동작 ── */
+function sleep(ms, id){ return new Promise(function(res, rej){ setTimeout(function(){ id === run ? res() : rej('stop'); }, ms); }); }
+function posOf(el){ var s = $('stage').getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: (r.left - s.left + r.width / 2) / scale, y: (r.top - s.top + r.height / 2) / scale }; }
+function moveTo(el, id, dx, dy){ var p = posOf(el); $('cur').style.left = (p.x + (dx || 0)) + 'px'; $('cur').style.top = (p.y + (dy || 0)) + 'px'; return sleep(1000, id); }
+function click(id){
+  var c = $('cur'), r = $('rip');
+  c.classList.add('down'); r.style.left = c.style.left; r.style.top = c.style.top;
+  r.classList.remove('go'); void r.offsetWidth; r.classList.add('go');
+  return sleep(160, id).then(function(){ c.classList.remove('down'); return sleep(350, id); });
+}
+function typeIn(el, text, id){
+  var i = 0; el.textContent = '';
+  return (function step(){ if (i >= text.length) return Promise.resolve(); el.textContent += text[i++]; return sleep(90, id).then(step); })();
+}
+function cls(id, c, on){ $(id).classList.toggle(c, !!on); }
+
+/* ── 장면 처음 상태 ── */
+function setState(n){
+  cls('bm', 'hid', n < 1); cls('slot', 'hot', false); cls('src', 'glow', false);
+  cls('tabE', 'hid', n < 2);
+  var ebut = n === 2 || n === 3;
+  cls('tabE', 'on', ebut); cls('tabR', 'on', !ebut);
+  cls('vE', 'hid', !ebut); cls('vR', 'hid', ebut);
+  $('url').textContent = ebut ? 'ebut3pl.co.kr/main' : 'makewon.com/star_return.html';
+  cls('login', 'hid', n >= 2);
+  $('lgId').textContent = ''; $('lgPw').textContent = '';
+  cls('hbox', 'hid', n < 3); $('hmsg').textContent = n >= 3 ? '🟢 반품입고관리와 연결됨' : '반품입고관리와 연결 중…';
+  cls('ind', 'on', n >= 4); $('indT').textContent = n >= 4 ? '이벗 도우미 연결됨' : '이벗 도우미 연결 안 됨';
+  cls('tips', 'hid', true); [].forEach.call(document.querySelectorAll('.tip'), function(t){ t.classList.add('hid'); });
+  $('ghost').style.opacity = 0;
+}
+
+/* ── 장면별 동작 ── */
+var PLAY = [
+  function(id){   /* ① 끌어다 놓기 */
+    return moveTo($('src'), id).then(function(){ cls('src', 'glow', true); return sleep(500, id); })
+      .then(function(){ $('cur').classList.add('down'); var g = $('ghost'), p = posOf($('src'));
+        g.style.transition = 'none'; g.style.left = (p.x - 70) + 'px'; g.style.top = (p.y - 12) + 'px'; void g.offsetWidth; g.style.transition = ''; g.style.opacity = 1; cls('slot', 'hot', true); return sleep(300, id); })
+      .then(function(){ var p = posOf($('slot')); $('ghost').style.left = (p.x - 70) + 'px'; $('ghost').style.top = (p.y - 12) + 'px'; return moveTo($('slot'), id); })
+      .then(function(){ $('cur').classList.remove('down'); $('ghost').style.opacity = 0; cls('slot', 'hot', false); cls('src', 'glow', false); cls('bm', 'hid', false); return sleep(1500, id); });
+  },
+  function(id){   /* ② 이벗 열기 → 로그인 */
+    return moveTo($('open'), id).then(function(){ return click(id); })
+      .then(function(){ cls('tabE', 'hid', false); cls('tabE', 'on', true); cls('tabR', 'on', false); cls('vR', 'hid', true); cls('vE', 'hid', false); cls('login', 'hid', false);
+        $('url').textContent = 'ebut3pl.co.kr/login'; return sleep(700, id); })
+      .then(function(){ return moveTo($('lgId'), id); }).then(function(){ return click(id); }).then(function(){ return typeIn($('lgId'), '아이디', id); })
+      .then(function(){ return typeIn($('lgPw'), '●●●●●●●●', id); })
+      .then(function(){ return moveTo($('lgBtn'), id); }).then(function(){ return click(id); })
+      .then(function(){ cls('login', 'hid', true); $('url').textContent = 'ebut3pl.co.kr/main'; return sleep(1500, id); });
+  },
+  function(id){   /* ③ 이벗 탭에서 즐겨찾기 클릭 */
+    return moveTo($('bm'), id).then(function(){ return click(id); })
+      .then(function(){ cls('hbox', 'hid', false); return sleep(1300, id); })
+      .then(function(){ $('hmsg').textContent = '🟢 반품입고관리와 연결됨'; return moveTo($('hbox'), id, 30, 40); })
+      .then(function(){ return sleep(1400, id); });
+  },
+  function(id){   /* ④ 반품입고관리로 돌아가 🟢 확인 */
+    return moveTo($('tabR'), id).then(function(){ return click(id); })
+      .then(function(){ cls('tabR', 'on', true); cls('tabE', 'on', false); cls('vE', 'hid', true); cls('vR', 'hid', false); $('url').textContent = 'makewon.com/star_return.html'; return sleep(500, id); })
+      .then(function(){ cls('ind', 'on', true); $('indT').textContent = '이벗 도우미 연결됨'; return moveTo($('ind'), id, 0, 26); })
+      .then(function(){ return sleep(2200, id); });
+  },
+  function(id){   /* ⑤ 이럴 땐 */
+    cls('tips', 'hid', false);
+    var tips = document.querySelectorAll('.tip'), i = 0;
+    return (function next(){ if (i >= tips.length) return sleep(3500, id); tips[i++].classList.remove('hid'); return sleep(900, id).then(next); })();
+  }
+];
+
+/* ── 재생 ── */
+var progT = null;
+function go(n){
+  n = (n + SCENES.length) % SCENES.length; cur = n; var id = ++run;
+  setState(n); renderCap();
+  var p = $('prog'); p.style.transition = 'none'; p.style.width = '0'; void p.offsetWidth;
+  var t0 = Date.now(); clearInterval(progT);
+  progT = setInterval(function(){ if (id !== run) return; p.style.width = Math.min(96, (Date.now() - t0) / 90) + '%'; }, 100);
+  PLAY[n](id).then(function(){ if (id !== run) return; p.style.width = '100%'; if (playing) return sleep(400, id).then(function(){ go(n + 1); }); })
+    .catch(function(){});
+}
+function togglePlay(){
+  playing = !playing; $('pp').textContent = playing ? '⏸ 멈춤' : '▶ 재생';
+  if (playing) go(cur); else { run++; clearInterval(progT); }
+}
+function renderCap(){
+  $('num').textContent = cur + 1 < 5 ? ['①', '②', '③', '④'][cur] : '💡';
+  $('txt').innerHTML = SCENES[cur].t + '<small>' + SCENES[cur].s + '</small>';
+  $('dots').innerHTML = SCENES.map(function(s, i){ return '<button class="' + (i === cur ? 'on' : '') + '" onclick="go(' + i + ')">' + (i < 4 ? i + 1 : '💡') + '</button>'; }).join(' ');
+}
+/* 화면에 보일 때만 재생 (설치 상자를 접어 두면 멈춤) */
+if ('IntersectionObserver' in window){
+  new IntersectionObserver(function(es){ var v = es[0].isIntersecting; if (v){ fit(); if (playing && run === 0) go(0); } }).observe($('fit'));
+  if ('ResizeObserver' in window) new ResizeObserver(fit).observe($('fit'));   /* 접힌 상자 안(폭 0)에서 펼쳐질 때 다시 맞춤 */
+} else go(0);
+</script>
+<script src="/wms_access.js" data-page="ebut_helper_guide" data-floor="0"></script>
+</body>
+</html>
