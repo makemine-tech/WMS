@@ -81,3 +81,59 @@ var WMS_PAGES=[
     {key:'saju_app',     file:'saju/index.html',   label:'사주 (만신 AI · 서브폴더)', floor:0, gate:true},
   ]},
 ];
+
+/* ── 메인 메뉴 배치 (index.html 과 같은 순서·크기) ─────────────────
+   관리도구의 「메뉴 모양」 화면이 이걸로 버튼을 그린다.
+   index.html 에 메뉴 버튼을 넣거나 옮기면 여기도 같이 고친다.
+   kind  : big = 큰 가로 버튼 · card = 피킹 카드 · tile = 정사각 앱 타일
+   also  : 같은 카드 안의 두 번째 버튼
+   subs  : 그 메뉴를 열고 들어가는 하부 페이지 (subs 안에 subs 가능)
+   hidden: 메인에서 슈퍼관리자에게만 보이는 숨김 타일
+   여기 없는 WMS_PAGES 페이지는 「메뉴에 없는 페이지」로 따로 모아 보인다.
+   ───────────────────────────────────────────────────────────── */
+var WMS_MENU=[
+  {section:'MAKE CHANGO · 홈', kind:'big', cols:1, tiles:[
+    {key:'index', name:'홈 / 랜딩 (메인 메뉴 화면)', eng:'WMS & PICKING HUB'},
+  ]},
+  {section:'WMS PRIMARY', kind:'big', cols:2, tiles:[
+    {key:'wms', name:'창고 관리 시스템', eng:'CORE · WAREHOUSE MANAGEMENT', note:'버튼은 로그인 화면을 거쳐 열림',
+      subs:[{key:'wms_login'},{key:'wms_vendors'},{key:'vendor_list'},{key:'vendor_status'}]},
+    {key:'cargo_log', name:'입출고 화물관리', eng:'CARGO · IN / OUT LOG'},
+  ]},
+  {section:'PICKING ENGINE · SELECT', kind:'card', cols:3, tiles:[
+    {key:'picking_ebut', name:'이벗 피킹 시스템', eng:'UNIT · 01',
+      also:[{key:'tutorial_ebut', name:'튜토리얼 · 기능 안내'}]},
+    {key:'picking_ez', name:'이지어드민 피킹 시스템', eng:'UNIT · 02',
+      also:[{key:'tutorial_ez', name:'튜토리얼 · 기능 안내'}]},
+    {key:'star_picking', name:'스타로케이션 피킹 시스템', eng:'UNIT · 03',
+      subs:[{key:'star_return', subs:[{key:'ebut_helper_guide'}]}]},
+  ]},
+  {section:'APPS · TOOLS & SERVICES', kind:'tile', cols:4, tiles:[
+    {key:'rocket_packing', name:'쿠팡 팔레트 적재리스트', eng:'COUPANG PALLET'},
+    {key:'rocket_index',   name:'크로스닥 팔레트', eng:'CROSSDOCK',
+      subs:[{key:'rocket_tools'},{key:'rocket_pomatch'}]},
+    {key:'rocket_kurly',   name:'컬리 명세서 Parser', eng:'KURLY PARSER'},
+    {key:'rocket_picking', name:'피킹리스트 생성기', eng:'PICKING LIST'},
+    {key:'rocket_csvup',   name:'PO 주소 매칭', eng:'ADDRESS MATCH'},
+    {key:'star_coupang',   name:'STAR 입고 시스템', eng:'STAR INBOUND'},
+    {key:'star_instock',   name:'STAR 재고 관리', eng:'STAR INVENTORY'},
+    {key:'star_outorder',  name:'STAR 출고지시서', eng:'STAR OUTORDER'},
+    {key:'stock_check',    name:'재고조사풀', eng:'STOCK CHECK POOL',
+      subs:[{key:'stock_tales_minus'},{key:'stock_jeju'}]},
+    {key:'picktalk',       name:'픽앤톡 현장 협업', eng:'PICK & TALK'},
+    {key:'star_extract',   name:'STAR 사진+정보 PDF', eng:'PHOTO·INFO PDF'},
+    {key:'pdf_smart_merge',name:'PDF 스마트 병합', eng:'PDF MERGE'},
+    {key:'label_fit',      name:'라벨 규격맞추기 100×140', eng:'LABEL FIT'},
+    {key:'barcodeprint',   name:'바코드 라벨 인쇄', eng:'BARCODE PRINT'},
+    {key:'pdf_pdf',        name:'PDF 텍스트 진단', eng:'PDF DIAGNOSE'},
+    {key:'excel_merge',    name:'엑셀 합치기', eng:'EXCEL MERGE'},
+    {key:'payroll',        name:'급여관리', eng:'PAYROLL', hidden:true},
+    {key:'settlement',     name:'정산관리', eng:'SETTLEMENT', hidden:true},
+    {key:'site_stats',     name:'사이트 통계', eng:'ANALYTICS', hidden:true},
+    {key:'ad_control',     name:'광고 관제', eng:'AD CONTROL', hidden:true},
+  ]},
+  {section:'EXTRA · OTHER SERVICES', kind:'tile', cols:4, tiles:[
+    {key:'stock',    name:'주식 분석', eng:'STOCK-SYNC'},
+    {key:'saju_app', name:'만신 AI', eng:'MANSIN AI'},
+  ]},
+];
