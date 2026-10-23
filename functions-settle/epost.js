@@ -7,7 +7,7 @@
    호출: firebase.app().functions('asia-northeast3').httpsCallable('epostReturnOrigin')
      입력  { nos: ['7077480532049', …] }  (한 번에 최대 40개)
      출력  { ok, rows: [{ no, orig, origDate, sender, recvDate, result, err }] }
-   슈퍼관리자만. 서울 지역(asia-northeast3) — 싱가포르에선 우체국이 응답 안 함(2026-10-05 시간 초과). 동시 5개, 한 건 15초 제한.
+   슈퍼관리자 + 작업 그룹원(반품입고관리). 서울 지역(asia-northeast3) — 싱가포르에선 우체국이 응답 안 함(2026-10-05 시간 초과). 동시 5개, 한 건 15초 제한.
 =========================================================== */
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
@@ -51,8 +51,9 @@ async function lookup(no) {
 exports.epostReturnOrigin = onCall({ region: 'asia-northeast3', timeoutSeconds: 300, memory: '256MiB' }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다');
-  const sa = await admin.database().ref('superadmins/' + uid).once('value');
-  if (!sa.exists()) throw new HttpsError('permission-denied', '슈퍼관리자만 쓸 수 있습니다');
+  /* 슈퍼관리자 + 작업 그룹원 — 스타 3PL 반품입고관리(star_return.html)에서 현장이 반품 송장을 스캔할 때도 씀 (2026-10-24) */
+  const [sa, ug] = await Promise.all([admin.database().ref('superadmins/' + uid).once('value'), admin.database().ref('userGroup/' + uid).once('value')]);
+  if (!sa.exists() && !ug.exists()) throw new HttpsError('permission-denied', '작업 그룹원만 쓸 수 있습니다');
   const nos = [...new Set(((req.data && req.data.nos) || []).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 10 && x.length <= 15))].slice(0, MAX);
   const rows = [];
   for (let i = 0; i < nos.length; i += 5) {

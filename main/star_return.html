@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>스타 3PL 반품입고관리</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700;900&family=Space+Mono:wght@400;700&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --bg:#0d0f14; --surface:#151820; --surface2:#1b1f29; --border:#2a2f3d; --accent:#4af0a8; --accent2:#f0a84a;
+          --text:#e8eaf0; --muted:#6b7280; --red:#f05050; --yellow:#fbbf24; --blue:#3b82f6; }
+  body { font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:1.4rem 1rem 4rem; }
+  .container { width:100%; max-width:1180px; margin:0 auto; }
+  .mono { font-family:'Space Mono',monospace; }
+  .dim { color:var(--muted); }
+  .sm { font-size:.74rem; }
+
+  .header { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .badge { display:inline-block; font-family:'Space Mono',monospace; font-size:.62rem; letter-spacing:.14em; color:var(--accent);
+           border:1px solid rgba(74,240,168,.35); border-radius:20px; padding:.2rem .6rem; margin-bottom:.45rem; }
+  h1 { font-size:1.6rem; font-weight:900; letter-spacing:-.5px; }
+  h1 span { color:var(--accent); }
+  .hdr-r { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  .who { font-size:.72rem; color:var(--muted); }
+  .back { background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:8px; padding:.45rem .8rem;
+          font-size:.78rem; font-weight:700; text-decoration:none; }
+  .back:hover { color:var(--text); }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1rem; margin-bottom:.9rem; }
+  .card-h { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; font-size:.92rem; font-weight:800; margin-bottom:.7rem; }
+  .card-h .sp { flex:1; }
+
+  .btn { background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.5rem .85rem;
+         font:700 .8rem 'Noto Sans KR',sans-serif; cursor:pointer; white-space:nowrap; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.p { background:var(--accent); color:#06281a; border-color:var(--accent); }
+  .btn.w { background:#2a2010; border-color:#5a4520; color:var(--accent2); }
+  .btn.r { background:#2a1414; border-color:#5a2525; color:#fca5a5; }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .btn.sm { padding:.3rem .55rem; font-size:.72rem; }
+
+  .helper { display:flex; align-items:center; gap:.5rem; font-size:.8rem; font-weight:700; padding:.45rem .75rem; border-radius:8px;
+            background:var(--surface2); border:1px solid var(--border); }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+  .dot.on { background:var(--accent); box-shadow:0 0 8px var(--accent); }
+  .dot.warn { background:var(--yellow); }
+  .setup { font-size:.8rem; line-height:1.9; color:#c7cbd6; }
+  .setup ol { padding-left:1.2rem; }
+  .bm { display:inline-block; background:#1d3b2e; border:1px dashed var(--accent); color:var(--accent); border-radius:8px; padding:.3rem .7rem;
+        font-weight:800; text-decoration:none; cursor:grab; }
+
+  .scan-row { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+  .scan { flex:1; min-width:240px; background:#0a0c10; border:2px solid var(--border); color:var(--text); border-radius:10px;
+          padding:.75rem .9rem; font:700 1.15rem 'Space Mono',monospace; outline:none; }
+  .scan:focus { border-color:var(--accent); }
+  .scan.item:focus { border-color:var(--blue); }
+  .lbl { font-size:.72rem; font-weight:800; color:var(--muted); letter-spacing:.06em; margin:.2rem 0 .35rem; }
+
+  .cur { margin-top:.9rem; border-top:1px dashed var(--border); padding-top:.9rem; }
+  .cur-top { display:flex; gap:1.2rem; flex-wrap:wrap; font-size:.84rem; margin-bottom:.6rem; }
+  .cur-top b { font-family:'Space Mono',monospace; font-size:.95rem; }
+  .banner { border-radius:10px; padding:.6rem .8rem; font-size:.86rem; font-weight:700; margin:.4rem 0; line-height:1.6; }
+  .banner.red { background:#2a1414; border:1px solid #5a2525; color:#fca5a5; }
+  .banner.yel { background:#2a2410; border:1px solid #5a4b20; color:#fde68a; }
+  .banner.grn { background:#10261c; border:1px solid #1f5a3d; color:#a7f3d0; }
+  .banner.blu { background:#0f1d33; border:1px solid #1e3a66; color:#bfdbfe; }
+
+  table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  th { text-align:left; font-size:.68rem; color:var(--muted); font-weight:800; padding:.45rem .5rem; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td { padding:.5rem; border-bottom:1px solid #1f2430; vertical-align:middle; }
+  tr.hot td { background:rgba(74,240,168,.07); }
+  tr.bad td { background:rgba(240,80,80,.07); }
+  .qbtn { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .qbtn button { background:transparent; border:0; color:var(--muted); padding:.35rem .7rem; font:800 .78rem 'Noto Sans KR',sans-serif; cursor:pointer; }
+  .qbtn button.on1 { background:var(--accent); color:#06281a; }
+  .qbtn button.on2 { background:var(--red); color:#fff; }
+  .cnt { font-family:'Space Mono',monospace; font-weight:700; font-size:.95rem; }
+  .cnt.full { color:var(--accent); }
+  .cnt.over { color:var(--red); }
+
+  .chips { display:flex; gap:.35rem; flex-wrap:wrap; }
+  .chip { background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:20px; padding:.25rem .7rem;
+          font-size:.72rem; font-weight:800; cursor:pointer; }
+  .chip.on { color:var(--text); border-color:var(--accent); }
+  .st { display:inline-block; border-radius:6px; padding:.12rem .45rem; font-size:.7rem; font-weight:800; white-space:nowrap; }
+  .st.scan { background:#1f2533; color:#cbd5e1; }
+  .st.ready { background:#0f1d33; color:#93c5fd; }
+  .st.saving { background:#2a2410; color:#fde68a; }
+  .st.done { background:#10261c; color:#6ee7b7; }
+  .st.fail { background:#2a1414; color:#fca5a5; }
+  .tag { display:inline-block; margin:.1rem .2rem .1rem 0; border-radius:5px; padding:.05rem .4rem; font-size:.68rem; font-weight:700; }
+  .tag.r { background:#3a1a1a; color:#fca5a5; }
+  .tag.y { background:#3a3115; color:#fde68a; }
+  .tag.b { background:#16284a; color:#bfdbfe; }
+  .lst tr { cursor:pointer; }
+  .lst tr:hover td { background:#1a1f2a; }
+
+  .notes-form { display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:.6rem; }
+  .notes-form select, .notes-form input { background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.45rem .6rem; font:.8rem 'Noto Sans KR',sans-serif; }
+  .notes-form input.v { font-family:'Space Mono',monospace; min-width:180px; }
+  .notes-form input.m { flex:1; min-width:200px; }
+  textarea.memo { width:100%; background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.5rem .6rem; font:.8rem 'Noto Sans KR',sans-serif; min-height:2.6rem; }
+  details > summary { cursor:pointer; list-style:none; }
+  details > summary::-webkit-details-marker { display:none; }
+
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#111827; border:1px solid var(--border); color:var(--text);
+           border-radius:10px; padding:.6rem 1rem; font-size:.84rem; font-weight:700; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; max-width:90vw; }
+  #toast.on { opacity:1; }
+  .scroll-x { overflow-x:auto; }
+  @media (max-width:640px){ h1 { font-size:1.3rem; } .scan { font-size:1rem; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div>
+      <div class="badge">STAR 3PL RETURN</div>
+      <h1>스타 3PL <span>반품입고관리</span></h1>
+      <div class="who" id="who">로그인 확인 중…</div>
+    </div>
+    <div class="hdr-r">
+      <div class="helper" title="이벗에 로그인된 크롬 탭에서 「이벗 반품 도우미」를 눌러야 주문 조회·이벗 반영이 됩니다"><span class="dot" id="hDot"></span><span id="hTxt">이벗 도우미 연결 안 됨</span></div>
+      <button class="btn" onclick="openEbut()">이벗 열기</button>
+      <a class="back" href="star_picking.html">‹ 피킹으로</a>
+    </div>
+  </div>
+
+  <!-- 이벗 도우미 안내 -->
+  <details class="card" id="setupCard">
+    <summary class="card-h">🔌 이벗 도우미 설치·연결 방법 <span class="sp"></span><span class="sm dim">처음 한 번 · 펼치기</span></summary>
+    <div class="setup">
+      <ol>
+        <li>이 버튼을 크롬 <b>즐겨찾기 막대</b>로 끌어다 놓습니다 → <a class="bm" id="bmLink" href="#" onclick="toast('클릭하지 말고 즐겨찾기 막대로 끌어다 놓으세요'); return false;">↩ 이벗 반품 도우미</a>
+          <span class="dim">(즐겨찾기 막대가 안 보이면 Ctrl+Shift+B)</span></li>
+        <li>오른쪽 위 <b>「이벗 열기」</b>로 이벗을 열고 로그인합니다. 이벗이 이미 열려 있으면 그 탭을 그대로 써도 됩니다.</li>
+        <li>이벗 탭에서 즐겨찾기의 <b>↩ 이벗 반품 도우미</b>를 누르면 이 화면 오른쪽 위에 <b>🟢 연결됨</b>이 뜹니다.</li>
+      </ol>
+      <div class="dim sm" style="margin-top:.4rem">반품 송장 스캔과 원송장 추적은 도우미 없이도 됩니다. 원송장 주문의 상품을 불러오는 것과 이벗 반영은 도우미가 연결된 PC에서만 됩니다. 이벗 탭을 닫거나 로그아웃되면 다시 눌러 주세요.</div>
+    </div>
+  </details>
+
+  <!-- 사전 특이사항 -->
+  <details class="card" id="notesCard">
+    <summary class="card-h">📌 사전 특이사항 <span class="sm dim" id="notesCnt"></span><span class="sp"></span><span class="sm dim">고객사 요청: 이 송장·상품이 반품되면 따로 빼기 등 · 펼치기</span></summary>
+    <div class="notes-form">
+      <select id="nKind"><option value="inv">송장번호 (반품·원송장)</option><option value="item">상품 바코드</option></select>
+      <input class="v" id="nVal" placeholder="번호 / 바코드">
+      <input class="m" id="nMemo" placeholder="안내할 내용 (예: 고객사 요청 — 불량 확인 후 따로 보관)">
+      <button class="btn p" onclick="addNote()">추가</button>
+    </div>
+    <div class="scroll-x"><table><thead><tr><th>종류</th><th>번호 / 바코드</th><th>내용</th><th>등록</th><th>맞은 건</th><th></th></tr></thead><tbody id="notesBody"></tbody></table></div>
+  </details>
+
+  <!-- 스캔 -->
+  <div class="card">
+    <div class="card-h">📦 반품 검수</div>
+    <div class="lbl">① 반품 송장 스캔 (우체국)</div>
+    <div class="scan-row">
+      <input class="scan" id="rnoIn" placeholder="반품 송장번호 스캔 후 Enter" autocomplete="off" inputmode="numeric">
+    </div>
+    <div class="cur" id="cur" style="display:none"></div>
+  </div>
+
+  <!-- 목록 -->
+  <div class="card">
+    <div class="card-h">🗂 반품입고 목록 <span class="sp"></span>
+      <button class="btn" id="lookAllBtn" onclick="lookAll()">🔎 주문 조회 대기 <span id="nLook">0</span>건 찾기</button>
+      <button class="btn p" id="pushBtn" onclick="pushAll()">📤 이벗에 반영 (<span id="nReady">0</span>건)</button>
+      <button class="btn" onclick="downloadXlsx()">📥 엑셀</button>
+    </div>
+    <div class="chips" style="margin-bottom:.5rem" id="perChips"></div>
+    <div class="chips" style="margin-bottom:.7rem" id="stChips"></div>
+    <div class="scroll-x"><table class="lst"><thead><tr><th>검수 시각</th><th>반품 송장</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th></tr></thead>
+      <tbody id="listBody"><tr><td colspan="8" class="dim">불러오는 중…</td></tr></tbody></table></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script src="wms_sync.js"></script>
+<script src="/wms_access.js" data-page="star_return" data-floor="2"></script>
+<script>
+/* ============================================================
+   스타 3PL 반품입고관리 (대표님 2026-10-24)
+   ① 반품 송장 스캔 → 우체국 「반품원등기번호」 = 원송장 (서버 함수 epostReturnOrigin, 없으면 그 번호 자체가 우리 발송 = 반송)
+   ② 원송장 → 이벗 주문·상품 (이벗 탭의 도우미 ebut_helper.js 가 이벗 로그인으로 조회)
+   ③ 상품 바코드 스캔 · 상품마다 정상/불량 · 특이사항(반품 대상 아닌 상품, 사전 특이사항 송장·상품, 메모)
+   ④ 「이벗에 반영」 → 도우미가 이벗 반품입고 팝업에 한 줄씩 저장, 결과 기록 / 엑셀
+   정해진 값: 스타인터내셔널(이벗 고객사 446)만 · 반송사유 불량 있으면 상품불량 · 완료 · 가용 00000_in / 불량 0000_불량존 (도우미가 채움)
+   데이터: wms_sync/groups/{gid}/star_return/ recs/{반품송장} · notes/{id}
+============================================================ */
+var $ = function(id){ return document.getElementById(id); };
+var db = null, gid = null, me = null, base = null;
+var RECS = {}, NOTES = {}, CUR = null;
+var PER = 'today', STF = 'all';
+var STAR_CUST = '446';
+var HELPER_JS = 'https://makewon.com/ebut_helper.js';
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+function digits(v){ return String(v == null ? '' : v).replace(/\D/g, ''); }
+function pad(n){ return String(n).padStart(2, '0'); }
+function dayOf(ts){ var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function hm(ts){ var d = new Date(ts); return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+var toastT = null;
+function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2600); }
+var actx = null;
+function beep(ok){ try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); var o = actx.createOscillator(), g = actx.createGain();
+  o.frequency.value = ok ? 1046 : 220; o.type = ok ? 'sine' : 'square'; g.gain.value = .08; o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + (ok ? .09 : .35)); } catch(e){} }
+function byName(){ return (me && (me.email || '').split('@')[0]) || ''; }
+
+/* ── 이벗 도우미 연결 (postMessage) ── */
+var H = { win: null, ok: false, login: null, seq: 0, pend: {}, ver: '' };
+var EBUT_ORIGIN = 'https://ebut3pl.co.kr';
+window.addEventListener('message', function(e){
+  var m = e.data;
+  if (!m || m.from !== 'ebut-helper' || !/^https:\/\/(www\.)?ebut3pl\.co\.kr$/.test(e.origin)) return;
+  if (m.cmd === 'ready'){ H.win = e.source; EBUT_ORIGIN = e.origin; H.ver = m.ver || ''; ping(); return; }
+  var p = H.pend[m.id]; if (!p) return;
+  delete H.pend[m.id]; clearTimeout(p.t);
+  if (m.ok) p.res(m.data); else p.rej(new Error(m.err || '도우미 오류'));
+});
+function hcall(cmd, args, ms){
+  return new Promise(function(res, rej){
+    if (!H.win || H.win.closed){ setHelper(false); rej(new Error('NOHELPER')); return; }
+    var id = ++H.seq;
+    H.pend[id] = { res: res, rej: rej, t: setTimeout(function(){ delete H.pend[id]; rej(new Error('TIMEOUT')); }, ms || 30000) };
+    try { H.win.postMessage({ to: 'ebut-helper', id: id, cmd: cmd, args: args || {} }, EBUT_ORIGIN); } catch(e){ delete H.pend[id]; rej(e); }
+  });
+}
+function setHelper(ok, login){
+  H.ok = !!ok; H.login = login;
+  $('hDot').className = 'dot' + (ok ? (login === false ? ' warn' : ' on') : '');
+  $('hTxt').textContent = ok ? (login === false ? '이벗 로그아웃됨 — 다시 로그인' : '이벗 도우미 연결됨') : '이벗 도우미 연결 안 됨';
+  if (ok && login !== false && CUR && RECS[CUR] && RECS[CUR].look === 'wait') lookup(CUR);
+  renderList();
+}
+function ping(){ return hcall('ping', {}, 8000).then(function(r){ setHelper(true, r.login); return r; }, function(){ setHelper(false); }); }
+setInterval(function(){ if (H.win) ping(); }, 30000);
+/* 도우미가 이 화면을 열었을 때(이벗 탭이 opener) — 도우미의 첫 인사를 놓쳤을 수 있으니 이쪽에서 먼저 부름 */
+if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; try { H.win.postMessage({ to: 'ebut-helper', id: 0, cmd: 'ping' }, EBUT_ORIGIN); } catch(e){} ping(); setTimeout(knock, 1500); })(); }
+function openEbut(){
+  var w = window.open('https://ebut3pl.co.kr/main', 'mkw_ebut_tab');
+  if (!w){ toast('팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용'); return; }
+  H.win = w; $('setupCard').open = true;
+  toast('이벗에 로그인한 뒤 즐겨찾기의 「↩ 이벗 반품 도우미」를 눌러 주세요');
+}
+$('bmLink').href = "javascript:(function(){var s=document.createElement('script');s.src='" + HELPER_JS + "?v='+Date.now();document.head.appendChild(s);})();";
+
+/* ── 판정 ── */
+function starOrders(r){ return (r.orders || []).filter(function(o){ return o.cust === STAR_CUST; }); }
+function noteHits(r){
+  var out = [], keys = [r.rno, r.orig].filter(Boolean), codes = {};
+  (r.items || []).forEach(function(it){ if (it.got > 0 && it.nicn) codes[it.nicn] = 1; });
+  (r.extras || []).forEach(function(x){ codes[x.code] = 1; });
+  Object.keys(NOTES).forEach(function(k){ var n = NOTES[k]; if (!n) return;
+    if (n.kind === 'inv' && keys.indexOf(n.val) >= 0) out.push({ k: k, t: '송장', n: n });
+    if (n.kind === 'item' && codes[n.val]) out.push({ k: k, t: '상품', n: n }); });
+  return out;
+}
+/* 막힘(이벗에 못 넣음) / 알림(넣되 확인) */
+function judge(r){
+  var block = [], info = [];
+  if (r.trace === 'err') block.push('원송장 조회 실패');
+  else if (r.trace === 'busy') block.push('원송장 조회 중');
+  else if (r.look === 'wait' || r.look === 'busy') block.push('이벗 주문 조회 대기');
+  else if (r.look === 'err') block.push('이벗 주문 조회 실패');
+  else if (r.look === 'none') block.push('이벗에서 원송장 주문 못 찾음');
+  else if (r.look === 'ok'){
+    var st = starOrders(r);
+    if (!st.length) block.push('다른 고객사 주문 (' + (r.orders || []).map(function(o){ return o.custName || o.cust; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(', ') + ')');
+    else if (!(r.items || []).length && st.every(function(o){ return o.ret !== '-'; })) block.push('이벗에서 이미 반품처리됨 (' + st.map(function(o){ return o.ret; }).join(',') + ')');
+    else if (!(r.items || []).some(function(it){ return it.got > 0; })) block.push('반품 상품 스캔 없음');
+  }
+  if ((r.extras || []).length) info.push('반품 대상 아닌 상품 ' + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
+  (r.items || []).forEach(function(it){ if (it.got > it.qty) info.push('주문보다 많음: ' + it.name); });
+  if ((r.items || []).some(function(it){ return it.got > 0 && it.got < it.qty; }) || ((r.items || []).some(function(it){ return !it.got; }) && (r.items || []).some(function(it){ return it.got > 0; }))) info.push('부분 반품');
+  if (r.self) info.push('반송 (원송장 = 반품송장)');
+  noteHits(r).forEach(function(h){ info.push('📌 사전 특이사항 ' + h.t + ': ' + (h.n.memo || h.n.val)); });
+  if (r.memo) info.push('메모: ' + r.memo);
+  return { block: block, info: info };
+}
+function stOf(r){
+  if (r.state === 'saving' && Date.now() - (r.saveAt || 0) > 120000) return { k: 'fail', t: '확인 필요' };
+  return { scan: { k: 'scan', t: '검수 중' }, ready: { k: 'ready', t: '반영 대기' }, saving: { k: 'saving', t: '반영 중' }, done: { k: 'done', t: '반영 완료' }, fail: { k: 'fail', t: '반영 실패' } }[r.state] || { k: 'scan', t: '검수 중' };
+}
+function locked(r){ return r.state === 'done' || r.state === 'saving'; }
+
+/* ── 저장 ── */
+function save(r, fields){ Object.assign(r, fields || {}); r.upd = Date.now(); RECS[r.rno] = r; return base.child('recs/' + r.rno).set(r); }
+
+/* ── ① 반품 송장 스캔 ── */
+$('rnoIn').addEventListener('keydown', function(e){
+  if (e.key !== 'Enter') return; e.preventDefault();
+  var no = digits(this.value); this.value = '';
+  if (no.length < 10 || no.length > 15){ beep(false); toast('송장번호가 아닙니다 (10~15자리 숫자)'); return; }
+  var r = RECS[no];
+  if (r){ CUR = no; renderCur(); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); focusItem(); return; }
+  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: 'busy', items: [], extras: [] };
+  CUR = no; save(r).then(function(){ renderCur(); beep(true); trace(no); });
+});
+function trace(no){
+  var r = RECS[no]; if (!r) return;
+  save(r, { trace: 'busy' }); renderCur();
+  var fn = firebase.app().functions('asia-northeast3').httpsCallable('epostReturnOrigin', { timeout: 60000 });
+  fn({ nos: [no] }).then(function(res){
+    var x = ((res.data && res.data.rows) || [])[0] || {};
+    if (x.err){ save(RECS[no], { trace: 'err', traceErr: x.err }); }
+    else if (x.orig){ save(RECS[no], { trace: 'ok', orig: x.orig, origDate: x.origDate || null, self: false, look: 'wait' }); }
+    else { save(RECS[no], { trace: 'ok', orig: no, origDate: null, self: true, look: 'wait' }); }   /* 반품원등기번호 없음 = 이 번호가 우리 발송(반송) */
+    renderCur();
+    if (RECS[no].look === 'wait' && H.ok) lookup(no);
+  }).catch(function(e){ save(RECS[no], { trace: 'err', traceErr: String((e && (e.message || e.code)) || e) }); renderCur(); beep(false); });
+}
+
+/* ── ② 이벗 주문·상품 ── */
+function lookup(no){
+  var r = RECS[no]; if (!r || !r.orig || r.look === 'busy') return Promise.resolve();
+  save(r, { look: 'busy' }); renderCur();
+  return hcall('find', { orig: r.orig, origDate: r.origDate }, 60000).then(function(d){
+    var old = {}; (r.items || []).forEach(function(it){ old[it.bopt + '|' + it.ordlist] = it; });
+    var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}; return { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0, q: o.q || '1' }; });
+    save(RECS[no], { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: items, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
+    if (CUR === no){ renderCur(); var j = judge(RECS[no]); beep(!j.block.length || j.block[0] === '반품 상품 스캔 없음'); }
+  }, function(e){
+    var m = String(e.message || e);
+    if (m === 'NOHELPER' || m === 'LOGIN'){ save(RECS[no], { look: 'wait' }); if (m === 'LOGIN') setHelper(true, false); }
+    else save(RECS[no], { look: 'err', lookErr: m === 'TIMEOUT' ? '도우미 응답 없음' : m });
+    if (CUR === no) renderCur();
+  });
+}
+function lookAll(){
+  if (!H.ok){ toast('먼저 이벗 도우미를 연결하세요'); $('setupCard').open = true; return; }
+  var q = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r.orig && (r.look === 'wait' || r.look === 'err') && !locked(r); });
+  if (!q.length){ toast('조회할 건이 없습니다'); return; }
+  $('lookAllBtn').disabled = true;
+  q.reduce(function(p, k){ return p.then(function(){ return lookup(k); }); }, Promise.resolve()).then(function(){ $('lookAllBtn').disabled = false; toast('주문 조회 ' + q.length + '건 끝'); });
+}
+
+/* ── ③ 상품 스캔 ── */
+function focusItem(){ setTimeout(function(){ var i = $('itemIn'); if (i) i.focus(); else $('rnoIn').focus(); }, 50); }
+function onItemScan(code){
+  var r = RECS[CUR]; if (!r || locked(r)) return;
+  code = String(code || '').trim(); if (!code) return;
+  var c2 = code.replace(/\s+/g, ''), hits = (r.items || []).filter(function(it){ return it.nicn && (it.nicn === c2 || digits(it.nicn) && digits(it.nicn) === digits(c2) && digits(c2).length >= 8); });
+  var note = Object.keys(NOTES).map(function(k){ return NOTES[k]; }).filter(function(n){ return n && n.kind === 'item' && n.val === c2; })[0];
+  if (hits.length){
+    var it = hits.filter(function(x){ return x.got < x.qty; })[0] || hits[hits.length - 1];
+    it.got = (it.got || 0) + 1;
+    save(r); renderCur(c2); beep(it.got <= it.qty);
+    if (it.got > it.qty) toast('⚠️ 주문 수량(' + it.qty + ')보다 많이 스캔됨');
+  } else {
+    r.extras = r.extras || [];
+    var x = r.extras.filter(function(e){ return e.code === c2; })[0];
+    if (x) x.n++; else r.extras.push({ code: c2, n: 1 });
+    save(r); renderCur(c2); beep(false);
+    toast('⚠️ 이 반품 주문에 없는 상품입니다 — 특이사항으로 기록');
+  }
+  if (note){ toast('📌 사전 특이사항 상품: ' + (note.memo || note.val)); beep(false); }
+}
+function setQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.items[i].q = q; save(r); renderCur(); focusItem(); }
+function addGot(i, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = Math.max(0, (it.got || 0) + d); save(r); renderCur(); focusItem(); }
+function delExtra(i){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras.splice(i, 1); save(r); renderCur(); focusItem(); }
+function setMemo(v){ var r = RECS[CUR]; if (!r || locked(r)) return; save(r, { memo: String(v || '').trim() }); renderList(); }
+function finishCur(){
+  var r = RECS[CUR]; if (!r) return;
+  var j = judge(r);
+  if (j.block.length){ beep(false); toast('이벗에 넣을 수 없습니다: ' + j.block[0]); return; }
+  save(r, { state: 'ready', checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); toast('✔ 검수 완료 — 반영 대기에 올렸습니다'); CUR = null; renderCur(); $('rnoIn').focus(); });
+}
+function reopenCur(){ var r = RECS[CUR]; if (!r || r.state === 'done') return; save(r, { state: 'scan' }); renderCur(); }
+function delCur(){
+  var r = RECS[CUR]; if (!r || r.state === 'done' || r.state === 'saving') return;
+  if (!confirm('반품 송장 ' + r.rno + ' 기록을 지울까요?')) return;
+  base.child('recs/' + r.rno).remove(); delete RECS[r.rno]; CUR = null; renderCur(); renderList();
+}
+function retryCur(){ var r = RECS[CUR]; if (!r) return; if (r.trace !== 'ok') trace(r.rno); else if (!H.ok) toast('이벗 도우미를 먼저 연결하세요'); else lookup(r.rno); }
+
+function renderCur(lastCode){
+  var box = $('cur'), r = CUR && RECS[CUR];
+  if (!r){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  var j = judge(r), st = stOf(r), lk = locked(r), so = starOrders(r);
+  var h = '<div class="cur-top"><div>반품 송장<br><b>' + esc(r.rno) + '</b></div>'
+    + '<div>원송장<br><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : esc(r.orig || '')) + '</b>'
+    + (r.origDate ? ' <span class="sm dim">' + esc(r.origDate) + '</span>' : '') + (r.self ? ' <span class="tag b">반송</span>' : '') + '</div>'
+    + '<div>수령자<br><b style="font-family:inherit">' + esc(so.map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ') || '-') + '</b></div>'
+    + '<div>상태<br><span class="st ' + st.k + '">' + st.t + '</span></div></div>';
+  noteHits(r).forEach(function(x){ h += '<div class="banner yel">📌 사전 특이사항 ' + x.t + '입니다 — ' + esc(x.n.memo || '') + ' <span class="mono sm">(' + esc(x.n.val) + ')</span></div>'; });
+  if (r.trace === 'err') h += '<div class="banner red">우체국 원송장 조회 실패: ' + esc(r.traceErr || '') + '</div>';
+  if (r.look === 'wait') h += '<div class="banner blu">' + (H.ok ? '이벗에서 주문 찾는 중…' : '이벗 도우미가 연결되면 원송장 주문 상품을 불러옵니다 (이 PC 또는 목록의 「주문 조회 대기 찾기」)') + '</div>';
+  if (r.look === 'busy') h += '<div class="banner blu">이벗에서 원송장 주문·상품 불러오는 중…</div>';
+  if (r.look === 'err') h += '<div class="banner red">이벗 주문 조회 실패: ' + esc(r.lookErr || '') + '</div>';
+  j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + ' — 이벗에 자동으로 넣지 않습니다</div>'; });
+  if (r.state === 'done') h += '<div class="banner grn">✔ 이벗 반영 완료 ' + (r.ebut && r.ebut.at ? hm(r.ebut.at) : '') + '</div>';
+  if (r.state === 'fail' && r.ebut) h += '<div class="banner red">이벗 반영 실패: ' + esc(r.ebut.msg || '') + '</div>';
+
+  if ((r.items || []).length){
+    h += '<div class="lbl" style="margin-top:.7rem">② 상품 바코드 스캔 → 상품마다 정상 / 불량</div>';
+    if (!lk) h += '<div class="scan-row" style="margin-bottom:.6rem"><input class="scan item" id="itemIn" placeholder="상품 바코드 스캔 후 Enter" autocomplete="off"></div>';
+    h += '<div class="scroll-x"><table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>반품</th><th></th><th>정상 / 불량</th></tr></thead><tbody>';
+    r.items.forEach(function(it, i){
+      var cls = (lastCode && it.nicn === lastCode ? 'hot' : '') + (it.q === '2' && it.got > 0 ? ' bad' : '');
+      h += '<tr class="' + cls + '"><td>' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '</td><td class="mono sm">' + esc(it.nicn) + '</td>'
+        + '<td class="cnt">' + it.qty + '</td><td class="cnt ' + (it.got > it.qty ? 'over' : it.got === it.qty ? 'full' : '') + '">' + (it.got || 0) + '</td>'
+        + '<td>' + (lk ? '' : '<button class="btn sm" onclick="addGot(' + i + ',-1)">−</button> <button class="btn sm" onclick="addGot(' + i + ',1)">+</button>') + '</td>'
+        + '<td><span class="qbtn"><button class="' + (it.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setQ(' + i + ',\'1\')">정상</button><button class="' + (it.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setQ(' + i + ',\'2\')">불량</button></span></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  if ((r.extras || []).length){
+    h += '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">'
+      + r.extras.map(function(x, i){ return '<span class="tag r mono">' + esc(x.code) + ' × ' + x.n + '</span>' + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
+  }
+  h += '<div class="lbl" style="margin-top:.7rem">특이사항 메모</div><textarea class="memo" ' + (lk ? 'disabled' : '') + ' placeholder="예: 박스 파손, 구성품 누락, 엉뚱한 상품 동봉 …" onchange="setMemo(this.value)">' + esc(r.memo || '') + '</textarea>';
+  h += '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem">';
+  if (r.state === 'scan' || !r.state) h += '<button class="btn p" onclick="finishCur()">✔ 검수 완료 → 반영 대기</button>';
+  if (r.state === 'ready' || r.state === 'fail') h += '<button class="btn w" onclick="reopenCur()">✏️ 다시 검수</button>';
+  if (r.trace === 'err' || r.look === 'err' || r.look === 'none' || r.look === 'wait') h += '<button class="btn" onclick="retryCur()">🔁 다시 조회</button>';
+  if (!lk) h += '<button class="btn r" onclick="delCur()">기록 지우기</button>';
+  h += '<button class="btn" onclick="CUR=null;renderCur();$(\'rnoIn\').focus()">닫기</button></div>';
+  box.innerHTML = h;
+  var ii = $('itemIn');
+  if (ii) ii.addEventListener('keydown', function(e){ if (e.key !== 'Enter') return; e.preventDefault(); var v = this.value; this.value = ''; onItemScan(v); });
+  focusItem();
+  renderList();
+}
+
+/* ── ④ 이벗 반영 ── */
+var pushing = false;
+function pushAll(){
+  if (pushing) return;
+  if (!H.ok || H.login === false){ toast('이벗 도우미 연결(로그인)부터 확인하세요'); $('setupCard').open = true; return; }
+  var q = Object.keys(RECS).filter(function(k){ return RECS[k].state === 'ready'; }).sort(function(a, b){ return RECS[a].at - RECS[b].at; });
+  if (!q.length){ toast('반영 대기 건이 없습니다'); return; }
+  if (!confirm('반영 대기 ' + q.length + '건을 이벗 반품입고로 저장합니다. 진행할까요?')) return;
+  pushing = true; $('pushBtn').disabled = true;
+  var ok = 0, bad = 0, stop = false;
+  q.reduce(function(p, k){ return p.then(function(){
+    if (stop) return;
+    /* 다른 PC가 같은 건을 동시에 반영하지 않게 「반영 대기」인 것만 가져옴 */
+    return base.child('recs/' + k).transaction(function(cur){ if (!cur || cur.state !== 'ready') return; cur.state = 'saving'; cur.saveAt = Date.now(); cur.saveBy = byName(); return cur; }).then(function(tx){
+      if (!tx.committed) return;
+      var r = tx.snapshot.val(); RECS[k] = r; renderList();
+      var lines = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: it.q === '2' ? '2' : '1' }; });
+      return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines }, 60000).then(function(res){
+        ok++; return save(RECS[k], { state: 'done', ebut: { at: Date.now(), msg: '저장됨', codes: res.codes || '', by: byName() } });
+      }, function(e){
+        var m = String(e.message || e);
+        if (m === 'LOGIN' || m === 'NOHELPER'){ stop = true; setHelper(m !== 'NOHELPER', false); return save(RECS[k], { state: 'ready', saveAt: null }); }
+        bad++;
+        if (m === 'TIMEOUT') return save(RECS[k], { state: 'fail', ebut: { at: Date.now(), msg: '도우미 응답 없음 — 이벗 반품내역에서 들어갔는지 확인 후 「다시 검수」', by: byName() } });
+        if (/^ALREADY:/.test(m)) m = '이벗에서 이미 반품처리됨 (' + m.slice(8) + ')';
+        return save(RECS[k], { state: 'fail', ebut: { at: Date.now(), msg: m, by: byName() } });
+      });
+    });
+  }); }, Promise.resolve()).then(function(){
+    pushing = false; $('pushBtn').disabled = false; renderList(); if (CUR) renderCur();
+    toast(stop ? '이벗 로그인이 끊겨 멈췄습니다 — 다시 로그인 후 도우미를 누르고 이어서 반영' : '이벗 반영 끝 — 완료 ' + ok + '건' + (bad ? ' · 실패 ' + bad + '건' : ''));
+  });
+}
+
+/* ── 목록 ── */
+var PERS = [['today', '오늘'], ['7', '7일'], ['30', '30일'], ['all', '전체']];
+var STS = [['all', '전체'], ['scan', '검수 중'], ['ready', '반영 대기'], ['done', '반영 완료'], ['fail', '실패·확인'], ['flag', '특이사항']];
+function inPer(r){ if (PER === 'all') return true; if (PER === 'today') return dayOf(r.at) === dayOf(Date.now()); return Date.now() - r.at < (+PER) * 864e5; }
+function inSt(r){ var j; if (STF === 'all') return true; if (STF === 'flag'){ j = judge(r); return j.info.length || (j.block.length && r.look === 'ok'); } return stOf(r).k === STF; }
+function listRows(){ return Object.keys(RECS).map(function(k){ return RECS[k]; }).filter(function(r){ return r && inPer(r) && inSt(r); }).sort(function(a, b){ return b.at - a.at; }); }
+function renderList(){
+  $('perChips').innerHTML = PERS.map(function(p){ return '<span class="chip' + (PER === p[0] ? ' on' : '') + '" onclick="PER=\'' + p[0] + '\';renderList()">' + p[1] + '</span>'; }).join('');
+  var all = Object.keys(RECS).map(function(k){ return RECS[k]; });
+  $('stChips').innerHTML = STS.map(function(s){ var n = all.filter(function(r){ var keep = STF; STF = s[0]; var v = inPer(r) && inSt(r); STF = keep; return v; }).length;
+    return '<span class="chip' + (STF === s[0] ? ' on' : '') + '" onclick="STF=\'' + s[0] + '\';renderList()">' + s[1] + ' ' + n + '</span>'; }).join('');
+  $('nReady').textContent = all.filter(function(r){ return r.state === 'ready'; }).length;
+  $('nLook').textContent = all.filter(function(r){ return r.orig && (r.look === 'wait' || r.look === 'err') && !locked(r); }).length;
+  var rows = listRows();
+  $('listBody').innerHTML = rows.length ? rows.map(function(r){
+    var j = judge(r), st = stOf(r), so = starOrders(r);
+    var good = 0, badn = 0; (r.items || []).forEach(function(it){ if (it.got > 0){ if (it.q === '2') badn += it.got; else good += it.got; } });
+    var names = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return it.name; });
+    return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})"><td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
+      + '<td class="mono sm">' + esc(r.rno) + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || '') + '</td>'
+      + '<td class="sm">' + esc(so.map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ')) + '</td>'
+      + '<td class="sm">' + (names.length ? esc(names[0]) + (names.length > 1 ? ' 외 ' + (names.length - 1) : '') + '<div>정상 <b style="color:var(--accent)">' + good + '</b> · 불량 <b style="color:var(--red)">' + badn + '</b></div>' : '<span class="dim">-</span>') + '</td>'
+      + '<td>' + j.block.map(function(b){ return '<span class="tag r">' + esc(b) + '</span>'; }).join('') + j.info.map(function(b){ return '<span class="tag y">' + esc(b) + '</span>'; }).join('') + '</td>'
+      + '<td><span class="st ' + st.k + '">' + st.t + '</span></td><td class="sm">' + esc(r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' · ' + hm(r.ebut.at) : '') : '') + '</td></tr>';
+  }).join('') : '<tr><td colspan="8" class="dim">해당 기간·상태의 반품이 없습니다</td></tr>';
+}
+
+/* ── 사전 특이사항 ── */
+function addNote(){
+  var kind = $('nKind').value, val = kind === 'inv' ? digits($('nVal').value) : $('nVal').value.replace(/\s+/g, ''), memo = $('nMemo').value.trim();
+  if (!val){ toast('번호 / 바코드를 넣어 주세요'); return; }
+  if (kind === 'inv' && (val.length < 10 || val.length > 15)){ toast('송장번호는 10~15자리 숫자'); return; }
+  base.child('notes').push({ kind: kind, val: val, memo: memo, at: Date.now(), by: byName() }).then(function(){ $('nVal').value = ''; $('nMemo').value = ''; toast('사전 특이사항 추가'); });
+}
+function delNote(k){ if (!confirm('이 사전 특이사항을 지울까요?')) return; base.child('notes/' + k).remove(); }
+function renderNotes(){
+  var ks = Object.keys(NOTES).sort(function(a, b){ return (NOTES[b].at || 0) - (NOTES[a].at || 0); });
+  $('notesCnt').textContent = ks.length ? '(' + ks.length + '건)' : '';
+  var hitBy = {}; Object.keys(RECS).forEach(function(rk){ noteHits(RECS[rk]).forEach(function(h){ (hitBy[h.k] = hitBy[h.k] || []).push(rk); }); });
+  $('notesBody').innerHTML = ks.length ? ks.map(function(k){ var n = NOTES[k];
+    return '<tr><td class="sm">' + (n.kind === 'inv' ? '송장' : '상품') + '</td><td class="mono sm">' + esc(n.val) + '</td><td class="sm">' + esc(n.memo) + '</td><td class="sm dim">' + hm(n.at) + ' ' + esc(n.by || '') + '</td>'
+      + '<td class="sm">' + (hitBy[k] ? '<b style="color:var(--yellow)">' + hitBy[k].length + '건</b> <span class="mono dim">' + esc(hitBy[k].slice(0, 3).join(', ')) + '</span>' : '<span class="dim">-</span>') + '</td>'
+      + '<td><button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; }).join('') : '<tr><td colspan="6" class="dim">등록된 사전 특이사항이 없습니다</td></tr>';
+}
+
+/* ── 엑셀 ── */
+function loadXlsx(cb){
+  if (window.XLSX) return cb();
+  var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload = cb; s.onerror = function(){ toast('엑셀 라이브러리 로딩 실패'); }; document.head.appendChild(s);
+}
+function downloadXlsx(){
+  var rows = listRows(); if (!rows.length){ toast('내려받을 반품이 없습니다'); return; }
+  loadXlsx(function(){
+    var a = [['검수일시', '작업자', '반품송장', '원송장', '원송장 접수일', '이벗 주문코드', '수령자', '상품명', '옵션', '바코드', '주문수량', '반품수량', '상태', '특이사항', '진행', '이벗 반영 결과']];
+    rows.forEach(function(r){
+      var j = judge(r), so = starOrders(r), flag = j.block.concat(j.info).join(' / '), st = stOf(r).t, eb = r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' ' + hm(r.ebut.at) : '') : '';
+      var rman = so.map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ');
+      var head = [hm(r.at), r.by || '', r.rno, r.orig || '', r.origDate || '', so.map(function(o){ return o.code; }).join(','), rman];
+      var lines = (r.items || []).filter(function(it){ return it.got > 0; });
+      lines.forEach(function(it){ a.push(head.concat([it.name, it.opt, it.nicn, it.qty, it.got, it.q === '2' ? '불량' : '정상', flag, st, eb])); });
+      (r.extras || []).forEach(function(x){ a.push(head.concat(['(반품 대상 아님)', '', x.code, 0, x.n, '대상아님', flag, st, eb])); });
+      if (!lines.length && !(r.extras || []).length) a.push(head.concat(['', '', '', '', 0, '', flag, st, eb]));
+    });
+    var ws = XLSX.utils.aoa_to_sheet(a);
+    ws['!cols'] = [12, 10, 16, 16, 11, 12, 10, 34, 10, 16, 8, 8, 8, 40, 9, 30].map(function(w){ return { wch: w }; });
+    var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '반품입고');
+    var d = new Date(); XLSX.writeFile(wb, '스타_반품입고_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.xlsx');
+  });
+}
+
+/* ── 시작 ── */
+WMSync.init('star_return', { requireAuth: true });
+WMSync.onAuth(function(st){
+  if (!st.user){ $('who').textContent = '로그인 필요'; return; }            /* 로그인 이동은 wms_access.js 가 처리 */
+  if (!st.groupId){ $('who').textContent = '작업 그룹 미등록 — 관리자에게 초대코드를 받으세요'; return; }
+  me = st.user; gid = st.groupId; db = firebase.database();
+  base = db.ref('wms_sync/groups/' + gid + '/star_return');
+  $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
+  base.child('recs').orderByChild('at').startAt(Date.now() - 120 * 864e5).on('value', function(s){
+    RECS = s.val() || {}; renderList(); renderNotes();
+    var a = document.activeElement;   /* 스캔 중(입력칸에 커서)일 땐 다른 PC 변경으로 화면을 다시 그리지 않음 — 커서가 튐 */
+    if (CUR && !(a && (a.id === 'itemIn' || a.tagName === 'TEXTAREA'))) renderCur();
+  });
+  base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); if (CUR) renderCur(); });
+  $('rnoIn').focus();
+});
+</script>
+</body>
+</html>

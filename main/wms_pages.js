@@ -40,6 +40,7 @@ var WMS_PAGES=[
     {key:'star_outorder',file:'star_outorder.html',label:'출고 지시', floor:2, gate:true},
     {key:'star_instock', file:'star_instock.html', label:'입고 관리', floor:2, gate:true},
     {key:'star_picking', file:'star_picking.html', label:'피킹 (송장정렬)', floor:2, gate:true},
+    {key:'star_return',  file:'star_return.html',  label:'└ 스타 3PL 반품입고관리 (반품 스캔·이벗 반영)', floor:2, gate:true},
     {key:'star_extract', file:'star_extract.html', label:'데이터 추출', floor:2, gate:true},
     {key:'stock_check',       file:'stock_check.html',       label:'재고조사풀 (업체별 재고조사 모음)', floor:2, gate:true},
     {key:'stock_tales_minus', file:'stock_tales_minus.html', label:'└ 테일즈 마이너스재고 조정', floor:2, gate:true},
