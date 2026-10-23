@@ -362,7 +362,7 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
       <button class="btn btn-s" onclick="closeEditModal()" style="padding:.3rem .6rem">✕</button>
     </div>
     <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">
-      바코드·박스번호로 <strong>부분 검색</strong> → 각 행에서 <strong>재고수량·비고</strong>를 고치면 <strong style="color:var(--g)">조정 이력으로 안전하게 기록</strong>됩니다(원본 로그는 보존). 박스번호 자체를 바꾸려면 아래 「박스번호 일괄 변경」을 쓰세요.
+      바코드·박스번호로 <strong>부분 검색</strong> → 각 행에서 <strong>재고수량·비고</strong>를 고치면 <strong style="color:var(--g)">조정 이력으로 안전하게 기록</strong>됩니다(원본 로그는 보존). 입고 때 잘못 넣은 <strong>바코드·품명·브랜드·품번·컬러·사이즈·원산지·박스</strong>는 행의 <strong style="color:var(--y)">✏️ 정보</strong>로 개별 수정. 박스번호 자체를 통째로 바꾸려면 아래 「박스번호 일괄 변경」을 쓰세요.
     </p>
 
     <!-- 박스번호 일괄 변경 -->
@@ -382,6 +382,23 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
       <input id="editSearchInp" type="text" placeholder="바코드 또는 박스번호 (부분일치). 비우면 전체" oninput="renderEditResults()" style="flex:1;min-width:220px;background:#0a0d13;color:var(--tx);border:1px solid var(--g);border-radius:6px;padding:.5rem .7rem;font-size:.88rem;font-family:var(--mo)">
       <button class="btn btn-g" onclick="renderEditResults()" style="padding:.45rem .9rem">🔍 조회</button>
       <span id="editSearchMsg" style="font-size:.72rem;color:var(--mu);font-family:var(--mo)"></span>
+    </div>
+
+    <!-- 상품 정보 수정 (행의 ✏️ 정보 → 열림) -->
+    <div id="infoEditPanel" style="display:none;background:var(--s2);border:1px solid var(--y);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.45rem">
+        <div style="font-size:.8rem;font-weight:800;color:var(--y)">✏️ 상품 정보 수정 — <span id="infoEditTitle" style="font-family:var(--mo)"></span></div>
+        <button class="btn btn-s" onclick="closeInfoEdit()" style="padding:.2rem .5rem;font-size:.72rem">닫기</button>
+      </div>
+      <div id="infoEditFields" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.45rem .6rem"></div>
+      <label style="display:flex;align-items:center;gap:.35rem;font-size:.76rem;color:var(--tx);margin-top:.55rem;cursor:pointer">
+        <input type="checkbox" id="infoEditAllBox" checked onchange="updateInfoEditScope()">
+        박스 말고 나머지 정보(바코드·품명 등)는 <strong>같은 바코드의 다른 박스 기록에도</strong> 똑같이 적용
+      </label>
+      <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap">
+        <button class="btn btn-y" onclick="saveInfoEdit()" style="padding:.42rem .95rem">💾 정보 저장</button>
+        <span id="infoEditMsg" style="font-size:.72rem;color:var(--mu);font-family:var(--mo)"></span>
+      </div>
     </div>
 
     <!-- 결과 (편집) -->
@@ -1376,6 +1393,7 @@ function openEditModal(){
 }
 function closeEditModal(){
   var m = document.getElementById('editModal'); if (m) m.style.display = 'none';
+  closeInfoEdit();
 }
 /* (박스,바코드) 단위 결과 — 검색(부분일치)으로 필터, 각 행 편집 가능 */
 function renderEditResults(){
@@ -1396,7 +1414,7 @@ function renderEditResults(){
   }
   var head = '<table class="tbl" style="font-size:.8rem"><thead><tr>'+
     '<th>박스번호</th><th>바코드</th><th>품명</th><th style="text-align:right">현재고</th>'+
-    '<th style="width:96px">재고수정</th><th style="width:150px">비고(메모)</th><th style="width:56px"></th>'+
+    '<th style="width:96px">재고수정</th><th style="width:150px">비고(메모)</th><th style="width:120px"></th>'+
     '</tr></thead><tbody>';
   var body = editRows.map(function(g, i){
     var m = g.meta || {};
@@ -1410,7 +1428,8 @@ function renderEditResults(){
       '<td class="cell-stock" style="text-align:right">'+g.stock+'</td>'+
       '<td><input id="eq_'+i+'" type="number" placeholder="'+g.stock+'" style="width:82px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.3rem .4rem;font-size:.82rem;font-family:var(--mo);text-align:right"></td>'+
       '<td><input id="en_'+i+'" type="text" placeholder="메모" style="width:140px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.3rem .4rem;font-size:.8rem"></td>'+
-      '<td><button class="btn btn-g" onclick="saveRowEdit('+i+')" style="padding:.28rem .55rem;font-size:.74rem">저장</button></td>'+
+      '<td style="white-space:nowrap"><button class="btn btn-g" onclick="saveRowEdit('+i+')" style="padding:.28rem .55rem;font-size:.74rem">저장</button> '+
+        '<button class="btn btn-y" onclick="openInfoEdit('+i+')" title="바코드·품명·브랜드·품번·컬러·사이즈·원산지·박스 수정" style="padding:.28rem .5rem;font-size:.74rem">✏️ 정보</button></td>'+
     '</tr>';
   }).join('');
   box.innerHTML = head + body + '</tbody></table>';
@@ -1473,6 +1492,115 @@ function renameBox(){
     say('✅ '+targets.length+'건 변경 완료 — '+oldB+' → '+newB);
     setMsg('m0','ok','✅ 박스번호 변경: '+oldB+' → '+newB+' ('+targets.length+'건)');
     document.getElementById('boxRenameOld').value=''; document.getElementById('boxRenameNew').value='';
+  }).catch(function(err){ say('❌ 실패: '+(err&&err.message||err)); });
+}
+
+/* 상품 정보 개별 수정 — 입고 때 잘못 넣은 바코드·품명·브랜드·품번·컬러·사이즈·원산지·박스를 로그째 고침.
+   박스는 그 (박스,바코드) 행의 기록만, 나머지는 체크 시 같은 바코드의 모든 박스 기록에 적용. 수량은 안 건드림. */
+var INFO_FIELDS = [
+  ['barcode','바코드'], ['altBarcode','대체바코드'], ['name','품명'], ['brand','브랜드'], ['code','품번'],
+  ['color','컬러'], ['size','사이즈'], ['origin','원산지'], ['box','박스']
+];
+var infoEditTarget = null;
+function openInfoEdit(i){
+  var g = editRows[i]; if (!g) return;
+  var m = g.meta || {};
+  var box = g.box === '(미지정)' ? '' : g.box;
+  var cur = {};
+  INFO_FIELDS.forEach(function(f){ cur[f[0]] = f[0]==='box' ? box : f[0]==='barcode' ? String(g.barcode||'') : String(m[f[0]]==null?'':m[f[0]]); });
+  infoEditTarget = { box: box, bc: normBarcode(g.barcode), cur: cur };
+  document.getElementById('infoEditTitle').textContent = (box||'(미지정)') + ' / ' + g.barcode;
+  document.getElementById('infoEditFields').innerHTML = INFO_FIELDS.map(function(f){
+    return '<label style="display:flex;flex-direction:column;gap:.15rem;font-size:.7rem;color:var(--mu)">'+f[1]+
+      '<input id="ie_'+f[0]+'" type="text" placeholder="(비어 있음)" oninput="markInfoEdit(this,\''+f[0]+'\')" '+
+      'style="background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.35rem .5rem;font-size:.82rem;'+
+      (f[0]==='barcode'||f[0]==='altBarcode'||f[0]==='box'?'font-family:var(--mo)':'')+'"></label>';
+  }).join('');
+  INFO_FIELDS.forEach(function(f){ document.getElementById('ie_'+f[0]).value = cur[f[0]]; });
+  document.getElementById('infoEditAllBox').checked = true;
+  var p = document.getElementById('infoEditPanel'); p.style.display = 'block';
+  updateInfoEditScope();
+  p.scrollIntoView({ block:'nearest' });
+}
+function closeInfoEdit(){
+  infoEditTarget = null;
+  var p = document.getElementById('infoEditPanel'); if (p) p.style.display = 'none';
+}
+/* 바뀐 칸은 노란 테두리 */
+function markInfoEdit(el, k){
+  if (!infoEditTarget) return;
+  el.style.borderColor = String(el.value).trim() !== infoEditTarget.cur[k] ? 'var(--y)' : 'var(--br)';
+}
+/* 적용 대상 로그 — 박스 변경용(이 행)과 정보 변경용(체크 시 바코드 전체) */
+function infoEditScope(){
+  var t = infoEditTarget;
+  var rowLogs = logs.filter(function(lg){
+    return normBarcode(lg.barcode) === t.bc && ((lg.box==null?'':String(lg.box).trim()) === t.box);
+  });
+  var all = document.getElementById('infoEditAllBox').checked;
+  var infoLogs = all ? logs.filter(function(lg){ return normBarcode(lg.barcode) === t.bc; }) : rowLogs;
+  return { rowLogs: rowLogs, infoLogs: infoLogs, all: all };
+}
+function updateInfoEditScope(){
+  if (!infoEditTarget) return;
+  var s = infoEditScope();
+  document.getElementById('infoEditMsg').textContent =
+    '이 행 기록 '+s.rowLogs.length+'건' + (s.all && s.infoLogs.length !== s.rowLogs.length ? ' · 같은 바코드 전체 '+s.infoLogs.length+'건' : '');
+}
+function saveInfoEdit(){
+  var t = infoEditTarget; if (!t) return;
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  var msgEl = document.getElementById('infoEditMsg');
+  function say(x){ if (msgEl) msgEl.textContent = x; }
+  var nv = {}, changed = [];
+  INFO_FIELDS.forEach(function(f){
+    var v = String(document.getElementById('ie_'+f[0]).value||'').trim();
+    nv[f[0]] = v;
+    if (v !== t.cur[f[0]]) changed.push(f);
+  });
+  if (!changed.length) { say('⚠️ 바뀐 칸이 없습니다'); return; }
+  if (!nv.barcode) { say('⚠️ 바코드는 비울 수 없습니다'); return; }
+  var s = infoEditScope();
+  if (!s.rowLogs.length) { say('⚠️ 이 행의 기록을 찾지 못했습니다 — 다시 조회하세요'); return; }
+  var newBc = normBarcode(nv.barcode);
+  var merge = newBc !== t.bc && logs.some(function(lg){ return normBarcode(lg.barcode) === newBc; });
+
+  /* 로그 키별 바뀐 필드 */
+  var upd = {}, now = Date.now();
+  function put(lg, k, v){ (upd[lg.key] = upd[lg.key] || {})[k] = v; }
+  changed.forEach(function(f){
+    var list = f[0] === 'box' ? s.rowLogs : s.infoLogs;
+    list.forEach(function(lg){ put(lg, f[0], nv[f[0]]); });
+  });
+  var keys = Object.keys(upd);
+  var cmsg = '✏️ 상품 정보 수정\n\n• 박스: '+(t.box||'(미지정)')+'\n• 바코드: '+t.cur.barcode+'\n\n' +
+    changed.map(function(f){ return '• '+f[1]+': '+(t.cur[f[0]]||'(빈칸)')+' → '+(nv[f[0]]||'(빈칸)'); }).join('\n') +
+    '\n\n적용: '+(s.all ? '박스는 이 행만, 나머지는 같은 바코드 모든 박스' : '이 행(박스)만') + ' — 기록 '+keys.length+'건' +
+    (merge ? '\n\n⚠ 새 바코드 '+nv.barcode+' 는 이미 재고에 있습니다 — 그 바코드와 재고가 합쳐집니다.' : '') +
+    '\n\n수량은 그대로, 기록의 정보만 바뀝니다. 진행할까요?';
+  if (!confirm(cmsg)) return;
+  say('저장 중...');
+  var chunks = [];
+  for (var c=0; c<keys.length; c+=400) chunks.push(keys.slice(c, c+400));
+  var chain = Promise.resolve();
+  chunks.forEach(function(part){
+    chain = chain.then(function(){
+      var u = {};
+      part.forEach(function(k){
+        Object.keys(upd[k]).forEach(function(f){ u[k+'/'+f] = upd[k][f]; });
+        u[k+'/infoEditTs'] = now;
+      });
+      return dbRef.update(u);
+    });
+  });
+  chain.then(function(){
+    var sum = changed.map(function(f){ return f[1]; }).join('·');
+    setMsg('m0','ok','✅ 정보 수정: '+t.cur.barcode+' — '+sum+' ('+keys.length+'건)');
+    markSessionBarcode(nv.barcode);
+    closeInfoEdit();
+    /* 바코드가 바뀌었으면 검색칸도 새 바코드로 */
+    if (newBc !== t.bc) document.getElementById('editSearchInp').value = nv.barcode;
+    if (isEditModalOpen()) renderEditResults();
   }).catch(function(err){ say('❌ 실패: '+(err&&err.message||err)); });
 }
 
