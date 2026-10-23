@@ -252,6 +252,9 @@ function setHelper(ok, login){
   $('hTxt').textContent = ok ? (login === false ? '이벗 로그아웃됨 — 다시 로그인' : '이벗 도우미 연결됨') : '이벗 도우미 연결 안 됨';
   if (ok && login !== false && CUR && RECS[CUR] && RECS[CUR].look === 'wait') lookup(CUR);
   renderList(); autoLook();
+  /* 휴대폰 화면이 「상품을 채워 줄 PC 가 있는지」 알 수 있게 연결 신호를 남김 (ping 마다 = 30초마다) */
+  /* 도우미가 없는 다른 PC 가 신호를 덮지 않게, 도우미와 이야기한 PC 만 씀 (끊기면 신호가 90초 뒤 낡아서 휴대폰이 알아챔) */
+  if (base && ok) base.child('helperBeat').set({ ok: !!ok && login !== false, at: firebase.database.ServerValue.TIMESTAMP, by: byName() }).catch(function(){});
 }
 function ping(){ return hcall('ping', {}, 8000).then(function(r){ setHelper(true, r.login); return r; }, function(){ setHelper(false); }); }
 setInterval(function(){ if (H.win) ping(); }, 30000);

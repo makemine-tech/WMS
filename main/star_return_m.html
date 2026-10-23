@@ -92,6 +92,7 @@
     <div style="display:flex;gap:6px;align-items:center"><span class="os" id="osTag"></span><a href="star_return.html" class="who" style="color:var(--muted)">PC 화면</a></div>
   </div>
 
+  <div id="pcWarn" class="banner yel" style="display:none;margin:0 0 10px"></div>
   <div id="startBox">
     <button class="big g" onclick="openScan('rno')">📷 반품 송장 스캔</button>
     <div class="man"><input id="rnoIn" inputmode="numeric" placeholder="또는 송장번호 직접 입력" autocomplete="off"><button onclick="manualRno()">확인</button></div>
@@ -146,6 +147,18 @@ var toastT = null;
 function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2400); }
 function byName(){ return (me && (me.email || '').split('@')[0]) || ''; }
 function vib(ms){ try { navigator.vibrate && navigator.vibrate(ms); } catch(e){} }
+
+/* ── 이벗 도우미가 연결된 PC 가 있는지 — PC 반품입고관리가 30초마다 남기는 helperBeat 로 판단 (90초 넘게 없으면 없음) ── */
+var BEAT = null, SKEW = 0;
+function pcAlive(){ return !!(BEAT && BEAT.ok && Date.now() + SKEW - (BEAT.at || 0) < 90000); }
+function showPcWarn(){
+  var w = $('pcWarn'), alive = pcAlive();
+  w.style.display = alive || !base ? 'none' : 'block';
+  w.innerHTML = '⚠️ 이벗 도우미가 연결된 PC 가 없습니다<div style="font-weight:400;font-size:13px;margin-top:3px">스캔·사진·메모는 그대로 됩니다. 다만 <b>상품 목록</b>은 PC 반품입고관리에서 이벗 도우미를 연결해야 채워집니다'
+    + (BEAT && BEAT.at ? ' (마지막 연결 ' + hm(BEAT.at) + (BEAT.by ? ' · ' + esc(BEAT.by) : '') + ')' : '') + '.</div>';
+}
+function typing(){ var a = document.activeElement; return !!(a && a.tagName === 'TEXTAREA'); }   /* 메모 쓰는 중엔 다시 그리지 않음 */
+setInterval(function(){ showPcWarn(); if (CUR && !typing()) render(); }, 15000);
 
 /* ── 기록 쓰기: 바뀐 칸만 ── */
 function upd(r, fields){
@@ -204,7 +217,8 @@ function startRno(no){
     if (sn.exists()){ RECS[no] = sn.val(); openRec(no); toast('예전에 스캔한 송장입니다 — 이어서 봅니다'); return; }
     r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: 'busy', items: [], extras: [], dev: 'm-' + OS };
     RECS[no] = r;
-    return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40); trace(no); });
+    return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40); trace(no);
+      if (!pcAlive()) toast('⚠️ 이벗 도우미가 연결된 PC 가 없습니다 — 상품 목록은 PC 에서 도우미를 연결하면 채워집니다'); });
   });
 }
 function trace(no){
@@ -250,7 +264,9 @@ function render(lastCode){
     + '<span>상태</span><b style="font-family:inherit"><span class="st s-' + st.k + '">' + st.t + '</span></b></div>';
   noteHits(r).forEach(function(x){ h += '<div class="banner yel">📌 사전 특이사항 ' + x.t + ' — ' + esc(x.n.memo || '') + '</div>'; });
   if (r.trace === 'err') h += '<div class="banner red">우체국 원송장 조회 실패: ' + esc(r.traceErr || '') + '</div>';
-  if (r.look === 'wait' || r.look === 'busy') h += '<div class="banner blu">⏳ PC 가 이벗에서 원송장 주문 상품을 찾는 중… <div style="font-weight:400;font-size:12.5px;margin-top:2px">이벗 도우미가 연결된 PC 반품입고관리가 켜져 있어야 합니다. 그동안 사진·메모는 먼저 하셔도 됩니다.</div></div>';
+  if (r.look === 'wait' || r.look === 'busy') h += pcAlive()
+    ? '<div class="banner blu">⏳ PC 가 이벗에서 원송장 주문 상품을 찾는 중… <div style="font-weight:400;font-size:12.5px;margin-top:2px">보통 몇 초 걸립니다. 그동안 사진·메모는 먼저 하셔도 됩니다.</div></div>'
+    : '<div class="banner yel">⚠️ 이벗 도우미가 연결된 PC 가 없어 상품 목록을 아직 못 불러옵니다<div style="font-weight:400;font-size:12.5px;margin-top:2px">PC 반품입고관리에서 이벗 도우미를 연결하면 자동으로 채워집니다. 사진·메모는 먼저 하셔도 됩니다.</div></div>';
   if (r.look === 'err') h += '<div class="banner red">이벗 주문 조회 실패: ' + esc(r.lookErr || '') + '</div>';
   j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + '</div>'; });
   if (r.state === 'done') h += '<div class="banner grn">✔ 이벗 반영 완료</div>';
@@ -346,6 +362,8 @@ WMSync.onAuth(function(st){
     if (!(a && a.tagName === 'TEXTAREA')) render(); else renderRecent();
   });
   base.child('notes').on('value', function(s){ NOTES = s.val() || {}; if (CUR) render(); });
+  db.ref('.info/serverTimeOffset').on('value', function(s){ SKEW = s.val() || 0; });
+  base.child('helperBeat').on('value', function(s){ BEAT = s.val(); showPcWarn(); if (CUR && !typing()) render(); });
 });
 </script>
 </body>
