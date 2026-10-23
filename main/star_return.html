@@ -109,7 +109,8 @@
   .mdl-grid label { font-size:.72rem; font-weight:800; color:var(--muted); display:flex; flex-direction:column; gap:.25rem; }
   .mdl-box input:not([type=checkbox]), .mdl-box select { background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.45rem .6rem; font-size:.85rem; }
   .mdl-box input.eGot { width:5rem; }
-  .btn.mobbtn { background:#0f1d33; border-color:#1e3a66; color:#bfdbfe; }
+  .btn.logo { width:38px; height:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+  .btn.logo svg { width:22px; height:22px; display:block; }
   .phs { display:flex; gap:.4rem; flex-wrap:wrap; }
   .phs img { width:96px; height:96px; object-fit:cover; border-radius:8px; border:1px solid var(--border); display:block; }
   .mob { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start; }
@@ -133,8 +134,8 @@
     </div>
     <div class="hdr-r">
       <div class="helper" title="이벗에 로그인된 크롬 탭에서 「이벗 반품 도우미」를 눌러야 주문 조회·이벗 반영이 됩니다"><span class="dot" id="hDot"></span><span id="hTxt">이벗 도우미 연결 안 됨</span></div>
-      <button class="btn mobbtn" onclick="showMobile('android')">📱 모바일 안드로이드</button>
-      <button class="btn mobbtn" onclick="showMobile('ios')">📱 모바일 아이폰</button>
+      <button class="btn logo" onclick="showMobile('android')" title="휴대폰 반품 검수 — 안드로이드" aria-label="모바일 안드로이드"><svg viewBox="0 0 24 24"><path fill="#3DDC84" d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.66-.38l-1.86 3.22A11.4 11.4 0 0 0 12 8.1c-1.77 0-3.43.39-4.92 1.04L5.22 5.92a.38.38 0 0 0-.66.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/></svg></button>
+      <button class="btn logo" onclick="showMobile('ios')" title="휴대폰 반품 검수 — 아이폰" aria-label="모바일 아이폰"><svg viewBox="0 0 24 24"><path fill="#f5f5f7" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg></button>
       <button class="btn" onclick="openEbut()">이벗 열기</button>
       <a class="back" href="star_picking.html">‹ 피킹으로</a>
     </div>
@@ -186,6 +187,7 @@
       <button class="btn" id="lookAllBtn" onclick="lookAll()">🔎 주문 조회 대기 <span id="nLook">0</span>건 찾기</button>
       <button class="btn p" id="pushBtn" onclick="pushAll()">📤 이벗에 반영 (<span id="nReady">0</span>건)</button>
       <button class="btn" onclick="downloadXlsx()">📥 엑셀</button>
+      <button class="btn" id="pdfBtn" onclick="downloadReport()">📄 선택 PDF 보고서</button>
       <button class="btn r" onclick="delSelected()">🗑 선택 삭제 (<span id="nSel">0</span>)</button>
     </div>
     <div class="chips" style="margin-bottom:.5rem" id="perChips"></div>
@@ -644,6 +646,95 @@ function downloadXlsx(){
     var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '반품입고');
     var d = new Date(); XLSX.writeFile(wb, '스타_반품입고_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.xlsx');
   });
+}
+
+/* ── 체크한 건 PDF 보고서 (대표님 2026-10-24: 엑셀 표에 사진이 붙은 모양) ──
+   A4 세로 한 장 = 1240×1754 캔버스(150dpi)에 직접 그려서 jsPDF 에 그림으로 붙임 — 한글 글꼴을 PDF 에 넣지 않아도 됨.
+   반품 한 건 = 머리줄(반품송장·원송장·수령자·검수·상태) + 상품 표 + 특이사항 + 사진(한 줄 4장). 사진 줄은 쪽을 넘겨 이어짐. */
+function loadJsPdf(){
+  return window.jspdf ? Promise.resolve() : new Promise(function(res, rej){
+    var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.onload = res; s.onerror = function(){ rej(new Error('PDF 프로그램을 못 불러왔습니다')); }; document.head.appendChild(s); });
+}
+function loadImg(url){
+  return new Promise(function(res){ var i = new Image(); i.crossOrigin = 'anonymous'; i.onload = function(){ res(i); }; i.onerror = function(){ res(null); }; i.src = url; });
+}
+function downloadReport(){
+  var ks = Object.keys(SEL).filter(function(k){ return RECS[k]; }).sort(function(a, b){ return RECS[a].at - RECS[b].at; });
+  if (!ks.length){ toast('PDF 로 받을 줄을 먼저 체크하세요'); return; }
+  var btn = $('pdfBtn'); btn.disabled = true; toast('PDF 보고서 만드는 중… (' + ks.length + '건)');
+  var imgs = {};
+  var urls = []; ks.forEach(function(k){ var ph = PHOTOS[k] || {}; Object.keys(ph).forEach(function(id){ urls.push(ph[id].url); }); });
+  Promise.all([loadJsPdf(), document.fonts ? Promise.all([document.fonts.load('400 20px "Noto Sans KR"'), document.fonts.load('700 20px "Noto Sans KR"')]) : null]
+    .concat(urls.map(function(u){ return loadImg(u).then(function(i){ imgs[u] = i; }); })))
+  .then(function(){
+    var W = 1240, H = 1754, M = 64, CW = W - M * 2, F = '"Noto Sans KR", "Malgun Gothic", sans-serif';
+    var pages = [], c, g, y;
+    function newPage(){
+      c = document.createElement('canvas'); c.width = W; c.height = H; g = c.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.textBaseline = 'middle';
+      g.fillStyle = '#111'; g.font = '700 30px ' + F; g.fillText('스타 3PL 반품입고 보고서', M, M + 10);
+      g.fillStyle = '#666'; g.font = '400 17px ' + F; var d = new Date();
+      var t = '출력 ' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ' · ' + byName() + ' · ' + ks.length + '건';
+      g.textAlign = 'right'; g.fillText(t, W - M, M + 12); g.textAlign = 'left';
+      g.strokeStyle = '#111'; g.lineWidth = 2; g.beginPath(); g.moveTo(M, M + 36); g.lineTo(W - M, M + 36); g.stroke();
+      y = M + 56; pages.push(c);
+    }
+    function room(h){ if (y + h > H - M - 30) newPage(); }
+    function wrap(text, w, font){ g.font = font; var out = [], line = ''; String(text || '').split('').forEach(function(ch){ if (g.measureText(line + ch).width > w && line){ out.push(line); line = ch; } else line += ch; }); if (line) out.push(line); return out.length ? out : ['']; }
+    function cellRow(cols, ws, opt){   /* 엑셀 표 한 줄: 칸 글자는 줄바꿈, 줄 높이는 가장 긴 칸에 맞춤 */
+      opt = opt || {}; var font = (opt.bold ? '700 ' : '400 ') + (opt.size || 18) + 'px ' + F, lh = (opt.size || 18) + 8;
+      var lines = cols.map(function(t, i){ return wrap(t, ws[i] - 16, font); }), h = Math.max.apply(null, lines.map(function(l){ return l.length; })) * lh + 14;
+      room(h); var x = M;
+      cols.forEach(function(t, i){
+        g.fillStyle = opt.bg || '#fff'; g.fillRect(x, y, ws[i], h);
+        g.strokeStyle = '#bfc5cf'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, ws[i], h);
+        g.fillStyle = (opt.colors && opt.colors[i]) || opt.color || '#111'; g.font = font;
+        lines[i].forEach(function(l, j){ g.fillText(l, x + 8, y + 7 + lh / 2 + j * lh); });
+        x += ws[i]; });
+      y += h;
+    }
+    newPage();
+    ks.forEach(function(k, n){
+      var r = RECS[k], j = judge(r), st = stOf(r);
+      room(260); if (n) y += 22;
+      g.fillStyle = '#1d4ed8'; g.font = '700 21px ' + F; g.fillText((n + 1) + '. 반품 송장 ' + r.rno, M, y + 14); y += 34;
+      var hw = [CW * .22, CW * .22, CW * .16, CW * .24, CW * .16];
+      cellRow(['반품 송장', '원송장', '수령자', '검수', '상태'], hw, { bold: true, size: 16, bg: '#eef1f6', color: '#444' });
+      cellRow([r.rno, (r.orig || '-') + (r.self ? ' (반송)' : ''), rmanOf(r) || '-', hm(r.at) + ' ' + (r.by || ''), st.t + (r.ebut && r.ebut.at ? ' ' + hm(r.ebut.at) : '')], hw, { size: 17 });
+      var iw = [CW * .36, CW * .11, CW * .2, CW * .1, CW * .1, CW * .13];
+      cellRow(['상품명', '옵션', '바코드', '주문', '반품', '정상/불량'], iw, { bold: true, size: 16, bg: '#eef1f6', color: '#444' });
+      var lines = (r.items || []).filter(function(it){ return it.got > 0; });
+      lines.forEach(function(it){ var bad = it.q === '2';
+        cellRow([it.name, it.opt || '', it.nicn || '', String(it.qty), String(it.got), bad ? '불량' : '정상'], iw, { size: 17, colors: [null, null, null, null, null, bad ? '#dc2626' : '#15803d'] }); });
+      (r.extras || []).forEach(function(x){ cellRow(['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw, { size: 17, colors: ['#dc2626', null, null, null, null, '#dc2626'] }); });
+      if (!lines.length && !(r.extras || []).length) cellRow(['반품 상품 없음', '', '', '', '', ''], iw, { size: 17, color: '#888' });
+      var notes = j.block.concat(j.info).join(' / ');
+      cellRow(['특이사항', notes || '-'], [CW * .14, CW * .86], { size: 17, colors: ['#444', notes ? '#b45309' : '#888'] });
+      /* 사진: 한 줄 4장, 정사각 잘라 넣기 */
+      var ph = PHOTOS[k] || {}, pk = Object.keys(ph).sort(function(a, b){ return (ph[a].at || 0) - (ph[b].at || 0); });
+      if (!pk.length){ cellRow(['사진', '없음'], [CW * .14, CW * .86], { size: 17, colors: ['#444', '#888'] }); return; }
+      var gap = 12, sz = Math.floor((CW - gap * 3) / 4);
+      room(34 + sz); g.fillStyle = '#444'; g.font = '700 16px ' + F; g.fillText('사진 ' + pk.length + '장', M, y + 16); y += 32;
+      for (var i = 0; i < pk.length; i += 4){
+        room(sz + gap);
+        pk.slice(i, i + 4).forEach(function(id, c2){
+          var im = imgs[ph[id].url], x = M + c2 * (sz + gap);
+          g.fillStyle = '#f1f3f6'; g.fillRect(x, y, sz, sz);
+          if (im){ var s = Math.min(im.naturalWidth, im.naturalHeight); g.drawImage(im, (im.naturalWidth - s) / 2, (im.naturalHeight - s) / 2, s, s, x, y, sz, sz); }
+          else { g.fillStyle = '#888'; g.font = '400 16px ' + F; g.fillText('사진을 못 불러옴', x + 14, y + sz / 2); }
+          g.strokeStyle = '#bfc5cf'; g.strokeRect(x + .5, y + .5, sz, sz);
+        });
+        y += sz + gap;
+      }
+    });
+    pages.forEach(function(p, i){ var gg = p.getContext('2d'); gg.fillStyle = '#888'; gg.font = '400 16px ' + F; gg.textAlign = 'center'; gg.textBaseline = 'middle'; gg.fillText((i + 1) + ' / ' + pages.length, W / 2, H - M / 2); });
+    var pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+    pages.forEach(function(p, i){ if (i) pdf.addPage(); pdf.addImage(p.toDataURL('image/jpeg', 0.86), 'JPEG', 0, 0, 210, 297); });
+    var d = new Date(); pdf.save('스타_반품입고_보고서_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + ks.length + '건.pdf');
+    toast('✔ PDF 보고서 ' + pages.length + '쪽 내려받음');
+  }).catch(function(e){ toast('PDF 만들기 실패: ' + (e.message || e)); console.error(e); })
+  .then(function(){ btn.disabled = false; });
 }
 
 /* ── 시작 ── */
