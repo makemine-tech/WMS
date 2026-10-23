@@ -51,7 +51,7 @@
       BASIC_FDATE:'', matInfoYn:'N', ORDLIST_NO1_MULTI:'', ORDLIST_RMAN_MULTI:'', BASIC_NAME:'', gridReload:'true', _search:'false',
       rows:'100', page:'1', sidx:'ordlist_code', sord:'asc' };
     return fetch('/cs/cs200main_jdata?' + new URLSearchParams(p), { credentials: 'same-origin' }).then(function(r){ return r.text(); }).then(function(t){
-      var j; try { j = JSON.parse(t); } catch(e){ throw new Error('LOGIN'); }   /* JSON 이 아니면 로그아웃 화면 */
+      var j; try { j = JSON.parse(t); } catch(e){ throw new Error(/</.test(t) ? 'LOGIN' : '이벗 검색 응답이 비어 있음'); }   /* HTML 이면 로그아웃 화면 */
       return (j.rows || []).filter(function(r){ return String(r.ordlist_dno || '').replace(/<[^>]+>/g, '').replace(/\D/g, '') === dno; });
     });
   }
@@ -186,8 +186,9 @@
   }
 
   function cmdPing(){
-    return fetch('/cs/cs200main_jdata?' + new URLSearchParams({ DATE_GBN: 'ord_date', DATE1: ymd(new Date()), DATE2: ymd(new Date()), rows: '1', page: '1', _search: 'false' }), { credentials: 'same-origin' })
-      .then(function(r){ return r.text(); }).then(function(t){ try { JSON.parse(t); return { ok: true, login: true, ver: VER }; } catch(e){ return { ok: true, login: false, ver: VER }; } });
+    /* 없는 송장으로 정식 검색 — 칸이 빠지면 이벗이 빈 응답을 줘서 로그인 여부를 못 가림 */
+    return search('0000000000', ymd(new Date()), ymd(new Date())).then(function(){ return { ok: true, login: true, ver: VER }; },
+      function(e){ return { ok: true, login: e.message !== 'LOGIN', ver: VER }; });
   }
 
   var busy = 0;
