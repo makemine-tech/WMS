@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24b';
+  var VER = '2026-10-24c';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -158,6 +158,13 @@
         tot += q;
       }); } catch(err){ f.remove(); throw err; }
       if (Object.keys(used).length !== lines.length){ f.remove(); throw new Error('팝업 상품 줄과 맞지 않는 상품이 있습니다'); }
+      /* 입고창고(창고·로케이션 관리 회원사는 필수) = 로케이션 값 「창고,존,로케이션」의 창고 — 스타4물류(김포) 263 (2026-10-24 첫 실반영이 「입고창고를 선택하세요」로 멈춰서 추가) */
+      var wahSel = d.getElementById('inoutstock_wah');
+      if (wahSel){
+        var wah = String(locas.in || locas.bad || '').split(',')[0];
+        if (!wah || ![].some.call(wahSel.options, function(o){ return o.value === wah; })){ f.remove(); throw new Error('입고창고(' + (wah || '?') + ')를 팝업 목록에서 못 찾음'); }
+        wahSel.value = wah;
+      }
       fm.RETURN_DNO.value = rno;
       fm.RETURN_DOFC.value = '142';                                         /* 우체국택배 */
       fm.RETURN_RECO.value = lines.some(function(l){ return l.q === '2'; }) ? '402' : '401';
