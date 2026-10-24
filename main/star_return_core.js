@@ -64,7 +64,7 @@ function judge(r){
     else if (!(r.items || []).length && st.every(function(o){ return o.ret !== '-'; })) block.push('이벗에서 이미 반품처리됨 (' + st.map(function(o){ return o.ret; }).join(',') + ')');
     else if (!(r.items || []).some(function(it){ return it.got > 0; })) block.push('반품 상품 스캔 없음');
   }
-  if ((r.extras || []).length) info.push('반품 대상 아닌 상품 ' + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
+  if ((r.extras || []).length) info.push((CFG.db === 'cargo' && !(r.items || []).length ? '원송장 전 스캔 상품 ' : '반품 대상 아닌 상품 ') + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
   (r.items || []).forEach(function(it){ if (it.got > it.qty) info.push('주문보다 많음: ' + it.name); });
   if ((r.items || []).some(function(it){ return it.got > 0 && it.got < it.qty; }) || ((r.items || []).some(function(it){ return !it.got; }) && (r.items || []).some(function(it){ return it.got > 0; }))) info.push('부분 반품');
   if (r.self) info.push('반송 (원송장 = 반품송장)');
