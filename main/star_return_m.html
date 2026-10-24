@@ -141,7 +141,12 @@
   #scanOv.on { display:flex; }
   #scanOv.okf { border:8px solid var(--grn); } #scanOv.badf { border:8px solid var(--red); }
   #reader { flex:1; width:100%; min-height:0; }
+  #reader { position:relative; overflow:hidden; background:#000; }
   #reader video { object-fit:cover; }
+  #reader > video { position:absolute; inset:0; width:100%; height:100%; }
+  #reader .guide { position:absolute; left:4%; right:4%; top:30%; bottom:30%; pointer-events:none; }
+  #reader .guide i { position:absolute; inset:0; border:3px solid var(--yel); border-radius:16px; box-shadow:0 0 0 2000px rgba(0,0,0,.35); }
+  #torchBtn.on { background:var(--yel); color:var(--ink); }
   .sc-top { padding:12px 14px; padding-top:calc(12px + env(safe-area-inset-top)); display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--yel); font-weight:900; font-size:20px; }
   .sc-top .btn { width:auto; min-height:56px; padding:0 18px; font-size:17px; }
   .sc-msg { padding:12px 16px; text-align:center; font-size:20px; font-weight:700; color:#fff; min-height:72px; line-height:1.4; }
@@ -453,7 +458,7 @@
   </div>
 
   <div id="scanOv">
-    <div class="sc-top"><span id="scTitle">반품 송장 찍기</span><button class="btn" onclick="closeScan()">닫기</button></div>
+    <div class="sc-top"><span id="scTitle">반품 송장 찍기</span><span style="display:flex;gap:8px"><button class="btn" id="torchBtn" style="display:none" onclick="toggleTorch()">손전등</button><button class="btn" onclick="closeScan()">닫기</button></span></div>
     <div id="reader"></div>
     <div class="sc-msg" id="scMsg">바코드를 네모 안에 맞춰 주세요</div>
     <div class="sc-bot" id="scBot"></div>
@@ -470,6 +475,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<!-- 아이폰·PC 용 빠른 바코드 엔진(zxing-wasm) — 브라우저에 BarcodeDetector 가 없을 때만 채움 (안드로이드 크롬은 자체 엔진) -->
+<script src="https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/polyfill.js"></script>
 <script src="wms_sync.js"></script>
 <script src="star_return_core.js"></script>
 <script>
@@ -548,17 +555,77 @@ function upd(r, fields){
 var scanner = null, scanMode = null, lastCode = '', lastAt = 0;
 var FORMATS = typeof Html5QrcodeSupportedFormats !== 'undefined' ? [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13,
   Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E, Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.CODABAR, Html5QrcodeSupportedFormats.QR_CODE] : [];
+/* ── 빠른 바코드 읽기 (대표님 2026-10-24: 아이폰은 거의 안 읽힘) ──
+   BarcodeDetector 로 직접 읽음 — 안드로이드 크롬은 휴대폰 자체 엔진(구글), 아이폰·PC 는 zxing-wasm(C++ 엔진, 위 polyfill 스크립트가 채워 줌)
+   카메라는 고화질(1920×1080)·연속 초점으로 받고, 가운데 네모 부분만 잘라 1초에 ~10번 읽음. 안 되면 예전 html5-qrcode 로 */
+var BD = null, camStream = null, camLoop = 0, camBusy = false, camTorch = false;
+var BD_FORMATS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code'];
+function bdMake(){
+  if (BD) return Promise.resolve(BD);
+  if (typeof BarcodeDetector === 'undefined') return Promise.reject(new Error('no BarcodeDetector'));
+  return Promise.resolve(BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : BD_FORMATS).then(function(sup){
+    var fm = BD_FORMATS.filter(function(f){ return sup.indexOf(f) >= 0; });
+    BD = new BarcodeDetector({ formats: fm.length ? fm : BD_FORMATS }); return BD;
+  });
+}
+/* 아이폰: 첫 스캔이 늦지 않게 엔진(wasm)을 미리 받아 둠 */
+setTimeout(function(){ bdMake().then(function(d){ var c = document.createElement('canvas'); c.width = c.height = 8; return d.detect(c); }).catch(function(){}); }, 1500);
+function camStart(){
+  var host = $('reader');
+  host.innerHTML = '<video id="camV" playsinline muted autoplay></video><div class="guide"><i></i></div>';
+  var v = $('camV');
+  return navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } }).then(function(st){
+    camStream = st; v.srcObject = st;
+    var tr = st.getVideoTracks()[0], cap = tr.getCapabilities ? tr.getCapabilities() : {};
+    if (cap.focusMode && cap.focusMode.indexOf('continuous') >= 0) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function(){});
+    $('torchBtn').style.display = cap.torch ? 'inline-flex' : 'none';
+    return v.play();
+  }).then(function(){ return bdMake(); }).then(function(det){
+    var c = document.createElement('canvas'), g = c.getContext('2d', { willReadFrequently: true }), last = 0;
+    var tick = function(t){
+      if (!camStream) return;
+      camLoop = requestAnimationFrame(tick);
+      if (camBusy || t - last < 90 || !v.videoWidth) return;
+      last = t; camBusy = true;
+      /* 화면 가운데 가로로 긴 네모(가로 92% · 세로 40%) 부분만 원래 화질로 잘라서 읽음 */
+      var vw = v.videoWidth, vh = v.videoHeight, cw = Math.round(vw * .92), ch = Math.round(vh * .4);
+      c.width = cw; c.height = ch; g.drawImage(v, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, cw, ch);
+      det.detect(c).then(function(rs){ camBusy = false; if (rs && rs.length && camStream) onCode(rs[0].rawValue); }, function(){ camBusy = false; });
+    };
+    camLoop = requestAnimationFrame(tick);
+  });
+}
+function camStop(){
+  cancelAnimationFrame(camLoop); camBusy = false; camTorch = false;
+  if (camStream){ camStream.getTracks().forEach(function(t){ t.stop(); }); camStream = null; }
+  var v = $('camV'); if (v) v.srcObject = null;
+}
+function toggleTorch(){
+  if (!camStream) return; camTorch = !camTorch;
+  camStream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: camTorch }] }).catch(function(){ toast('이 휴대폰은 손전등을 켤 수 없습니다'); });
+  $('torchBtn').classList.toggle('on', camTorch);
+}
 function openScan(mode){
-  if (typeof Html5Qrcode === 'undefined'){ toast('바코드 읽기 프로그램을 못 불러왔습니다 — 인터넷 확인'); return; }
   scanMode = mode; lastCode = ''; lastAt = 0;
   $('scTitle').textContent = mode === 'rno' ? '반품 송장 찍기' : '상품 찍기 · 계속';
   $('scMsg').innerHTML = mode === 'rno' ? '송장 바코드를 네모 안에 맞춰 주세요' : '상품 바코드를 하나씩 비추면 자동으로 셉니다';
   renderScanBot();
   $('scanOv').classList.add('on');
+  var fail = function(e){ closeScan(); toast('카메라를 못 열었습니다 — ' + (OS === 'ios' ? '설정 > Safari > 카메라 「허용」' : '주소창 왼쪽 자물쇠 > 카메라 「허용」') + ' 후 다시'); console.error(e); };
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && typeof BarcodeDetector !== 'undefined'){
+    camStart().catch(function(e){ if (e && /NotAllowed|NotFound|NotReadable|Overconstrained|Security/.test(e.name || '')) fail(e); else { camStop(); oldScan(fail); } });
+    return;
+  }
+  oldScan(fail);
+}
+/* 예전 방식 (빠른 엔진을 못 불러왔을 때만) */
+function oldScan(fail){
+  if (typeof Html5Qrcode === 'undefined'){ toast('바코드 읽기 프로그램을 못 불러왔습니다 — 인터넷 확인'); closeScan(); return; }
+  $('reader').innerHTML = '';
   scanner = new Html5Qrcode('reader', { formatsToSupport: FORMATS, verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: OS === 'android' } });
   var box = Math.min(window.innerWidth - 40, 340);
   scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: { width: box, height: Math.round(box * 0.45) }, disableFlip: true }, onCode, function(){})
-    .catch(function(e){ closeScan(); toast('카메라를 못 열었습니다 — ' + (OS === 'ios' ? '설정 > Safari > 카메라 「허용」' : '주소창 왼쪽 자물쇠 > 카메라 「허용」') + ' 후 다시'); console.error(e); });
+    .catch(fail);
 }
 /* 상품 찍기: 지금 찍는 것을 정상/불량 중 무엇으로 셀지 크게 고름 */
 function renderScanBot(){
@@ -570,6 +637,7 @@ function renderScanBot(){
 function setScanQ(q){ SCANQ = q; vib(20); renderScanBot(); }
 function closeScan(){
   $('scanOv').classList.remove('on');
+  camStop();
   if (scanner){ var s = scanner; scanner = null; s.stop().then(function(){ s.clear(); }).catch(function(){}); }
 }
 function onCode(text){
