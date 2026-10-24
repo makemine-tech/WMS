@@ -165,7 +165,10 @@
   /* 한 화면씩 — 화면 전체가 휴대폰 높이에 딱 맞음, 스크롤은 목록(.scroll)만 (대표님 2026-10-24) */
   html, body { height:100%; overflow:hidden; }
   body { padding:0; }
-  #app { height:100vh; height:100dvh; display:flex; flex-direction:column; padding:calc(8px + env(safe-area-inset-top)) 14px calc(4px + env(safe-area-inset-bottom)); }
+  /* 키보드(대표님 2026-10-24: 올라오면 내용을 밀어 올리고 안 내려옴) — 문서는 아예 안 움직이게 고정하고,
+     #app 을 「지금 보이는 부분」(visualViewport) 위치·높이에 맞춤 → 키보드가 내려가면 저절로 제자리 */
+  html, body { position:fixed; inset:0; width:100%; overscroll-behavior:none; }
+  #app { position:fixed; left:0; right:0; top:var(--appTop, 0px); height:100vh; height:var(--appH, 100dvh); display:flex; flex-direction:column; padding:calc(8px + env(safe-area-inset-top)) 14px calc(4px + env(safe-area-inset-bottom)); }
   #app .top { margin-bottom:8px; flex:0 0 auto; }
   #page { flex:1; min-height:0; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
   #page > * { flex-shrink:0; }
@@ -419,6 +422,12 @@
   .seg button.on, .yb .seg .ib.on { background:var(--yel); color:var(--ink); border-color:transparent; font-weight:700; }
   .yb > .ib.big, .yb .seg .ib.big:first-child { background:var(--yel); color:var(--ink); border-color:transparent; font-weight:700; }
   .copy { color:#6B7686; }
+  /* 키보드가 올라와 있는 동안: 머리·카피라이트를 접고, 이 화면 안에서만 스크롤 (입력 칸이 가려지지 않게) */
+  html.kb #app .top, html.kb .copy { display:none; }
+  html.kb #page { overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  html.kb #page > .scroll, html.kb #page > .yb.fill, html.kb #page > .focus { flex:0 0 auto; }
+  html.kb .foot { padding-top:6px; }
+  html.kb .foot .btn { min-height:52px; }
 </style>
 </head>
 <body>
@@ -480,6 +489,28 @@ if (!/[?&]key=[A-Za-z0-9_-]{20,64}/.test(location.search)){
    이 화면은 기록 전체를 덮어쓰지 않고(update) 바뀐 칸만 씀 — PC 가 같은 기록에 상품을 채우는 중이어도 안 지워지게
 ============================================================ */
 var $ = function(id){ return document.getElementById(id); };
+/* ── 휴대폰 키보드: #app 을 지금 보이는 부분(visualViewport)에 맞춤 — 키보드가 올라오면 줄이고, 내려가면 원래대로 (대표님 2026-10-24) ── */
+(function(){
+  var vv = window.visualViewport, full = 0, root = document.documentElement, t = null;
+  function fit(){
+    var h = vv ? vv.height : window.innerHeight, top = vv ? Math.max(0, vv.offsetTop) : 0;
+    full = Math.max(full, window.innerHeight, h);
+    var kb = h < full - 120;   /* 보이는 높이가 120px 넘게 줄면 키보드가 올라온 것 */
+    root.style.setProperty('--appH', Math.round(h) + 'px');
+    root.style.setProperty('--appTop', Math.round(top) + 'px');
+    root.classList.toggle('kb', kb);
+    if (!kb){ window.scrollTo(0, 0); var p = $('page'); if (p) p.scrollTop = 0; }
+  }
+  function soon(){ clearTimeout(t); t = setTimeout(fit, 60); }
+  if (vv){ vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); }
+  window.addEventListener('resize', soon);
+  window.addEventListener('orientationchange', function(){ full = 0; setTimeout(fit, 300); });
+  /* 입력 칸을 누르면 키보드가 다 올라온 뒤 그 칸이 보이게, 칸에서 나오면 제자리 */
+  document.addEventListener('focusin', function(e){ var el = e.target; if (!el || !/INPUT|TEXTAREA/.test(el.tagName)) return;
+    setTimeout(function(){ fit(); try { el.scrollIntoView({ block: 'center' }); } catch(x){} window.scrollTo(0, 0); }, 320); });
+  document.addEventListener('focusout', function(){ setTimeout(fit, 120); setTimeout(fit, 450); });
+  fit();
+})();
 var db = null, gid = null, me = null, base = null;
 var RECS = {}, NOTES = {}, PHOTOS = {}, CUR = null, photoRef = null;
 var OS = (/[?&]os=(android|ios)/.exec(location.search) || [])[1] || (/iPhone|iPad|iPod/.test(navigator.userAgent) ? 'ios' : 'android');
