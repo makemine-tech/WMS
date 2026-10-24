@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24d';
+  var VER = '2026-10-24e';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -153,16 +153,20 @@
         cb.checked = true;
         N('qtytype')[it.i].value = l.q === '2' ? '2' : '1';
         N('qty')[it.i].value = String(q);
-        var loc = l.q === '2' ? locas.bad : locas.in;
-        if (!loc) throw new Error('적치로케이션 「' + (l.q === '2' ? LOCA_BAD : LOCA_IN) + '」 을 팝업 목록에서 못 찾음');
-        var ls = N('INOUTSTOCK_LOCA')[it.i]; ls.value = loc;
-        if (w.jQuery) w.jQuery(ls).trigger('chosen:updated');
+        /* 적치로케이션: 로케이션 관리 계정(스타)만 칸이 있음 — 화물 쪽 이벗 계정은 칸 자체가 없어 건너뜀 (대표님 2026-10-24) */
+        var ls = N('INOUTSTOCK_LOCA')[it.i];
+        if (ls){
+          var loc = l.q === '2' ? locas.bad : locas.in;
+          if (!loc) throw new Error('적치로케이션 「' + (l.q === '2' ? LOCA_BAD : LOCA_IN) + '」 을 팝업 목록에서 못 찾음');
+          ls.value = loc;
+          if (w.jQuery) w.jQuery(ls).trigger('chosen:updated');
+        }
         tot += q;
       }); } catch(err){ f.remove(); throw err; }
       if (Object.keys(used).length !== lines.length){ f.remove(); throw new Error('팝업 상품 줄과 맞지 않는 상품이 있습니다'); }
       /* 입고창고(창고·로케이션 관리 회원사는 필수) = 로케이션 값 「창고,존,로케이션」의 창고 — 스타4물류(김포) 263 (2026-10-24 첫 실반영이 「입고창고를 선택하세요」로 멈춰서 추가) */
       var wahSel = d.getElementById('inoutstock_wah');
-      if (wahSel){
+      if (wahSel && N('INOUTSTOCK_LOCA').length){   /* 창고 칸도 로케이션 관리 계정에만 — 없으면 건너뜀 */
         var wah = String(locas.in || locas.bad || '').split(',')[0];
         if (!wah || ![].some.call(wahSel.options, function(o){ return o.value === wah; })){ f.remove(); throw new Error('입고창고(' + (wah || '?') + ')를 팝업 목록에서 못 찾음'); }
         wahSel.value = wah;
@@ -212,6 +216,8 @@
     var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
+    /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
+    if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
     busy++; if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
@@ -229,7 +235,8 @@
   function hello(){
     var target = null;
     try { if (window.opener && !window.opener.closed) target = window.opener; } catch(e){}
-    if (!target) target = window.open(PAGE, 'mkw_star_return');
+    var dbm = 'star'; try { dbm = localStorage.getItem('mkwRetDb') || 'star'; } catch(x){}
+    if (!target) target = window.open(PAGE + (dbm === 'cargo' ? '?db=cargo' : ''), 'mkw_ret_' + dbm);
     if (target){ target.postMessage({ from: 'ebut-helper', cmd: 'ready', ver: VER }, '*'); say('반품입고관리와 연결 중… (그쪽 화면에 🟢 이 뜨면 연결됨)'); }
     else say('⚠️ 팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용 후 다시 눌러 주세요');
   }

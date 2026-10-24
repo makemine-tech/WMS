@@ -199,9 +199,11 @@
       <button class="btn" id="pdfBtn" onclick="downloadReport()">📄 선택 PDF 보고서</button>
       <button class="btn r" onclick="delSelected()">🗑 선택 삭제 (<span id="nSel">0</span>)</button>
     </div>
+    <div id="vfRow" style="display:none;margin-bottom:.5rem" class="notes-form"><span class="lbl" style="margin:0;align-self:center">업체명으로 보기</span>
+      <select id="vFilter" onchange="VF=this.value;SEL={};renderList()"><option value="">전체 업체</option></select></div>
     <div class="chips" style="margin-bottom:.5rem" id="perChips"></div>
     <div class="chips" style="margin-bottom:.7rem" id="stChips"></div>
-    <div class="scroll-x"><table class="lst"><thead><tr><th><input type="checkbox" id="selAll" title="보이는 줄 모두 체크" onchange="selAllRows(this.checked)"></th><th>검수 시각</th><th>반품 송장</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th><th>관리</th></tr></thead>
+    <div class="scroll-x"><table class="lst"><thead><tr><th><input type="checkbox" id="selAll" title="보이는 줄 모두 체크" onchange="selAllRows(this.checked)"></th><th>검수 시각</th><th>반품 송장</th><th class="vcol">업체명</th><th class="vcol">택배사</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th><th>관리</th></tr></thead>
       <tbody id="listBody"><tr><td colspan="10" class="dim">불러오는 중…</td></tr></tbody></table></div>
   </div>
 </div>
@@ -239,8 +241,9 @@ var VENDORS = {};   /* 화물: 업체명 목록 dict/vendor/{이름} = { name, n
   $('hBadge').textContent = CFG.badge;
   $('hTitle').innerHTML = CFG.db === 'cargo' ? '3PL <span>반품입고관리</span> <span style="font-size:.9rem;color:var(--muted)">화물</span>' : '스타 3PL <span>반품입고관리</span>';
   $('hBack').href = CFG.back; $('hBack').textContent = '‹ ' + CFG.backLabel;
+  if (!CFG.vendor) [].forEach.call(document.querySelectorAll('th.vcol'), function(th){ th.remove(); });
   if (CFG.vendor){
-    $('cargoRow').style.display = 'block';
+    $('cargoRow').style.display = 'block'; $('vfRow').style.display = 'flex';
     $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국(6077·7077)만 원송장 자동 추적, 다른 택배는 원송장 없이 쌓임';
     try { $('vendorIn').value = localStorage.getItem('retVendor_' + CFG.db) || ''; } catch(e){}
   }
@@ -285,7 +288,7 @@ function hcall(cmd, args, ms){
     if (!H.win || H.win.closed){ setHelper(false); rej(new Error('NOHELPER')); return; }
     var id = ++H.seq;
     H.pend[id] = { res: res, rej: rej, t: setTimeout(function(){ delete H.pend[id]; rej(new Error('TIMEOUT')); }, ms || 30000) };
-    try { H.win.postMessage({ to: 'ebut-helper', id: id, cmd: cmd, args: args || {} }, EBUT_ORIGIN); } catch(e){ delete H.pend[id]; rej(e); }
+    try { H.win.postMessage({ to: 'ebut-helper', id: id, cmd: cmd, args: Object.assign({ db: CFG.db }, args || {}) }, EBUT_ORIGIN); } catch(e){ delete H.pend[id]; rej(e); }
   });
 }
 function setHelper(ok, login){
@@ -521,7 +524,19 @@ function pushAll(){
 /* ── 목록 ── */
 var PERS = [['today', '오늘'], ['7', '7일'], ['30', '30일'], ['all', '전체']];
 var STS = [['all', '전체'], ['scan', '검수 중'], ['ready', '반영 대기'], ['done', '반영 완료'], ['fail', '실패·확인'], ['flag', '특이사항']];
-function inPer(r){ if (PER === 'all') return true; if (PER === 'today') return dayOf(r.at) === dayOf(Date.now()); return Date.now() - r.at < (+PER) * 864e5; }
+/* 화물: 업체명으로 걸러 보기 (VF = 업체명, '' = 전체) — 기간·상태 칩 숫자, 엑셀·PDF 도 이 기준 */
+var VF = '';
+function inPer(r){ if (VF && (r.vendor || '') !== VF) return false; if (PER === 'all') return true; if (PER === 'today') return dayOf(r.at) === dayOf(Date.now()); return Date.now() - r.at < (+PER) * 864e5; }
+function renderVF(){
+  if (!CFG.vendor) return;
+  var seen = {}; Object.keys(VENDORS).forEach(function(k){ if (VENDORS[k] && VENDORS[k].name) seen[VENDORS[k].name] = 1; });
+  Object.keys(RECS).forEach(function(k){ if (RECS[k] && RECS[k].vendor) seen[RECS[k].vendor] = 1; });
+  var names = Object.keys(seen).sort(function(a, b){ return a.localeCompare(b, 'ko'); });
+  if (VF && !seen[VF]) names.unshift(VF);
+  $('vFilter').innerHTML = '<option value="">전체 업체</option>' + names.map(function(n){
+    var c = Object.keys(RECS).filter(function(k){ return RECS[k].vendor === n; }).length;
+    return '<option value="' + esc(n) + '"' + (n === VF ? ' selected' : '') + '>' + esc(n) + (c ? ' (' + c + ')' : '') + '</option>'; }).join('');
+}
 function inSt(r){ var j; if (STF === 'all') return true; if (STF === 'flag'){ j = judge(r); return j.info.length || (j.block.length && r.look === 'ok'); } return stOf(r).k === STF; }
 function listRows(){ return Object.keys(RECS).map(function(k){ return RECS[k]; }).filter(function(r){ return r && inPer(r) && inSt(r); }).sort(function(a, b){ return b.at - a.at; }); }
 function renderList(){
@@ -539,8 +554,10 @@ function renderList(){
     return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
       + '<td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
-      + '<td class="mono sm">' + esc(r.rno) + (CFG.vendor ? '<div style="font-family:\'Noto Sans KR\';font-weight:700">' + esc(r.vendor || '업체 없음') + ' <span class="dim" style="font-weight:400">' + esc(r.courier || '') + '</span></div>' : '')
-      + (PHOTOS[r.rno] ? '<div class="tag b">📷 ' + Object.keys(PHOTOS[r.rno]).length + '</div>' : '') + (/^m-/.test(r.dev || '') ? '<div class="tag b">📱</div>' : '') + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || (r.trace === 'skip' ? '—' : '')) + '</td>'
+      + '<td class="mono sm">' + esc(r.rno)
+      + (PHOTOS[r.rno] ? '<div class="tag b">📷 ' + Object.keys(PHOTOS[r.rno]).length + '</div>' : '') + (/^m-/.test(r.dev || '') ? '<div class="tag b">📱</div>' : '') + '</td>'
+      + (CFG.vendor ? '<td class="sm" style="font-weight:700">' + (r.vendor ? esc(r.vendor) : '<span style="color:var(--red)">없음</span>') + '</td><td class="sm">' + esc(r.courier || '-') + '</td>' : '')
+      + '<td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || (r.trace === 'skip' ? '—' : '')) + '</td>'
       + '<td class="sm">' + esc(rmanOf(r)) + (r.rmanEdit ? ' <span class="tag b">수정</span>' : '') + '</td>'
       + '<td class="sm">' + (names.length ? esc(names[0]) + (names.length > 1 ? ' 외 ' + (names.length - 1) : '') + '<div>정상 <b style="color:var(--accent)">' + good + '</b> · 불량 <b style="color:var(--red)">' + badn + '</b></div>' : '<span class="dim">-</span>') + '</td>'
       + '<td>' + j.block.map(function(b){ return '<span class="tag r">' + esc(b) + '</span>'; }).join('') + j.info.map(function(b){ return '<span class="tag y">' + esc(b) + '</span>'; }).join('') + '</td>'
@@ -549,7 +566,8 @@ function renderList(){
       + '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn sm" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button> '
       + (r.state !== 'done' && r.state !== 'saving' ? '<button class="btn sm" title="수동 완료" onclick="manualDone(\'' + r.rno + '\')">✋</button> ' : '')
       + '<button class="btn sm r" onclick="delRec(\'' + r.rno + '\')">🗑</button></td></tr>';
-  }).join('') : '<tr><td colspan="10" class="dim">해당 기간·상태의 반품이 없습니다</td></tr>';
+  }).join('') : '<tr><td colspan="' + (CFG.vendor ? 12 : 10) + '" class="dim">해당 ' + (VF ? '업체·' : '') + '기간·상태의 반품이 없습니다</td></tr>';
+  renderVF();
   Object.keys(SEL).forEach(function(k){ if (!RECS[k]) delete SEL[k]; });
   $('nSel').textContent = Object.keys(SEL).length;
   $('selAll').checked = rows.length > 0 && rows.every(function(r){ return SEL[r.rno]; });
@@ -567,7 +585,8 @@ function delWarn(ks){
 /* ── ✋ 수동 완료: 이벗에 직접 넣었거나, 이벗 반영 없이 끝내기로 판단한 건 (대표님 2026-10-24 — 자동 완료와 구분) ── */
 function manualDone(k){
   var r = RECS[k]; if (!r || r.state === 'done') return;
-  var why = prompt('✋ 수동 완료 — 반품 송장 ' + k + '\n이벗 도우미로 넣지 않고 완료로 표시합니다. 메모(선택):', '이벗에 직접 입력');
+  /* 화물은 이벗과 상관없는 반품(기록만)도 많아 기본 메모를 다르게 */
+  var why = prompt('✋ 수동 완료 — 반품 송장 ' + k + '\n이벗 도우미로 넣지 않고 완료로 표시합니다. 메모(선택):', CFG.db === 'cargo' ? '기록만 (이벗 반영 안 함)' : '이벗에 직접 입력');
   if (why === null) return;
   patch(k, { state: 'done', saveAt: null, ebut: { at: Date.now(), by: byName(), mode: 'manual', msg: String(why || '').trim() || '수동 완료' } })
     .then(function(){ toast('✋ 수동 완료 — ' + k); if (CUR === k) renderCur(); renderList(); });
@@ -843,7 +862,7 @@ WMSync.onAuth(function(st){
     autoLook();
   });
   if (CFG.vendor){
-    base.child('dict/vendor').on('value', function(s){ VENDORS = s.val() || {}; renderVendorChips(); });
+    base.child('dict/vendor').on('value', function(s){ VENDORS = s.val() || {}; renderVendorChips(); renderVF(); });
     $('vendorIn').addEventListener('change', function(){ try { localStorage.setItem('retVendor_' + CFG.db, this.value.trim()); } catch(e){} renderVendorChips(); });
     renderCourierChips();
   }
