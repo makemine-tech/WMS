@@ -53,7 +53,11 @@ exports.epostReturnOrigin = onCall({ region: 'asia-northeast3', timeoutSeconds: 
   if (!uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다');
   /* 슈퍼관리자 + 작업 그룹원 — 스타 3PL 반품입고관리(star_return.html)에서 현장이 반품 송장을 스캔할 때도 씀 (2026-10-24) */
   const [sa, ug] = await Promise.all([admin.database().ref('superadmins/' + uid).once('value'), admin.database().ref('userGroup/' + uid).once('value')]);
-  if (!sa.exists() && !ug.exists()) throw new HttpsError('permission-denied', '작업 그룹원만 쓸 수 있습니다');
+  if (!sa.exists() && !ug.exists()){
+    /* 알바용 링크(열쇠)로 들어온 휴대폰도 허용 — 열쇠가 살아 있을 때만 (kiosk.js) */
+    const ks = (await admin.database().ref('retKiosk/' + uid).once('value')).val();
+    if (!ks || !(await require('./kiosk').liveKey(ks.key))) throw new HttpsError('permission-denied', '작업 그룹원만 쓸 수 있습니다');
+  }
   const nos = [...new Set(((req.data && req.data.nos) || []).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 10 && x.length <= 15))].slice(0, MAX);
   const rows = [];
   for (let i = 0; i < nos.length; i += 5) {

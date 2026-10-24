@@ -593,23 +593,73 @@ function manualDone(k){
 }
 
 /* ── 휴대폰 화면 링크 안내 (안드로이드 / 아이폰) ── */
-function showMobile(os){
-  var url = location.origin + '/star_return_m.html?os=' + os + CFG.q, ios = os === 'ios';
-  var h = '<div class="mdl-box"><div class="card-h">📱 반품 검수 — 휴대폰 ' + (ios ? '아이폰' : '안드로이드') + ' <span class="sp"></span><button class="btn sm" onclick="closeEdit()">닫기</button></div>'
-    + '<div class="mob"><div class="qr" id="mobQr"></div><div style="flex:1;min-width:260px">'
-    + '<div class="lbl">링크 주소</div><div class="url" id="mobUrl">' + esc(url) + '</div>'
-    + '<div style="display:flex;gap:.4rem;margin-top:.5rem"><button class="btn p sm" onclick="copyMobile()">📋 주소 복사</button></div>'
-    + '<div class="lbl" style="margin-top:.9rem">쓰는 방법</div><ol class="setup" style="padding-left:1.2rem">'
-    + '<li>휴대폰 ' + (ios ? '<b>기본 카메라</b>' : '<b>카메라</b> 또는 <b>크롬</b>') + '으로 왼쪽 QR을 비추거나, 위 주소를 카톡 등으로 보내서 엽니다' + (ios ? ' — <b>사파리</b>로 열어 주세요' : ' — <b>크롬</b>으로 열어 주세요') + '.</li>'
-    + '<li>구글 로그인(작업 그룹 계정)을 합니다. 처음 한 번만.</li>'
-    + '<li>「📷 반품 송장 스캔」을 누르고 카메라 사용을 <b>허용</b>합니다.</li>'
-    + '<li>' + (ios ? '사파리 아래 <b>공유(□↑) → 홈 화면에 추가</b>' : '크롬 오른쪽 위 <b>⋮ → 홈 화면에 추가</b>') + ' 하면 앱처럼 바로 열립니다.</li>'
-    + '</ol><div class="sm dim" style="margin-top:.4rem;line-height:1.7">원송장 주문의 상품 목록은 <b>이벗 도우미가 연결된 이 PC</b>가 자동으로 채워 줍니다 — 휴대폰으로 검수하는 동안 이 화면과 이벗 탭을 켜 두세요. 사진·메모는 PC 없이도 됩니다.</div>'
-    + '</div></div></div>';
-  var m = $('mdl'); m.innerHTML = h; m.style.display = 'flex';
+/* 휴대폰 링크 안내 창 — 위: 로그인용 링크 / 아래: 👥 알바용 링크(로그인 없이, 여러 개 · 끄기 · 기간) */
+var MOB_OS = 'android', KEYS = {};
+function mobUrl(key){ return location.origin + '/star_return_m.html?os=' + MOB_OS + CFG.q + (key ? '&key=' + key : ''); }
+function drawQr(url){
+  $('mobUrl').textContent = url; $('mobQr').innerHTML = '';
   var draw = function(){ try { new QRCode($('mobQr'), { text: url, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M }); } catch(e){ $('mobQr').textContent = 'QR 실패'; } };
   if (window.QRCode) draw();
   else { var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; s.onload = draw; s.onerror = function(){ $('mobQr').textContent = 'QR 불러오기 실패'; }; document.head.appendChild(s); }
+}
+function showMobile(os){
+  MOB_OS = os; var ios = os === 'ios';
+  var h = '<div class="mdl-box"><div class="card-h">📱 반품 검수 — 휴대폰 ' + (ios ? '아이폰' : '안드로이드') + (CFG.db === 'cargo' ? ' · 화물' : '') + ' <span class="sp"></span><button class="btn sm" onclick="closeEdit()">닫기</button></div>'
+    + '<div class="mob"><div class="qr" id="mobQr"></div><div style="flex:1;min-width:260px">'
+    + '<div class="lbl" id="mobKind">🔐 로그인용 링크 (작업 그룹 계정)</div><div class="url" id="mobUrl"></div>'
+    + '<div style="display:flex;gap:.4rem;margin-top:.5rem"><button class="btn p sm" onclick="copyMobile()">📋 주소 복사</button><button class="btn sm" onclick="pickLink(null)">🔐 로그인용 QR 보기</button></div>'
+    + '<div class="lbl" style="margin-top:.9rem">쓰는 방법</div><ol class="setup" style="padding-left:1.2rem">'
+    + '<li>휴대폰 ' + (ios ? '<b>기본 카메라</b>' : '<b>카메라</b> 또는 <b>크롬</b>') + '으로 왼쪽 QR을 비추거나, 주소를 카톡 등으로 보내서 엽니다' + (ios ? ' — <b>사파리</b>로 열어 주세요' : ' — <b>크롬</b>으로 열어 주세요') + '.</li>'
+    + '<li>로그인용 링크는 작업 그룹 구글 계정으로 로그인, <b>알바용 링크는 로그인 없이 작업자 이름만</b> 넣습니다.</li>'
+    + '<li>「📷 반품 송장 스캔」을 누르고 카메라 사용을 <b>허용</b>합니다.</li>'
+    + '<li>' + (ios ? '사파리 아래 <b>공유(□↑) → 홈 화면에 추가</b>' : '크롬 오른쪽 위 <b>⋮ → 홈 화면에 추가</b>') + ' 하면 앱처럼 바로 열립니다.</li>'
+    + '</ol></div></div>'
+    + '<div class="lbl" style="margin-top:1.1rem">👥 알바용 링크 — 로그인 없이, 이 링크를 받은 사람만 · ' + (CFG.db === 'cargo' ? '화물' : '스타') + ' 반품만 볼 수 있음 · 여러 개 만들 수 있음</div>'
+    + '<div class="notes-form"><input class="m" id="kLabel" placeholder="링크 이름 (예: 알바 김OO, 오후조)" style="min-width:200px">'
+    + '<select id="kDays"><option value="0">기간 없음 (끌 때까지)</option><option value="1">1일</option><option value="7">7일</option><option value="30" selected>30일</option></select>'
+    + '<button class="btn p" onclick="makeKey()">＋ 새 알바용 링크</button></div>'
+    + '<div class="scroll-x"><table><thead><tr><th>이름</th><th>만든 날 · 사람</th><th>기간</th><th>들어온 사람</th><th>상태</th><th></th></tr></thead><tbody id="keyBody"><tr><td colspan="6" class="dim">불러오는 중…</td></tr></tbody></table></div>'
+    + '<div class="sm dim" style="margin-top:.4rem;line-height:1.7">알바용 링크로는 스캔·정상/불량·사진·메모·검수 완료만 됩니다 — 이벗 반영·기록 삭제는 이 PC 에서. 링크가 새 나가면 「끄기」 → 그 링크로 들어온 휴대폰도 바로 막힙니다.</div>'
+    + '</div>';
+  var m = $('mdl'); m.innerHTML = h; m.style.display = 'flex';
+  pickLink(null); loadKeys();
+}
+function pickLink(key){
+  $('mobKind').textContent = key ? '👥 알바용 링크 「' + ((KEYS[key] && KEYS[key].label) || '이름 없음') + '」 — 로그인 없이' : '🔐 로그인용 링크 (작업 그룹 계정)';
+  drawQr(mobUrl(key));
+}
+function keyState(k){ return k.off ? { t: '꺼짐', c: 'var(--red)' } : (k.exp && Date.now() > k.exp) ? { t: '기간 끝', c: 'var(--muted)' } : { t: '사용 중', c: 'var(--accent)' }; }
+function loadKeys(){
+  return db.ref('retKeyIndex').orderByChild('gid').equalTo(gid).once('value').then(function(s){
+    var all = s.val() || {}; KEYS = {};
+    Object.keys(all).forEach(function(k){ if (all[k] && all[k].db === CFG.db) KEYS[k] = all[k]; });
+    var ks = Object.keys(KEYS).sort(function(a, b){ return (KEYS[b].at || 0) - (KEYS[a].at || 0); });
+    if (!$('keyBody')) return;
+    $('keyBody').innerHTML = ks.length ? ks.map(function(k){ var x = KEYS[k], st = keyState(x), used = x.used ? Object.keys(x.used).map(function(u){ return x.used[u].name; }) : [];
+      return '<tr><td><b>' + esc(x.label || '이름 없음') + '</b></td><td class="sm dim">' + hm(x.at) + ' ' + esc(x.by || '') + '</td><td class="sm">' + (x.exp ? '~' + hm(x.exp) : '기간 없음') + '</td>'
+        + '<td class="sm">' + (used.length ? used.length + '명 <span class="dim">' + esc(used.slice(0, 4).join(', ')) + (used.length > 4 ? ' …' : '') + '</span>' : '<span class="dim">-</span>') + '</td>'
+        + '<td><b style="color:' + st.c + '">' + st.t + '</b></td>'
+        + '<td style="white-space:nowrap"><button class="btn sm" onclick="pickLink(\'' + k + '\')">QR</button> <button class="btn sm" onclick="pickLink(\'' + k + '\');copyMobile()">📋</button> '
+        + '<button class="btn sm ' + (x.off ? '' : 'w') + '" onclick="toggleKey(\'' + k + '\')">' + (x.off ? '켜기' : '끄기') + '</button> <button class="btn sm r" onclick="delKey(\'' + k + '\')">🗑</button></td></tr>'; }).join('')
+      : '<tr><td colspan="6" class="dim">아직 알바용 링크가 없습니다 — 위에서 이름을 넣고 「＋ 새 알바용 링크」</td></tr>';
+  }).catch(function(e){ if ($('keyBody')) $('keyBody').innerHTML = '<tr><td colspan="6" style="color:var(--red)">링크 목록을 못 불러옴: ' + esc(e.code || e.message) + '</td></tr>'; });
+}
+function makeKey(){
+  var a = new Uint8Array(24); crypto.getRandomValues(a);
+  var key = btoa(String.fromCharCode.apply(null, a)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');   /* 32자 무작위 열쇠 */
+  var days = +$('kDays').value, rec = { gid: gid, db: CFG.db, label: $('kLabel').value.trim() || '알바용', at: Date.now(), by: byName() };
+  if (days) rec.exp = Date.now() + days * 864e5;
+  db.ref('retKeyIndex/' + key).set(rec).then(function(){ KEYS[key] = rec; $('kLabel').value = ''; toast('알바용 링크를 만들었습니다 — QR·주소를 전달하세요'); return loadKeys(); }).then(function(){ pickLink(key); })
+    .catch(function(e){ toast('링크 만들기 실패: ' + (e.code || e.message)); });
+}
+function toggleKey(k){
+  var x = KEYS[k]; if (!x) return;
+  if (!x.off && !confirm('「' + (x.label || '') + '」 링크를 끌까요? 이 링크로 들어온 휴대폰도 바로 막힙니다.')) return;
+  db.ref('retKeyIndex/' + k + '/off').set(x.off ? null : true).then(loadKeys).then(function(){ toast(KEYS[k] && KEYS[k].off ? '링크를 껐습니다' : '링크를 다시 켰습니다'); });
+}
+function delKey(k){
+  var x = KEYS[k]; if (!x || !confirm('「' + (x.label || '') + '」 링크를 지울까요? 이 링크로는 다시 못 들어옵니다.')) return;
+  db.ref('retKeyIndex/' + k).remove().then(function(){ delete KEYS[k]; pickLink(null); return loadKeys(); }).then(function(){ toast('링크를 지웠습니다'); });
 }
 function copyMobile(){
   var t = $('mobUrl').textContent;
