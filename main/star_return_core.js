@@ -35,6 +35,8 @@ function noteHits(r){
   (r.items || []).forEach(function(it){ if (it.got > 0 && it.nicn) codes[it.nicn] = 1; });
   (r.extras || []).forEach(function(x){ codes[x.code] = 1; });
   Object.keys(NOTES).forEach(function(k){ var n = NOTES[k]; if (!n) return;
+    /* 업체(화물): 그 업체 반품마다 늘 안내 — 「찾음」으로 넘기지 않음 */
+    if (n.kind === 'vendor'){ if (r.vendor && String(n.val || '').replace(/\s/g, '') === String(r.vendor).replace(/\s/g, '')) out.push({ k: k, t: '업체', n: n }); return; }
     if (n.found && n.found.rno !== r.rno) return;   /* 다른 반품에서 이미 찾은 특이사항 */
     if (n.kind === 'inv' && keys.indexOf(n.val) >= 0) out.push({ k: k, t: '송장', n: n });
     if (n.kind === 'item' && codes[n.val]) out.push({ k: k, t: '상품', n: n }); });
@@ -42,7 +44,7 @@ function noteHits(r){
 }
 /* 사전 특이사항: 찾을 때까지 날짜 상관없이 「대기 중」 → 스캔으로 맞으면 「찾음」으로 넘김 (대표님 2026-10-24) */
 function markNotes(r){
-  noteHits(r).forEach(function(h){ if (h.n.found) return;
+  noteHits(r).forEach(function(h){ if (h.n.found || h.t === '업체') return;
     h.n.found = { rno: r.rno, at: Date.now(), by: byName(), how: h.t };
     base.child('notes/' + h.k + '/found').set(h.n.found);
     toast('📌 사전 특이사항 ' + h.t + '을 찾았습니다 — ' + (h.n.memo || h.n.val)); beep(false); });

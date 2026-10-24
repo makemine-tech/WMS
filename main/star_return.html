@@ -163,7 +163,7 @@
   <details class="card" id="notesCard">
     <summary class="card-h">📌 사전 특이사항 <span class="sm dim" id="notesCnt"></span><span class="sp"></span><span class="sm dim">고객사 요청: 이 송장·상품이 반품되면 따로 빼기 등 · 펼치기</span></summary>
     <div class="notes-form">
-      <select id="nKind"><option value="inv">송장번호 (반품·원송장)</option><option value="item">상품 바코드</option></select>
+      <select id="nKind"><option value="inv">송장번호 (반품·원송장)</option><option value="item">상품 바코드</option><option value="vendor" class="vcol">업체명 (화물 — 그 업체 반품마다 휴대폰에 빨간 안내)</option></select>
       <input class="v" id="nVal" placeholder="번호 / 바코드">
       <input class="m" id="nMemo" placeholder="안내할 내용 (예: 고객사 요청 — 불량 확인 후 따로 보관)">
       <button class="btn p" onclick="addNote()">추가</button>
@@ -241,7 +241,7 @@ var VENDORS = {};   /* 화물: 업체명 목록 dict/vendor/{이름} = { name, n
   $('hBadge').textContent = CFG.badge;
   $('hTitle').innerHTML = CFG.db === 'cargo' ? '3PL <span>반품입고관리</span> <span style="font-size:.9rem;color:var(--muted)">화물</span>' : '스타 3PL <span>반품입고관리</span>';
   $('hBack').href = CFG.back; $('hBack').textContent = '‹ ' + CFG.backLabel;
-  if (!CFG.vendor) [].forEach.call(document.querySelectorAll('th.vcol'), function(th){ th.remove(); });
+  if (!CFG.vendor) [].forEach.call(document.querySelectorAll('th.vcol, option.vcol'), function(th){ th.remove(); });
   if (CFG.vendor){
     $('cargoRow').style.display = 'block'; $('vfRow').style.display = 'flex';
     $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국(6077·7077)만 원송장 자동 추적, 다른 택배는 원송장 없이 쌓임';
@@ -764,7 +764,7 @@ function saveEdit(){
 }
 /* ── 사전 특이사항 ── */
 function addNote(){
-  var kind = $('nKind').value, val = kind === 'inv' ? digits($('nVal').value) : $('nVal').value.replace(/\s+/g, ''), memo = $('nMemo').value.trim();
+  var kind = $('nKind').value, val = kind === 'inv' ? digits($('nVal').value) : kind === 'vendor' ? $('nVal').value.trim() : $('nVal').value.replace(/\s+/g, ''), memo = $('nMemo').value.trim();
   if (!val){ toast('번호 / 바코드를 넣어 주세요'); return; }
   if (kind === 'inv' && (val.length < 10 || val.length > 15)){ toast('송장번호는 10~15자리 숫자'); return; }
   base.child('notes').push({ kind: kind, val: val, memo: memo, at: Date.now(), by: byName() }).then(function(){ $('nVal').value = ''; $('nMemo').value = ''; toast('사전 특이사항 추가'); });
@@ -777,8 +777,8 @@ function renderNotes(){
     .sort(function(a, b){ return NOTES[b].found.at - NOTES[a].found.at; });
   $('notesCnt').textContent = ks.length ? '(대기 ' + wait.length + ' · 찾음 ' + found.length + ')' : '';
   var row = function(k){ var n = NOTES[k], f = n.found;
-    return '<tr><td class="sm">' + (n.kind === 'inv' ? '송장' : '상품') + '</td><td class="mono sm">' + esc(n.val) + '</td><td class="sm">' + esc(n.memo) + '</td><td class="sm dim">' + hm(n.at) + ' ' + esc(n.by || '') + '</td>'
-      + '<td class="sm">' + (f ? '<b style="color:var(--accent)">✔ 찾음</b> ' + hm(f.at) + ' · ' + esc(f.by || '') + '<div class="mono dim" style="cursor:pointer" onclick="CUR=\'' + f.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">반품 ' + esc(f.rno) + '</div>' : '<b style="color:var(--yellow)">⏳ 대기 중</b>') + '</td>'
+    return '<tr><td class="sm">' + (n.kind === 'inv' ? '송장' : n.kind === 'vendor' ? '업체' : '상품') + '</td><td class="' + (n.kind === 'vendor' ? '' : 'mono ') + 'sm">' + esc(n.val) + '</td><td class="sm">' + esc(n.memo) + '</td><td class="sm dim">' + hm(n.at) + ' ' + esc(n.by || '') + '</td>'
+      + '<td class="sm">' + (f ? '<b style="color:var(--accent)">✔ 찾음</b> ' + hm(f.at) + ' · ' + esc(f.by || '') + '<div class="mono dim" style="cursor:pointer" onclick="CUR=\'' + f.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">반품 ' + esc(f.rno) + '</div>' : n.kind === 'vendor' ? '<b style="color:var(--yellow)">📌 늘 안내</b>' : '<b style="color:var(--yellow)">⏳ 대기 중</b>') + '</td>'
       + '<td style="white-space:nowrap">' + (f ? '<button class="btn sm" onclick="unfindNote(\'' + k + '\')">되돌리기</button> ' : '') + '<button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; };
   $('notesBody').innerHTML = (wait.length ? wait.map(row).join('') : '<tr><td colspan="6" class="dim">찾는 중인 사전 특이사항이 없습니다</td></tr>')
     + (found.length ? '<tr><td colspan="6" class="lbl" style="padding-top:1rem">✔ 찾음 ' + found.length + '건</td></tr>' + found.map(row).join('') : '');
