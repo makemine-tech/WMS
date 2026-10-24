@@ -82,8 +82,9 @@
 
   /* 한 번 재생 = Run: 타이머 묶음. 멈추면 전부 취소 */
   var cur = null;
-  function Run(stage){ this.st = stage; this.tm = []; this.W = stage.clientWidth / 100; }
-  Run.prototype.at = function(ms, fn){ var self = this; this.tm.push(setTimeout(function(){ if (cur === self) fn(); }, ms)); };
+  function Run(stage){ this.st = stage; this.tm = []; this.W = stage.clientWidth / 100; this.t0 = performance.now(); }
+  /* ms = 재생 시작부터의 시각 (장면 안에서 예약해도 기준은 시작) */
+  Run.prototype.at = function(ms, fn){ var self = this; this.tm.push(setTimeout(function(){ if (cur === self) fn(); }, Math.max(0, ms - (performance.now() - this.t0)))); };
   Run.prototype.layer = function(bg){
     var self = this;
     [].slice.call(this.st.querySelectorAll('.mm-l')).forEach(function(o){ blast(o); });
@@ -155,7 +156,8 @@
       fl.style.cssText = 'width:' + COLS * C + 'px;height:' + ROWS * C + 'px;left:' + (-COLS * C / 2) + 'px;top:' + (-ROWS * C / 2) + 'px;background-size:' + C + 'px ' + C + 'px';
       'ABCD'.split('').forEach(function(r, i){ var lb = h('div', 'mm-lb', r, fl); lb.style.cssText = 'left:' + (-2.2 * px) + 'px;top:' + (i * C + C * .35) + 'px'; });
       for (var c = 0; c < COLS; c++){ var lb = h('div', 'mm-lb', String(c + 1), fl); lb.style.cssText = 'top:' + (-2.4 * px) + 'px;left:' + (c * C + C * .42) + 'px'; }
-      iso.animate([{transform:'rotateX(58deg) rotateZ(-225deg) scale(.2)', opacity:0}, {transform:'rotateX(58deg) rotateZ(-45deg) scale(1)', opacity:1}],
+      /* 주의: 입체 묶음(.mm-iso·.mm-pal)에 opacity 애니메이션을 걸면 크롬이 납작하게 눌러 버림 → 크기·visibility 로만 */
+      iso.animate([{transform:'rotateX(58deg) rotateZ(-225deg) scale(.05)'}, {transform:'rotateX(58deg) rotateZ(-45deg) scale(1)'}],
         {duration:700, easing:'cubic-bezier(.2,.8,.2,1)', fill:'both'});
       var FILL = ['0,0','1,0','2,0','4,0','5,0','0,1','1,1','3,1','4,1','0,2','2,2','3,2','5,2','1,3','2,3','3,3','4,3'];
       var pals = {};
@@ -166,8 +168,9 @@
         p.querySelector('.t').style.transform = 'translateZ(' + H + 'px)';
         p.querySelector('.s').style.height = H + 'px';
         p.querySelector('.w').style.width = H + 'px';
-        p.animate([{transform:'translateZ(' + 30 * px + 'px)', opacity:0}, {transform:'translateZ(0)', opacity:1, offset:.8}, {transform:'translateZ(' + px + 'px)', offset:.9}, {transform:'translateZ(0)', opacity:1}],
-          {duration:420, delay:500 + (cc + rr) * 75, easing:'cubic-bezier(.55,0,.8,.6)', fill:'both'});
+        p.style.visibility = 'hidden';
+        p.animate([{transform:'translateZ(' + 30 * px + 'px)', visibility:'visible'}, {transform:'translateZ(0)', visibility:'visible', offset:.8}, {transform:'translateZ(' + px + 'px)', visibility:'visible', offset:.9}, {transform:'translateZ(0)', visibility:'visible'}],
+          {duration:420, delay:500 + (cc + rr) * 75, easing:'cubic-bezier(.55,0,.8,.6)', fill:'forwards'});
         pals[k] = p;
       });
       var cap = h('div', 'mm-cap mm-hv', '', L);
