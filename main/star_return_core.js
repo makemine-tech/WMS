@@ -69,6 +69,7 @@ function judge(r){
   (r.items || []).forEach(function(it){ if (isMix(it)) info.push('정상·불량 섞임: ' + it.name + ' (정상 ' + goodOf(it) + ' · 불량 ' + badOf(it) + ') — 이벗은 손으로 나눠 입력'); });
   if ((r.items || []).some(function(it){ return it.got > 0 && it.got < it.qty; }) || ((r.items || []).some(function(it){ return !it.got; }) && (r.items || []).some(function(it){ return it.got > 0; }))) info.push('부분 반품');
   if (r.self) info.push('반송 (원송장 = 반품송장)');
+  if (r.reco && r.reco !== '401') info.push('반품사유 ' + recoName(r.reco));
   if (r.checked && r.state === 'scan') info.push('검수 완료 · 반영 전');
   noteHits(r).forEach(function(h){ info.push('📌 사전 특이사항 ' + h.t + ': ' + (h.n.memo || h.n.val)); });
   if (r.memo) info.push('메모: ' + r.memo);
@@ -85,7 +86,8 @@ function absorbExtras(r){
   var left = [];
   (r.extras || []).forEach(function(x){
     var n = x.n;
-    (r.items || []).forEach(function(it){ if (n > 0 && it.nicn && (it.nicn === x.code || (digits(it.nicn) && digits(it.nicn) === digits(x.code) && digits(x.code).length >= 8))){
+    (r.items || []).forEach(function(it){ if (n > 0 && ((it.nicn && x.code && (it.nicn === x.code || (digits(it.nicn) && digits(it.nicn) === digits(x.code) && digits(x.code).length >= 8)))
+        || (!x.code && x.name && String(it.name || '').replace(/\s/g, '') === String(x.name).replace(/\s/g, '')))){   /* 직접 입력은 상품명이 같으면 */
       var b = badOf(it) + badOf(x); it.got = (it.got || 0) + n; n = 0; setBad(it, b); } });
     if (n > 0) left.push(x);
   });
@@ -99,6 +101,10 @@ function badOf(o){ var n = cntOf(o); return o.bad != null ? Math.max(0, Math.min
 function goodOf(o){ return cntOf(o) - badOf(o); }
 function setBad(o, b){ var n = cntOf(o); o.bad = Math.max(0, Math.min(n, b || 0)); o.q = !o.bad ? '1' : o.bad >= n ? '2' : 'mix'; }
 function isMix(o){ var b = badOf(o); return b > 0 && b < cntOf(o); }
+function xName(x){ return x.name || x.code || ''; }   /* 반품 대상 아닌·먼저 넣은 상품: 휴대폰 직접 입력은 바코드 없이 이름만 */
+/* 반품사유 (이벗 RETURN_RECO) — 휴대폰에서 고름, 기본 고객변심. 안 고른 예전 기록은 도우미가 불량 있으면 상품불량 */
+var RECOS = [['401', '고객변심'], ['402', '상품불량'], ['403', '오배송'], ['404', '기타']];
+function recoName(c){ var x = RECOS.filter(function(r){ return r[0] === c; })[0]; return x ? x[1] : ''; }
 function qText(o){ return isMix(o) ? '정상 ' + goodOf(o) + ' · 불량 ' + badOf(o) : badOf(o) ? '불량' : '정상'; }   /* 엑셀·PDF 칸 */
 /* 수량 바꾸기: 정상(kind '1') 또는 불량(kind '2') 을 d 만큼 — 반품 수량(got/n)도 같이 바뀜 */
 function addCnt(o, kind, d){

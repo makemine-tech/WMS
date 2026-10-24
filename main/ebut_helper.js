@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24e';
+  var VER = '2026-10-24f';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -178,7 +178,8 @@
       else [].forEach.call(fm.RETURN_DOFC.options, function(o){ if (!dofc && o.value && o.text.replace(/\s/g, '').indexOf(cr.replace(/대한통운|택배|\s/g, '')) >= 0) dofc = o.value; });
       if (!dofc){ f.remove(); throw new Error('이벗 택배사 목록에 「' + cr + '」이(가) 없습니다 — 이벗 기초정보에 추가하거나 ✋ 수동 완료'); }
       fm.RETURN_DOFC.value = dofc;
-      fm.RETURN_RECO.value = lines.some(function(l){ return l.q === '2'; }) ? '402' : '401';
+      /* 반송사유: 휴대폰에서 고른 것(a.reco, 기본 고객변심) — 안 고른 예전 기록은 불량 있으면 402 상품불량 · 없으면 401 고객변심 */
+      fm.RETURN_RECO.value = /^40[1-4]$/.test(a.reco || '') ? a.reco : lines.some(function(l){ return l.q === '2'; }) ? '402' : '401';
       fm.RETURN_QTY.value = String(tot);
       [].forEach.call(N('RETURN_MALLYN'), function(r){ r.checked = (r.value === (partial ? '2' : '1')); });   /* 전량/부분입고 */
       [].forEach.call(N('RETURN_FNSH'), function(r){ r.checked = (r.value === '1'); });                      /* 완료 */

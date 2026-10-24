@@ -466,7 +466,7 @@ function renderCur(lastCode){
     var pre = noItems && CFG.db === 'cargo';
     h += pre ? '<div class="banner blu" style="margin-top:.6rem">스캔한 상품 (원송장 찾기 전)<div style="margin-top:.3rem">'
              : '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">';
-    h += r.extras.map(function(x, i){ return '<span class="tag ' + (pre ? 'b' : 'r') + ' mono">' + esc(x.code) + ' × ' + x.n + (isMix(x) ? ' (불량 ' + badOf(x) + ')' : '') + '</span>'
+    h += r.extras.map(function(x, i){ return '<span class="tag ' + (pre ? 'b' : 'r') + (x.code ? ' mono' : '') + '">' + esc(xName(x)) + ' × ' + x.n + (isMix(x) ? ' (불량 ' + badOf(x) + ')' : '') + '</span>'
       + (pre ? '<span class="qbtn" style="margin-right:.4rem"><button class="' + (x.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'1\')">정상</button><button class="' + (x.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'2\')">불량</button></span>' : '')
       + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
   }
@@ -510,7 +510,7 @@ function pushAll(){
       if (mix.length){ bad++; return save(RECS[k], { state: 'fail', ebut: { at: Date.now(), by: byName(),
         msg: '정상·불량 섞인 상품 (' + mix.map(function(it){ return it.name + ' 정상 ' + goodOf(it) + '·불량 ' + badOf(it); }).join(', ') + ') — 이벗에서 손으로 나눠 넣고 ✋ 수동 완료' } }); }
       var lines = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: badOf(it) ? '2' : '1' }; });
-      return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines, cust: CFG.cust, courier: r.courier || '우체국' }, 60000).then(function(res){
+      return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines, cust: CFG.cust, courier: r.courier || '우체국', reco: r.reco || null }, 60000).then(function(res){
         ok++; return save(RECS[k], { state: 'done', ebut: { at: Date.now(), msg: '저장됨', codes: res.codes || '', by: byName(), mode: 'auto' } });
       }, function(e){
         var m = String(e.message || e);
@@ -718,7 +718,7 @@ function editRec(k){
   }
   if ((r.extras || []).length){
     h += '<div class="lbl" style="margin-top:.7rem">반품 대상 아닌 상품 — 체크를 풀면 지워집니다</div>'
-      + r.extras.map(function(x, i){ return '<label class="sm" style="margin-right:1rem"><input type="checkbox" class="eX" data-i="' + i + '" checked> <span class="mono">' + esc(x.code) + '</span> × ' + x.n + '</label>'; }).join('');
+      + r.extras.map(function(x, i){ return '<label class="sm" style="margin-right:1rem"><input type="checkbox" class="eX" data-i="' + i + '" checked> <span class="' + (x.code ? 'mono' : '') + '">' + esc(xName(x)) + '</span> × ' + x.n + '</label>'; }).join('');
   }
   h += '<div class="lbl" style="margin-top:.7rem">특이사항 메모</div><textarea class="memo" id="eMemo">' + esc(r.memo || '') + '</textarea>'
     + '<div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn p" onclick="saveEdit()">저장</button><button class="btn" onclick="closeEdit()">취소</button></div></div>';
@@ -801,7 +801,7 @@ function downloadXlsx(){
       var head = [hm(r.at), r.by || '', r.rno].concat(V ? [r.vendor || '', r.courier || ''] : [], [r.orig || '', r.origDate || '', so.map(function(o){ return o.code; }).join(','), rman]);
       var lines = (r.items || []).filter(function(it){ return it.got > 0; });
       lines.forEach(function(it){ a.push(head.concat([it.name, it.opt, it.nicn, it.qty, it.got, qText(it), flag, st, eb])); });
-      (r.extras || []).forEach(function(x){ a.push(head.concat([pre ? '(원송장 찾기 전 스캔)' : '(반품 대상 아님)', '', x.code, pre ? '' : 0, x.n, pre ? qText(x) : '대상아님', flag, st, eb])); });
+      (r.extras || []).forEach(function(x){ a.push(head.concat([pre ? (x.code ? '(원송장 찾기 전 스캔)' : x.name + ' (직접 입력)') : '(반품 대상 아님)' + (x.code ? '' : ' ' + x.name), '', x.code, pre ? '' : 0, x.n, pre ? qText(x) : '대상아님', flag, st, eb])); });
       if (!lines.length && !(r.extras || []).length) a.push(head.concat(['', '', '', '', 0, '', flag, st, eb]));
     });
     var ws = XLSX.utils.aoa_to_sheet(a);
@@ -873,7 +873,7 @@ function downloadReport(){
         cellRow([it.name, it.opt || '', it.nicn || '', String(it.qty), String(it.got), qText(it)], iw, { size: 17, colors: [null, null, null, null, null, bad ? '#dc2626' : '#15803d'] }); });
       var pre = !(r.items || []).length && CFG.db === 'cargo';
       (r.extras || []).forEach(function(x){ var bad = badOf(x) > 0;
-        cellRow(pre ? ['(원송장 찾기 전 스캔)', '', x.code, '-', String(x.n), qText(x)] : ['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw,
+        cellRow(pre ? [x.code ? '(원송장 찾기 전 스캔)' : x.name + ' (직접 입력)', '', x.code, '-', String(x.n), qText(x)] : ['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw,
           { size: 17, colors: pre ? ['#444', null, null, null, null, bad ? '#dc2626' : '#15803d'] : ['#dc2626', null, null, null, null, '#dc2626'] }); });
       if (!lines.length && !(r.extras || []).length) cellRow(['반품 상품 없음', '', '', '', '', ''], iw, { size: 17, color: '#888' });
       var notes = j.block.concat(j.info).join(' / ');
