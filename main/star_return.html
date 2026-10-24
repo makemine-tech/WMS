@@ -70,6 +70,9 @@
   td { padding:.5rem; border-bottom:1px solid #1f2430; vertical-align:middle; }
   tr.hot td { background:rgba(74,240,168,.07); }
   tr.bad td { background:rgba(240,80,80,.07); }
+  .boxh { font-weight:800; font-size:.95rem; padding:.55rem .8rem; border-radius:10px; margin:.4rem 0 .4rem; }
+  .boxh.pend { background:rgba(251,191,36,.10); border:1px solid rgba(251,191,36,.35); color:#fde68a; }
+  .boxh.done { background:rgba(74,240,168,.08); border:1px solid rgba(74,240,168,.3); color:#a7f3d0; margin-top:1.2rem; }
   .qbtn { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
   .qbtn button { background:transparent; border:0; color:var(--muted); padding:.35rem .7rem; font:800 .78rem 'Noto Sans KR',sans-serif; cursor:pointer; }
   .qbtn button.on1 { background:var(--accent); color:#06281a; }
@@ -203,8 +206,13 @@
       <select id="vFilter" onchange="VF=this.value;SEL={};renderList()"><option value="">전체 업체</option></select></div>
     <div class="chips" style="margin-bottom:.5rem" id="perChips"></div>
     <div class="chips" style="margin-bottom:.7rem" id="stChips"></div>
+    <!-- 미완료 / 완료 두 상자 (대표님 2026-10-24): 미완료는 기간 상관없이 다 — 막힌 것부터 하나씩 채워 완료, 반영 끝나면 아래 「완료」로 -->
+    <div class="boxh pend">⏳ 미완료 <b id="nPend">0</b>건 <span class="sm dim">— 검수 중 · 반영 대기 · 실패 (기간 상관없이 전부, 막힌 것부터)</span></div>
     <div class="scroll-x"><table class="lst"><thead><tr><th><input type="checkbox" id="selAll" title="보이는 줄 모두 체크" onchange="selAllRows(this.checked)"></th><th>검수 시각</th><th>반품 송장</th><th class="vcol">업체명</th><th class="vcol">택배사</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th><th>관리</th></tr></thead>
       <tbody id="listBody"><tr><td colspan="10" class="dim">불러오는 중…</td></tr></tbody></table></div>
+    <div class="boxh done">✔ 완료 <b id="nDone">0</b>건 <span class="sm dim">— 이벗 반영 끝 (자동 · ✋ 수동), 위 기간 기준</span></div>
+    <div class="scroll-x"><table class="lst"><thead><tr><th></th><th>검수 시각</th><th>반품 송장</th><th class="vcol">업체명</th><th class="vcol">택배사</th><th>원송장</th><th>수령자</th><th>상품 (정상 / 불량)</th><th>특이사항</th><th>상태</th><th>이벗 반영 결과</th><th>관리</th></tr></thead>
+      <tbody id="doneBody"></tbody></table></div>
   </div>
 </div>
 <div id="mdl" onclick="if(event.target===this)closeEdit()"></div>
@@ -373,7 +381,14 @@ function lookup(no){
 }
 /* 휴대폰에서 스캔한 반품(원송장만 있고 상품 대기) → 도우미가 연결돼 있으면 이 PC 가 알아서 이벗에서 상품을 찾아 채움 */
 var autoBusy = false;
+/* 휴대폰 「목록 완료」(checked) 건: 이벗 주문 상품과 다 맞고 막힌 게 없으면 반영 대기로 — 아니면 미완료에 남아 손으로 채움 (대표님 2026-10-24) */
+function autoReady(){
+  Object.keys(RECS).forEach(function(k){ var r = RECS[k];
+    if (r && r.checked && (r.state === 'scan' || !r.state) && r.look === 'ok' && !(r.extras || []).length && !judge(r).block.length)
+      patch(k, { state: 'ready', checkedBy: r.checkedBy || byName(), checkedAt: r.checkedAt || Date.now() }); });
+}
 function autoLook(){
+  autoReady();
   if (autoBusy || !H.ok || H.login === false) return;
   var k = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r && r.orig && !locked(r) && (r.look === 'wait' || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) > 120000)); })
     .sort(function(a, b){ return RECS[a].at - RECS[b].at; })[0];
@@ -548,19 +563,27 @@ function renderVF(){
     return '<option value="' + esc(n) + '"' + (n === VF ? ' selected' : '') + '>' + esc(n) + (c ? ' (' + c + ')' : '') + '</option>'; }).join('');
 }
 function inSt(r){ var j; if (STF === 'all') return true; if (STF === 'flag'){ j = judge(r); return j.info.length || (j.block.length && r.look === 'ok'); } return stOf(r).k === STF; }
-function listRows(){ return Object.keys(RECS).map(function(k){ return RECS[k]; }).filter(function(r){ return r && inPer(r) && inSt(r); }).sort(function(a, b){ return b.at - a.at; }); }
+/* 미완료(반영 안 끝난 것)는 기간 상관없이 전부, 완료는 기간 칩 기준 — 업체·상태 칩은 둘 다 (대표님 2026-10-24) */
+function isDoneRec(r){ return r.state === 'done'; }
+function visible(r){ return !!r && (isDoneRec(r) ? inPer(r) : (!VF || (r.vendor || '') === VF)) && inSt(r); }
+function pendRank(r){ var k = stOf(r).k; return k === 'fail' ? 0 : k === 'scan' ? (judge(r).block.length ? 1 : 2) : k === 'saving' ? 3 : 4; }   /* 막힌 것부터 */
+function pendRows(){ return Object.keys(RECS).map(function(k){ return RECS[k]; }).filter(function(r){ return visible(r) && !isDoneRec(r); }).sort(function(a, b){ return pendRank(a) - pendRank(b) || b.at - a.at; }); }
+function doneRows(){ return Object.keys(RECS).map(function(k){ return RECS[k]; }).filter(function(r){ return visible(r) && isDoneRec(r); }).sort(function(a, b){ return b.at - a.at; }); }
+function listRows(){ return pendRows().concat(doneRows()); }
 function renderList(){
   $('perChips').innerHTML = PERS.map(function(p){ return '<span class="chip' + (PER === p[0] ? ' on' : '') + '" onclick="PER=\'' + p[0] + '\';renderList()">' + p[1] + '</span>'; }).join('');
   var all = Object.keys(RECS).map(function(k){ return RECS[k]; });
-  $('stChips').innerHTML = STS.map(function(s){ var n = all.filter(function(r){ var keep = STF; STF = s[0]; var v = inPer(r) && inSt(r); STF = keep; return v; }).length;
+  $('stChips').innerHTML = STS.map(function(s){ var n = all.filter(function(r){ var keep = STF; STF = s[0]; var v = visible(r); STF = keep; return v; }).length;
     return '<span class="chip' + (STF === s[0] ? ' on' : '') + '" onclick="STF=\'' + s[0] + '\';renderList()">' + s[1] + ' ' + n + '</span>'; }).join('');
   $('nReady').textContent = all.filter(function(r){ return r.state === 'ready'; }).length;
   $('nLook').textContent = all.filter(function(r){ return r.orig && (r.look === 'wait' || r.look === 'err') && !locked(r); }).length;
-  var rows = listRows();
-  $('listBody').innerHTML = rows.length ? rows.map(function(r){
+  var rows = listRows(), pend = pendRows(), dn = doneRows();
+  $('nPend').textContent = pend.length; $('nDone').textContent = dn.length;
+  var row = function(r){
     var j = judge(r), st = stOf(r), so = starOrders(r);
     var good = 0, badn = 0; (r.items || []).forEach(function(it){ if (it.got > 0){ badn += badOf(it); good += goodOf(it); } });
     var names = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return it.name; });
+    (r.extras || []).forEach(function(x){ names.push(xName(x)); badn += badOf(x); good += goodOf(x); });   /* 휴대폰에서 찍어 둔·직접 넣은 상품도 */
     return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
       + '<td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
@@ -576,7 +599,10 @@ function renderList(){
       + '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn sm" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button> '
       + (r.state !== 'done' && r.state !== 'saving' ? '<button class="btn sm" title="수동 완료" onclick="manualDone(\'' + r.rno + '\')">✋</button> ' : '')
       + '<button class="btn sm r" onclick="delRec(\'' + r.rno + '\')">🗑</button></td></tr>';
-  }).join('') : '<tr><td colspan="' + (CFG.vendor ? 12 : 10) + '" class="dim">해당 ' + (VF ? '업체·' : '') + '기간·상태의 반품이 없습니다</td></tr>';
+  };
+  var cs = CFG.vendor ? 12 : 10;
+  $('listBody').innerHTML = pend.length ? pend.map(row).join('') : '<tr><td colspan="' + cs + '" class="dim">미완료 반품이 없습니다 ✔</td></tr>';
+  $('doneBody').innerHTML = dn.length ? dn.map(row).join('') : '<tr><td colspan="' + cs + '" class="dim">해당 ' + (VF ? '업체·' : '') + '기간·상태의 완료 반품이 없습니다</td></tr>';
   renderVF();
   Object.keys(SEL).forEach(function(k){ if (!RECS[k]) delete SEL[k]; });
   $('nSel').textContent = Object.keys(SEL).length;

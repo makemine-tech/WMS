@@ -657,6 +657,7 @@ function editDone(){
 /* 정상/불량 수량 ± (kind '1' 정상 · '2' 불량 — star_return_core.js addCnt) */
 function addCntI(i, kind, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; if (it.got == null) it.got = 0; addCnt(it, kind, d); FOCUS = i; upd(r, { items: r.items }); vib(20); render(); }
 function addCntX(i, kind, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var x = r.extras[i]; addCnt(x, kind, d); if (!x.n) r.extras.splice(i, 1); upd(r, { extras: r.extras }); vib(20); render(); }
+function delItem(i){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = 0; setBad(it, 0); upd(r, { items: r.items }); render(); }
 function delExtra(i){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras.splice(i, 1); upd(r, { extras: r.extras }); render(); }
 function setMemo(v){ var r = RECS[CUR]; if (!r || locked(r)) return; upd(r, { memo: String(v || '').trim() }); }
 function memoTags(m){ return String(m || '').split(/\s*,\s*/).filter(Boolean); }
@@ -740,20 +741,14 @@ function flash(ok){
   f.className = ok ? 'ok' : 'bad'; o.classList.remove('okf', 'badf'); o.classList.add(ok ? 'okf' : 'badf');
   setTimeout(function(){ f.className = ''; o.classList.remove('okf', 'badf'); }, 260);
 }
+/* 완료 = 「목록 완료」(checked) — 휴대폰은 원송장·이벗 상품을 기다리지 않음. 이벗 주문과 맞추기·반영은 PC 에서 (대표님 2026-10-24) */
 function finish(){
   var r = RECS[CUR]; if (!r) return;
-  var j = judge(r);
-  /* 원송장·이벗 상품 목록이 아직이면 「목록 완료(반영 전)」로 남김 — PC 가 이벗 주문 상품과 맞추면 반영 대기로 (화물·스타 둘 다) */
-  if (j.block.length && /원송장|주문 조회|못 찾음/.test(j.block[0]) && ((r.items || []).some(function(it){ return it.got > 0; }) || (r.extras || []).length)){
-    upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast(CFG.vendor ? '✔ 목록 완료 — 내 목록에서 확인 후 「확정」' : '✔ 목록 완료 — PC 가 이벗 주문 상품과 맞추면 반영 대기로 넘어갑니다'); });
-    beep(true); vib(60); closeCur();   /* 화물: 다음 송장은 첫 화면에서 */
-    if (!CFG.vendor) openScan('rno');   /* 스타: 누른 손 그대로 다음 송장 카메라 */
-    return;
-  }
-  if (j.block.length){ beep(false); flash(false); toast('아직 넣을 수 없습니다: ' + j.block[0]); return; }
-  upd(r, { state: 'ready', checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast('✔ 검수 완료 — PC 에서 이벗에 반영됩니다'); });
+  if (!(r.items || []).some(function(it){ return it.got > 0; }) && !(r.extras || []).length){ beep(false); flash(false); toast('들어온 상품을 하나 이상 넣어 주세요'); return; }
+  if (CFG.vendor && !r.vendor){ beep(false); flash(false); toast('업체를 골라 주세요'); go('vendor'); return; }
+  upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast('✔ 목록 완료 — PC 에서 이벗에 반영합니다'); });
   beep(true); vib(60); closeCur();
-  if (!CFG.vendor) openScan('rno');   /* 스타: 누른 손 그대로 다음 송장 카메라 (아이폰은 누른 순간에 열어야 함) */
+  if (!CFG.vendor) openScan('rno');   /* 스타: 누른 손 그대로 다음 송장 카메라 (아이폰은 누른 순간에 열어야 함) — 화물은 첫 화면에서 */
 }
 function retry(){ var r = RECS[CUR]; if (!r) return; if (r.trace !== 'ok'){ upd(r, { trace: 'busy' }); render(); trace(r.rno); } else { upd(r, { look: 'wait' }); render(); toast('PC 에 다시 찾아 달라고 했습니다'); } }
 
@@ -797,12 +792,7 @@ function vendorNotes(r){   /* 업체 사전 특이사항 → 빨간 지시 상�
 function msgsOf(r){   /* 알릴 것 — 한 줄씩, 많으면 이 칸만 스크롤 */
   var j = judge(r), st = stOf(r), m = [];
   noteHits(r).forEach(function(x){ m.push([x.t === '업체' ? 'red' : 'yel', '📌 ' + (x.t === '업체' ? esc(r.vendor) + ' 지시사항' : '사전 특이사항 ' + x.t) + ' — ' + esc(x.n.memo || '')]); });
-  if (r.trace === 'busy') m.push(['blu', '⏳ 우체국에서 원송장 찾는 중… 상품은 먼저 찍어 두세요']);
-  if (r.trace === 'err') m.push(['red', '우체국 원송장 조회 실패 ' + esc(r.traceErr || '')]);
-  if (r.look === 'wait' || r.look === 'busy') m.push(pcAlive() ? ['blu', '⏳ PC 가 이벗 주문 상품을 찾는 중… 상품은 먼저 찍어 두세요'] : ['yel', '⚠️ 이벗 도우미 PC 연결 전 — 상품은 먼저 찍어 두면 PC 연결 후 주문 상품과 맞춰집니다']);
-  if (r.look === 'err') m.push(['red', '이벗 주문 조회 실패 ' + esc(r.lookErr || '')]);
-  j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음|업체명 없음/.test(b) && !(CFG.db === 'cargo' && /^원송장 없음/.test(b))) m.push(['red', '⛔ ' + esc(b)]); });
-  (r.items || []).forEach(function(it){ if (isMix(it)) m.push(['yel', '정상·불량 섞임: ' + esc(it.name) + ' — 이벗은 PC 에서 손으로 나눠 넣습니다']); });
+  /* 휴대폰은 기록만 — 원송장·이벗 조회·막힘은 PC 목록 「미완료」에서 처리 (대표님 2026-10-24) */
   if (r.state === 'done') m.push(['grn', '✔ ' + st.t]);
   return m.length ? '<div class="msgs">' + m.map(function(x){ return '<div class="banner ' + x[0] + '">' + x[1] + '</div>'; }).join('') + '</div>' : '';
 }
@@ -864,52 +854,27 @@ function render(lastCode){
   else if (STEP === 'items'){
     var lk = locked(r), items = r.items || [];
     h += stepBar() + recHead(r) + msgsOf(r);
-    if (items.length){
-      var tg = 0, tb = 0, short = 0;
-      items.forEach(function(it){ tg += goodOf(it); tb += badOf(it); short += Math.max(0, it.qty - (it.got || 0)); });
-      if (lastCode){ items.forEach(function(it, i){ if (it.nicn === lastCode) FOCUS = i; }); }
-      if (FOCUS < 0 || FOCUS >= items.length){ FOCUS = 0; for (var k = 0; k < items.length; k++){ if ((items[k].got || 0) < items[k].qty){ FOCUS = k; break; } } }
-      var nx = (r.extras || []).reduce(function(s, x){ return s + x.n; }, 0);
-      h += '<div class="pager"><span class="pn">상품 ' + (FOCUS + 1) + '/' + items.length + '</span>'
-        + '<span class="tl">정상 <b style="color:var(--grn)">' + tg + '</b> · 불량 <b style="color:var(--red2)">' + tb + '</b> · 덜 옴 <b>' + short + '</b></span>'
-        + '<button class="lk" onclick="toggleList()">' + (SHOWALL ? '한 상품씩' : '전체' + (nx ? ' <b style="color:var(--red2)">+' + nx + '</b>' : '')) + '</button></div>';
-      if (SHOWALL){
-        h += '<div class="scroll lst">' + items.map(function(it, i){ var g = it.got || 0;
-          return '<button class="li' + (i === FOCUS ? ' cur' : '') + '" onclick="focusTo(' + i + ')"><span class="t">' + esc(it.name) + '<small>정상 ' + goodOf(it) + ' · 불량 ' + badOf(it) + (it.opt ? ' · ' + esc(it.opt) : '') + '</small></span>'
-            + '<span class="c ' + (g > it.qty ? 'over' : g === it.qty ? 'full' : '') + '">' + g + '/' + it.qty + '</span></button>'; }).join('')
-          + (r.extras || []).map(function(x, i){ return '<div class="xrow"><span class="t">주문에 없는 상품 ' + x.n + '개<span class="' + (x.code ? 'mono' : '') + '">' + esc(xName(x)) + '</span></span>'
-            + (lk ? '' : '<button class="btn" onclick="delExtra(' + i + ')">지우기</button>') + '</div>'; }).join('') + '</div>';
-      } else {
-        var it = items[FOCUS], got = it.got || 0, say = sayOf(it);
-        h += '<div class="focus' + (lastCode && it.nicn === lastCode ? ' hot' : '') + '"><div class="nm' + (String(it.name || '').length > 18 ? ' long' : '') + '">' + esc(it.name) + '</div>'
-          + '<div class="bc">' + (it.opt ? esc(it.opt) + ' · ' : '') + esc(it.nicn) + '</div>'
-          + '<div class="big ' + (got > it.qty ? 'over' : got === it.qty ? 'full' : '') + '">' + got + '<small>/' + it.qty + '</small></div>'
-          + '<div class="say ' + say[0] + '">' + say[1] + '</div>' + qBoxes('addCntI', FOCUS, it, lk) + '</div>';
-      }
-      h += '<div class="row nav"><button class="btn" aria-label="이전 상품" ' + (FOCUS <= 0 || SHOWALL ? 'disabled' : '') + ' onclick="focusTo(' + (FOCUS - 1) + ')">' + ico('back') + '</button>'
-        + (lk ? '<span style="flex:3"></span>' : '<button class="btn y" style="flex:3" onclick="openScan(\'item\')">' + ico('scan') + '상품 찍기</button>')
-        + '<button class="btn" aria-label="다음 상품" ' + (FOCUS >= items.length - 1 || SHOWALL ? 'disabled' : '') + ' onclick="focusTo(' + (FOCUS + 1) + ')">' + ico('next') + '</button></div>';
-    } else if (CFG.db === 'cargo' || r.look !== 'ok'){
-      /* 상품 목록 오기 전(화물은 늘, 스타는 PC 가 이벗에서 가져오기 전): 어떤 상품이 몇 개 들어왔는지만 — 바코드 스캔 / 촬영하고 입력 / 직접 입력 (원송장을 찾으면 PC 가 주문 상품과 맞춤) */
-      var xs = r.extras || [], xn = xs.reduce(function(s, x){ return s + x.n; }, 0);
-      if (ADD && !lk){
-        h += '<div class="yb">' + yh('items', '상품 직접 입력', Object.keys(UPLOADING).length ? '사진 올리는 중…' : '')
-          + '<input id="manName" class="win" oninput="if(ADD)ADD.name=this.value" value="' + esc(ADD.name) + '" placeholder="상품명" autocomplete="off">'
-          + '<div class="addq"><button class="ib" aria-label="하나 빼기" onclick="addQty(-1)">−</button><b>' + ADD.n + '<small>개</small></b><button class="ib" aria-label="하나 더하기" onclick="addQty(1)">+</button></div>'
-          + '<div class="seg two"><button class="ib' + (ADD.q !== '2' ? ' g' : '') + '" onclick="addQ(\'1\')">정상</button><button class="ib' + (ADD.q === '2' ? ' r' : '') + '" onclick="addQ(\'2\')">불량</button></div>'
-          + '<div class="seg two"><button class="ib" onclick="addCancel()">취소</button><button class="ib on" onclick="addSave()">넣기</button></div></div>';
-      } else {
-        h += '<div class="lbl" style="margin:0">들어온 상품 ' + (xs.length ? xs.length + '종 ' + xn + '개' : '') + '</div><div class="scroll">'
-          + (xs.length ? '' : '<div class="empty" style="min-height:100%">아직 없습니다<small>아래 버튼에서 스캔 · 촬영 · 직접 입력</small></div>')
-          + xs.map(function(x, i){ return '<div class="xcard' + (lastCode && x.code === lastCode ? ' hot' : '') + '"><div class="xh"><span class="' + (x.code ? 'mono' : 'xn') + '">' + esc(xName(x)) + '</span><b>' + x.n + '개</b>'
-            + (lk ? '' : '<button class="btn" onclick="delExtra(' + i + ')">지우기</button>') + '</div>' + qMini('addCntX', i, x, lk) + '</div>'; }).join('') + '</div>';
-        if (!lk) h += '<div class="yb">' + yh('items', !xs.length ? '무엇이 들어왔나요?' : xs.length === 1 ? '다른 상품도 들어왔나요?' : '여러 품목이라면 계속 추가해 주세요')
-          + '<div class="seg three"><button class="ib" onclick="openScan(\'item\')">' + ico('scan') + '스캔</button><button class="ib" onclick="addOpen(true)">' + ico('cam') + '촬영</button><button class="ib" onclick="addOpen(false)">' + ico('key') + '직접 입력</button></div></div>';
-      }
+    /* 휴대폰은 기다리지 않음 (대표님 2026-10-24): 스타·화물 모두 찍은(넣은) 상품과 수량만 기록 — 이벗 주문 상품과 맞추기·반영은 PC 에서
+       이미 PC 가 주문 상품을 불러온 건이면 찍은 바코드가 그 줄 수량으로 올라가고(items), 아니면 찍어 둔 상품(extras) */
+    var got = items.map(function(it, i){ return { it: it, i: i }; }).filter(function(o){ return o.it.got > 0; });
+    var xs = r.extras || [], nk = got.length + xs.length;
+    var nn = got.reduce(function(s, o){ return s + o.it.got; }, 0) + xs.reduce(function(s, x){ return s + x.n; }, 0);
+    if (ADD && !lk){
+      h += '<div class="yb">' + yh('items', '상품 직접 입력', Object.keys(UPLOADING).length ? '사진 올리는 중…' : '')
+        + '<input id="manName" class="win" oninput="if(ADD)ADD.name=this.value" value="' + esc(ADD.name) + '" placeholder="상품명" autocomplete="off">'
+        + '<div class="addq"><button class="ib" aria-label="하나 빼기" onclick="addQty(-1)">−</button><b>' + ADD.n + '<small>개</small></b><button class="ib" aria-label="하나 더하기" onclick="addQty(1)">+</button></div>'
+        + '<div class="seg two"><button class="ib' + (ADD.q !== '2' ? ' g' : '') + '" onclick="addQ(\'1\')">정상</button><button class="ib' + (ADD.q === '2' ? ' r' : '') + '" onclick="addQ(\'2\')">불량</button></div>'
+        + '<div class="seg two"><button class="ib" onclick="addCancel()">취소</button><button class="ib on" onclick="addSave()">넣기</button></div></div>';
     } else {
-      h += '<div class="empty">' + (r.look === 'wait' || r.look === 'busy' ? '상품 목록을 기다리는 중…' : '상품 목록이 없습니다') + '<small>사진·메모는 다음 단계에서 먼저 해도 됩니다</small></div>';
+      h += '<div class="lbl" style="margin:0">들어온 상품 ' + (nk ? nk + '종 ' + nn + '개' : '') + '</div><div class="scroll">'
+        + (nk ? '' : '<div class="empty" style="min-height:100%">아직 없습니다<small>아래 버튼에서 스캔 · 촬영 · 직접 입력</small></div>')
+        + got.map(function(o){ var it = o.it; return '<div class="xcard' + (lastCode && it.nicn === lastCode ? ' hot' : '') + '"><div class="xh"><span class="xn">' + esc(it.name || it.nicn) + '</span><b>' + it.got + '개</b>'
+          + (lk ? '' : '<button class="btn" onclick="delItem(' + o.i + ')">지우기</button>') + '</div>' + qMini('addCntI', o.i, it, lk) + '</div>'; }).join('')
+        + xs.map(function(x, i){ return '<div class="xcard' + (lastCode && x.code === lastCode ? ' hot' : '') + '"><div class="xh"><span class="' + (x.code ? 'mono' : 'xn') + '">' + esc(xName(x)) + '</span><b>' + x.n + '개</b>'
+          + (lk ? '' : '<button class="btn" onclick="delExtra(' + i + ')">지우기</button>') + '</div>' + qMini('addCntX', i, x, lk) + '</div>'; }).join('') + '</div>';
+      if (!lk) h += '<div class="yb">' + yh('items', !nk ? '무엇이 들어왔나요?' : nk === 1 ? '다른 상품도 들어왔나요?' : '여러 품목이라면 계속 추가해 주세요')
+        + '<div class="seg three"><button class="ib" onclick="openScan(\'item\')">' + ico('scan') + '스캔</button><button class="ib" onclick="addOpen(true)">' + ico('cam') + '촬영</button><button class="ib" onclick="addOpen(false)">' + ico('key') + '직접 입력</button></div></div>';
     }
-    if ((r.trace === 'err' || r.look === 'err' || r.look === 'none') && !lk) h += '<button class="btn" onclick="retry()">다시 조회</button>';
     f = navFoot('<button class="btn y" onclick="itemsNext()">다음' + ico('next') + '</button>');
   }
 
@@ -947,7 +912,7 @@ function render(lastCode){
 function itemsNext(){
   var r = RECS[CUR]; if (!r) return;
   if (CFG.vendor && ADD){ toast('입력 중인 상품을 「넣기」 또는 「취소」 하세요'); return; }
-  if (CFG.vendor && !(r.items || []).some(function(it){ return it.got > 0; }) && !(r.extras || []).length){ beep(false); flash(false); toast('들어온 상품을 하나 이상 넣어 주세요'); return; }
+  if (!(r.items || []).some(function(it){ return it.got > 0; }) && !(r.extras || []).length){ beep(false); flash(false); toast('들어온 상품을 하나 이상 넣어 주세요'); return; }
   go(nextOf('items'));
 }
 /* 내 목록 = 이 휴대폰 작업자가 찍은 것 중 확정 안 한 것 (최근 3일) */
