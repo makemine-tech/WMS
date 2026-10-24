@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24f';
+  var VER = '2026-10-24g';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -114,7 +114,7 @@
   function custOf(a){ return a.cust === undefined ? STAR_CUST : a.cust; }
   function cmdFind(a){
     var orig = String(a.orig || '').replace(/\D/g, '');
-    if (orig.length < 10) return Promise.reject(new Error('원송장 번호가 이상합니다'));
+    if (!orig) return Promise.reject(new Error('원송장 번호가 이상합니다'));
     return findOrders(orig, a.origDate).then(function(orders){
       if (!orders.length) return { orders: [], items: [], locas: {} };
       var cust = custOf(a), open = orders.filter(function(o){ return (!cust || o.cust === cust) && o.ret === '-'; });
@@ -130,7 +130,7 @@
     var lines = (a.lines || []).filter(function(l){ return +l.qty > 0; });
     if (!lines.length) return Promise.reject(new Error('입고할 상품이 없습니다'));
     var rno = String(a.rno || '').replace(/\D/g, '');
-    if (rno.length < 10) return Promise.reject(new Error('반품 송장번호가 이상합니다'));
+    if (!rno) return Promise.reject(new Error('반품 송장번호가 이상합니다'));
     var want = {}; lines.forEach(function(l){ want[l.ordlist] = 1; });
     /* 저장 직전에 다시 검색 — 그새 누가 손으로 반품처리했으면 멈춤 (두 번 들어가면 재고가 두 번 오름) */
     return findOrders(String(a.orig || '').replace(/\D/g, ''), a.origDate).then(function(orders){

@@ -547,7 +547,7 @@ function onCode(text){
   lastCode = code; lastAt = now;
   if (scanMode === 'rno'){
     var no = digits(code);
-    if (no.length < 10 || no.length > 15){ beep(false); flash(false); $('scMsg').textContent = '송장 바코드가 아닙니다: ' + code; return; }
+    if (!okNo(no)){ beep(false); flash(false); $('scMsg').textContent = '송장 바코드가 아닙니다: ' + code; return; }
     closeScan(); startRno(no);
   } else {
     var r = RECS[CUR]; if (!r || locked(r)) return;
@@ -565,7 +565,7 @@ function onCode(text){
 }
 
 /* ── ① 반품 송장 ── */
-function manualRno(){ var no = digits($('rnoIn').value); $('rnoIn').value = ''; if (no.length < 10 || no.length > 15){ toast('송장번호는 10~15자리 숫자'); return; } startRno(no); }
+function manualRno(){ var no = digits($('rnoIn').value); $('rnoIn').value = ''; if (!okNo(no)){ toast('송장번호(숫자)를 넣어 주세요'); return; } startRno(no); }
 function startRno(no){
   var r = RECS[no];
   if (r){ openRec(no); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); return; }
@@ -678,7 +678,7 @@ function setReco(c){ var r = RECS[CUR]; if (!r || locked(r)) return; upd(r, { re
 function applyOrig(r){
   var e = $('origIn'), no = e ? digits(e.value) : '';
   if (!e || locked(r)) return true;
-  if (no && (no.length < 10 || no.length > 15)){ beep(false); flash(false); toast('원송장은 10~15자리 숫자'); return false; }
+  if (no && !okNo(no)){ beep(false); flash(false); toast('원송장 번호가 너무 깁니다'); return false; }
   if (no && no !== r.orig) upd(r, { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' });
   return true;
 }

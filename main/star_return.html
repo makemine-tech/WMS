@@ -320,7 +320,7 @@ function save(r, fields){ Object.assign(r, fields || {}); r.upd = Date.now(); RE
 $('rnoIn').addEventListener('keydown', function(e){
   if (e.key !== 'Enter') return; e.preventDefault();
   var no = digits(this.value); this.value = '';
-  if (no.length < 10 || no.length > 15){ beep(false); toast('송장번호가 아닙니다 (10~15자리 숫자)'); return; }
+  if (!okNo(no)){ beep(false); toast('송장번호(숫자)를 넣어 주세요'); return; }
   var r = RECS[no];
   if (r){ CUR = no; renderCur(); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); focusItem(); return; }
   var vendor = CFG.vendor ? $('vendorIn').value.trim() : '', courier = isEpost(no) ? '우체국' : CUR_COURIER;
@@ -729,8 +729,8 @@ function saveEdit(){
   var k = EDIT, r0 = RECS[k]; if (!r0) { closeEdit(); return; }
   var r = JSON.parse(JSON.stringify(r0));
   var rno = digits($('eRno').value), orig = digits($('eOrig').value), rman = $('eRman').value.trim(), state = $('eState').value;
-  if (rno.length < 10 || rno.length > 15){ toast('반품 송장은 10~15자리 숫자'); return; }
-  if (orig && (orig.length < 10 || orig.length > 15)){ toast('원송장은 10~15자리 숫자'); return; }
+  if (!okNo(rno)){ toast('반품 송장번호(숫자)를 넣어 주세요'); return; }
+  if (orig && !okNo(orig)){ toast('원송장 번호가 너무 깁니다'); return; }
   if (rno !== k && RECS[rno]){ toast('반품 송장 ' + rno + ' 기록이 이미 있습니다'); return; }
   var origChanged = orig !== (r.orig || '');
   if (origChanged){
@@ -766,7 +766,7 @@ function saveEdit(){
 function addNote(){
   var kind = $('nKind').value, val = kind === 'inv' ? digits($('nVal').value) : kind === 'vendor' ? $('nVal').value.trim() : $('nVal').value.replace(/\s+/g, ''), memo = $('nMemo').value.trim();
   if (!val){ toast('번호 / 바코드를 넣어 주세요'); return; }
-  if (kind === 'inv' && (val.length < 10 || val.length > 15)){ toast('송장번호는 10~15자리 숫자'); return; }
+  if (kind === 'inv' && !okNo(val)){ toast('송장번호(숫자)를 넣어 주세요'); return; }
   base.child('notes').push({ kind: kind, val: val, memo: memo, at: Date.now(), by: byName() }).then(function(){ $('nVal').value = ''; $('nMemo').value = ''; toast('사전 특이사항 추가'); });
 }
 function delNote(k){ if (!confirm('이 사전 특이사항을 지울까요?')) return; base.child('notes/' + k).remove(); }
