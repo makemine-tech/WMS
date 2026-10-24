@@ -690,6 +690,7 @@ body.sd-collapsed .sd-fold{top:.3rem}
     <button class="btn btn-g" onclick="downloadAll()" id="downloadAllBtn" title="모든 행 포함 (입고된 것 + 미입고) · 원본 양식 유지 + A열 박스ID + 수정 셀 표시">📥 전체 엑셀 다운로드</button>
     <button class="btn btn-y" onclick="downloadDone()" id="downloadDoneBtn" title="박스 × SKU 단위로 펼침 — 같은 SKU가 박스 2개에 분산되면 2행으로">📥 완료건 엑셀 다운로드</button>
     <button class="btn btn-b" onclick="downloadForInstock()" id="downloadInstockBtn" title="재고관리(star_instock)의 [📊 엑셀 일괄 입고] 양식(12열)에 맞춰 내보냅니다 — 박스×품목 단위. 이 파일을 star_instock에 올리면 재고로 잡힙니다.">📦 재고 입고용 엑셀</button>
+    <button class="btn btn-g" onclick="downloadInspectReport()" id="downloadReportBtn" title="검수완료 보고서 — 원본(입고예정) 양식 그대로 + 입고검수수량(정상)·불량수량·검수합계·차이(검수-예정)·검수 비고. 예정과 다른 줄은 분홍색. 원본이 없으면(자료 없이 시작) 예정 없이 그대로 만듭니다.">📑 보고서용 엑셀</button>
     <button class="btn btn-s" onclick="exportSessionJson()" id="exportJsonBtn" title="현재 작업 전체를 .json 으로 백업 — 나중에 '세션 가져오기'로 100% 복원 가능 (엑셀보다 안전)">💾 세션 백업(JSON)</button>
     <button class="btn" id="btnPhotoSort" onclick="openPhotoSortModal()" style="display:none;background:var(--p);color:#0f1117;font-weight:800" title="휴대폰으로 찍은 신규 SKU 사진들을 촬영 시간순으로 정렬 → 로그와 매칭 → 바코드명으로 일괄 변경 ZIP 다운로드">📷 신규 사진 일괄 정리</button>
     <button class="btn btn-s" onclick="goTo(0)">← 새 파일 업로드</button>
@@ -3796,6 +3797,259 @@ function downloadForInstock() {
     console.error(err);
     setMsg('m1','er','❌ 재고 입고용 엑셀 저장 실패: '+err.message);
   }
+}
+
+/* ─────────────── 보고서용 엑셀 (검수완료 보고서) ───────────────
+   입고예정(원본) 수량과 실제 바코드 검수 결과를 SKU 한 줄씩 대조한다.
+   양식 = 원본 열 그대로(작업용 박스바코드·직영수량 열은 뺌) + 뒤에 5열
+   [입고검수수량(정상) | 불량수량 | 검수합계(=정상+불량) | 차이(검수-예정) | 검수 비고].
+   예정과 다르거나 불량·신규가 있는 줄은 검수 열을 분홍색으로 칠한다.
+   원본이 없는 작업(자료 없이 시작)은 예정 파일을 골라 대조하거나, 예정 없이 그대로 저장. */
+var EXCELJS_SRC = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+function ensureExcelJS() {
+  if (window.ExcelJS) return Promise.resolve();
+  return new Promise(function(res, rej){
+    var s = document.createElement('script');
+    s.src = EXCELJS_SRC;
+    s.onload = function(){ res(); };
+    s.onerror = function(){ rej(new Error('엑셀 모듈(ExcelJS) 불러오기 실패 — 인터넷 연결을 확인하세요')); };
+    document.head.appendChild(s);
+  });
+}
+
+/* 세션 rows → 바코드별 검수 수량 {key: {normal, defect, rowIdx}} (대비바코드로도 찾게) */
+function inspectCountsByKey() {
+  var m = {};
+  rows.forEach(function(r, idx){
+    var rec = { normal: r.qtyReceived || 0, defect: r.qtyDefective || 0, rowIdx: idx };
+    [r.vals[COL.BARCODE], r.vals[COL.ALT_BARCODE]].forEach(function(v){
+      var k = normBarcode(v);
+      if (k && !m[k]) m[k] = rec;
+    });
+  });
+  return m;
+}
+
+/* 작업자가 고친 상품 정보 — 보고서 비고에 원본→변경으로 남긴다 */
+function inspectModNotes(r) {
+  var out = [];
+  var f = function(flag, label, o, n){ if (flag) out.push(label+' 수정 '+(o==null||o===''?'(빈)':o)+'→'+(n==null||n===''?'(빈)':n)); };
+  f(r.nameMod,   '품명',   r.origName,   r.vals[COL.NAME]);
+  f(r.colorMod,  '컬러',   r.origColor,  r.vals[COL.COLOR]);
+  f(r.sizeMod,   '사이즈', r.origSize,   r.vals[COL.SIZE]);
+  f(r.originMod, '원산지', r.origOrigin, r.vals[COL.ORIGIN]);
+  return out;
+}
+
+/* 이 세션의 업로드 원본을 보고서 표로 — 박스바코드(A)·직영수량(R) 작업 열은 뺀다 */
+function inspectPlanFromSession() {
+  var keep = [];
+  headers.forEach(function(h, c){
+    if (c === COL.BOX_BARCODE && /박스/.test(h || '')) return;
+    if (c === COL.EXISTING_QTY && /직영|실물|실입고/.test(h || '')) return;
+    keep.push(c);
+  });
+  /* 헤더보다 값이 긴 행이 있으면 그 열도 살린다 */
+  var maxLen = rows.reduce(function(m, r){ return Math.max(m, (r.vals || []).length); }, headers.length);
+  for (var c = headers.length; c < maxLen; c++) keep.push(c);
+  var qtyPos = keep.indexOf(COL.EXPECT_QTY);
+  var plan = { headers: keep.map(function(c){ return headers[c] || ''; }), qtyPos: qtyPos, items: [] };
+  rows.forEach(function(r, idx){
+    if (r.isNew) return;
+    plan.items.push({
+      cells: keep.map(function(c){ var v = r.vals[c]; return v === undefined ? null : v; }),
+      expect: +r.vals[COL.EXPECT_QTY] || 0,
+      rowIdx: idx
+    });
+  });
+  return plan;
+}
+
+/* 나중에 생긴 입고예정 파일(업체 원본 양식) → 보고서 표. 헤더 이름으로 바코드·수량 열을 찾는다. */
+function inspectPlanFromAoa(aoa) {
+  var clean = function(v){ return v == null ? '' : String(v).replace(/\s+/g, ''); };
+  var hr = -1;
+  for (var i = 0; i < Math.min(aoa.length, 15); i++) {
+    if ((aoa[i] || []).some(function(v){ return clean(v) === '바코드'; })) { hr = i; break; }
+  }
+  if (hr < 0) throw new Error('「바코드」 열 머리글을 찾지 못했습니다');
+  var H = (aoa[hr] || []).map(function(v){ return v == null ? '' : String(v); });
+  /* 이미 검수 열이 붙은 파일(예전 보고서)을 골라도 검수 열이 두 번 생기지 않게 뺀다 */
+  var OWN = /^(입고검수수량(\(정상\))?|불량수량|검수합계|차이\(.*\)|검수비고)$/;
+  var keep = [];
+  H.forEach(function(h, c){ if (!OWN.test(clean(h))) keep.push(c); });
+  aoa = aoa.map(function(row){ return keep.map(function(c){ return (row || [])[c]; }); });
+  H = keep.map(function(c){ return H[c]; });
+  var find = function(re){ for (var c = 0; c < H.length; c++) if (re.test(clean(H[c]))) return c; return -1; };
+  var bcCol = find(/^바코드$/), altCol = find(/대비|대체/);
+  var qtyCol = find(/^입고(예정)?수량$/); if (qtyCol < 0) qtyCol = find(/^수량$/);
+  if (qtyCol < 0) throw new Error('「수량」 열 머리글을 찾지 못했습니다');
+  var plan = { headers: H, qtyPos: qtyCol, items: [], cols: { bc: bcCol, alt: altCol } };
+  for (var r = hr + 1; r < aoa.length; r++) {
+    var row = aoa[r] || [];
+    var bc = normBarcode(row[bcCol]), ab = altCol >= 0 ? normBarcode(row[altCol]) : '';
+    if (!bc && !ab) continue;
+    var cells = H.map(function(_, c){ var v = row[c]; return v === undefined || v === '' ? null : v; });
+    plan.items.push({ cells: cells, expect: +row[qtyCol] || 0, keys: [bc, ab].filter(Boolean) });
+  }
+  return plan;
+}
+
+function downloadInspectReport() {
+  commitCurrentBox();
+  recalcRowQtys();
+  var total = rows.reduce(function(s, r){ return s + (r.qtyReceived || 0) + (r.qtyDefective || 0); }, 0);
+  if (!total) { setMsg('m1','warn','⚠️ 검수된 수량이 없습니다 — 스캔 후 다시 시도하세요'); return; }
+  var hasPlan = !startedEmpty && rows.some(function(r){ return !r.isNew; });
+  if (hasPlan) { buildInspectReport(inspectPlanFromSession()); return; }
+  /* 원본 없이 시작한 작업 — 예정 파일이 이제 생겼으면 골라서 대조, 아니면 그대로 */
+  var ok = confirm('이 작업은 입고예정(원본) 자료 없이 시작했습니다.\n\n' +
+    '[확인] 입고예정 엑셀을 지금 골라 예정 수량과 대조\n' +
+    '[취소] 예정 없이 검수 수량 그대로 보고서 저장');
+  if (!ok) { buildInspectReport(null); return; }
+  var inp = document.getElementById('origReupload');
+  inp.value = '';
+  inp.onchange = function(){
+    var f = inp.files && inp.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+        /* 「바코드」 머리글이 있는 첫 시트 */
+        var plan = null, lastErr = null;
+        for (var i = 0; i < wb.SheetNames.length && !plan; i++) {
+          try { plan = inspectPlanFromAoa(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], { header:1, defval:null, raw:true })); }
+          catch(err){ lastErr = err; }
+        }
+        if (!plan) throw lastErr || new Error('읽을 시트가 없습니다');
+        plan.fileName = f.name;
+        buildInspectReport(plan);
+      } catch(err) {
+        console.error(err);
+        setMsg('m1','er','❌ 입고예정 파일 읽기 실패: '+escH(err.message));
+      }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+  inp.click();
+}
+
+/* plan = null 이면 예정 없음(검수 수량만) */
+function buildInspectReport(plan) {
+  setMsg('m1','inf','<span class="sp"></span> 보고서 만드는 중...');
+  ensureExcelJS().then(function(){
+    var counts = inspectCountsByKey();
+    var usedRow = {};
+    var lines = [];   /* {cells, expect(null=예정없음), normal, defect, notes[]} */
+    var H;
+    if (plan) {
+      H = plan.headers.slice();
+      plan.items.forEach(function(it){
+        var rec = null;
+        if (it.rowIdx !== undefined) { var rr = rows[it.rowIdx]; rec = { normal: rr.qtyReceived||0, defect: rr.qtyDefective||0, rowIdx: it.rowIdx }; }
+        else for (var k = 0; k < it.keys.length && !rec; k++) rec = counts[it.keys[k]] || null;
+        if (rec && usedRow[rec.rowIdx]) rec = null;   /* 같은 SKU가 예정에 두 줄 — 첫 줄에만 */
+        if (rec) usedRow[rec.rowIdx] = true;
+        lines.push({ cells: it.cells, expect: it.expect, normal: rec ? rec.normal : 0, defect: rec ? rec.defect : 0,
+          notes: rec ? inspectModNotes(rows[rec.rowIdx]) : [] });
+      });
+    } else {
+      H = ['브랜드','품번','바코드','대비바코드','품명','컬러','사이즈','원산지','수량'];
+    }
+    /* 예정에 없던 SKU(현장 신규) — 표 끝에 붙인다 */
+    var byName = function(re){ for (var c = 0; c < H.length; c++) if (re.test(String(H[c]||'').replace(/\s+/g,''))) return c; return -1; };
+    var map = [
+      [/^브랜드$/, COL.BRAND], [/^품번$/, COL.CODE], [/^바코드$/, COL.BARCODE], [/대비|대체/, COL.ALT_BARCODE],
+      [/^(상품명|품명)$/, COL.NAME], [/^컬러|^COLOR$/i, COL.COLOR], [/사이즈|^SIZE$/i, COL.SIZE], [/원산지/, COL.ORIGIN]
+    ];
+    rows.forEach(function(r, idx){
+      if (usedRow[idx]) return;
+      var normal = r.qtyReceived || 0, defect = r.qtyDefective || 0;
+      if (!normal && !defect) return;
+      var cells = H.map(function(){ return null; });
+      map.forEach(function(m){ var c = byName(m[0]); if (c >= 0 && cells[c] === null) cells[c] = r.vals[m[1]] == null ? null : r.vals[m[1]]; });
+      var notes = inspectModNotes(r);
+      if (plan) notes.unshift('예정에 없는 바코드(신규)');
+      lines.push({ cells: cells, expect: plan ? 0 : null, normal: normal, defect: defect, notes: notes, isNew: !!plan });
+    });
+
+    var wb = new ExcelJS.Workbook();
+    var ws = wb.addWorksheet('Sheet1');
+    var nO = H.length;
+    var qtyPos = plan ? plan.qtyPos : H.length - 1;
+    var cP = nO + 1, cQ = nO + 2, cR = nO + 3, cS = nO + 4, cT = nO + 5;   /* 1-based */
+    var L = function(c){ return ws.getColumn(c).letter; };
+    var hdr = ws.getRow(1);
+    H.concat(['입고검수수량(정상)','불량수량','검수합계','차이(검수-예정)','검수 비고']).forEach(function(h, i){
+      var cell = hdr.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true };
+      cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb: i < nO ? 'FFFFFFCC' : 'FFFFF2CC' } };
+      cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+    });
+    hdr.height = 34;
+    var bcCols = [];
+    H.forEach(function(h, i){ if (/바코드/.test(String(h||''))) bcCols.push(i + 1); });
+    var PINK = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFC7CE' } };
+    var qtyFmt = '_-* #,##0_-;-* #,##0_-;_-* "-"_-;_-@_-';
+    var sum = { expect:0, normal:0, defect:0, diffRows:0 };
+    lines.forEach(function(ln, i){
+      var rn = i + 2;
+      var row = ws.getRow(rn);
+      ln.cells.forEach(function(v, c){ if (v !== null && v !== undefined && v !== '') row.getCell(c + 1).value = v; });
+      bcCols.forEach(function(c){ if (typeof row.getCell(c).value === 'number') row.getCell(c).numFmt = '0'; });
+      if (ln.expect !== null) { row.getCell(qtyPos + 1).value = ln.expect; row.getCell(qtyPos + 1).numFmt = qtyFmt; }
+      var tot = ln.normal + ln.defect;
+      row.getCell(cP).value = ln.normal;
+      if (ln.defect) row.getCell(cQ).value = ln.defect;
+      row.getCell(cR).value = { formula: L(cP)+rn+'+'+L(cQ)+rn, result: tot };
+      var notes = ln.notes.slice();
+      var diff = null;
+      if (ln.expect !== null) {
+        diff = tot - ln.expect;
+        row.getCell(cS).value = { formula: L(cR)+rn+'-'+L(qtyPos + 1)+rn, result: diff };
+        if (!ln.isNew) {
+          if (tot === 0) notes.unshift('미입고 (예정 '+ln.expect+'개)');
+          else if (diff > 0) notes.unshift('예정보다 '+diff+'개 많음');
+          else if (diff < 0) notes.unshift('예정보다 '+(-diff)+'개 부족');
+        }
+        sum.expect += ln.expect;
+      }
+      if (ln.defect) notes.push('불량 '+ln.defect+'개');
+      if (notes.length) row.getCell(cT).value = notes.join(' · ');
+      if ((diff !== null && diff !== 0) || ln.defect || ln.isNew) {
+        [cP, cQ, cR, cS, cT].forEach(function(c){ row.getCell(c).fill = PINK; });
+        sum.diffRows++;
+      }
+      sum.normal += ln.normal; sum.defect += ln.defect;
+    });
+    /* 열 너비 — 머리글·값 길이 기준(한글은 2칸) */
+    var wlen = function(v){ if (v === null || v === undefined) return 0; var s = String(v); var n = 0; for (var k = 0; k < s.length; k++) n += s.charCodeAt(k) > 255 ? 2 : 1; return n; };
+    for (var c = 1; c <= cT; c++) {
+      var w = wlen(hdr.getCell(c).value) * 0.7;
+      for (var r2 = 2; r2 <= lines.length + 1 && r2 < 200; r2++) { var cv = ws.getRow(r2).getCell(c).value; w = Math.max(w, wlen(cv && cv.formula ? cv.result : cv)); }
+      ws.getColumn(c).width = Math.max(6, Math.min(c === cT ? 40 : 34, w + 2));
+    }
+    return wb.xlsx.writeBuffer().then(function(buf){
+      var d = new Date(), pad = function(n){ return String(n).padStart(2,'0'); };
+      var base = (jobName || (workbookFile && workbookFile.name) || '입고검수').replace(/\.xlsx?$/i, '').replace(/^\(검수요청\)\s*/, '');
+      var fname = pad(d.getMonth()+1)+pad(d.getDate())+'_(검수완료)'+base+'_'+(sum.normal+sum.defect)+'개검수입고.xlsx';
+      var blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fname.replace(/[\\/:*?"<>|]/g, '_');
+      a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+      var msg = '✅ 보고서용 엑셀 저장 · '+lines.length+'줄 · 검수 '+(sum.normal+sum.defect)+'개(정상 '+sum.normal+(sum.defect?' · 불량 '+sum.defect:'')+')';
+      if (plan) msg += ' · 예정 '+sum.expect+'개 · 차이·불량·신규 '+sum.diffRows+'줄(분홍)' + (plan.fileName ? ' · 대조 파일: '+escH(plan.fileName) : '');
+      else msg += ' · 입고예정 자료 없이 저장 (예정·차이 칸 비움)';
+      setMsg('m1', 'ok', msg);
+    });
+  }).catch(function(err){
+    console.error(err);
+    setMsg('m1','er','❌ 보고서용 엑셀 저장 실패: '+escH(err && err.message || String(err)));
+  });
 }
 
 function saveBlob(out, suffix) {
