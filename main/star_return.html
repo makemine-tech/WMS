@@ -128,8 +128,8 @@
 
   <div class="header">
     <div>
-      <div class="badge">STAR 3PL RETURN</div>
-      <h1>스타 3PL <span>반품입고관리</span></h1>
+      <div class="badge" id="hBadge">STAR 3PL RETURN</div>
+      <h1 id="hTitle">스타 3PL <span>반품입고관리</span></h1>
       <div class="who" id="who">로그인 확인 중…</div>
     </div>
     <div class="hdr-r">
@@ -137,7 +137,7 @@
       <button class="btn logo" onclick="showMobile('android')" title="휴대폰 반품 검수 — 안드로이드" aria-label="모바일 안드로이드"><svg viewBox="0 0 24 24"><path fill="#3DDC84" d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.66-.38l-1.86 3.22A11.4 11.4 0 0 0 12 8.1c-1.77 0-3.43.39-4.92 1.04L5.22 5.92a.38.38 0 0 0-.66.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/></svg></button>
       <button class="btn logo" onclick="showMobile('ios')" title="휴대폰 반품 검수 — 아이폰" aria-label="모바일 아이폰"><svg viewBox="0 0 24 24"><path fill="#f5f5f7" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg></button>
       <button class="btn" onclick="openEbut()">이벗 열기</button>
-      <a class="back" href="star_picking.html">‹ 피킹으로</a>
+      <a class="back" id="hBack" href="star_picking.html">‹ 피킹으로</a>
     </div>
   </div>
 
@@ -174,7 +174,16 @@
   <!-- 스캔 -->
   <div class="card">
     <div class="card-h">📦 반품 검수</div>
-    <div class="lbl">① 반품 송장 스캔 (우체국)</div>
+    <div id="cargoRow" style="display:none;margin-bottom:.7rem">
+      <div class="lbl">업체명 · 택배사 <span class="dim" style="font-weight:400">— 스캔하는 반품마다 이 값이 들어갑니다</span></div>
+      <div class="notes-form" style="margin-bottom:.35rem">
+        <input id="vendorIn" list="vendorList" placeholder="업체명 (새 이름을 넣으면 목록에 쌓입니다)" style="min-width:260px" autocomplete="off">
+        <datalist id="vendorList"></datalist>
+        <span class="chips" id="courierChips"></span>
+      </div>
+      <div class="chips" id="vendorChips"></div>
+    </div>
+    <div class="lbl" id="rnoLbl">① 반품 송장 스캔 (우체국)</div>
     <div class="scan-row">
       <input class="scan" id="rnoIn" placeholder="반품 송장번호 스캔 후 Enter" autocomplete="off" inputmode="numeric">
     </div>
@@ -222,6 +231,39 @@ var db = null, gid = null, me = null, base = null;
 var RECS = {}, NOTES = {}, PHOTOS = {}, CUR = null;
 var PER = 'today', STF = 'all';
 var HELPER_JS = 'https://makewon.com/ebut_helper.js';
+var VENDORS = {};   /* 화물: 업체명 목록 dict/vendor/{이름} = { name, n, t } (화물관리 업체명과 같은 방식, 이 반품 데이터 안에 따로 쌓임) */
+
+/* 스타 / 화물 반품 화면 구분 (star_return_core.js 의 CFG) */
+(function(){
+  document.title = CFG.title;
+  $('hBadge').textContent = CFG.badge;
+  $('hTitle').innerHTML = CFG.db === 'cargo' ? '3PL <span>반품입고관리</span> <span style="font-size:.9rem;color:var(--muted)">화물</span>' : '스타 3PL <span>반품입고관리</span>';
+  $('hBack').href = CFG.back; $('hBack').textContent = '‹ ' + CFG.backLabel;
+  if (CFG.vendor){
+    $('cargoRow').style.display = 'block';
+    $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국(6077·7077)만 원송장 자동 추적, 다른 택배는 원송장 없이 쌓임';
+    try { $('vendorIn').value = localStorage.getItem('retVendor_' + CFG.db) || ''; } catch(e){}
+  }
+})();
+var CUR_COURIER = '';
+function renderCourierChips(){
+  if (!CFG.vendor) return;
+  $('courierChips').innerHTML = COURIERS.map(function(c){ return '<span class="chip' + (CUR_COURIER === c ? ' on' : '') + '" onclick="CUR_COURIER=\'' + c + '\';renderCourierChips()">' + c + '</span>'; }).join('')
+    + '<span class="sm dim" style="margin-left:.3rem">(6077·7077 송장은 자동 우체국)</span>';
+}
+function renderVendorChips(){
+  if (!CFG.vendor) return;
+  var ks = Object.keys(VENDORS).map(function(k){ return VENDORS[k]; }).filter(function(v){ return v && v.name; });
+  $('vendorList').innerHTML = ks.map(function(v){ return '<option value="' + esc(v.name) + '">'; }).join('');
+  var top = ks.slice().sort(function(a, b){ return (b.t || 0) - (a.t || 0); }).slice(0, 12);
+  $('vendorChips').innerHTML = top.map(function(v){ return '<span class="chip' + ($('vendorIn').value.trim() === v.name ? ' on' : '') + '" onclick="pickVendor(\'' + esc(v.name).replace(/'/g, '&#39;') + '\')">' + esc(v.name) + '</span>'; }).join('')
+    || '<span class="sm dim">업체명을 넣고 반품을 스캔하면 여기 쌓입니다</span>';
+}
+function pickVendor(n){ $('vendorIn').value = n; try { localStorage.setItem('retVendor_' + CFG.db, n); } catch(e){} renderVendorChips(); $('rnoIn').focus(); }
+function addVendor(name){
+  name = String(name || '').trim(); if (!name || !base) return;
+  base.child('dict/vendor/' + vkey(name)).transaction(function(c){ c = c || {}; return { name: name, n: (c.n || 0) + 1, t: Date.now() }; });
+}
 
 var toastT = null;
 function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2600); }
@@ -278,8 +320,12 @@ $('rnoIn').addEventListener('keydown', function(e){
   if (no.length < 10 || no.length > 15){ beep(false); toast('송장번호가 아닙니다 (10~15자리 숫자)'); return; }
   var r = RECS[no];
   if (r){ CUR = no; renderCur(); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); focusItem(); return; }
-  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: 'busy', items: [], extras: [] };
-  CUR = no; save(r).then(function(){ renderCur(); beep(true); trace(no); });
+  var vendor = CFG.vendor ? $('vendorIn').value.trim() : '', courier = isEpost(no) ? '우체국' : CUR_COURIER;
+  if (CFG.vendor && !vendor){ beep(false); toast('업체명을 먼저 넣어 주세요'); $('vendorIn').focus(); return; }
+  if (CFG.vendor && !courier){ beep(false); toast('우체국 송장이 아닙니다 — 택배사를 먼저 고르세요'); return; }
+  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no) ? 'busy' : 'skip', items: [], extras: [] };
+  if (CFG.vendor){ r.vendor = vendor; r.courier = courier; addVendor(vendor); try { localStorage.setItem('retVendor_' + CFG.db, vendor); } catch(e){} }
+  CUR = no; save(r).then(function(){ renderCur(); beep(true); if (r.trace === 'busy') trace(no); else focusItem(); });
 });
 function trace(no){
   var r = RECS[no]; if (!r) return;
@@ -305,10 +351,11 @@ function patch(no, fields){
 function lookup(no){
   var r = RECS[no]; if (!r || !r.orig || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) < 120000)) return Promise.resolve();
   patch(no, { look: 'busy', lookBusyAt: Date.now() }); renderCur();
-  return hcall('find', { orig: r.orig, origDate: r.origDate }, 60000).then(function(d){
+  return hcall('find', { orig: r.orig, origDate: r.origDate, cust: CFG.cust }, 60000).then(function(d){
     var r2 = RECS[no] || r, old = {}; (r2.items || []).forEach(function(it){ old[it.bopt + '|' + it.ordlist] = it; });
     var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}; return { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0, q: o.q || '1' }; });
-    patch(no, { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: items, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
+    var tmp = { items: items, extras: (r2.extras || []).slice() }; absorbExtras(tmp);   /* 원송장 찾기 전에 스캔해 둔 상품 → 주문 상품 수량으로 */
+    patch(no, { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: tmp.items, extras: tmp.extras, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
     if (CUR === no){ renderCur(); var j = judge(RECS[no]); beep(!j.block.length || j.block[0] === '반품 상품 스캔 없음'); }
   }, function(e){
     var m = String(e.message || e);
@@ -349,9 +396,16 @@ function setQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.items[i].
 function addGot(i, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = Math.max(0, (it.got || 0) + d); save(r); renderCur(); focusItem(); }
 function delExtra(i){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras.splice(i, 1); save(r); renderCur(); focusItem(); }
 function setMemo(v){ var r = RECS[CUR]; if (!r || locked(r)) return; save(r, { memo: String(v || '').trim() }); renderList(); }
+function setExtraQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras[i].q = q; save(r); renderCur(); focusItem(); }
+function setRecField(f, v){ var r = RECS[CUR]; if (!r || locked(r)) return; var o = {}; o[f] = v; save(r, o); if (f === 'vendor') addVendor(v); renderCur(); }
 function finishCur(){
   var r = RECS[CUR]; if (!r) return;
   var j = judge(r);
+  /* 화물: 원송장을 아직 못 찾은 반품은 「검수 완료(반영 전)」로 두고 목록에 남김 → 원송장을 찾아 넣으면 반영 대기로 */
+  if (j.block.length && CFG.db === 'cargo' && /원송장|주문 조회|못 찾음/.test(j.block[0]) && ((r.items || []).some(function(it){ return it.got > 0; }) || (r.extras || []).length)){
+    save(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); toast('✔ 검수 완료 — 원송장을 찾아 ✏️ 수정에 넣으면 반영할 수 있습니다'); CUR = null; renderCur(); $('rnoIn').focus(); });
+    return;
+  }
   if (j.block.length){ beep(false); toast('이벗에 넣을 수 없습니다: ' + j.block[0]); return; }
   save(r, { state: 'ready', checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); toast('✔ 검수 완료 — 반영 대기에 올렸습니다'); CUR = null; renderCur(); $('rnoIn').focus(); });
 }
@@ -369,7 +423,10 @@ function renderCur(lastCode){
   box.style.display = 'block';
   var j = judge(r), st = stOf(r), lk = locked(r), so = starOrders(r);
   var h = '<div class="cur-top"><div>반품 송장<br><b>' + esc(r.rno) + '</b></div>'
-    + '<div>원송장<br><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : esc(r.orig || '')) + '</b>'
+    + (CFG.vendor ? '<div>업체명<br><input class="sm" style="background:#0a0c10;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.25rem .4rem;width:9rem" list="vendorList" value="' + esc(r.vendor || '') + '" ' + (lk ? 'disabled' : '') + ' onchange="setRecField(\'vendor\',this.value.trim())"></div>'
+      + '<div>택배사<br><select class="sm" style="background:#0a0c10;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.25rem" ' + (lk ? 'disabled' : '') + ' onchange="setRecField(\'courier\',this.value)"><option value="">선택</option>'
+      + COURIERS.map(function(c){ return '<option' + (r.courier === c ? ' selected' : '') + '>' + c + '</option>'; }).join('') + '</select></div>' : '')
+    + '<div>원송장<br><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : r.trace === 'skip' && !r.orig ? '<span style="color:var(--yellow)">없음 — ✏️ 수정에서 입력</span>' : esc(r.orig || '')) + '</b>'
     + (r.origDate ? ' <span class="sm dim">' + esc(r.origDate) + '</span>' : '') + (r.self ? ' <span class="tag b">반송</span>' : '') + '</div>'
     + '<div>수령자<br><b style="font-family:inherit">' + esc(rmanOf(r) || '-') + '</b></div>'
     + '<div>상태<br><span class="st s-' + st.k + '">' + st.t + '</span></div></div>';
@@ -379,7 +436,7 @@ function renderCur(lastCode){
   if (r.look === 'busy') h += '<div class="banner blu">이벗에서 원송장 주문·상품 불러오는 중…</div>';
   if (r.look === 'err') h += '<div class="banner red">이벗 주문 조회 실패: ' + esc(r.lookErr || '') + '</div>';
   j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + ' — 이벗에 자동으로 넣지 않습니다</div>'; });
-  if (r.state === 'done') h += '<div class="banner grn">✔ 이벗 반영 완료 ' + (r.ebut && r.ebut.at ? hm(r.ebut.at) : '') + '</div>';
+  if (r.state === 'done') h += '<div class="banner grn">✔ ' + st.t + ' ' + (r.ebut && r.ebut.at ? hm(r.ebut.at) + ' · ' + esc(r.ebut.by || '') : '') + (r.ebut && r.ebut.mode === 'manual' && r.ebut.msg ? ' — ' + esc(r.ebut.msg) : '') + '</div>';
   if (r.state === 'fail' && r.ebut) h += '<div class="banner red">이벗 반영 실패: ' + esc(r.ebut.msg || '') + '</div>';
 
   if ((r.items || []).length){
@@ -395,9 +452,18 @@ function renderCur(lastCode){
     });
     h += '</tbody></table></div>';
   }
+  var noItems = !(r.items || []).length;
+  if (noItems && CFG.db === 'cargo' && !lk){   /* 화물: 원송장 전이라도 상품을 먼저 스캔해 둠 → 원송장을 찾으면 주문 상품과 맞춰짐 */
+    h += '<div class="lbl" style="margin-top:.7rem">② 상품 바코드 스캔 — 원송장을 찾으면 주문 상품과 자동으로 맞춰집니다</div>'
+      + '<div class="scan-row" style="margin-bottom:.6rem"><input class="scan item" id="itemIn" placeholder="상품 바코드 스캔 후 Enter" autocomplete="off"></div>';
+  }
   if ((r.extras || []).length){
-    h += '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">'
-      + r.extras.map(function(x, i){ return '<span class="tag r mono">' + esc(x.code) + ' × ' + x.n + '</span>' + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
+    var pre = noItems && CFG.db === 'cargo';
+    h += pre ? '<div class="banner blu" style="margin-top:.6rem">스캔한 상품 (원송장 찾기 전)<div style="margin-top:.3rem">'
+             : '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">';
+    h += r.extras.map(function(x, i){ return '<span class="tag ' + (pre ? 'b' : 'r') + ' mono">' + esc(x.code) + ' × ' + x.n + '</span>'
+      + (pre ? '<span class="qbtn" style="margin-right:.4rem"><button class="' + (x.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'1\')">정상</button><button class="' + (x.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'2\')">불량</button></span>' : '')
+      + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
   }
   var ph = PHOTOS[r.rno] || {}, pk = Object.keys(ph).sort(function(a, b){ return (ph[a].at || 0) - (ph[b].at || 0); });
   h += '<div class="lbl" style="margin-top:.7rem">📷 사진 ' + (pk.length ? pk.length + '장' : '— 휴대폰 화면에서 찍으면 여기 같이 보입니다') + '</div>'
@@ -406,6 +472,8 @@ function renderCur(lastCode){
   h += '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem">';
   if (r.state === 'scan' || !r.state) h += '<button class="btn p" onclick="finishCur()">✔ 검수 완료 → 반영 대기</button>';
   if (r.state === 'ready' || r.state === 'fail') h += '<button class="btn w" onclick="reopenCur()">✏️ 다시 검수</button>';
+  if (r.state !== 'done' && r.state !== 'saving') h += '<button class="btn" onclick="manualDone(\'' + r.rno + '\')" title="이벗에 직접 넣었거나, 이벗 반영 없이 끝낼 때">✋ 수동 완료</button>';
+  h += '<button class="btn" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button>';
   if (r.trace === 'err' || r.look === 'err' || r.look === 'none' || r.look === 'wait') h += '<button class="btn" onclick="retryCur()">🔁 다시 조회</button>';
   if (!lk) h += '<button class="btn r" onclick="delCur()">기록 지우기</button>';
   h += '<button class="btn" onclick="CUR=null;renderCur();$(\'rnoIn\').focus()">닫기</button></div>';
@@ -433,8 +501,8 @@ function pushAll(){
       if (!tx.committed) return;
       var r = tx.snapshot.val(); RECS[k] = r; renderList();
       var lines = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: it.q === '2' ? '2' : '1' }; });
-      return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines }, 60000).then(function(res){
-        ok++; return save(RECS[k], { state: 'done', ebut: { at: Date.now(), msg: '저장됨', codes: res.codes || '', by: byName() } });
+      return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines, cust: CFG.cust, courier: r.courier || '우체국' }, 60000).then(function(res){
+        ok++; return save(RECS[k], { state: 'done', ebut: { at: Date.now(), msg: '저장됨', codes: res.codes || '', by: byName(), mode: 'auto' } });
       }, function(e){
         var m = String(e.message || e);
         if (m === 'LOGIN' || m === 'NOHELPER'){ stop = true; setHelper(m !== 'NOHELPER', false); return save(RECS[k], { state: 'ready', saveAt: null }); }
@@ -471,13 +539,16 @@ function renderList(){
     return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
       + '<td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
-      + '<td class="mono sm">' + esc(r.rno) + (PHOTOS[r.rno] ? '<div class="tag b">📷 ' + Object.keys(PHOTOS[r.rno]).length + '</div>' : '') + (/^m-/.test(r.dev || '') ? '<div class="tag b">📱</div>' : '') + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || '') + '</td>'
+      + '<td class="mono sm">' + esc(r.rno) + (CFG.vendor ? '<div style="font-family:\'Noto Sans KR\';font-weight:700">' + esc(r.vendor || '업체 없음') + ' <span class="dim" style="font-weight:400">' + esc(r.courier || '') + '</span></div>' : '')
+      + (PHOTOS[r.rno] ? '<div class="tag b">📷 ' + Object.keys(PHOTOS[r.rno]).length + '</div>' : '') + (/^m-/.test(r.dev || '') ? '<div class="tag b">📱</div>' : '') + '</td><td class="mono sm">' + esc(r.trace === 'busy' ? '조회 중' : r.trace === 'err' ? '실패' : r.orig || (r.trace === 'skip' ? '—' : '')) + '</td>'
       + '<td class="sm">' + esc(rmanOf(r)) + (r.rmanEdit ? ' <span class="tag b">수정</span>' : '') + '</td>'
       + '<td class="sm">' + (names.length ? esc(names[0]) + (names.length > 1 ? ' 외 ' + (names.length - 1) : '') + '<div>정상 <b style="color:var(--accent)">' + good + '</b> · 불량 <b style="color:var(--red)">' + badn + '</b></div>' : '<span class="dim">-</span>') + '</td>'
       + '<td>' + j.block.map(function(b){ return '<span class="tag r">' + esc(b) + '</span>'; }).join('') + j.info.map(function(b){ return '<span class="tag y">' + esc(b) + '</span>'; }).join('') + '</td>'
       + '<td><span class="st s-' + st.k + '">' + st.t + '</span></td><td class="sm">' + esc(r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' · ' + hm(r.ebut.at) : '') : '')
       + (r.edited ? '<div class="dim">✏️ ' + esc(r.edited.by || '') + ' ' + hm(r.edited.at) + ' 수정</div>' : '') + '</td>'
-      + '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn sm" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button> <button class="btn sm r" onclick="delRec(\'' + r.rno + '\')">🗑</button></td></tr>';
+      + '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn sm" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button> '
+      + (r.state !== 'done' && r.state !== 'saving' ? '<button class="btn sm" title="수동 완료" onclick="manualDone(\'' + r.rno + '\')">✋</button> ' : '')
+      + '<button class="btn sm r" onclick="delRec(\'' + r.rno + '\')">🗑</button></td></tr>';
   }).join('') : '<tr><td colspan="10" class="dim">해당 기간·상태의 반품이 없습니다</td></tr>';
   Object.keys(SEL).forEach(function(k){ if (!RECS[k]) delete SEL[k]; });
   $('nSel').textContent = Object.keys(SEL).length;
@@ -493,9 +564,18 @@ function delWarn(ks){
   return (done ? '\n\n⚠️ 이벗에 이미 반영된 ' + done + '건은 여기 기록만 지워지고 이벗 반품입고는 그대로 남습니다.' : '')
     + (saving ? '\n⚠️ 지금 반영 중인 ' + saving + '건이 있습니다 — 이벗에 들어갔는지 먼저 확인하세요.' : '');
 }
+/* ── ✋ 수동 완료: 이벗에 직접 넣었거나, 이벗 반영 없이 끝내기로 판단한 건 (대표님 2026-10-24 — 자동 완료와 구분) ── */
+function manualDone(k){
+  var r = RECS[k]; if (!r || r.state === 'done') return;
+  var why = prompt('✋ 수동 완료 — 반품 송장 ' + k + '\n이벗 도우미로 넣지 않고 완료로 표시합니다. 메모(선택):', '이벗에 직접 입력');
+  if (why === null) return;
+  patch(k, { state: 'done', saveAt: null, ebut: { at: Date.now(), by: byName(), mode: 'manual', msg: String(why || '').trim() || '수동 완료' } })
+    .then(function(){ toast('✋ 수동 완료 — ' + k); if (CUR === k) renderCur(); renderList(); });
+}
+
 /* ── 휴대폰 화면 링크 안내 (안드로이드 / 아이폰) ── */
 function showMobile(os){
-  var url = location.origin + '/star_return_m.html?os=' + os, ios = os === 'ios';
+  var url = location.origin + '/star_return_m.html?os=' + os + CFG.q, ios = os === 'ios';
   var h = '<div class="mdl-box"><div class="card-h">📱 반품 검수 — 휴대폰 ' + (ios ? '아이폰' : '안드로이드') + ' <span class="sp"></span><button class="btn sm" onclick="closeEdit()">닫기</button></div>'
     + '<div class="mob"><div class="qr" id="mobQr"></div><div style="flex:1;min-width:260px">'
     + '<div class="lbl">링크 주소</div><div class="url" id="mobUrl">' + esc(url) + '</div>'
@@ -549,7 +629,9 @@ function editRec(k){
     + '<label>반품 송장<input id="eRno" class="mono" value="' + esc(r.rno) + '" inputmode="numeric"></label>'
     + '<label>원송장<input id="eOrig" class="mono" value="' + esc(r.orig || '') + '" inputmode="numeric"></label>'
     + '<label>수령자<input id="eRman" value="' + esc(rmanOf(r)) + '"></label>'
-    + '<label>상태<select id="eState">' + [['scan', '검수 중'], ['ready', '반영 대기'], ['done', '반영 완료 (이벗에 손으로 넣음)'], ['fail', '반영 실패·확인']].map(function(o){
+    + (CFG.vendor ? '<label>업체명<input id="eVendor" list="vendorList" value="' + esc(r.vendor || '') + '"></label>'
+      + '<label>택배사<select id="eCourier"><option value="">선택</option>' + COURIERS.map(function(c){ return '<option' + (r.courier === c ? ' selected' : '') + '>' + c + '</option>'; }).join('') + '</select></label>' : '')
+    + '<label>상태<select id="eState">' + [['scan', '검수 중'], ['ready', '반영 대기'], ['done', r.state === 'done' && !(r.ebut && r.ebut.mode === 'manual') ? '자동 완료' : '✋ 수동 완료'], ['fail', '반영 실패·확인']].map(function(o){
         return '<option value="' + o[0] + '"' + ((r.state === o[0] || (r.state === 'saving' && o[0] === 'fail')) ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>'
     + '</div><div class="sm dim" style="margin:.2rem 0 .6rem">원송장을 바꾸면 이벗에서 주문·상품을 다시 불러옵니다 (아래 상품 수정은 버려짐).</div>';
   if ((r.items || []).length){
@@ -577,7 +659,7 @@ function saveEdit(){
   if (rno !== k && RECS[rno]){ toast('반품 송장 ' + rno + ' 기록이 이미 있습니다'); return; }
   var origChanged = orig !== (r.orig || '');
   if (origChanged){
-    Object.assign(r, { orig: orig || null, origDate: null, self: !!orig && orig === rno, trace: orig ? 'ok' : 'err', traceErr: orig ? null : '원송장 없음', look: orig ? 'wait' : null, orders: [], items: [], locas: {} });
+    Object.assign(r, { orig: orig || null, origDate: null, self: !!orig && orig === rno, trace: orig ? 'ok' : (CFG.db === 'cargo' ? 'skip' : 'err'), traceErr: orig || CFG.db === 'cargo' ? null : '원송장 없음', look: orig ? 'wait' : null, orders: [], items: [], locas: {} });
   } else {
     [].forEach.call(document.querySelectorAll('.eGot'), function(e){ r.items[+e.dataset.i].got = Math.max(0, parseInt(e.value, 10) || 0); });
     [].forEach.call(document.querySelectorAll('.eQ'), function(e){ r.items[+e.dataset.i].q = e.value; });
@@ -586,12 +668,13 @@ function saveEdit(){
   if (r.extras) r.extras = keepX;
   var auto = starOrders(r).map(function(o){ return o.rman; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(', ');
   r.rmanEdit = rman && rman !== auto ? rman : null;
+  if (CFG.vendor){ var nv = $('eVendor').value.trim(); if (nv && nv !== r.vendor) addVendor(nv); r.vendor = nv || null; r.courier = $('eCourier').value || null; }
   r.memo = $('eMemo').value.trim();
   r.rno = rno;
   if (state !== r0.state){
     if (r0.state === 'done' && !confirm('이벗에 반영된 건의 상태를 바꿉니다. 「반영 대기」로 두고 다시 반영하면 이벗에 두 번 들어갈 수 있습니다. 계속할까요?')) return;
     if (state === 'ready'){ var j = judge(r); if (j.block.length){ toast('반영 대기로 올릴 수 없습니다: ' + j.block[0]); return; } }
-    if (state === 'done' && !r.ebut) r.ebut = { at: Date.now(), msg: '이벗에 손으로 반영 (목록에서 표시)', by: byName() };
+    if (state === 'done') r.ebut = { at: Date.now(), msg: '수동 완료 (수정 창에서)', by: byName(), mode: 'manual' };
     r.state = state; r.saveAt = null;
   }
   r.edited = { at: Date.now(), by: byName() }; r.upd = Date.now();
@@ -634,20 +717,21 @@ function loadXlsx(cb){
 function downloadXlsx(){
   var rows = listRows(); if (!rows.length){ toast('내려받을 반품이 없습니다'); return; }
   loadXlsx(function(){
-    var a = [['검수일시', '작업자', '반품송장', '원송장', '원송장 접수일', '이벗 주문코드', '수령자', '상품명', '옵션', '바코드', '주문수량', '반품수량', '상태', '특이사항', '진행', '이벗 반영 결과']];
+    var V = CFG.vendor;
+    var a = [['검수일시', '작업자', '반품송장'].concat(V ? ['업체명', '택배사'] : [], ['원송장', '원송장 접수일', '이벗 주문코드', '수령자', '상품명', '옵션', '바코드', '주문수량', '반품수량', '상태', '특이사항', '진행', '이벗 반영 결과'])];
     rows.forEach(function(r){
       var j = judge(r), so = starOrders(r), flag = j.block.concat(j.info).join(' / '), st = stOf(r).t, eb = r.ebut ? (r.ebut.msg || '') + (r.ebut.at ? ' ' + hm(r.ebut.at) : '') : '';
-      var rman = rmanOf(r);
-      var head = [hm(r.at), r.by || '', r.rno, r.orig || '', r.origDate || '', so.map(function(o){ return o.code; }).join(','), rman];
+      var rman = rmanOf(r), pre = !(r.items || []).length && CFG.db === 'cargo';
+      var head = [hm(r.at), r.by || '', r.rno].concat(V ? [r.vendor || '', r.courier || ''] : [], [r.orig || '', r.origDate || '', so.map(function(o){ return o.code; }).join(','), rman]);
       var lines = (r.items || []).filter(function(it){ return it.got > 0; });
       lines.forEach(function(it){ a.push(head.concat([it.name, it.opt, it.nicn, it.qty, it.got, it.q === '2' ? '불량' : '정상', flag, st, eb])); });
-      (r.extras || []).forEach(function(x){ a.push(head.concat(['(반품 대상 아님)', '', x.code, 0, x.n, '대상아님', flag, st, eb])); });
+      (r.extras || []).forEach(function(x){ a.push(head.concat([pre ? '(원송장 찾기 전 스캔)' : '(반품 대상 아님)', '', x.code, pre ? '' : 0, x.n, pre ? (x.q === '2' ? '불량' : '정상') : '대상아님', flag, st, eb])); });
       if (!lines.length && !(r.extras || []).length) a.push(head.concat(['', '', '', '', 0, '', flag, st, eb]));
     });
     var ws = XLSX.utils.aoa_to_sheet(a);
-    ws['!cols'] = [12, 10, 16, 16, 11, 12, 10, 34, 10, 16, 8, 8, 8, 40, 9, 30].map(function(w){ return { wch: w }; });
+    ws['!cols'] = [12, 10, 16].concat(V ? [16, 9] : [], [16, 11, 12, 10, 34, 10, 16, 8, 8, 8, 40, 9, 30]).map(function(w){ return { wch: w }; });
     var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '반품입고');
-    var d = new Date(); XLSX.writeFile(wb, '스타_반품입고_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.xlsx');
+    var d = new Date(); XLSX.writeFile(wb, (CFG.db === 'cargo' ? '화물' : '스타') + '_반품입고_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.xlsx');
   });
 }
 
@@ -676,7 +760,7 @@ function downloadReport(){
     function newPage(){
       c = document.createElement('canvas'); c.width = W; c.height = H; g = c.getContext('2d');
       g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.textBaseline = 'middle';
-      g.fillStyle = '#111'; g.font = '700 30px ' + F; g.fillText('스타 3PL 반품입고 보고서', M, M + 10);
+      g.fillStyle = '#111'; g.font = '700 30px ' + F; g.fillText(CFG.db === 'cargo' ? '3PL 반품입고 보고서 (화물)' : '스타 3PL 반품입고 보고서', M, M + 10);
       g.fillStyle = '#666'; g.font = '400 17px ' + F; var d = new Date();
       var t = '출력 ' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ' · ' + byName() + ' · ' + ks.length + '건';
       g.textAlign = 'right'; g.fillText(t, W - M, M + 12); g.textAlign = 'left';
@@ -703,6 +787,7 @@ function downloadReport(){
       room(260); if (n) y += 22;
       g.fillStyle = '#1d4ed8'; g.font = '700 21px ' + F; g.fillText((n + 1) + '. 반품 송장 ' + r.rno, M, y + 14); y += 34;
       var hw = [CW * .22, CW * .22, CW * .16, CW * .24, CW * .16];
+      if (CFG.vendor) cellRow(['업체명', (r.vendor || '-') + '   ·   택배사 ' + (r.courier || '-')], [CW * .14, CW * .86], { size: 17, colors: ['#444', '#111'] });
       cellRow(['반품 송장', '원송장', '수령자', '검수', '상태'], hw, { bold: true, size: 16, bg: '#eef1f6', color: '#444' });
       cellRow([r.rno, (r.orig || '-') + (r.self ? ' (반송)' : ''), rmanOf(r) || '-', hm(r.at) + ' ' + (r.by || ''), st.t + (r.ebut && r.ebut.at ? ' ' + hm(r.ebut.at) : '')], hw, { size: 17 });
       var iw = [CW * .36, CW * .11, CW * .2, CW * .1, CW * .1, CW * .13];
@@ -710,7 +795,10 @@ function downloadReport(){
       var lines = (r.items || []).filter(function(it){ return it.got > 0; });
       lines.forEach(function(it){ var bad = it.q === '2';
         cellRow([it.name, it.opt || '', it.nicn || '', String(it.qty), String(it.got), bad ? '불량' : '정상'], iw, { size: 17, colors: [null, null, null, null, null, bad ? '#dc2626' : '#15803d'] }); });
-      (r.extras || []).forEach(function(x){ cellRow(['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw, { size: 17, colors: ['#dc2626', null, null, null, null, '#dc2626'] }); });
+      var pre = !(r.items || []).length && CFG.db === 'cargo';
+      (r.extras || []).forEach(function(x){ var bad = x.q === '2';
+        cellRow(pre ? ['(원송장 찾기 전 스캔)', '', x.code, '-', String(x.n), bad ? '불량' : '정상'] : ['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw,
+          { size: 17, colors: pre ? ['#444', null, null, null, null, bad ? '#dc2626' : '#15803d'] : ['#dc2626', null, null, null, null, '#dc2626'] }); });
       if (!lines.length && !(r.extras || []).length) cellRow(['반품 상품 없음', '', '', '', '', ''], iw, { size: 17, color: '#888' });
       var notes = j.block.concat(j.info).join(' / ');
       cellRow(['특이사항', notes || '-'], [CW * .14, CW * .86], { size: 17, colors: ['#444', notes ? '#b45309' : '#888'] });
@@ -734,7 +822,7 @@ function downloadReport(){
     pages.forEach(function(p, i){ var gg = p.getContext('2d'); gg.fillStyle = '#888'; gg.font = '400 16px ' + F; gg.textAlign = 'center'; gg.textBaseline = 'middle'; gg.fillText((i + 1) + ' / ' + pages.length, W / 2, H - M / 2); });
     var pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
     pages.forEach(function(p, i){ if (i) pdf.addPage(); pdf.addImage(p.toDataURL('image/jpeg', 0.86), 'JPEG', 0, 0, 210, 297); });
-    var d = new Date(); pdf.save('스타_반품입고_보고서_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + ks.length + '건.pdf');
+    var d = new Date(); pdf.save((CFG.db === 'cargo' ? '화물' : '스타') + '_반품입고_보고서_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + ks.length + '건.pdf');
     toast('✔ PDF 보고서 ' + pages.length + '쪽 내려받음');
   }).catch(function(e){ toast('PDF 만들기 실패: ' + (e.message || e)); console.error(e); })
   .then(function(){ btn.disabled = false; });
@@ -746,14 +834,19 @@ WMSync.onAuth(function(st){
   if (!st.user){ $('who').textContent = '로그인 필요'; return; }            /* 로그인 이동은 wms_access.js 가 처리 */
   if (!st.groupId){ $('who').textContent = '작업 그룹 미등록 — 관리자에게 초대코드를 받으세요'; return; }
   me = st.user; gid = st.groupId; db = firebase.database();
-  base = db.ref('wms_sync/groups/' + gid + '/star_return');
+  base = db.ref('wms_sync/groups/' + gid + '/' + CFG.path);
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
   base.child('recs').orderByChild('at').startAt(Date.now() - 120 * 864e5).on('value', function(s){
     RECS = s.val() || {}; renderList(); renderNotes();
-    var a = document.activeElement;   /* 스캔 중(입력칸에 커서)일 땐 다른 PC 변경으로 화면을 다시 그리지 않음 — 커서가 튐 */
-    if (CUR && !(a && (a.id === 'itemIn' || a.tagName === 'TEXTAREA'))) renderCur();
+    var a = document.activeElement;   /* 스캔·입력 중(입력칸에 커서)일 땐 다른 PC 변경으로 화면을 다시 그리지 않음 — 커서가 튐 */
+    if (CUR && !(a && (a.id === 'itemIn' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || (a.tagName === 'INPUT' && $('cur').contains(a))))) renderCur();
     autoLook();
   });
+  if (CFG.vendor){
+    base.child('dict/vendor').on('value', function(s){ VENDORS = s.val() || {}; renderVendorChips(); });
+    $('vendorIn').addEventListener('change', function(){ try { localStorage.setItem('retVendor_' + CFG.db, this.value.trim()); } catch(e){} renderVendorChips(); });
+    renderCourierChips();
+  }
   base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); if (CUR) renderCur(); });
   base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; renderList(); if (CUR) renderCur(); });
   $('rnoIn').focus();

@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24c';
+  var VER = '2026-10-24d';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -110,12 +110,14 @@
     return s ? { in: locaValue(s, LOCA_IN), bad: locaValue(s, LOCA_BAD) } : { in: '', bad: '' };
   }
 
+  /* 반영할 고객사: 스타 반품은 446, 화물 반품(?db=cargo)은 null = 제한 없음 (화면이 a.cust 로 보냄, 예전 화면은 안 보내므로 스타) */
+  function custOf(a){ return a.cust === undefined ? STAR_CUST : a.cust; }
   function cmdFind(a){
     var orig = String(a.orig || '').replace(/\D/g, '');
     if (orig.length < 10) return Promise.reject(new Error('원송장 번호가 이상합니다'));
     return findOrders(orig, a.origDate).then(function(orders){
       if (!orders.length) return { orders: [], items: [], locas: {} };
-      var open = orders.filter(function(o){ return o.cust === STAR_CUST && o.ret === '-'; });
+      var cust = custOf(a), open = orders.filter(function(o){ return (!cust || o.cust === cust) && o.ret === '-'; });
       if (!open.length) return { orders: orders, items: [], locas: {} };
       return openPopup(open).then(function(f){
         var r = { orders: orders, items: readItems(f), locas: readLocas(f) };
@@ -134,7 +136,7 @@
     return findOrders(String(a.orig || '').replace(/\D/g, ''), a.origDate).then(function(orders){
       var tgt = orders.filter(function(o){ return want[o.code]; });
       if (tgt.length !== Object.keys(want).length) throw new Error('이벗에서 주문을 다시 찾지 못했습니다');
-      if (tgt.some(function(o){ return o.cust !== STAR_CUST; })) throw new Error('스타인터내셔널 주문이 아닙니다');
+      var cust = custOf(a); if (cust && tgt.some(function(o){ return o.cust !== cust; })) throw new Error('스타인터내셔널 주문이 아닙니다');
       var done = tgt.filter(function(o){ return o.ret !== '-'; });
       if (done.length) throw new Error('ALREADY:' + done.map(function(o){ return o.ret; }).join(','));
       return openPopup(tgt);
@@ -166,7 +168,12 @@
         wahSel.value = wah;
       }
       fm.RETURN_DNO.value = rno;
-      fm.RETURN_DOFC.value = '142';                                         /* 우체국택배 */
+      /* 택배사: 우체국(기본) = 142, 그 밖은 팝업 목록에서 이름으로 찾음 — 없으면 멈춤 (엉뚱한 택배사로 들어가지 않게) */
+      var cr = String(a.courier || '우체국'), dofc = '';
+      if (cr === '우체국') dofc = '142';
+      else [].forEach.call(fm.RETURN_DOFC.options, function(o){ if (!dofc && o.value && o.text.replace(/\s/g, '').indexOf(cr.replace(/대한통운|택배|\s/g, '')) >= 0) dofc = o.value; });
+      if (!dofc){ f.remove(); throw new Error('이벗 택배사 목록에 「' + cr + '」이(가) 없습니다 — 이벗 기초정보에 추가하거나 ✋ 수동 완료'); }
+      fm.RETURN_DOFC.value = dofc;
       fm.RETURN_RECO.value = lines.some(function(l){ return l.q === '2'; }) ? '402' : '401';
       fm.RETURN_QTY.value = String(tot);
       [].forEach.call(N('RETURN_MALLYN'), function(r){ r.checked = (r.value === (partial ? '2' : '1')); });   /* 전량/부분입고 */

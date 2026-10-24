@@ -61,6 +61,8 @@
   .ph .x { position:absolute; right:4px; top:4px; width:26px; height:26px; border-radius:50%; border:0; background:rgba(0,0,0,.65); color:#fff; font-weight:900; }
   .ph .up { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--muted); }
 
+  .chipm { border:1px solid var(--border); background:var(--surface2); color:var(--muted); border-radius:16px; padding:6px 12px; font-size:13.5px; font-weight:700; }
+  .chipm.on { color:#06281a; background:var(--accent); border-color:var(--accent); }
   .recent .r { display:flex; justify-content:space-between; align-items:center; padding:9px 2px; border-bottom:1px solid #1f2430; font-size:13.5px; }
   .st { border-radius:6px; padding:2px 7px; font-size:11.5px; font-weight:800; white-space:nowrap; }
   .st.s-scan { background:#1f2533; color:#cbd5e1; } .st.s-ready { background:#0f1d33; color:#93c5fd; } .st.s-saving { background:#2a2410; color:#fde68a; }
@@ -94,6 +96,13 @@
 
   <div id="pcWarn" class="banner yel" style="display:none;margin:0 0 10px"></div>
   <div id="startBox">
+    <div id="cargoBox" class="card" style="display:none;margin:0 0 10px">
+      <div class="lbl">업체명 · 택배사 — 스캔하는 반품마다 들어갑니다</div>
+      <div class="man" style="margin-top:0"><input id="vendorIn" list="vendorList" placeholder="업체명 (새 이름은 목록에 쌓임)" autocomplete="off" style="font-family:'Noto Sans KR',sans-serif"><datalist id="vendorList"></datalist></div>
+      <div id="vendorChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+      <div id="courierChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+      <div class="dim" style="font-size:12px;margin-top:6px">우체국 송장(6077·7077)은 택배사를 안 골라도 자동으로 우체국 · 원송장 자동 추적</div>
+    </div>
     <button class="big g" onclick="openScan('rno')">📷 반품 송장 스캔</button>
     <div class="man"><input id="rnoIn" inputmode="numeric" placeholder="또는 송장번호 직접 입력" autocomplete="off"><button onclick="manualRno()">확인</button></div>
   </div>
@@ -142,6 +151,27 @@ var db = null, gid = null, me = null, base = null;
 var RECS = {}, NOTES = {}, PHOTOS = {}, CUR = null, photoRef = null;
 var OS = (/[?&]os=(android|ios)/.exec(location.search) || [])[1] || (/iPhone|iPad|iPod/.test(navigator.userAgent) ? 'ios' : 'android');
 $('osTag').textContent = OS === 'ios' ? ' 아이폰' : ' 안드로이드';
+/* 스타 / 화물 구분 (star_return_core.js 의 CFG, 주소 ?db=cargo) */
+document.title = CFG.db === 'cargo' ? '반품 검수 (화물·휴대폰)' : '반품 검수 (휴대폰)';
+if (CFG.db === 'cargo') document.querySelector('.top h1').innerHTML = '↩ 반품 <b>검수</b> <span class="dim" style="font-size:13px">화물</span>';
+document.querySelector('.top a[href="star_return.html"]').href = 'star_return.html' + (CFG.q ? '?' + CFG.q.slice(1) : '');
+var VENDORS = {}, CUR_COURIER = '';
+if (CFG.vendor){
+  $('cargoBox').style.display = 'block';
+  try { $('vendorIn').value = localStorage.getItem('retVendor_' + CFG.db) || ''; } catch(e){}
+  $('vendorIn').addEventListener('change', function(){ try { localStorage.setItem('retVendor_' + CFG.db, this.value.trim()); } catch(e){} renderVendorChips(); });
+}
+function renderVendorChips(){
+  if (!CFG.vendor) return;
+  var ks = Object.keys(VENDORS).map(function(k){ return VENDORS[k]; }).filter(function(v){ return v && v.name; });
+  $('vendorList').innerHTML = ks.map(function(v){ return '<option value="' + esc(v.name) + '">'; }).join('');
+  var cur = $('vendorIn').value.trim();
+  $('vendorChips').innerHTML = ks.sort(function(a, b){ return (b.t || 0) - (a.t || 0); }).slice(0, 10).map(function(v){
+    return '<button class="chipm' + (cur === v.name ? ' on' : '') + '" onclick="pickVendor(this.textContent)">' + esc(v.name) + '</button>'; }).join('');
+  $('courierChips').innerHTML = COURIERS.map(function(c){ return '<button class="chipm' + (CUR_COURIER === c ? ' on' : '') + '" onclick="CUR_COURIER=\'' + c + '\';renderVendorChips()">' + c + '</button>'; }).join('');
+}
+function pickVendor(n){ $('vendorIn').value = n; try { localStorage.setItem('retVendor_' + CFG.db, n); } catch(e){} renderVendorChips(); }
+function addVendor(name){ name = String(name || '').trim(); if (!name || !base) return; base.child('dict/vendor/' + vkey(name)).transaction(function(c){ c = c || {}; return { name: name, n: (c.n || 0) + 1, t: Date.now() }; }); }
 
 var toastT = null;
 function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2400); }
@@ -197,8 +227,11 @@ function onCode(text){
     closeScan(); startRno(no);
   } else {
     var r = RECS[CUR]; if (!r || locked(r)) return;
+    var pre = !(r.items || []).length && CFG.db === 'cargo';   /* 화물: 원송장 전 스캔은 그냥 쌓음 */
     var a = applyItem(r, code);
     upd(r, { items: r.items || [], extras: r.extras || [] });
+    if (pre){ var xx = (r.extras || []).filter(function(e){ return e.code === a.code; })[0]; beep(true); vib(40);
+      $('scMsg').innerHTML = '✔ <span class="sc-last">' + esc(a.code) + '</span> — ' + (xx ? xx.n : 1) + '개째'; render(a.code); return; }
     beep(!!a.hit && !a.over); vib(a.hit && !a.over ? 40 : [80, 60, 80]);
     $('scMsg').innerHTML = a.hit ? '✔ <span class="sc-last">' + esc(a.code) + '</span> ' + esc(a.hit.name) + ' — 반품 ' + a.hit.got + ' / 주문 ' + a.hit.qty + (a.over ? ' <b style="color:#f05050">주문보다 많음</b>' : '')
       : '<b style="color:#f05050">⚠️ 이 주문에 없는 상품</b> <span class="sc-last">' + esc(a.code) + '</span> — 특이사항으로 기록';
@@ -212,13 +245,18 @@ function manualRno(){ var no = digits($('rnoIn').value); $('rnoIn').value = ''; 
 function startRno(no){
   var r = RECS[no];
   if (r){ openRec(no); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); return; }
+  var vendor = CFG.vendor ? $('vendorIn').value.trim() : '', courier = isEpost(no) ? '우체국' : CUR_COURIER;
+  if (CFG.vendor && !vendor){ beep(false); vib([80, 60, 80]); toast('업체명을 먼저 고르세요'); return; }
+  if (CFG.vendor && !courier){ beep(false); vib([80, 60, 80]); toast('우체국 송장이 아닙니다 — 택배사를 먼저 고르세요'); return; }
   /* 휴대폰은 최근 3일만 받아 두므로, 더 오래된 같은 송장 기록이 있는지 서버에서 한 번 더 확인 (덮어쓰기 방지) */
   base.child('recs/' + no).once('value').then(function(sn){
     if (sn.exists()){ RECS[no] = sn.val(); openRec(no); toast('예전에 스캔한 송장입니다 — 이어서 봅니다'); return; }
-    r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: 'busy', items: [], extras: [], dev: 'm-' + OS };
+    r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no) ? 'busy' : 'skip', items: [], extras: [], dev: 'm-' + OS };
+    if (CFG.vendor){ r.vendor = vendor; r.courier = courier; addVendor(vendor); }
     RECS[no] = r;
-    return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40); trace(no);
-      if (!pcAlive()) toast('⚠️ 이벗 도우미가 연결된 PC 가 없습니다 — 상품 목록은 PC 에서 도우미를 연결하면 채워집니다'); });
+    return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40);
+      if (r.trace === 'busy'){ trace(no); if (!pcAlive()) toast('⚠️ 이벗 도우미가 연결된 PC 가 없습니다 — 상품 목록은 PC 에서 도우미를 연결하면 채워집니다'); }
+      else toast('원송장 추적 없이 등록 — 상품 스캔·사진을 남기고, 원송장은 PC 에서 찾아 넣습니다'); });
   });
 }
 function trace(no){
@@ -244,9 +282,15 @@ function setQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.items[i].
 function addGot(i, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = Math.max(0, (it.got || 0) + d); upd(r, { items: r.items }); render(); }
 function delExtra(i){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras.splice(i, 1); upd(r, { extras: r.extras }); render(); }
 function setMemo(v){ var r = RECS[CUR]; if (!r || locked(r)) return; upd(r, { memo: String(v || '').trim() }); }
+function setExtraQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras[i].q = q; upd(r, { extras: r.extras }); vib(20); render(); }
 function finish(){
   var r = RECS[CUR]; if (!r) return;
   var j = judge(r);
+  /* 화물: 원송장 못 찾은 반품은 「검수 완료(반영 전)」로 남김 — PC 에서 원송장을 찾아 넣으면 반영 */
+  if (j.block.length && CFG.db === 'cargo' && /원송장|주문 조회|못 찾음/.test(j.block[0]) && ((r.items || []).some(function(it){ return it.got > 0; }) || (r.extras || []).length)){
+    upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); vib(60); toast('✔ 검수 완료 — 원송장은 PC 에서 찾아 넣으면 반영됩니다'); closeCur(); });
+    return;
+  }
   if (j.block.length){ beep(false); toast('아직 넣을 수 없습니다: ' + j.block[0]); return; }
   upd(r, { state: 'ready', checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); vib(60); toast('✔ 검수 완료 — PC 에서 이벗에 반영됩니다'); closeCur(); });
 }
@@ -259,7 +303,8 @@ function render(lastCode){
   if (!r){ box.innerHTML = ''; foot.style.display = 'none'; return; }
   var j = judge(r), st = stOf(r), lk = locked(r), h = '';
   h += '<div class="card"><div class="kv"><span>반품 송장</span><b>' + esc(r.rno) + '</b>'
-    + '<span>원송장</span><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : esc(r.orig || '')) + (r.self ? ' <span class="dim">(반송)</span>' : '') + '</b>'
+    + (CFG.vendor ? '<span>업체명</span><b style="font-family:inherit">' + esc(r.vendor || '-') + '</b><span>택배사</span><b style="font-family:inherit">' + esc(r.courier || '-') + '</b>' : '')
+    + '<span>원송장</span><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : r.trace === 'skip' && !r.orig ? '<span class="dim" style="font-family:inherit">없음 — PC 에서 찾아 입력</span>' : esc(r.orig || '')) + (r.self ? ' <span class="dim">(반송)</span>' : '') + '</b>'
     + '<span>수령자</span><b style="font-family:inherit">' + esc(rmanOf(r) || '-') + '</b>'
     + '<span>상태</span><b style="font-family:inherit"><span class="st s-' + st.k + '">' + st.t + '</span></b></div>';
   noteHits(r).forEach(function(x){ h += '<div class="banner yel">📌 사전 특이사항 ' + x.t + ' — ' + esc(x.n.memo || '') + '</div>'; });
@@ -268,9 +313,22 @@ function render(lastCode){
     ? '<div class="banner blu">⏳ PC 가 이벗에서 원송장 주문 상품을 찾는 중… <div style="font-weight:400;font-size:12.5px;margin-top:2px">보통 몇 초 걸립니다. 그동안 사진·메모는 먼저 하셔도 됩니다.</div></div>'
     : '<div class="banner yel">⚠️ 이벗 도우미가 연결된 PC 가 없어 상품 목록을 아직 못 불러옵니다<div style="font-weight:400;font-size:12.5px;margin-top:2px">PC 반품입고관리에서 이벗 도우미를 연결하면 자동으로 채워집니다. 사진·메모는 먼저 하셔도 됩니다.</div></div>';
   if (r.look === 'err') h += '<div class="banner red">이벗 주문 조회 실패: ' + esc(r.lookErr || '') + '</div>';
-  j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + '</div>'; });
-  if (r.state === 'done') h += '<div class="banner grn">✔ 이벗 반영 완료</div>';
+  j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b) && !(CFG.db === 'cargo' && /^원송장 없음/.test(b))) h += '<div class="banner red">⛔ ' + esc(b) + '</div>'; });
+  if (r.state === 'done') h += '<div class="banner grn">✔ ' + st.t + '</div>';
   h += '</div>';
+
+  /* 화물: 원송장 전에도 상품을 먼저 스캔해 둠 (원송장을 찾으면 PC 가 주문 상품과 맞춤) */
+  if (!(r.items || []).length && CFG.db === 'cargo'){
+    h += '<div class="card"><div class="lbl">② 상품 — 스캔해 두면 원송장을 찾았을 때 주문 상품과 맞춰집니다</div>';
+    if (!lk) h += '<button class="big b" onclick="openScan(\'item\')">📷 상품 바코드 스캔</button>';
+    (r.extras || []).forEach(function(x, i){
+      h += '<div class="item' + (lastCode && x.code === lastCode ? ' hot' : '') + '"><div class="bc" style="font-size:14px;color:var(--text)">' + esc(x.code) + '</div>'
+        + '<div class="ctl"><div class="cnt">' + x.n + '<span class="dim" style="font-size:13px"> 개</span></div>'
+        + '<div class="q"><button class="' + (x.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'1\')">정상</button><button class="' + (x.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'2\')">불량</button></div>'
+        + (lk ? '' : '<button class="pm" onclick="delExtra(' + i + ')">×</button>') + '</div></div>';
+    });
+    h += '</div>';
+  }
 
   if ((r.items || []).length){
     h += '<div class="card"><div class="lbl">② 상품 — 스캔하면 반품 수량이 올라갑니다</div>';
@@ -330,7 +388,7 @@ function uploadFiles(files){
   var r = RECS[CUR]; if (!r || !files || !files.length) return;
   [].forEach.call(files, function(f){
     var tmp = 'u' + Date.now() + Math.random().toString(36).slice(2, 6); UPLOADING[tmp] = 1; render();
-    var path = 'star_return/' + gid + '/' + r.rno + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg';
+    var path = CFG.path + '/' + gid + '/' + r.rno + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg';
     shrink(f).then(function(b){
       var ref = firebase.storage().ref(path);
       return ref.put(b, { contentType: 'image/jpeg' }).then(function(){ return ref.getDownloadURL(); });
@@ -354,7 +412,8 @@ WMSync.onAuth(function(st){
   if (!st.user){ $('who').textContent = '로그인 필요'; return; }
   if (!st.groupId){ $('who').textContent = '작업 그룹 미등록 — 관리자에게 초대코드를 받으세요'; return; }
   me = st.user; gid = st.groupId; db = firebase.database();
-  base = db.ref('wms_sync/groups/' + gid + '/star_return');
+  base = db.ref('wms_sync/groups/' + gid + '/' + CFG.path);
+  if (CFG.vendor) base.child('dict/vendor').on('value', function(s){ VENDORS = s.val() || {}; renderVendorChips(); });
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid;
   base.child('recs').orderByChild('at').startAt(Date.now() - 3 * 864e5).on('value', function(s){
     RECS = s.val() || {};
