@@ -582,7 +582,7 @@ function onCode(text){
     closeScan(); startRno(no);
   } else {
     var r = RECS[CUR]; if (!r || locked(r)) return;
-    var pre = !(r.items || []).length && CFG.db === 'cargo';   /* 화물: 원송장 전 스캔은 그냥 쌓음 */
+    var pre = !(r.items || []).length && (CFG.db === 'cargo' || r.look !== 'ok');   /* 상품 목록 오기 전 스캔은 그냥 쌓음 (화물·스타 둘 다) */
     var a = applyItem(r, code, SCANQ), qw = SCANQ === '2' ? ' <b style="color:var(--red2)">불량</b>' : '';
     upd(r, { items: r.items || [], extras: r.extras || [] });
     if (pre){ var xx = (r.extras || []).filter(function(e){ return e.code === a.code; })[0]; beep(true); vib(40); flash(true);
@@ -743,10 +743,11 @@ function flash(ok){
 function finish(){
   var r = RECS[CUR]; if (!r) return;
   var j = judge(r);
-  /* 화물: 원송장 못 찾은 반품은 「목록 완료(반영 전)」로 남김 — PC 에서 원송장을 찾아 넣으면 반영 */
-  if (j.block.length && CFG.db === 'cargo' && /원송장|주문 조회|못 찾음/.test(j.block[0]) && ((r.items || []).some(function(it){ return it.got > 0; }) || (r.extras || []).length)){
-    upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast('✔ 목록 완료 — 내 목록에서 확인 후 「확정」'); });
-    beep(true); vib(60); closeCur();   /* 화물: 완료 = 목록에 올림, 다음 송장은 첫 화면에서 */
+  /* 원송장·이벗 상품 목록이 아직이면 「목록 완료(반영 전)」로 남김 — PC 가 이벗 주문 상품과 맞추면 반영 대기로 (화물·스타 둘 다) */
+  if (j.block.length && /원송장|주문 조회|못 찾음/.test(j.block[0]) && ((r.items || []).some(function(it){ return it.got > 0; }) || (r.extras || []).length)){
+    upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast(CFG.vendor ? '✔ 목록 완료 — 내 목록에서 확인 후 「확정」' : '✔ 목록 완료 — PC 가 이벗 주문 상품과 맞추면 반영 대기로 넘어갑니다'); });
+    beep(true); vib(60); closeCur();   /* 화물: 다음 송장은 첫 화면에서 */
+    if (!CFG.vendor) openScan('rno');   /* 스타: 누른 손 그대로 다음 송장 카메라 */
     return;
   }
   if (j.block.length){ beep(false); flash(false); toast('아직 넣을 수 없습니다: ' + j.block[0]); return; }
@@ -796,8 +797,9 @@ function vendorNotes(r){   /* 업체 사전 특이사항 → 빨간 지시 상�
 function msgsOf(r){   /* 알릴 것 — 한 줄씩, 많으면 이 칸만 스크롤 */
   var j = judge(r), st = stOf(r), m = [];
   noteHits(r).forEach(function(x){ m.push([x.t === '업체' ? 'red' : 'yel', '📌 ' + (x.t === '업체' ? esc(r.vendor) + ' 지시사항' : '사전 특이사항 ' + x.t) + ' — ' + esc(x.n.memo || '')]); });
+  if (r.trace === 'busy') m.push(['blu', '⏳ 우체국에서 원송장 찾는 중… 상품은 먼저 찍어 두세요']);
   if (r.trace === 'err') m.push(['red', '우체국 원송장 조회 실패 ' + esc(r.traceErr || '')]);
-  if (r.look === 'wait' || r.look === 'busy') m.push(pcAlive() ? ['blu', '⏳ PC 가 주문 상품을 찾는 중… 그동안 다른 단계 먼저 해도 됩니다'] : ['yel', '⚠️ 이벗 도우미 PC 가 연결 안 돼 주문 상품 목록을 못 불러옵니다']);
+  if (r.look === 'wait' || r.look === 'busy') m.push(pcAlive() ? ['blu', '⏳ PC 가 이벗 주문 상품을 찾는 중… 상품은 먼저 찍어 두세요'] : ['yel', '⚠️ 이벗 도우미 PC 연결 전 — 상품은 먼저 찍어 두면 PC 연결 후 주문 상품과 맞춰집니다']);
   if (r.look === 'err') m.push(['red', '이벗 주문 조회 실패 ' + esc(r.lookErr || '')]);
   j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음|업체명 없음/.test(b) && !(CFG.db === 'cargo' && /^원송장 없음/.test(b))) m.push(['red', '⛔ ' + esc(b)]); });
   (r.items || []).forEach(function(it){ if (isMix(it)) m.push(['yel', '정상·불량 섞임: ' + esc(it.name) + ' — 이벗은 PC 에서 손으로 나눠 넣습니다']); });
@@ -887,8 +889,8 @@ function render(lastCode){
       h += '<div class="row nav"><button class="btn" aria-label="이전 상품" ' + (FOCUS <= 0 || SHOWALL ? 'disabled' : '') + ' onclick="focusTo(' + (FOCUS - 1) + ')">' + ico('back') + '</button>'
         + (lk ? '<span style="flex:3"></span>' : '<button class="btn y" style="flex:3" onclick="openScan(\'item\')">' + ico('scan') + '상품 찍기</button>')
         + '<button class="btn" aria-label="다음 상품" ' + (FOCUS >= items.length - 1 || SHOWALL ? 'disabled' : '') + ' onclick="focusTo(' + (FOCUS + 1) + ')">' + ico('next') + '</button></div>';
-    } else if (CFG.db === 'cargo'){
-      /* 화물: 어떤 상품이 몇 개 들어왔는지만 — 바코드 스캔 / 촬영하고 입력 / 직접 입력 (원송장을 찾으면 PC 가 주문 상품과 맞춤) */
+    } else if (CFG.db === 'cargo' || r.look !== 'ok'){
+      /* 상품 목록 오기 전(화물은 늘, 스타는 PC 가 이벗에서 가져오기 전): 어떤 상품이 몇 개 들어왔는지만 — 바코드 스캔 / 촬영하고 입력 / 직접 입력 (원송장을 찾으면 PC 가 주문 상품과 맞춤) */
       var xs = r.extras || [], xn = xs.reduce(function(s, x){ return s + x.n; }, 0);
       if (ADD && !lk){
         h += '<div class="yb">' + yh('items', '상품 직접 입력', Object.keys(UPLOADING).length ? '사진 올리는 중…' : '')

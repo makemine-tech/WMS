@@ -359,6 +359,10 @@ function lookup(no){
     var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}, n = { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0 }; setBad(n, badOf(o.got != null ? o : { got: 0 })); return n; });
     var tmp = { items: items, extras: (r2.extras || []).slice() }; absorbExtras(tmp);   /* 원송장 찾기 전에 스캔해 둔 상품 → 주문 상품 수량으로 */
     patch(no, { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: tmp.items, extras: tmp.extras, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
+    /* 휴대폰에서 상품 목록 오기 전에 찍어 두고 「목록 완료」한 건: 찍은 상품이 주문 상품과 다 맞으면 바로 반영 대기로 (대표님 2026-10-24) */
+    var r3 = RECS[no];
+    if (r3 && r3.checked && (r3.state === 'scan' || !r3.state) && !judge(r3).block.length && !(r3.extras || []).length)
+      patch(no, { state: 'ready', checkedBy: r3.checkedBy || byName(), checkedAt: r3.checkedAt || Date.now() });
     if (CUR === no){ renderCur(); var j = judge(RECS[no]); beep(!j.block.length || j.block[0] === '반품 상품 스캔 없음'); }
   }, function(e){
     var m = String(e.message || e);
