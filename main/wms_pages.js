@@ -37,7 +37,7 @@ var WMS_PAGES=[
       self:'자체 인증: vendorByEmail 매칭 — 거래처 담당자는 그룹 미가입이므로 초대회원 이상으로 올리지 마세요'},
   ]},
   {group:'출고 · 입고 도구 (그룹 동기화)', items:[
-    {key:'cargo_log',    file:'cargo_log.html',    label:'입출고 화물관리 (기록지·파렛트 통계)', floor:2, gate:true},
+    {key:'cargo_log',    file:'cargo_log.html',    label:'입출고반품관리 (기록지·파렛트 통계)', floor:2, gate:true},
     {key:'star_coupang', file:'star_coupang.html', label:'쿠팡 출고', floor:2, gate:true},
     {key:'star_outorder',file:'star_outorder.html',label:'출고 지시', floor:2, gate:true},
     {key:'star_instock', file:'star_instock.html', label:'입고 관리', floor:2, gate:true},
@@ -101,7 +101,7 @@ var WMS_MENU=[
   {section:'WMS PRIMARY', kind:'big', cols:2, tiles:[
     {key:'wms', name:'창고 관리 시스템', eng:'CORE · WAREHOUSE MANAGEMENT', note:'버튼은 로그인 화면을 거쳐 열림',
       subs:[{key:'wms_login'},{key:'wms_vendors'},{key:'vendor_list'},{key:'vendor_status'}]},
-    {key:'cargo_log', name:'입출고 화물관리', eng:'CARGO · IN / OUT LOG'},
+    {key:'cargo_log', name:'입출고반품관리', eng:'CARGO · IN / OUT LOG'},
   ]},
   {section:'PICKING ENGINE · SELECT', kind:'card', cols:3, tiles:[
     {key:'picking_ebut', name:'이벗 피킹 시스템', eng:'UNIT · 01',
