@@ -66,6 +66,7 @@ function judge(r){
   }
   if ((r.extras || []).length) info.push((CFG.db === 'cargo' && !(r.items || []).length ? '원송장 전 스캔 상품 ' : '반품 대상 아닌 상품 ') + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
   (r.items || []).forEach(function(it){ if (it.got > it.qty) info.push('주문보다 많음: ' + it.name); });
+  (r.items || []).forEach(function(it){ if (isMix(it)) info.push('정상·불량 섞임: ' + it.name + ' (정상 ' + goodOf(it) + ' · 불량 ' + badOf(it) + ') — 이벗은 손으로 나눠 입력'); });
   if ((r.items || []).some(function(it){ return it.got > 0 && it.got < it.qty; }) || ((r.items || []).some(function(it){ return !it.got; }) && (r.items || []).some(function(it){ return it.got > 0; }))) info.push('부분 반품');
   if (r.self) info.push('반송 (원송장 = 반품송장)');
   if (r.checked && r.state === 'scan') info.push('검수 완료 · 반영 전');
@@ -84,25 +85,45 @@ function absorbExtras(r){
   var left = [];
   (r.extras || []).forEach(function(x){
     var n = x.n;
-    (r.items || []).forEach(function(it){ if (n > 0 && it.nicn && (it.nicn === x.code || (digits(it.nicn) && digits(it.nicn) === digits(x.code) && digits(x.code).length >= 8))){ it.got = (it.got || 0) + n; n = 0; if (x.q === '2') it.q = '2'; } });
-    if (n > 0) left.push(x.q ? { code: x.code, n: n, q: x.q } : { code: x.code, n: n });
+    (r.items || []).forEach(function(it){ if (n > 0 && it.nicn && (it.nicn === x.code || (digits(it.nicn) && digits(it.nicn) === digits(x.code) && digits(x.code).length >= 8))){
+      var b = badOf(it) + badOf(x); it.got = (it.got || 0) + n; n = 0; setBad(it, b); } });
+    if (n > 0) left.push(x);
   });
   r.extras = left;
+}
+/* 정상·불량 수량 (대표님 2026-10-24) — 한 상품 줄 안에서도 정상·불량이 나뉠 수 있음: got = 반품 온 수량, bad = 그중 불량
+   예전 기록(bad 없음)은 q '2' = 전부 불량. q 는 이벗 도우미·예전 화면용으로 같이 맞춰 둠 ('1' 전부 정상 · '2' 전부 불량 · 'mix' 섞임)
+   상품 줄(got)·반품 대상 아닌 상품(n) 둘 다 씀 */
+function cntOf(o){ return (o.got != null ? o.got : o.n) || 0; }
+function badOf(o){ var n = cntOf(o); return o.bad != null ? Math.max(0, Math.min(n, o.bad || 0)) : (o.q === '2' ? n : 0); }
+function goodOf(o){ return cntOf(o) - badOf(o); }
+function setBad(o, b){ var n = cntOf(o); o.bad = Math.max(0, Math.min(n, b || 0)); o.q = !o.bad ? '1' : o.bad >= n ? '2' : 'mix'; }
+function isMix(o){ var b = badOf(o); return b > 0 && b < cntOf(o); }
+function qText(o){ return isMix(o) ? '정상 ' + goodOf(o) + ' · 불량 ' + badOf(o) : badOf(o) ? '불량' : '정상'; }   /* 엑셀·PDF 칸 */
+/* 수량 바꾸기: 정상(kind '1') 또는 불량(kind '2') 을 d 만큼 — 반품 수량(got/n)도 같이 바뀜 */
+function addCnt(o, kind, d){
+  var b = badOf(o), g = cntOf(o) - b;
+  if (kind === '2') b = Math.max(0, b + d); else g = Math.max(0, g + d);
+  if (o.got != null || o.n == null) o.got = g + b; else o.n = g + b;
+  setBad(o, b);
 }
 function locked(r){ return r.state === 'done' || r.state === 'saving'; }
 
 /* 상품 바코드 한 번 스캔 → 주문 상품이면 반품 수량 +1, 아니면 「반품 대상 아닌 상품」 (r 을 바꿈)
+   q = '2' 면 불량으로 셈 (휴대폰 「불량으로 찍기」), 없으면 정상
    돌려줌 { hit: 맞은 상품 줄 | null, over: 주문보다 많아짐, code, note: 사전 특이사항(상품) } */
-function applyItem(r, code){
+function applyItem(r, code, q){
   var c2 = String(code || '').replace(/\s+/g, ''), hit = null;
   var hits = (r.items || []).filter(function(it){ return it.nicn && (it.nicn === c2 || digits(it.nicn) && digits(it.nicn) === digits(c2) && digits(c2).length >= 8); });
   if (hits.length){
     hit = hits.filter(function(x){ return x.got < x.qty; })[0] || hits[hits.length - 1];
-    hit.got = (hit.got || 0) + 1;
+    if (hit.got == null) hit.got = 0;
+    addCnt(hit, q === '2' ? '2' : '1', 1);
   } else {
     r.extras = r.extras || [];
     var x = r.extras.filter(function(e){ return e.code === c2; })[0];
-    if (x) x.n++; else r.extras.push({ code: c2, n: 1 });
+    if (!x){ x = { code: c2, n: 0 }; r.extras.push(x); }
+    addCnt(x, q === '2' ? '2' : '1', 1);
   }
   var note = Object.keys(NOTES).map(function(k){ return NOTES[k]; }).filter(function(n){ return n && n.kind === 'item' && n.val === c2 && (!n.found || n.found.rno === r.rno); })[0] || null;
   return { hit: hit, over: !!(hit && hit.got > hit.qty), code: c2, note: note };

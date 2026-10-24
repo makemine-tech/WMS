@@ -356,7 +356,7 @@ function lookup(no){
   patch(no, { look: 'busy', lookBusyAt: Date.now() }); renderCur();
   return hcall('find', { orig: r.orig, origDate: r.origDate, cust: CFG.cust }, 60000).then(function(d){
     var r2 = RECS[no] || r, old = {}; (r2.items || []).forEach(function(it){ old[it.bopt + '|' + it.ordlist] = it; });
-    var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}; return { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0, q: o.q || '1' }; });
+    var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}, n = { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0 }; setBad(n, badOf(o.got != null ? o : { got: 0 })); return n; });
     var tmp = { items: items, extras: (r2.extras || []).slice() }; absorbExtras(tmp);   /* 원송장 찾기 전에 스캔해 둔 상품 → 주문 상품 수량으로 */
     patch(no, { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: tmp.items, extras: tmp.extras, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
     if (CUR === no){ renderCur(); var j = judge(RECS[no]); beep(!j.block.length || j.block[0] === '반품 상품 스캔 없음'); }
@@ -395,11 +395,11 @@ function onItemScan(code){
   if (a.over) toast('⚠️ 주문 수량(' + a.hit.qty + ')보다 많이 스캔됨');
   if (!a.hit) toast('⚠️ 이 반품 주문에 없는 상품입니다 — 특이사항으로 기록');
 }
-function setQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.items[i].q = q; save(r); renderCur(); focusItem(); }
-function addGot(i, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; it.got = Math.max(0, (it.got || 0) + d); save(r); renderCur(); focusItem(); }
+/* 정상·불량 따로 셈 — kind '1' 정상 / '2' 불량 (star_return_core.js addCnt) */
+function addGot(i, d, kind){ var r = RECS[CUR]; if (!r || locked(r)) return; var it = r.items[i]; if (it.got == null) it.got = 0; addCnt(it, kind || '1', d); save(r); renderCur(); focusItem(); }
 function delExtra(i){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras.splice(i, 1); save(r); renderCur(); focusItem(); }
 function setMemo(v){ var r = RECS[CUR]; if (!r || locked(r)) return; save(r, { memo: String(v || '').trim() }); renderList(); }
-function setExtraQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; r.extras[i].q = q; save(r); renderCur(); focusItem(); }
+function setExtraQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; var x = r.extras[i]; setBad(x, q === '2' ? cntOf(x) : 0); save(r); renderCur(); focusItem(); }
 function setRecField(f, v){ var r = RECS[CUR]; if (!r || locked(r)) return; var o = {}; o[f] = v; save(r, o); if (f === 'vendor') addVendor(v); renderCur(); }
 function finishCur(){
   var r = RECS[CUR]; if (!r) return;
@@ -445,13 +445,15 @@ function renderCur(lastCode){
   if ((r.items || []).length){
     h += '<div class="lbl" style="margin-top:.7rem">② 상품 바코드 스캔 → 상품마다 정상 / 불량</div>';
     if (!lk) h += '<div class="scan-row" style="margin-bottom:.6rem"><input class="scan item" id="itemIn" placeholder="상품 바코드 스캔 후 Enter" autocomplete="off"></div>';
-    h += '<div class="scroll-x"><table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>반품</th><th></th><th>정상 / 불량</th></tr></thead><tbody>';
+    h += '<div class="scroll-x"><table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>반품</th><th>정상</th><th>불량</th></tr></thead><tbody>';
     r.items.forEach(function(it, i){
-      var cls = (lastCode && it.nicn === lastCode ? 'hot' : '') + (it.q === '2' && it.got > 0 ? ' bad' : '');
+      var g = goodOf(it), b = badOf(it);
+      var cls = (lastCode && it.nicn === lastCode ? 'hot' : '') + (b > 0 ? ' bad' : '');
+      var pm = function(kind){ return lk ? '' : ' <button class="btn sm" onclick="addGot(' + i + ',-1,\'' + kind + '\')">−</button> <button class="btn sm" onclick="addGot(' + i + ',1,\'' + kind + '\')">+</button>'; };
       h += '<tr class="' + cls + '"><td>' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '</td><td class="mono sm">' + esc(it.nicn) + '</td>'
         + '<td class="cnt">' + it.qty + '</td><td class="cnt ' + (it.got > it.qty ? 'over' : it.got === it.qty ? 'full' : '') + '">' + (it.got || 0) + '</td>'
-        + '<td>' + (lk ? '' : '<button class="btn sm" onclick="addGot(' + i + ',-1)">−</button> <button class="btn sm" onclick="addGot(' + i + ',1)">+</button>') + '</td>'
-        + '<td><span class="qbtn"><button class="' + (it.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setQ(' + i + ',\'1\')">정상</button><button class="' + (it.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setQ(' + i + ',\'2\')">불량</button></span></td></tr>';
+        + '<td style="white-space:nowrap"><b class="cnt" style="color:var(--accent)">' + g + '</b>' + pm('1') + '</td>'
+        + '<td style="white-space:nowrap"><b class="cnt" style="color:' + (b ? 'var(--red)' : 'var(--muted)') + '">' + b + '</b>' + pm('2') + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -464,7 +466,7 @@ function renderCur(lastCode){
     var pre = noItems && CFG.db === 'cargo';
     h += pre ? '<div class="banner blu" style="margin-top:.6rem">스캔한 상품 (원송장 찾기 전)<div style="margin-top:.3rem">'
              : '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">';
-    h += r.extras.map(function(x, i){ return '<span class="tag ' + (pre ? 'b' : 'r') + ' mono">' + esc(x.code) + ' × ' + x.n + '</span>'
+    h += r.extras.map(function(x, i){ return '<span class="tag ' + (pre ? 'b' : 'r') + ' mono">' + esc(x.code) + ' × ' + x.n + (isMix(x) ? ' (불량 ' + badOf(x) + ')' : '') + '</span>'
       + (pre ? '<span class="qbtn" style="margin-right:.4rem"><button class="' + (x.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'1\')">정상</button><button class="' + (x.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'2\')">불량</button></span>' : '')
       + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
   }
@@ -503,7 +505,11 @@ function pushAll(){
     return base.child('recs/' + k).transaction(function(cur){ if (!cur || cur.state !== 'ready') return; cur.state = 'saving'; cur.saveAt = Date.now(); cur.saveBy = byName(); return cur; }).then(function(tx){
       if (!tx.committed) return;
       var r = tx.snapshot.val(); RECS[k] = r; renderList();
-      var lines = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: it.q === '2' ? '2' : '1' }; });
+      /* 한 상품 줄에 정상·불량이 섞이면 이벗 팝업(주문 줄마다 가용/불량 하나)으로는 못 나눔 → 멈추고 손으로 */
+      var mix = (r.items || []).filter(isMix);
+      if (mix.length){ bad++; return save(RECS[k], { state: 'fail', ebut: { at: Date.now(), by: byName(),
+        msg: '정상·불량 섞인 상품 (' + mix.map(function(it){ return it.name + ' 정상 ' + goodOf(it) + '·불량 ' + badOf(it); }).join(', ') + ') — 이벗에서 손으로 나눠 넣고 ✋ 수동 완료' } }); }
+      var lines = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: badOf(it) ? '2' : '1' }; });
       return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines, cust: CFG.cust, courier: r.courier || '우체국' }, 60000).then(function(res){
         ok++; return save(RECS[k], { state: 'done', ebut: { at: Date.now(), msg: '저장됨', codes: res.codes || '', by: byName(), mode: 'auto' } });
       }, function(e){
@@ -549,7 +555,7 @@ function renderList(){
   var rows = listRows();
   $('listBody').innerHTML = rows.length ? rows.map(function(r){
     var j = judge(r), st = stOf(r), so = starOrders(r);
-    var good = 0, badn = 0; (r.items || []).forEach(function(it){ if (it.got > 0){ if (it.q === '2') badn += it.got; else good += it.got; } });
+    var good = 0, badn = 0; (r.items || []).forEach(function(it){ if (it.got > 0){ badn += badOf(it); good += goodOf(it); } });
     var names = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return it.name; });
     return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
@@ -704,10 +710,10 @@ function editRec(k){
         return '<option value="' + o[0] + '"' + ((r.state === o[0] || (r.state === 'saving' && o[0] === 'fail')) ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>'
     + '</div><div class="sm dim" style="margin:.2rem 0 .6rem">원송장을 바꾸면 이벗에서 주문·상품을 다시 불러옵니다 (아래 상품 수정은 버려짐).</div>';
   if ((r.items || []).length){
-    h += '<table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>반품 수량</th><th>정상 / 불량</th></tr></thead><tbody>'
+    h += '<table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>정상</th><th>불량</th></tr></thead><tbody>'
       + r.items.map(function(it, i){ return '<tr><td class="sm">' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '</td><td class="mono sm">' + esc(it.nicn) + '</td><td class="cnt">' + it.qty + '</td>'
-        + '<td><input type="number" min="0" class="eGot mono" data-i="' + i + '" value="' + (it.got || 0) + '"></td>'
-        + '<td><select class="eQ" data-i="' + i + '"><option value="1"' + (it.q !== '2' ? ' selected' : '') + '>정상</option><option value="2"' + (it.q === '2' ? ' selected' : '') + '>불량</option></select></td></tr>'; }).join('')
+        + '<td><input type="number" min="0" class="eGot mono" data-i="' + i + '" value="' + goodOf(it) + '"></td>'
+        + '<td><input type="number" min="0" class="eGot eBad mono" data-i="' + i + '" value="' + badOf(it) + '"></td></tr>'; }).join('')
       + '</tbody></table>';
   }
   if ((r.extras || []).length){
@@ -730,8 +736,9 @@ function saveEdit(){
   if (origChanged){
     Object.assign(r, { orig: orig || null, origDate: null, self: !!orig && orig === rno, trace: orig ? 'ok' : (CFG.db === 'cargo' ? 'skip' : 'err'), traceErr: orig || CFG.db === 'cargo' ? null : '원송장 없음', look: orig ? 'wait' : null, orders: [], items: [], locas: {} });
   } else {
-    [].forEach.call(document.querySelectorAll('.eGot'), function(e){ r.items[+e.dataset.i].got = Math.max(0, parseInt(e.value, 10) || 0); });
-    [].forEach.call(document.querySelectorAll('.eQ'), function(e){ r.items[+e.dataset.i].q = e.value; });
+    /* 정상·불량 칸 → 반품 수량 = 정상 + 불량 */
+    var gb = {}; [].forEach.call(document.querySelectorAll('.eGot'), function(e){ var i = +e.dataset.i; gb[i] = gb[i] || [0, 0]; gb[i][e.classList.contains('eBad') ? 1 : 0] = Math.max(0, parseInt(e.value, 10) || 0); });
+    Object.keys(gb).forEach(function(i){ var it = r.items[+i]; it.got = gb[i][0] + gb[i][1]; setBad(it, gb[i][1]); });
   }
   var keepX = []; [].forEach.call(document.querySelectorAll('.eX'), function(e){ if (e.checked) keepX.push(r.extras[+e.dataset.i]); });
   if (r.extras) r.extras = keepX;
@@ -793,8 +800,8 @@ function downloadXlsx(){
       var rman = rmanOf(r), pre = !(r.items || []).length && CFG.db === 'cargo';
       var head = [hm(r.at), r.by || '', r.rno].concat(V ? [r.vendor || '', r.courier || ''] : [], [r.orig || '', r.origDate || '', so.map(function(o){ return o.code; }).join(','), rman]);
       var lines = (r.items || []).filter(function(it){ return it.got > 0; });
-      lines.forEach(function(it){ a.push(head.concat([it.name, it.opt, it.nicn, it.qty, it.got, it.q === '2' ? '불량' : '정상', flag, st, eb])); });
-      (r.extras || []).forEach(function(x){ a.push(head.concat([pre ? '(원송장 찾기 전 스캔)' : '(반품 대상 아님)', '', x.code, pre ? '' : 0, x.n, pre ? (x.q === '2' ? '불량' : '정상') : '대상아님', flag, st, eb])); });
+      lines.forEach(function(it){ a.push(head.concat([it.name, it.opt, it.nicn, it.qty, it.got, qText(it), flag, st, eb])); });
+      (r.extras || []).forEach(function(x){ a.push(head.concat([pre ? '(원송장 찾기 전 스캔)' : '(반품 대상 아님)', '', x.code, pre ? '' : 0, x.n, pre ? qText(x) : '대상아님', flag, st, eb])); });
       if (!lines.length && !(r.extras || []).length) a.push(head.concat(['', '', '', '', 0, '', flag, st, eb]));
     });
     var ws = XLSX.utils.aoa_to_sheet(a);
@@ -862,11 +869,11 @@ function downloadReport(){
       var iw = [CW * .36, CW * .11, CW * .2, CW * .1, CW * .1, CW * .13];
       cellRow(['상품명', '옵션', '바코드', '주문', '반품', '정상/불량'], iw, { bold: true, size: 16, bg: '#eef1f6', color: '#444' });
       var lines = (r.items || []).filter(function(it){ return it.got > 0; });
-      lines.forEach(function(it){ var bad = it.q === '2';
-        cellRow([it.name, it.opt || '', it.nicn || '', String(it.qty), String(it.got), bad ? '불량' : '정상'], iw, { size: 17, colors: [null, null, null, null, null, bad ? '#dc2626' : '#15803d'] }); });
+      lines.forEach(function(it){ var bad = badOf(it) > 0;
+        cellRow([it.name, it.opt || '', it.nicn || '', String(it.qty), String(it.got), qText(it)], iw, { size: 17, colors: [null, null, null, null, null, bad ? '#dc2626' : '#15803d'] }); });
       var pre = !(r.items || []).length && CFG.db === 'cargo';
-      (r.extras || []).forEach(function(x){ var bad = x.q === '2';
-        cellRow(pre ? ['(원송장 찾기 전 스캔)', '', x.code, '-', String(x.n), bad ? '불량' : '정상'] : ['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw,
+      (r.extras || []).forEach(function(x){ var bad = badOf(x) > 0;
+        cellRow(pre ? ['(원송장 찾기 전 스캔)', '', x.code, '-', String(x.n), qText(x)] : ['(반품 대상 아닌 상품)', '', x.code, '0', String(x.n), '대상 아님'], iw,
           { size: 17, colors: pre ? ['#444', null, null, null, null, bad ? '#dc2626' : '#15803d'] : ['#dc2626', null, null, null, null, '#dc2626'] }); });
       if (!lines.length && !(r.extras || []).length) cellRow(['반품 상품 없음', '', '', '', '', ''], iw, { size: 17, color: '#888' });
       var notes = j.block.concat(j.info).join(' / ');
@@ -921,5 +928,6 @@ WMSync.onAuth(function(st){
   $('rnoIn').focus();
 });
 </script>
+<script src="/mm_copy.js" defer></script>
 </body>
 </html>
