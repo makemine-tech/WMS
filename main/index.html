@@ -445,6 +445,88 @@ body{
   to{opacity:1;transform:none}
 }
 @keyframes blink{0%,100%{opacity:.5}50%{opacity:.08}}
+
+/* ═══ 전광판 뒤집기 시안 (대표님 2026-10-25) ═══
+   공지 오른쪽 버튼 → 메뉴 전체를 한 장의 전광판으로 보고 세로 살(slat)별로 차례로 돌려 뒷면(메뉴별 모션 설명 보기)으로 */
+.notice{align-items:center}
+.flip-btn{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:.5rem;width:118px;padding:.95rem .5rem .85rem;
+  border-radius:16px;border:1px solid rgba(246,163,74,.45);cursor:pointer;text-align:center;
+  background:radial-gradient(circle at 50% 28%,rgba(246,163,74,.20),rgba(246,163,74,.03) 72%);
+  color:#ffd7a8;font-family:var(--sans);font-weight:700;font-size:.8rem;line-height:1.3;letter-spacing:-.01em;
+  transition:transform .15s,border-color .2s,box-shadow .2s}
+.flip-btn .fi{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;border:1px solid rgba(246,163,74,.6);
+  box-shadow:0 0 14px rgba(246,163,74,.35) inset,0 0 18px rgba(246,163,74,.22)}
+.flip-btn svg{width:22px;height:22px;stroke:#f6a34a;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .6s}
+.flip-btn small{display:block;font-family:var(--mono);font-size:.56rem;letter-spacing:.18em;color:rgba(246,163,74,.75);font-weight:400;margin-top:.2rem}
+.flip-btn:hover{border-color:#f6a34a;box-shadow:0 0 24px rgba(246,163,74,.25)}
+.flip-btn:active{transform:scale(.96)}
+body.flipped .flip-btn svg{transform:rotateY(180deg)}
+/* 앞면(처음)일 땐 밝은 파랑, 뒷면으로 넘어가면 주황 (대표님 2026-10-25) */
+body:not(.flipped) .flip-btn{border-color:rgba(96,190,255,.5);color:#d4ecff;
+  background:radial-gradient(circle at 50% 28%,rgba(96,190,255,.22),rgba(96,190,255,.03) 72%)}
+body:not(.flipped) .flip-btn .fi{border-color:rgba(110,200,255,.7);box-shadow:0 0 14px rgba(96,190,255,.35) inset,0 0 18px rgba(96,190,255,.25)}
+body:not(.flipped) .flip-btn svg{stroke:#7cd0ff}
+body:not(.flipped) .flip-btn small{color:rgba(124,208,255,.85)}
+body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba(96,190,255,.3)}
+@media(max-width:560px){
+  .notice{flex-wrap:wrap}
+  .flip-btn{width:100%;flex-direction:row;justify-content:center;gap:.8rem;padding:.6rem}
+  .flip-btn small{display:inline;margin-left:.4rem}
+}
+
+.board{position:relative;margin:-14px;padding:14px;border-radius:8px;transition:box-shadow .4s}
+.board .face.back{display:none}
+.board.show-back .face.front{display:none}
+.board.show-back .face.back{display:block}
+.board.anim .face{visibility:hidden}
+.led{background-color:#060709;
+  background-image:radial-gradient(rgba(246,163,74,.11) 1px,transparent 1.5px);background-size:6px 6px}
+.board.show-back{box-shadow:0 0 0 1px rgba(246,163,74,.18),0 30px 70px rgba(0,0,0,.7)}
+.board.show-back.led{border-radius:8px}
+
+.slats{position:absolute;inset:0;z-index:5;display:flex;perspective:1800px;pointer-events:none}
+.slat{flex:1;position:relative;transform-style:preserve-3d;transition:transform .85s cubic-bezier(.65,.02,.25,1)}
+.slat.turn{transform:rotateY(180deg)}
+.slat .sf{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  box-shadow:inset 1px 0 0 rgba(0,0,0,.7),inset -1px 0 0 rgba(255,255,255,.05)}
+.slat .sf.b{transform:rotateY(180deg)}
+.slat .sf > .face{position:absolute;display:block !important;visibility:visible !important}
+/* 복제본·뒷면은 첫 등장 애니메이션(투명→나타남)을 건너뛰고 바로 보이게 */
+.slat .face *,.face.back *{animation-duration:0s !important;animation-delay:0s !important}
+.slat .shade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;animation:shade .85s ease-in-out forwards;animation-delay:inherit}
+@keyframes shade{0%{opacity:0}50%{opacity:.55}100%{opacity:0}}
+
+/* 뒷면 패널 — 앞면 칸 크기 그대로, 주황 LED 글씨 */
+.bk{all:unset;box-sizing:border-box;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.45rem;
+  text-align:center;cursor:pointer;border:1px solid rgba(246,163,74,.28);border-radius:4px;background:rgba(246,163,74,.04);padding:.8rem .5rem;
+  transition:background .2s,border-color .2s,box-shadow .2s}
+.bk:hover,.bk:focus-visible{background:rgba(246,163,74,.10);border-color:#f6a34a;box-shadow:0 0 22px rgba(246,163,74,.22)}
+.bk-play{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;border:1.5px solid #f6a34a;position:relative;
+  box-shadow:0 0 10px rgba(246,163,74,.45),0 0 10px rgba(246,163,74,.3) inset}
+.bk-play::after{content:'';position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(246,163,74,.5);animation:ring 2s ease-out infinite}
+@keyframes ring{0%{transform:scale(.8);opacity:.9}100%{transform:scale(1.35);opacity:0}}
+.bk-play svg{width:14px;height:14px;fill:#f6a34a;margin-left:2px}
+.bk-name{font-family:var(--sans);font-weight:800;font-size:1rem;line-height:1.25;color:#ffb35c;text-shadow:0 0 8px rgba(255,150,40,.55)}
+.bk-sub{font-family:var(--mono);font-size:.58rem;letter-spacing:.2em;color:rgba(246,163,74,.7)}
+.bk.big .bk-name{font-size:clamp(1.1rem,3vw,1.45rem)}
+.bk.big{flex-direction:row;gap:1rem}
+.bk.big .bk-txt{display:flex;flex-direction:column;align-items:flex-start;gap:.3rem;text-align:left}
+.bk.off{opacity:.3;cursor:not-allowed}
+.face.back .ph-text,.face.back .pick-sys-eng{color:rgba(246,163,74,.6)}
+.face.back .pick-sys-name{color:#ffcf96}
+.face.back .ph-line{background:rgba(246,163,74,.18)}
+
+/* 모션 설명 창 (시안 — 내용은 메뉴별로 다음 단계에서) */
+.mo-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;padding:1rem}
+.mo-ov.on{display:flex}
+.mo-box{width:min(520px,100%);border:1px solid rgba(246,163,74,.4);border-radius:12px;padding:1.2rem;background:#0b0c10;box-shadow:0 30px 80px rgba(0,0,0,.8)}
+.mo-led{height:64px;border-radius:6px;overflow:hidden;display:flex;align-items:center;border:1px solid rgba(246,163,74,.2)}
+.mo-led span{white-space:nowrap;font-family:var(--sans);font-weight:900;font-size:1.9rem;color:#ffb35c;text-shadow:0 0 10px rgba(255,150,40,.7);
+  padding-left:100%;animation:marq 7s linear infinite}
+@keyframes marq{to{transform:translateX(-100%)}}
+.mo-t{margin-top:1rem;font-weight:800;font-size:1.15rem;color:#fff}
+.mo-d{margin-top:.4rem;font-size:.9rem;line-height:1.7;color:rgba(255,255,255,.7)}
+.mo-x{margin-top:1rem;border:1px solid rgba(246,163,74,.5);background:none;color:#ffd7a8;border-radius:8px;padding:.5rem 1.1rem;font-weight:700;cursor:pointer;font-family:var(--sans)}
 </style>
 </head>
 <body>
@@ -480,7 +562,14 @@ body{
         <a href="mailto:dmzoot@gmail.com">dmzoot@gmail.com</a> 으로 연락 주세요.
       </div>
     </div>
+    <button class="flip-btn" id="flipBtn" type="button" aria-pressed="false">
+      <span class="fi"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg></span>
+      <span id="flipLbl">메뉴 모션<br>설명 보기<small>MOTION GUIDE</small></span>
+    </button>
   </div>
+
+  <div class="board" id="board">
+  <div class="face front" id="faceF">
 
   <!-- ── WMS PRIMARY — 왼쪽 창고관리 / 오른쪽 입출고반품관리 (임시 배치) ── -->
   <div class="wms-wrap wms-split">
@@ -916,6 +1005,10 @@ body{
     </div>
   </div>
 
+  </div><!-- /face.front -->
+  <div class="face back" id="faceB"></div>
+  </div><!-- /board -->
+
   <!-- ── STATUS ── -->
   <div class="status">
     <span class="s-live"><span class="s-dot"></span>SYSTEM ONLINE</span>
@@ -1073,5 +1166,110 @@ body{
 
 <script src="/wms_access.js" data-page="index" data-floor="0"></script>
 <script src="/mm_copy.js" defer></script>
+
+<div class="mo-ov" id="moOv" role="dialog" aria-modal="true">
+  <div class="mo-box">
+    <div class="mo-led led"><span id="moMarq"></span></div>
+    <div class="mo-t" id="moT"></div>
+    <div class="mo-d">이 자리에 메뉴의 사용 흐름을 짧은 모션으로 보여 줍니다.<br><span style="color:rgba(246,163,74,.85)">(시안 — 메뉴별 모션은 다음 단계에서 제작)</span></div>
+    <button class="mo-x" id="moX" type="button">닫기</button>
+  </div>
+</div>
+<script>
+/* 전광판 뒤집기 시안 — 앞면(실제 메뉴)을 복제해 같은 칸 크기의 뒷면(모션 설명 보기)을 만들고,
+   세로 살 여러 개로 잘라 왼쪽부터 차례로 돌린다. 끝나면 진짜 면으로 바꿔 끼움 */
+(function(){
+  var board = document.getElementById('board'), F = document.getElementById('faceF'), B = document.getElementById('faceB');
+  var btn = document.getElementById('flipBtn'), lbl = document.getElementById('flipLbl'), busy = false;
+  var ITEM = '.wms-btn, .card, .app-tile';
+  var PLAY = '<span class="bk-play"><svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span>';
+
+  function txt(el, sel){ var n = el.querySelector(sel); return n ? n.innerHTML.replace(/🔒/g, '').trim() : ''; }
+
+  function buildBack(){
+    var c = F.cloneNode(true);
+    c.querySelectorAll('[id]').forEach(function(n){ n.removeAttribute('id'); });
+    var src = F.querySelectorAll(ITEM), dst = c.querySelectorAll(ITEM);
+    dst.forEach(function(el, i){
+      var big = el.classList.contains('wms-btn');
+      var name = txt(el, '.wms-title, .card-name, .app-name'), eng = txt(el, '.wms-badge, .card-eng, .app-eng');
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = el.className + ' bk' + (big ? ' big' : '') + (el.classList.contains('disabled') ? ' off' : '');
+      if (src[i].offsetParent) b.style.height = src[i].offsetHeight + 'px';
+      else b.style.display = 'none';   /* 앞면에서 안 보이는 칸(권한 없는 메뉴)은 뒷면도 숨김 */
+      b.dataset.name = name.replace(/<br\s*\/?>/g, ' ');
+      b.innerHTML = big
+        ? PLAY + '<span class="bk-txt"><span class="bk-name">' + name + '</span><span class="bk-sub">▶ 모션 설명 보기</span></span>'
+        : PLAY + '<span class="bk-name">' + name + '</span><span class="bk-sub">' + (eng ? 'MOTION' : '') + '</span>';
+      el.replaceWith(b);
+    });
+    c.querySelectorAll('.pick-sys-name').forEach(function(n){ n.textContent = '피킹 시스템 · 모션 설명'; });
+    c.querySelectorAll('.pick-sys-eng').forEach(function(n){ n.textContent = 'MOTION GUIDE · TAP A PANEL TO PLAY'; });
+    c.querySelectorAll('.ph-text').forEach(function(n){ n.textContent = 'MOTION · ' + n.textContent; });
+    B.innerHTML = c.innerHTML;
+  }
+
+  function slatCount(){ return innerWidth < 560 ? 5 : 9; }
+
+  function flip(){
+    if (busy) return; busy = true;
+    var toBack = !board.classList.contains('show-back');
+    if (toBack) buildBack();
+    var from = toBack ? F : B, to = toBack ? B : F;
+    /* 두 면 높이 재기 */
+    var hFrom = from.offsetHeight; to.style.display = 'block'; var hTo = to.offsetHeight; to.style.display = '';
+    var W = board.clientWidth, PAD = 14, H = Math.max(hFrom, hTo) + PAD * 2;
+    board.style.height = H + 'px';
+    var layer = document.createElement('div'); layer.className = 'slats';
+    var n = slatCount(), sw = W / n, step = 70;
+    for (var i = 0; i < n; i++){
+      var sl = document.createElement('div'); sl.className = 'slat';
+      sl.style.transitionDelay = (i * step) + 'ms';
+      [[from, 'f', !toBack], [to, 'b', toBack]].forEach(function(p){
+        var sf = document.createElement('div'); sf.className = 'sf ' + p[1] + (p[2] ? ' led' : '');
+        var cl = p[0].cloneNode(true); cl.removeAttribute('id');
+        cl.style.cssText = 'top:' + PAD + 'px;left:' + (PAD - i * sw) + 'px;width:' + (W - PAD * 2) + 'px';
+        sf.appendChild(cl);
+        sf.style.backgroundPosition = (-i * sw) + 'px 0';
+        var sh = document.createElement('div'); sh.className = 'shade'; sh.style.animationDelay = (i * step) + 'ms';
+        sf.appendChild(sh);
+        sl.appendChild(sf);
+      });
+      layer.appendChild(sl);
+    }
+    board.classList.add('anim');
+    board.classList.remove('led');
+    board.style.boxShadow = 'none';
+    board.appendChild(layer);
+    layer.offsetWidth;
+    layer.querySelectorAll('.slat').forEach(function(sl){ sl.classList.add('turn'); });
+    setTimeout(function(){
+      board.classList.toggle('show-back', toBack);
+      board.classList.toggle('led', toBack);
+      board.classList.remove('anim');
+      board.style.height = ''; board.style.boxShadow = '';
+      layer.remove();
+      document.body.classList.toggle('flipped', toBack);
+      btn.setAttribute('aria-pressed', toBack);
+      lbl.innerHTML = toBack ? '메뉴로<br>돌아가기<small>BACK TO MENU</small>' : '메뉴 모션<br>설명 보기<small>MOTION GUIDE</small>';
+      busy = false;
+    }, 850 + (n - 1) * step + 30);
+  }
+  btn.addEventListener('click', flip);
+
+  var ov = document.getElementById('moOv');
+  B.addEventListener('click', function(e){
+    var b = e.target.closest('.bk'); if (!b || b.classList.contains('off')) return;
+    document.getElementById('moT').textContent = b.dataset.name + ' — 모션 설명';
+    document.getElementById('moMarq').textContent = '▶ ' + b.dataset.name + ' · MOTION GUIDE ·';
+    ov.classList.add('on');
+  });
+  function close(){ ov.classList.remove('on'); }
+  document.getElementById('moX').addEventListener('click', close);
+  ov.addEventListener('click', function(e){ if (e.target === ov) close(); });
+  addEventListener('keydown', function(e){ if (e.key === 'Escape') { if (ov.classList.contains('on')) close(); else if (board.classList.contains('show-back')) flip(); } });
+})();
+</script>
 </body>
 </html>
