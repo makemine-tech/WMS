@@ -86,6 +86,72 @@
   function shake(e){ e.animate([{transform:'translateX(0)'}, {transform:'translateX(-3%) rotate(-3deg)'}, {transform:'translateX(3%) rotate(3deg)'}, {transform:'translateX(-2%)'}, {transform:'none'}], {duration:300}); }
 
   /* 한 번 재생 = Run: 타이머 묶음. 멈추면 전부 취소 */
+
+  /* ═══ 소리 — 음원 파일 없이 Web Audio 로 직접 연주 (대표님 2026-10-25)
+     재생 시작 때 장면 시각표대로 전부 미리 예약 → 화면과 박자가 어긋나지 않음. 멈추면 그 회차 출력만 끊음 ═══ */
+  var AC = null, NOISE = null, muted = false;
+  try { muted = localStorage.getItem('mc_motion_mute') === '1'; } catch (e) {}
+  function audio(){
+    if (!AC){
+      var C = window.AudioContext || window.webkitAudioContext; if (!C) return null;
+      AC = new C();
+      NOISE = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+      var d = NOISE.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (AC.state === 'suspended') AC.resume();
+    return AC;
+  }
+  function Sound(){
+    var ac = this.ac = audio(); if (!ac) return;
+    this.out = ac.createGain(); this.out.gain.value = muted ? 0 : .8;
+    var comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+    this.out.connect(comp); comp.connect(ac.destination);
+    this.t0 = ac.currentTime + .05;
+  }
+  var S = Sound.prototype;
+  S.t = function(ms){ return this.t0 + ms / 1000; };
+  S.stop = function(){ if (!this.out) return; var g = this.out; g.gain.cancelScheduledValues(0); g.gain.setValueAtTime(0, this.ac.currentTime); setTimeout(function(){ g.disconnect(); }, 80); };
+  /* 소리 한 개: 음량 봉투(빠르게 올라가 지수로 줄어듦) */
+  S.env = function(t, vol, a, d){ var g = this.ac.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + a); g.gain.exponentialRampToValueAtTime(.0001, t + a + d); g.connect(this.out); return g; };
+  S.osc = function(type, t, f, f2, vol, a, d, lp){
+    if (!this.ac) return;
+    var o = this.ac.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + a + d * .6);
+    var g = this.env(t, vol, a, d), n = o;
+    if (lp){ var fl = this.ac.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = lp; o.connect(fl); n = fl; }
+    n.connect(g); o.start(t); o.stop(t + a + d + .05);
+  };
+  S.noise = function(t, vol, a, d, type, f, f2, q){
+    if (!this.ac) return;
+    var src = this.ac.createBufferSource(); src.buffer = NOISE;
+    var fl = this.ac.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q || 1;
+    if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + a + d);
+    src.connect(fl); fl.connect(this.env(t, vol, a, d)); src.start(t); src.stop(t + a + d + .05);
+  };
+  /* 악기 */
+  S.kick  = function(t, v){ this.osc('sine', t, 160, 42, v || .9, .003, .28); };
+  S.clap  = function(t){ this.noise(t, .32, .002, .12, 'bandpass', 1600, 0, .9); };
+  S.hat   = function(t){ this.noise(t, .1, .001, .035, 'highpass', 8000); };
+  S.bass  = function(t, f, d){ this.osc('sawtooth', t, f, 0, .22, .005, d || .2, 420); };
+  S.stab  = function(t, fs){ var self = this; fs.forEach(function(f){ self.osc('sawtooth', t, f, 0, .06, .004, .2, 2600); self.osc('square', t, f * 2.003, 0, .025, .004, .12, 3000); }); };
+  S.tick  = function(t, f){ this.osc('square', t, f || 1200, 0, .06, .002, .045, 4000); };
+  S.thud  = function(t, v){ this.osc('sine', t, 130, 48, v || .45, .002, .14); this.noise(t, (v || .45) * .25, .001, .05, 'lowpass', 600); };
+  S.whoosh= function(t, dur, f1, f2, v){ var src = this.ac && this.ac.createBufferSource(); if (!src) return;
+    src.buffer = NOISE; src.loop = true;
+    var fl = this.ac.createBiquadFilter(); fl.type = 'bandpass'; fl.Q.value = 1.2; fl.frequency.setValueAtTime(f1, t); fl.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    var g = this.ac.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(v, t + dur * .7); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    src.connect(fl); fl.connect(g); g.connect(this.out); src.start(t); src.stop(t + dur + .05); };
+  S.crash = function(t, v){ this.noise(t, v || .15, .002, 1.1, 'highpass', 4500); };
+  S.alarm = function(t){ this.osc('square', t, 988, 0, .05, .002, .07, 3000); this.osc('square', t + .08, 740, 0, .05, .002, .07, 3000); };
+  S.zap   = function(t){ this.osc('sawtooth', t, 320, 1600, .05, .003, .11, 3000); };
+  S.ding  = function(t, f, v){ this.osc('triangle', t, f, 0, v || .16, .003, .5); this.osc('sine', t, f * 2, 0, (v || .16) * .3, .003, .3); };
+  S.boing = function(t){ this.osc('sine', t, 520, 140, .22, .005, .4); };
+  S.pad   = function(t, fs, dur){ var self = this; if (!this.ac) return; fs.forEach(function(f){ [-7, 7].forEach(function(c){
+    var o = self.ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = c;
+    var fl = self.ac.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 1300;
+    var g = self.ac.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.linearRampToValueAtTime(.035, t + .35); g.gain.setValueAtTime(.035, t + dur * .6); g.gain.linearRampToValueAtTime(.0001, t + dur);
+    o.connect(fl); fl.connect(g); g.connect(self.out); o.start(t); o.stop(t + dur + .05); }); }); };
+
   var cur = null;
   function Run(stage){ this.st = stage; this.tm = []; this.W = stage.clientWidth / 100; this.t0 = performance.now(); }
   /* ms = 재생 시작부터의 시각 (장면 안에서 예약해도 기준은 시작) */
@@ -96,7 +162,7 @@
     if (bg) this.st.style.background = bg;
     return h('div', 'mm-l', null, this.st);
   };
-  Run.prototype.stop = function(){ this.tm.forEach(clearTimeout); };
+  Run.prototype.stop = function(){ this.tm.forEach(clearTimeout); if (this.snd) this.snd.stop(); };
 
   /* 장면을 base 시각에 맞춰 예약하는 도우미 */
   function scene(R, base, fn){ R.at(base, function(){ fn(function(ms, f){ R.at(base + ms, f); }); }); }
@@ -146,7 +212,10 @@
     });
   }
 
-  /* ═══ 창고관리 (wms) ═══ 약 24초 */
+  /* 입체 창고에 떨어지는 파렛트 자리 '열,행' — 화면·소리가 같은 목록을 씀 */
+  var FILL = ['0,0','1,0','2,0','4,0','5,0','0,1','1,1','3,1','4,1','0,2','2,2','3,2','5,2','1,3','2,3','3,3','4,3'];
+
+  /* ═══ 창고관리 (wms) ═══ 약 25초 */
   function wms(R){
     intro(R, 0, '창고관리', BLUE);
 
@@ -164,7 +233,6 @@
       /* 주의: 입체 묶음(.mm-iso·.mm-pal)에 opacity 애니메이션을 걸면 크롬이 납작하게 눌러 버림 → 크기·visibility 로만 */
       iso.animate([{transform:'rotateX(58deg) rotateZ(-225deg) scale(.05)'}, {transform:'rotateX(58deg) rotateZ(-45deg) scale(1)'}],
         {duration:700, easing:'cubic-bezier(.2,.8,.2,1)', fill:'both'});
-      var FILL = ['0,0','1,0','2,0','4,0','5,0','0,1','1,1','3,1','4,1','0,2','2,2','3,2','5,2','1,3','2,3','3,3','4,3'];
       var pals = {};
       FILL.forEach(function(k, i){
         var cc = +k.split(',')[0], rr = +k.split(',')[1];
@@ -271,8 +339,59 @@
     outro(R, 21000);
   }
 
+
+  /* ═══ 창고관리 음악 — 128 BPM(한 박 469ms ≈ 글자 바뀜 470ms), F–G–Em–Am 진행. 시각은 화면 장면표와 같은 ms ═══ */
+  function wmsSound(S){
+    var B = 469, G0 = 2500, G1 = 17600, ROOT = [87.31, 98, 82.41, 110],
+        CH = [[349.2, 440, 523.3], [392, 493.9, 587.3], [329.6, 392, 493.9], [440, 523.3, 659.3]],
+        PENTA = [523.3, 587.3, 659.3, 784, 880, 1046.5, 1174.7, 1318.5, 1568, 1760], i;
+    /* 시작: 글자 하나 떨어질 때마다 '틱'(점점 높게) → 줄 '슉' → 「창고관리」 쾅 */
+    for (i = 0; i < 10; i++) S.tick(S.t(i * 55 + 315), 700 + i * 70);
+    S.whoosh(S.t(700), .4, 500, 4000, .12);
+    S.kick(S.t(1000)); S.stab(S.t(1000), CH[0]); S.crash(S.t(1000), .1);
+    /* 본 비트: 킥 매 박 · 박수 2·4박 · 하이햇 엇박 · 베이스 8분음 */
+    for (var n = 0; G0 + n * B < G1; n++){
+      var ms = G0 + n * B, t = S.t(ms), bar = Math.floor(n / 4) % 4;
+      S.kick(t); if (n % 2) S.clap(t); S.hat(S.t(ms + B / 2));
+      S.bass(t, ROOT[bar], .2); S.bass(S.t(ms + B / 2), ROOT[bar] * 2, .14);
+    }
+    /* 창고가 / 한눈에 / 보인다? / 보인다!! — 단어마다 화음 */
+    for (i = 0; i < 4; i++) S.stab(S.t(2500 + i * 470), CH[i]);
+    S.crash(S.t(3910), .2);
+    /* 입체 창고: 바닥 도는 '슈욱' → 파렛트 떨어질 때마다 '퉁' */
+    S.whoosh(S.t(4500), .7, 200, 2600, .2);
+    var seen = {};
+    FILL.forEach(function(k){ var d = +k.split(',')[0] + +k.split(',')[1]; seen[d] = (seen[d] || 0) + 1; });
+    Object.keys(seen).forEach(function(d){ S.thud(S.t(4500 + 500 + d * 75 + 336), Math.min(.7, .3 + seen[d] * .1)); });
+    /* 하나 옮기기: 들어 올리는 '슉' → 내려놓는 '쿵' */
+    S.whoosh(S.t(4500 + 2300 + 250), .3, 600, 2400, .12);
+    S.thud(S.t(4500 + 2300 + 1250), .7);
+    /* 유통기한: 경보 '삐뽀' */
+    for (i = 0; i < 5; i++) S.alarm(S.t(4500 + 3900 + i * 130));
+    /* 동기화: 폰 '톡' → 신호 '지잉' → PC '띵' → 태그 '틱틱틱' */
+    S.tick(S.t(10900), 1500);
+    for (i = 0; i < 4; i++) S.zap(S.t(11400 + i * 90));
+    S.ding(S.t(11900), 1046.5, .2);
+    for (i = 0; i < 3; i++) S.tick(S.t(12500 + i * 110), 1000 + i * 250);
+    /* 체크리스트: 흰 바탕 '챙' → 체크마다 '띵'(한 음씩 올라감) → 「…더 있음」 '띠용' */
+    S.crash(S.t(13600), .12);
+    for (i = 0; i < 10; i++) S.ding(S.t(13600 + 450 + i * 210), PENTA[i], .13);
+    S.boing(S.t(16500));
+    /* 이건 맛보기. / 로그인하면, — 비트 멈추고 상승음 */
+    S.kick(S.t(17600)); S.stab(S.t(17600), CH[3]);
+    S.kick(S.t(18250)); S.stab(S.t(18250), CH[1]);
+    S.whoosh(S.t(18250), 1.0, 250, 6000, .16);
+    /* 문 열림: '촤악' → 빛과 함께 화음 → 글자 쾅 */
+    S.whoosh(S.t(19250), .8, 4000, 300, .22);
+    S.pad(S.t(19300), [261.6, 329.6, 392, 523.3], 1.6);
+    S.kick(S.t(19600)); S.crash(S.t(19600), .22);
+    /* 마무리: 잔잔한 화음 + 글자마다 '딩' */
+    S.pad(S.t(21000), [174.6, 261.6, 329.6, 440], 3.9);
+    [523.3, 659.3, 784, 987.8, 1046.5].forEach(function(f, i){ S.ding(S.t(21200 + i * 70), f, .07); });
+  }
+
   var SCENES = {
-    wms: { len: 25000, run: wms }
+    wms: { len: 25000, run: wms, sound: wmsSound }
   };
 
   window.MCMotion = {
@@ -286,10 +405,19 @@
         stage.innerHTML = '<div class="mm-ph"><span>▶ ' + (name || '') + ' · 모션 설명 준비 중 ·</span></div>';
         return 0;
       }
+      R.snd = new Sound();
+      if (R.snd.ac && SCENES[key].sound) SCENES[key].sound(R.snd);
       SCENES[key].run(R);
       R.at(SCENES[key].len, function(){ if (onEnd) onEnd(); });
       return SCENES[key].len;
     },
-    stop: function(){ if (cur) cur.stop(); cur = null; }
+    stop: function(){ if (cur) cur.stop(); cur = null; },
+    /* 소리 켜기/끄기 — 재생 중에도 바로 적용, 다음에도 기억 */
+    isMuted: function(){ return muted; },
+    setMuted: function(m){
+      muted = !!m;
+      try { localStorage.setItem('mc_motion_mute', muted ? '1' : '0'); } catch (e) {}
+      if (cur && cur.snd && cur.snd.out) cur.snd.out.gain.setTargetAtTime(muted ? 0 : .8, cur.snd.ac.currentTime, .02);
+    }
   };
 })();
