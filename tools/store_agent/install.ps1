@@ -50,7 +50,9 @@ New-Object System.Management.Automation.PSCredential($id, $secret) | Export-Clix
 Write-Host '키 저장 완료 (이 컴퓨터의 이 사용자만 풀 수 있게 암호화)'
 
 $run = Join-Path $PSScriptRoot 'run.ps1'
-$action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$run`""
+# 창 없이 실행: wscript 가 run_hidden.vbs 를 부르고, 그게 run.ps1 을 숨긴 채 돌림 (powershell 창이 잠깐 뜨는 것까지 막음, 2026-10-24)
+$hidden   = Join-Path $PSScriptRoot 'run_hidden.vbs'
+$action   = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "//B //Nologo `"$hidden`""
 $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 10)
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 Register-ScheduledTask -TaskName 'MAKEWON 스토어 매출' -Action $action -Trigger $trigger -Settings $settings -Description '스마트스토어 매출을 광고 관제로 보냄 (10분마다)' -Force | Out-Null
