@@ -519,14 +519,14 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
 /* 모션 설명 창 (시안 — 내용은 메뉴별로 다음 단계에서) */
 .mo-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;padding:1rem}
 .mo-ov.on{display:flex}
-.mo-box{width:min(520px,100%);border:1px solid rgba(246,163,74,.4);border-radius:12px;padding:1.2rem;background:#0b0c10;box-shadow:0 30px 80px rgba(0,0,0,.8)}
-.mo-led{height:64px;border-radius:6px;overflow:hidden;display:flex;align-items:center;border:1px solid rgba(246,163,74,.2)}
-.mo-led span{white-space:nowrap;font-family:var(--sans);font-weight:900;font-size:1.9rem;color:#ffb35c;text-shadow:0 0 10px rgba(255,150,40,.7);
-  padding-left:100%;animation:marq 7s linear infinite}
-@keyframes marq{to{transform:translateX(-100%)}}
-.mo-t{margin-top:1rem;font-weight:800;font-size:1.15rem;color:#fff}
-.mo-d{margin-top:.4rem;font-size:.9rem;line-height:1.7;color:rgba(255,255,255,.7)}
-.mo-x{margin-top:1rem;border:1px solid rgba(246,163,74,.5);background:none;color:#ffd7a8;border-radius:8px;padding:.5rem 1.1rem;font-weight:700;cursor:pointer;font-family:var(--sans)}
+.mo-box{width:min(900px,100%);border:1px solid rgba(246,163,74,.4);border-radius:14px;padding:1rem;background:#0b0c10;box-shadow:0 30px 80px rgba(0,0,0,.8)}
+.mo-bar{height:3px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:.6rem;overflow:hidden}
+.mo-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4cc9ff,#ff9a3c)}
+.mo-row{display:flex;align-items:center;gap:.5rem;margin-top:.8rem;flex-wrap:wrap}
+.mo-t{font-weight:800;font-size:1.1rem;color:#fff;margin-right:auto}
+.mo-b{border:1px solid rgba(246,163,74,.5);background:none;color:#ffd7a8;border-radius:8px;padding:.5rem 1rem;font-weight:700;cursor:pointer;font-family:var(--sans);font-size:.9rem;text-decoration:none}
+.mo-b.go{background:#ff9a3c;border-color:#ff9a3c;color:#111}
+.mo-b:hover{filter:brightness(1.15)}
 </style>
 </head>
 <body>
@@ -1166,13 +1166,18 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
 
 <script src="/wms_access.js" data-page="index" data-floor="0"></script>
 <script src="/mm_copy.js" defer></script>
+<script src="/mc_motion.js"></script>
 
 <div class="mo-ov" id="moOv" role="dialog" aria-modal="true">
   <div class="mo-box">
-    <div class="mo-led led"><span id="moMarq"></span></div>
-    <div class="mo-t" id="moT"></div>
-    <div class="mo-d">이 자리에 메뉴의 사용 흐름을 짧은 모션으로 보여 줍니다.<br><span style="color:rgba(246,163,74,.85)">(시안 — 메뉴별 모션은 다음 단계에서 제작)</span></div>
-    <button class="mo-x" id="moX" type="button">닫기</button>
+    <div id="moStage"></div>
+    <div class="mo-bar"><i id="moBar"></i></div>
+    <div class="mo-row">
+      <div class="mo-t" id="moT"></div>
+      <button class="mo-b" id="moRe" type="button">↻ 다시 보기</button>
+      <a class="mo-b go" id="moGo" target="_blank" rel="noopener">들어가기 →</a>
+      <button class="mo-b" id="moX" type="button">닫기</button>
+    </div>
   </div>
 </div>
 <script>
@@ -1198,6 +1203,7 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
       b.className = el.className + ' bk' + (big ? ' big' : '') + (el.classList.contains('disabled') ? ' off' : '');
       if (src[i].offsetParent) b.style.height = src[i].offsetHeight + 'px';
       else b.style.display = 'none';   /* 앞면에서 안 보이는 칸(권한 없는 메뉴)은 뒷면도 숨김 */
+      b.dataset.href = el.getAttribute("href") || "";
       b.dataset.name = name.replace(/<br\s*\/?>/g, ' ');
       b.innerHTML = big
         ? PLAY + '<span class="bk-txt"><span class="bk-name">' + name + '</span><span class="bk-sub">▶ 모션 설명 보기</span></span>'
@@ -1261,11 +1267,20 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
   var ov = document.getElementById('moOv');
   B.addEventListener('click', function(e){
     var b = e.target.closest('.bk'); if (!b || b.classList.contains('off')) return;
-    document.getElementById('moT').textContent = b.dataset.name + ' — 모션 설명';
-    document.getElementById('moMarq').textContent = '▶ ' + b.dataset.name + ' · MOTION GUIDE ·';
-    ov.classList.add('on');
+    cur = b; ov.classList.add('on'); play();
   });
-  function close(){ ov.classList.remove('on'); }
+  /* 메뉴 → 모션 장면 이름 (mc_motion.js) */
+  function motionKey(href){ return /wms_login/.test(href) ? 'wms' : href.replace(/\.html.*$/, ''); }
+  var cur = null, bar = document.getElementById('moBar');
+  function play(){
+    document.getElementById('moT').textContent = cur.dataset.name + ' — 모션 설명';
+    var go = document.getElementById('moGo'); go.href = cur.dataset.href; go.style.display = cur.dataset.href ? '' : 'none';
+    var len = MCMotion.play(motionKey(cur.dataset.href), document.getElementById('moStage'), cur.dataset.name);
+    bar.getAnimations().forEach(function(a){ a.cancel(); });
+    if (len) bar.animate([{width:'0'}, {width:'100%'}], {duration:len, fill:'forwards'});
+  }
+  document.getElementById('moRe').addEventListener('click', play);
+  function close(){ ov.classList.remove('on'); MCMotion.stop(); }
   document.getElementById('moX').addEventListener('click', close);
   ov.addEventListener('click', function(e){ if (e.target === ov) close(); });
   addEventListener('keydown', function(e){ if (e.key === 'Escape') { if (ov.classList.contains('on')) close(); else if (board.classList.contains('show-back')) flip(); } });
