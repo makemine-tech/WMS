@@ -570,8 +570,8 @@
       var L = R.layer(grad(o.bg || '#122a50'));
       var ch = h('div', 'mm-chart', null, L);
       var bars = vals.map(function(v, i){ var e = h('b', i === vals.length - 1 ? 'hi' : '', null, ch); return e; });
-      var num = css(h('div', 'mm-cnt', '0', L), 'left:10cqw;top:5cqw;color:' + (o.numColor || '#fff'));
-      var unit = css(h('div', 'mm-hv', o.unit || '', L), 'position:absolute;left:10cqw;top:15cqw;font-size:2.6cqw;color:' + BLUE);
+      var num = css(h('div', 'mm-cnt', '0', L), 'right:10cqw;top:5cqw;text-align:right;color:' + (o.numColor || '#fff'));
+      var unit = css(h('div', 'mm-hv', o.unit || '', L), 'position:absolute;right:10cqw;top:15cqw;font-size:2.6cqw;color:' + BLUE);
       bars.forEach(function(e, i){ T(1 + i / 2, function(){
         e.animate([{height:'0'}, {height:vals[i] + '%'}], {duration:b(.5), easing:'cubic-bezier(.2,1.4,.4,1)', fill:'forwards'});
         num.textContent = o.fmt ? o.fmt(i, vals.length) : Math.round((o.value || 100) * (i + 1) / vals.length).toLocaleString(); }); });
@@ -662,9 +662,9 @@
     scene(R, B0, function(T){
       var L = R.layer(grad(o.bg || '#0e2a2a'));
       var box = css(h('div', 'mm-abs', null, L), 'left:10cqw;right:10cqw;top:10cqw;bottom:10cqw;border-bottom:.3cqw solid #ffffff44');
-      var y = 30;
+      var y = 12;
       for (i = 0; i < N; i++) (function(i){
-        var up = (i * 7) % 5 !== 0, hgt = 4 + (i * 13) % 7; y += up ? 2 : -1.2;
+        var up = (i * 7) % 5 !== 0, hgt = 10 + (i * 13) % 12; y += up ? 5 : -3;
         var c = css(h('div', 'mm-cd', null, box), 'left:' + (6 + i * 7.5) + '%;bottom:' + y + '%;height:' + hgt + '%;background:' + (up ? GREEN : RED) + ';visibility:hidden');
         T(1 + i / 2, function(){ c.style.visibility = 'visible'; c.animate([{transform:'scaleY(0)'}, {transform:'scaleY(1)'}], {duration:200, fill:'both'}); });
       })(i);
@@ -700,7 +700,7 @@
       var fl = h('div', 'mm-flash', null, L);
       for (var i = 0; i < n; i++) (function(i){ T(1 + i, function(){
         fl.animate([{opacity:.9}, {opacity:0}], {duration:220});
-        var ph = css(h('div', 'mm-card', null, L), 'right:' + (6 + i * 1.2) + 'cqw;top:' + (8 + i * 2.5) + 'cqw;width:14cqw;height:11cqw;border:.6cqw solid #fff;background:linear-gradient(135deg,#f1c98a,#b8783a);transform:rotate(' + (i % 2 ? 6 : -5) + 'deg)');
+        var ph = css(h('div', 'mm-card', null, L), 'right:' + (9 + i * 1.2) + 'cqw;top:' + (8 + i * 2.5) + 'cqw;width:14cqw;height:11cqw;border:.6cqw solid #fff;background:linear-gradient(135deg,#f1c98a,#b8783a);transform:rotate(' + (i % 2 ? 6 : -5) + 'deg)');
         fly(ph, 'translate(-30cqw,10cqw) scale(.4)', 0, 260);
       }); })(i);
       captions(T, L, o.caps);
