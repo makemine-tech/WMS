@@ -14,6 +14,11 @@
 .mm-big{font-size:12.5cqw}
 .mm-mid{font-size:7.2cqw}
 .mm-ch{display:inline-block}
+/* 시작 로고 = 홈페이지 메인 로고와 같은 Outfit (MAKE 가늘게 · CHANGO 굵게) / 끝 「메이크창고」 = 가는 한글 */
+.mm-logo{font-family:"Outfit",system-ui,sans-serif;font-size:11cqw;line-height:1;letter-spacing:-.03em;white-space:nowrap}
+.mm-logo .lt{font-weight:200;color:rgba(255,255,255,.62);letter-spacing:.04em}
+.mm-logo .bd{font-weight:900}
+.mm-thin{font-family:"Noto Sans KR",sans-serif;font-weight:100;font-size:11cqw;letter-spacing:.06em;line-height:1}
 .mm-line{height:.35cqw;width:0;background:currentColor;margin:2.2cqw 0 2cqw;border-radius:1cqw}
 .mm-cap{position:absolute;left:5cqw;bottom:5.5cqw;font-size:5cqw;line-height:1.12;text-shadow:0 .4cqw 2cqw rgba(0,0,0,.65);text-align:left}
 .mm-cap em,.mm-em{font-style:normal;color:${ORANGE}}
@@ -64,7 +69,7 @@
     if (ready) return; ready = true;
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var lk = document.createElement('link'); lk.rel = 'stylesheet';
-    lk.href = 'https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@700;900&display=swap';
+    lk.href = 'https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@100;700;900&family=Outfit:wght@200;900&display=swap';
     document.head.appendChild(lk);
   }
 
@@ -100,9 +105,9 @@
   function intro(R, base, title, color){
     scene(R, base, function(T){
       var L = R.layer(NAVY);
-      var w = h('div', 'mm-hv mm-big', null, L);
+      var w = h('div', 'mm-logo', null, L);
       'MAKECHANGO'.split('').forEach(function(c, i){
-        var s = h('span', 'mm-ch', c, w);
+        var s = h('span', 'mm-ch ' + (i < 4 ? 'lt' : 'bd'), c, w);
         s.animate([{transform:'translateY(-140%) rotate(-14deg)', opacity:0}, {transform:'translateY(10%)', opacity:1, offset:.75}, {transform:'none', opacity:1}],
           {duration:420, delay:i * 55, easing:'cubic-bezier(.3,1.4,.5,1)', fill:'both'});
       });
@@ -116,7 +121,7 @@
   function outro(R, base){
     scene(R, base, function(T){
       var L = R.layer(NAVY);
-      var w = h('div', 'mm-hv mm-big', null, L);
+      var w = h('div', 'mm-thin', null, L);
       '메이크창고'.split('').forEach(function(c, i){
         var s = h('span', 'mm-ch', c, w);
         s.animate([{transform:'translateY(50%) scale(.6)', opacity:0}, {transform:'none', opacity:1}], {duration:360, delay:i * 70, easing:'cubic-bezier(.2,.9,.3,1.3)', fill:'both'});
