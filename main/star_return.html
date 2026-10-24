@@ -56,6 +56,37 @@
   .scan.item:focus { border-color:var(--blue); }
   .lbl { font-size:.72rem; font-weight:800; color:var(--muted); letter-spacing:.06em; margin:.2rem 0 .35rem; }
 
+  /* 목록 줄 아래로 펼친 상세 (대표님 2026-10-24 — 휴대폰과 같은 1~5 순서) */
+  tr.open td { background:rgba(74,240,168,.08); }
+  tr.expr > td { padding:0 0 .6rem !important; background:transparent !important; border-bottom:0; }
+  .expd { border:1px solid var(--accent); border-radius:12px; padding:.8rem; background:#10131a; cursor:default; text-align:left; }
+  .expd .banner { margin:.25rem 0; }
+  .sxg { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; margin-top:.5rem; }
+  .sx { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:.6rem .7rem; display:flex; flex-direction:column; gap:.45rem; font-size:.84rem; min-width:0; }
+  .sx.wide { grid-column:span 2; }
+  @media (max-width:760px){ .sx.wide { grid-column:auto; } }
+  .sxh { font-weight:800; display:flex; align-items:center; gap:.45rem; }
+  .sxh .num { width:22px; height:22px; border-radius:50%; background:var(--accent); color:#06281a; font-size:.75rem; display:inline-flex; align-items:center; justify-content:center; flex:0 0 22px; }
+  .sx .big { font-size:1rem; font-weight:700; word-break:break-all; }
+  .sx label { display:flex; flex-direction:column; gap:.2rem; color:var(--muted); font-size:.76rem; }
+  .sx input, .sx select, .sx textarea { background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:6px; padding:.35rem .5rem; font-size:.85rem; width:100%; min-width:0; font-family:inherit; }
+  .sx input.mono { font-family:'Space Mono',monospace; }
+  .sx textarea { min-height:3.2rem; resize:vertical; }
+  .sx .kv { display:grid; grid-template-columns:auto 1fr; gap:.15rem .6rem; font-size:.8rem; } .sx .kv span { color:var(--muted); }
+  .row2 { display:flex; gap:.35rem; align-items:center; } .row2 > input:first-child { flex:1; }
+  .row2 input[type=checkbox] { width:auto; }
+  table.mini { width:100%; font-size:.8rem; border-collapse:collapse; } table.mini td, table.mini th { padding:.25rem .35rem; border-bottom:1px solid var(--border); text-align:left; }
+  table.mini tr.hot td { background:rgba(74,240,168,.1); }
+  .nw { white-space:nowrap; }
+  .pmb { background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:5px; width:1.5rem; height:1.5rem; margin-left:.2rem; cursor:pointer; font-weight:800; }
+  .thumbs { display:flex; flex-wrap:wrap; gap:.35rem; min-height:36px; }
+  .th { position:relative; } .th img { width:36px; height:36px; object-fit:cover; border-radius:5px; border:1px solid var(--border); display:block; }
+  .th button { position:absolute; top:-6px; right:-6px; width:16px; height:16px; border-radius:50%; border:0; background:#000; color:#fff; font-size:10px; line-height:16px; padding:0; cursor:pointer; }
+  .th.up { font-size:.72rem; color:var(--muted); align-self:center; }
+  .attach { position:relative; overflow:hidden; align-self:flex-start; cursor:pointer; } .attach input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .chips2 { display:flex; flex-wrap:wrap; gap:.3rem; } .chips2 button { background:#0a0c10; border:1px solid var(--border); color:var(--muted); border-radius:14px; padding:.2rem .6rem; font-size:.78rem; cursor:pointer; font-family:inherit; }
+  .chips2 button.on { background:var(--accent); color:#06281a; border-color:var(--accent); font-weight:700; }
+  .acts { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.7rem; align-items:center; } .acts .sp { flex:1; }
   .cur { margin-top:.9rem; border-top:1px dashed var(--border); padding-top:.9rem; }
   .cur-top { display:flex; gap:1.2rem; flex-wrap:wrap; font-size:.84rem; margin-bottom:.6rem; }
   .cur-top b { font-family:'Space Mono',monospace; font-size:.95rem; }
@@ -405,7 +436,7 @@ function lookAll(){
 }
 
 /* ── ③ 상품 스캔 ── */
-function focusItem(){ setTimeout(function(){ var i = $('itemIn'); if (i) i.focus(); else $('rnoIn').focus(); }, 50); }
+function focusItem(){ setTimeout(function(){ var i = $('itemIn'); if (i) i.focus({ preventScroll: true }); else if (!CUR) $('rnoIn').focus({ preventScroll: true }); }, 50); }
 function onItemScan(code){
   var r = RECS[CUR]; if (!r || locked(r)) return;
   code = String(code || '').trim(); if (!code) return;
@@ -439,73 +470,146 @@ function delCur(){
 }
 function retryCur(){ var r = RECS[CUR]; if (!r) return; if (r.trace !== 'ok') trace(r.rno); else if (!H.ok) toast('이벗 도우미를 먼저 연결하세요'); else lookup(r.rno); }
 
-function renderCur(lastCode){
-  var box = $('cur'), r = CUR && RECS[CUR];
-  if (!r){ box.style.display = 'none'; box.innerHTML = ''; return; }
-  box.style.display = 'block';
-  var j = judge(r), st = stOf(r), lk = locked(r), so = starOrders(r);
-  var h = '<div class="cur-top"><div>반품 송장<br><b>' + esc(r.rno) + '</b></div>'
-    + (CFG.vendor ? '<div>업체명<br><input class="sm" style="background:#0a0c10;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.25rem .4rem;width:9rem" list="vendorList" value="' + esc(r.vendor || '') + '" ' + (lk ? 'disabled' : '') + ' onchange="setRecField(\'vendor\',this.value.trim())"></div>'
-      + '<div>택배사<br><select class="sm" style="background:#0a0c10;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.25rem" ' + (lk ? 'disabled' : '') + ' onchange="setRecField(\'courier\',this.value)"><option value="">선택</option>'
-      + COURIERS.map(function(c){ return '<option' + (r.courier === c ? ' selected' : '') + '>' + c + '</option>'; }).join('') + '</select></div>' : '')
-    + '<div>원송장<br><b>' + (r.trace === 'busy' ? '<span class="dim">우체국 조회 중…</span>' : r.trace === 'err' ? '<span style="color:var(--red)">조회 실패</span>' : r.trace === 'skip' && !r.orig ? '<span style="color:var(--yellow)">없음 — ✏️ 수정에서 입력</span>' : esc(r.orig || '')) + '</b>'
-    + (r.origDate ? ' <span class="sm dim">' + esc(r.origDate) + '</span>' : '') + (r.self ? ' <span class="tag b">반송</span>' : '') + '</div>'
-    + '<div>수령자<br><b style="font-family:inherit">' + esc(rmanOf(r) || '-') + '</b></div>'
-    + '<div>상태<br><span class="st s-' + st.k + '">' + st.t + '</span></div></div>';
-  noteHits(r).forEach(function(x){ h += '<div class="banner yel">📌 사전 특이사항 ' + x.t + '입니다 — ' + esc(x.n.memo || '') + ' <span class="mono sm">(' + esc(x.n.val) + ')</span></div>'; });
+/* ── 펼친 줄 (대표님 2026-10-24): 목록 줄을 누르면 그 줄 바로 아래로 펼쳐지고, 휴대폰과 같은 1~5 순서로 그 자리에서 고침
+   (위쪽 #cur 상자는 목록에 안 보이는 건(기간 밖 완료 등)만 대신 보여 줌) ── */
+var CURH = '', MEMO_TAGS = ['박스 파손', '구성품 누락', '사용 흔적', '내용물 파손', '오배송'];
+function busyTyping(){ var a = document.activeElement; if (!a || (a.id === 'itemIn' && !a.value)) return false; return !!(/INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.closest && a.closest('.expd, #cur')); }
+function toggleCur(no){
+  CUR = CUR === no ? null : no; renderCur();
+  if (CUR) setTimeout(function(){ var e = document.querySelector('.expd'); if (e) e.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 30);
+}
+function addX(i, kind, d){ var r = RECS[CUR]; if (!r || locked(r)) return; var x = r.extras[i]; addCnt(x, kind, d); if (!x.n) r.extras.splice(i, 1); save(r); renderCur(); }
+function addManPC(){
+  var r = RECS[CUR]; if (!r || locked(r)) return;
+  var n = $('manName').value.trim(), q = Math.max(1, parseInt($('manQty').value, 10) || 1), bad = $('manBad').checked;
+  if (!n){ toast('상품명을 넣어 주세요'); $('manName').focus(); return; }
+  r.extras = r.extras || []; var x = { code: '', name: n, n: q, man: true }; setBad(x, bad ? q : 0); r.extras.push(x);
+  save(r); renderCur(); toast('상품을 넣었습니다 — ' + n + ' × ' + q);
+}
+function setOrigPC(v){
+  var r = RECS[CUR]; if (!r || locked(r)) return; var no = digits(v);
+  if (no === (r.orig || '')) return;
+  if (no && !okNo(no)){ toast('원송장 번호가 너무 깁니다'); return; }
+  /* 원송장을 넣으면 이벗에서 그 주문 상품을 다시 불러옴(이 PC 의 도우미가 연결돼 있으면 바로) */
+  save(r, no ? { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' } : { orig: null, trace: needTrace(r.rno) ? 'err' : 'skip', look: null });
+  renderCur(); autoLook();
+}
+function toggleTagPC(t){
+  var r = RECS[CUR]; if (!r || locked(r)) return;
+  var a = String(r.memo || '').split(/\s*,\s*/).filter(Boolean), i = a.indexOf(t);
+  if (i >= 0) a.splice(i, 1); else a.unshift(t);
+  save(r, { memo: a.join(', ') }); renderCur();
+}
+/* 사진·파일 첨부 — 휴대폰과 같은 곳(Storage {path}/{gid}/{반품송장}/, DB photos/{반품송장}), 긴 변 1600px JPEG 로 줄여 올림 */
+var UPPC = 0;
+function shrinkPC(file){
+  return new Promise(function(res, rej){
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function(){
+      var M = 1600, w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, M / Math.max(w, h));
+      var c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      c.toBlob(function(b){ b ? res(b) : rej(new Error('사진 변환 실패')); }, 'image/jpeg', 0.8);
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); rej(new Error('그림 파일이 아닙니다 (사진만 올릴 수 있습니다)')); };
+    img.src = url;
+  });
+}
+function uploadPC(files){
+  var r = RECS[CUR]; if (!r || !files || !files.length) return;
+  [].forEach.call(files, function(f){
+    UPPC++; renderCur();
+    var path = CFG.path + '/' + gid + '/' + r.rno + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg';
+    shrinkPC(f).then(function(b){ var ref = firebase.storage().ref(path); return ref.put(b, { contentType: 'image/jpeg' }).then(function(){ return ref.getDownloadURL(); }); })
+      .then(function(url){ return base.child('photos/' + r.rno).push({ path: path, url: url, at: Date.now(), by: byName(), dev: 'pc' }); })
+      .then(function(){ UPPC--; renderCur(); toast('사진을 올렸습니다'); }, function(e){ UPPC--; renderCur(); toast('올리기 실패: ' + (e.code || e.message)); });
+  });
+}
+function delPhotoPC(k){
+  var r = RECS[CUR], p = r && PHOTOS[r.rno] && PHOTOS[r.rno][k]; if (!p || !confirm('이 사진을 지울까요?')) return;
+  base.child('photos/' + r.rno + '/' + k).remove();
+  if (p.path) firebase.storage().ref(p.path).delete().catch(function(){});
+}
+
+function curHtml(r, lastCode){
+  var j = judge(r), st = stOf(r), lk = locked(r), dis = lk ? ' disabled' : '';
+  var sec = function(n, title, body, wide){ return '<div class="sx' + (wide ? ' wide' : '') + '"><div class="sxh"><span class="num">' + n + '</span>' + title + '</div>' + body + '</div>'; };
+  var h = '';
+  /* 알림 — 한 줄씩 */
+  noteHits(r).forEach(function(x){ h += '<div class="banner ' + (x.t === '업체' ? 'red' : 'yel') + '">📌 ' + (x.t === '업체' ? esc(r.vendor) + ' 지시사항' : '사전 특이사항 ' + x.t) + ' — ' + esc(x.n.memo || '') + '</div>'; });
   if (r.trace === 'err') h += '<div class="banner red">우체국 원송장 조회 실패: ' + esc(r.traceErr || '') + '</div>';
-  if (r.look === 'wait') h += '<div class="banner blu">' + (H.ok ? '이벗에서 주문 찾는 중…' : '이벗 도우미가 연결되면 원송장 주문 상품을 불러옵니다 (이 PC 또는 목록의 「주문 조회 대기 찾기」)') + '</div>';
+  if (r.look === 'wait') h += '<div class="banner blu">' + (H.ok ? '이벗에서 주문 찾는 중…' : '이벗 도우미가 연결되면 원송장 주문 상품을 불러옵니다') + '</div>';
   if (r.look === 'busy') h += '<div class="banner blu">이벗에서 원송장 주문·상품 불러오는 중…</div>';
   if (r.look === 'err') h += '<div class="banner red">이벗 주문 조회 실패: ' + esc(r.lookErr || '') + '</div>';
-  j.block.forEach(function(b){ if (!/조회 (중|대기)|스캔 없음/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + ' — 이벗에 자동으로 넣지 않습니다</div>'; });
-  if (r.state === 'done') h += '<div class="banner grn">✔ ' + st.t + ' ' + (r.ebut && r.ebut.at ? hm(r.ebut.at) + ' · ' + esc(r.ebut.by || '') : '') + (r.ebut && r.ebut.mode === 'manual' && r.ebut.msg ? ' — ' + esc(r.ebut.msg) : '') + '</div>';
+  j.block.forEach(function(b){ if (!/조회 (중|대기)/.test(b)) h += '<div class="banner red">⛔ ' + esc(b) + ' — 채워야 반영할 수 있습니다</div>'; });
   if (r.state === 'fail' && r.ebut) h += '<div class="banner red">이벗 반영 실패: ' + esc(r.ebut.msg || '') + '</div>';
+  if (r.state === 'done') h += '<div class="banner grn">✔ ' + st.t + ' ' + (r.ebut && r.ebut.at ? hm(r.ebut.at) + ' · ' + esc(r.ebut.by || '') : '') + (r.ebut && r.ebut.msg ? ' — ' + esc(r.ebut.msg) : '') + '</div>';
 
+  var n = 0, g = '<div class="sxg">';
+  /* 1 송장 */
+  g += sec(++n, '송장', '<div class="big mono">' + esc(r.rno) + '</div>'
+    + (CFG.vendor ? '<label>택배사<select' + dis + ' onchange="setRecField(\'courier\',this.value)"><option value="">선택</option>' + COURIERS.map(function(c){ return '<option' + (r.courier === c ? ' selected' : '') + '>' + c + '</option>'; }).join('') + '</select></label>' : '')
+    + '<div class="kv"><span>수령자</span><b>' + esc(rmanOf(r) || '-') + '</b><span>검수</span><b>' + hm(r.at) + ' · ' + esc(r.by || '') + '</b><span>상태</span><b><span class="st s-' + st.k + '">' + st.t + '</span></b></div>');
+  /* 2 업체 (화물) */
+  if (CFG.vendor) g += sec(++n, '업체', '<input list="vendorList" value="' + esc(r.vendor || '') + '" placeholder="업체명"' + dis + ' onchange="setRecField(\'vendor\',this.value.trim())">'
+    + (r.vendor ? '' : '<div class="sm" style="color:var(--red);margin-top:.3rem">업체명을 넣어야 반영할 수 있습니다</div>'));
+  /* 3 상품 */
+  var p3 = '';
+  if (!lk) p3 += '<div class="row2"><input class="mono" id="itemIn" placeholder="상품 바코드 스캔 후 Enter" autocomplete="off"></div>';
   if ((r.items || []).length){
-    h += '<div class="lbl" style="margin-top:.7rem">② 상품 바코드 스캔 → 상품마다 정상 / 불량</div>';
-    if (!lk) h += '<div class="scan-row" style="margin-bottom:.6rem"><input class="scan item" id="itemIn" placeholder="상품 바코드 스캔 후 Enter" autocomplete="off"></div>';
-    h += '<div class="scroll-x"><table><thead><tr><th>상품</th><th>바코드</th><th>주문</th><th>반품</th><th>정상</th><th>불량</th></tr></thead><tbody>';
-    r.items.forEach(function(it, i){
-      var g = goodOf(it), b = badOf(it);
-      var cls = (lastCode && it.nicn === lastCode ? 'hot' : '') + (b > 0 ? ' bad' : '');
-      var pm = function(kind){ return lk ? '' : ' <button class="btn sm" onclick="addGot(' + i + ',-1,\'' + kind + '\')">−</button> <button class="btn sm" onclick="addGot(' + i + ',1,\'' + kind + '\')">+</button>'; };
-      h += '<tr class="' + cls + '"><td>' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '</td><td class="mono sm">' + esc(it.nicn) + '</td>'
-        + '<td class="cnt">' + it.qty + '</td><td class="cnt ' + (it.got > it.qty ? 'over' : it.got === it.qty ? 'full' : '') + '">' + (it.got || 0) + '</td>'
-        + '<td style="white-space:nowrap"><b class="cnt" style="color:var(--accent)">' + g + '</b>' + pm('1') + '</td>'
-        + '<td style="white-space:nowrap"><b class="cnt" style="color:' + (b ? 'var(--red)' : 'var(--muted)') + '">' + b + '</b>' + pm('2') + '</td></tr>';
-    });
-    h += '</tbody></table></div>';
-  }
-  var noItems = !(r.items || []).length;
-  if (noItems && CFG.db === 'cargo' && !lk){   /* 화물: 원송장 전이라도 상품을 먼저 스캔해 둠 → 원송장을 찾으면 주문 상품과 맞춰짐 */
-    h += '<div class="lbl" style="margin-top:.7rem">② 상품 바코드 스캔 — 원송장을 찾으면 주문 상품과 자동으로 맞춰집니다</div>'
-      + '<div class="scan-row" style="margin-bottom:.6rem"><input class="scan item" id="itemIn" placeholder="상품 바코드 스캔 후 Enter" autocomplete="off"></div>';
+    p3 += '<table class="mini"><thead><tr><th>상품</th><th>주문</th><th>반품</th><th>정상</th><th>불량</th></tr></thead><tbody>' + r.items.map(function(it, i){
+      var pm = function(kind){ return lk ? '' : '<button class="pmb" onclick="addGot(' + i + ',-1,\'' + kind + '\')">−</button><button class="pmb" onclick="addGot(' + i + ',1,\'' + kind + '\')">+</button>'; };
+      return '<tr class="' + (lastCode && it.nicn === lastCode ? 'hot' : '') + '"><td>' + esc(it.name) + (it.opt ? ' <span class="dim">' + esc(it.opt) + '</span>' : '') + '<div class="mono dim sm">' + esc(it.nicn) + '</div></td><td class="cnt">' + it.qty + '</td>'
+        + '<td class="cnt ' + (it.got > it.qty ? 'over' : it.got === it.qty ? 'full' : '') + '">' + (it.got || 0) + '</td>'
+        + '<td class="nw"><b class="cnt" style="color:var(--accent)">' + goodOf(it) + '</b>' + pm('1') + '</td><td class="nw"><b class="cnt" style="color:' + (badOf(it) ? 'var(--red)' : 'var(--muted)') + '">' + badOf(it) + '</b>' + pm('2') + '</td></tr>'; }).join('') + '</tbody></table>';
   }
   if ((r.extras || []).length){
-    var pre = noItems && CFG.db === 'cargo';
-    h += pre ? '<div class="banner blu" style="margin-top:.6rem">스캔한 상품 (원송장 찾기 전)<div style="margin-top:.3rem">'
-             : '<div class="banner red" style="margin-top:.6rem">⚠️ 반품 대상 아닌 상품 (이 주문에 없음) — 이벗에는 넣지 않고 특이사항으로 남깁니다<div style="margin-top:.3rem">';
-    h += r.extras.map(function(x, i){ return '<span class="tag ' + (pre ? 'b' : 'r') + (x.code ? ' mono' : '') + '">' + esc(xName(x)) + ' × ' + x.n + (isMix(x) ? ' (불량 ' + badOf(x) + ')' : '') + '</span>'
-      + (pre ? '<span class="qbtn" style="margin-right:.4rem"><button class="' + (x.q !== '2' ? 'on1' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'1\')">정상</button><button class="' + (x.q === '2' ? 'on2' : '') + '" ' + (lk ? 'disabled' : '') + ' onclick="setExtraQ(' + i + ',\'2\')">불량</button></span>' : '')
-      + (lk ? '' : '<button class="btn sm" style="margin-right:.5rem" onclick="delExtra(' + i + ')">지우기</button>'); }).join('') + '</div></div>';
+    var pre = !(r.items || []).length;
+    p3 += '<div class="sm" style="margin:.5rem 0 .2rem;color:' + (pre ? 'var(--muted)' : 'var(--red)') + '">' + (pre ? '찍어 둔 상품 — 원송장 주문 상품을 불러오면 맞춰집니다' : '⚠️ 이 주문에 없는 상품 — 이벗에는 넣지 않습니다') + '</div>'
+      + '<table class="mini"><tbody>' + r.extras.map(function(x, i){
+        var pm = function(kind){ return lk ? '' : '<button class="pmb" onclick="addX(' + i + ',\'' + kind + '\',-1)">−</button><button class="pmb" onclick="addX(' + i + ',\'' + kind + '\',1)">+</button>'; };
+        return '<tr><td class="' + (x.code ? 'mono' : '') + '">' + esc(xName(x)) + (x.man ? ' <span class="tag b">직접</span>' : '') + '</td><td class="cnt">' + x.n + '</td>'
+          + '<td class="nw"><b class="cnt" style="color:var(--accent)">' + goodOf(x) + '</b>' + pm('1') + '</td><td class="nw"><b class="cnt" style="color:' + (badOf(x) ? 'var(--red)' : 'var(--muted)') + '">' + badOf(x) + '</b>' + pm('2') + '</td>'
+          + '<td>' + (lk ? '' : '<button class="pmb" title="지우기" onclick="delExtra(' + i + ')">×</button>') + '</td></tr>'; }).join('') + '</tbody></table>';
   }
+  if (!lk) p3 += '<div class="row2" style="margin-top:.5rem"><input id="manName" placeholder="직접 입력 — 상품명" autocomplete="off" onkeydown="if(event.key===\'Enter\')addManPC()"><input id="manQty" type="number" min="1" value="1" style="width:4.2rem"><label class="sm nw"><input type="checkbox" id="manBad"> 불량</label><button class="btn sm" onclick="addManPC()">넣기</button></div>';
+  g += sec(++n, '상품', p3, true);
+  /* 4 사진 — 아주 작게, 아래 파일 첨부 */
   var ph = PHOTOS[r.rno] || {}, pk = Object.keys(ph).sort(function(a, b){ return (ph[a].at || 0) - (ph[b].at || 0); });
-  h += '<div class="lbl" style="margin-top:.7rem">📷 사진 ' + (pk.length ? pk.length + '장' : '— 휴대폰 화면에서 찍으면 여기 같이 보입니다') + '</div>'
-    + (pk.length ? '<div class="phs">' + pk.map(function(k){ var p = ph[k]; return '<a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="' + esc((p.by || '') + ' ' + hm(p.at)) + '"><img src="' + esc(p.url) + '" alt=""></a>'; }).join('') + '</div>' : '');
-  h += '<div class="lbl" style="margin-top:.7rem">특이사항 메모</div><textarea class="memo" ' + (lk ? 'disabled' : '') + ' placeholder="예: 박스 파손, 구성품 누락, 엉뚱한 상품 동봉 …" onchange="setMemo(this.value)">' + esc(r.memo || '') + '</textarea>';
-  h += '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem">';
+  g += sec(++n, '사진 <span class="dim sm">' + (pk.length ? pk.length + '장' : '없음') + '</span>', '<div class="thumbs">' + pk.map(function(k){ var p = ph[k];
+      return '<span class="th"><a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="' + esc((p.by || '') + ' ' + hm(p.at)) + '"><img src="' + esc(p.url) + '" alt=""></a>' + (lk ? '' : '<button title="지우기" onclick="delPhotoPC(\'' + k + '\')">×</button>') + '</span>'; }).join('')
+    + (UPPC ? '<span class="th up">올리는 중…</span>' : '') + '</div>'
+    + (lk ? '' : '<label class="btn sm attach">📎 파일 첨부<input type="file" accept="image/*" multiple onchange="uploadPC(this.files);this.value=\'\'"></label>'));
+  /* 5 원송장 · 사유 · 메모 */
+  var tags = String(r.memo || '').split(/\s*,\s*/).filter(Boolean);
+  g += sec(++n, '원송장 · 사유 · 메모', '<label>원송장<input class="mono" value="' + esc(r.self ? '' : (r.orig || '')) + '" placeholder="' + (r.trace === 'busy' ? '우체국 조회 중…' : '모르면 비워 두기') + '"' + dis + ' onchange="setOrigPC(this.value)"></label>'
+    + (r.self ? '<div class="sm"><span class="tag b">반송</span> 원송장 = 반품송장</div>' : '')
+    + '<div class="chips2">' + RECOS.map(function(x){ return '<button class="' + ((r.reco || '401') === x[0] ? 'on' : '') + '"' + dis + ' onclick="setRecField(\'reco\',\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>'
+    + '<div class="chips2">' + MEMO_TAGS.map(function(t){ return '<button class="' + (tags.indexOf(t) >= 0 ? 'on' : '') + '"' + dis + ' onclick="toggleTagPC(\'' + t + '\')">' + t + '</button>'; }).join('') + '</div>'
+    + '<textarea' + dis + ' placeholder="메모" onchange="setMemo(this.value);renderCur()">' + esc(r.memo || '') + '</textarea>');
+  g += '</div>';
+  h += g;
+  /* 할 일 */
+  h += '<div class="acts">';
   if (r.state === 'scan' || !r.state) h += '<button class="btn p" onclick="finishCur()">✔ 검수 완료 → 반영 대기</button>';
   if (r.state === 'ready' || r.state === 'fail') h += '<button class="btn w" onclick="reopenCur()">✏️ 다시 검수</button>';
   if (r.state !== 'done' && r.state !== 'saving') h += '<button class="btn" onclick="manualDone(\'' + r.rno + '\')" title="이벗에 직접 넣었거나, 이벗 반영 없이 끝낼 때">✋ 수동 완료</button>';
-  h += '<button class="btn" onclick="editRec(\'' + r.rno + '\')">✏️ 수정</button>';
   if (r.trace === 'err' || r.look === 'err' || r.look === 'none' || r.look === 'wait') h += '<button class="btn" onclick="retryCur()">🔁 다시 조회</button>';
+  h += '<button class="btn" onclick="editRec(\'' + r.rno + '\')" title="반품송장 번호 바꾸기 등">✏️ 수정 창</button>';
   if (!lk) h += '<button class="btn r" onclick="delCur()">기록 지우기</button>';
-  h += '<button class="btn" onclick="CUR=null;renderCur();$(\'rnoIn\').focus()">닫기</button></div>';
-  box.innerHTML = h;
+  h += '<span class="sp"></span><button class="btn" onclick="CUR=null;renderCur()">접기 ▲</button></div>';
+  return h;
+}
+function renderCur(lastCode){
+  var r = CUR && RECS[CUR];
+  CURH = r ? curHtml(r, lastCode) : '';
+  renderList();   /* 펼친 줄은 renderList 가 그 줄 바로 아래에 넣음 */
+  var box = $('cur'), shown = !!document.querySelector('.expd');
+  if (r && !shown){ box.style.display = 'block'; box.innerHTML = '<div class="expd">' + CURH + '</div>'; }   /* 목록에 안 보이는 건(기간 밖 등) */
+  else { box.style.display = 'none'; box.innerHTML = ''; }
   var ii = $('itemIn');
   if (ii) ii.addEventListener('keydown', function(e){ if (e.key !== 'Enter') return; e.preventDefault(); var v = this.value; this.value = ''; onItemScan(v); });
   focusItem();
-  renderList();
 }
 
 /* ── ④ 이벗 반영 ── */
@@ -584,7 +688,7 @@ function renderList(){
     var good = 0, badn = 0; (r.items || []).forEach(function(it){ if (it.got > 0){ badn += badOf(it); good += goodOf(it); } });
     var names = (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return it.name; });
     (r.extras || []).forEach(function(x){ names.push(xName(x)); badn += badOf(x); good += goodOf(x); });   /* 휴대폰에서 찍어 둔·직접 넣은 상품도 */
-    return '<tr onclick="CUR=\'' + r.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">'
+    return '<tr class="' + (r.rno === CUR ? 'open' : '') + '" onclick="toggleCur(\'' + r.rno + '\')" title="누르면 아래로 펼쳐서 바로 고칩니다">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" ' + (SEL[r.rno] ? 'checked' : '') + ' onchange="selRow(\'' + r.rno + '\',this.checked)"></td>'
       + '<td class="sm" style="white-space:nowrap">' + hm(r.at) + '<div class="dim">' + esc(r.by || '') + '</div></td>'
       + '<td class="mono sm">' + esc(r.rno)
@@ -601,6 +705,7 @@ function renderList(){
       + '<button class="btn sm r" onclick="delRec(\'' + r.rno + '\')">🗑</button></td></tr>';
   };
   var cs = CFG.vendor ? 12 : 10;
+  var row0 = row; row = function(r){ return row0(r) + (r.rno === CUR && CURH ? '<tr class="expr"><td colspan="' + cs + '"><div class="expd">' + CURH + '</div></td></tr>' : ''); };
   $('listBody').innerHTML = pend.length ? pend.map(row).join('') : '<tr><td colspan="' + cs + '" class="dim">미완료 반품이 없습니다 ✔</td></tr>';
   $('doneBody').innerHTML = dn.length ? dn.map(row).join('') : '<tr><td colspan="' + cs + '" class="dim">해당 ' + (VF ? '업체·' : '') + '기간·상태의 완료 반품이 없습니다</td></tr>';
   renderVF();
@@ -943,9 +1048,9 @@ WMSync.onAuth(function(st){
   base = db.ref('wms_sync/groups/' + gid + '/' + CFG.path);
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
   base.child('recs').orderByChild('at').startAt(Date.now() - 120 * 864e5).on('value', function(s){
-    RECS = s.val() || {}; renderList(); renderNotes();
-    var a = document.activeElement;   /* 스캔·입력 중(입력칸에 커서)일 땐 다른 PC 변경으로 화면을 다시 그리지 않음 — 커서가 튐 */
-    if (CUR && !(a && (a.id === 'itemIn' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || (a.tagName === 'INPUT' && $('cur').contains(a))))) renderCur();
+    RECS = s.val() || {}; renderNotes();
+    /* 펼친 곳에서 글자 넣는 중이면 다른 PC·휴대폰 변경으로 다시 그리지 않음 — 커서가 튐 (빈 스캔 칸은 괜찮음) */
+    if (!busyTyping()){ if (CUR) renderCur(); else renderList(); }
     autoLook();
   });
   if (CFG.vendor){
@@ -953,8 +1058,8 @@ WMSync.onAuth(function(st){
     $('vendorIn').addEventListener('change', function(){ try { localStorage.setItem('retVendor_' + CFG.db, this.value.trim()); } catch(e){} renderVendorChips(); });
     renderCourierChips();
   }
-  base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); if (CUR) renderCur(); });
-  base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; renderList(); if (CUR) renderCur(); });
+  base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
+  base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   $('rnoIn').focus();
 });
 </script>
