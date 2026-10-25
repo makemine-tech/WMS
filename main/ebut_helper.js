@@ -12,7 +12,7 @@
            원송장으로 상담전용창 검색(/cs/cs200main_jdata, 발송일 기준, 이벗은 기간 최대 약 90일)
            → { orders:[{code,cust,custName,site,ret,rman,odate,ddate}], items:[{bopt,ordlist,name,nicn,opt,qty}], locas:{in,bad} }
            items 는 반품입고 팝업(/jsp/rtn/rtn101edit.jsp)을 숨은 창에 띄워 상품 줄을 읽은 것 (저장 안 함)
-     save  { orig, origDate, rno, reco, lines:[{bopt,ordlist,qty,q}] }
+     save  { orig, origDate, rno, reco, memo, lines:[{bopt,ordlist,qty,q}] }   memo = 특이사항 → 팝업 메모 칸
            팝업을 숨은 창에 띄워 칸을 채우고 이벗 자체 저장(go_save → /rtn/rtn101save)을 부른다
            저장 직전에 같은 주문이 이미 반품처리됐는지 다시 확인한다
    정해진 값(대표님 2026-10-24): 반송사유 불량 있으면 402 상품불량·아니면 401 고객변심 / 완료구분 완료 /
@@ -23,7 +23,7 @@
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
   if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
 
-  var VER = '2026-10-24g';
+  var VER = '2026-10-25a';
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -110,6 +110,18 @@
     return s ? { in: locaValue(s, LOCA_IN), bad: locaValue(s, LOCA_BAD) } : { in: '', bad: '' };
   }
 
+  /* 팝업 메모 칸 찾기: 상품 줄마다 있는 칸(이름이 여러 개)은 빼고, 이름에 메모·비고가 들어간 칸 → 없으면 하나뿐인 textarea */
+  function findMemo(fm, N){
+    var els = [].filter.call(fm.elements, function(e){
+      return e.name && (e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && /^(text|)$/i.test(e.type))) && N(e.name).length === 1 && !e.readOnly && !e.disabled; });
+    var pick = function(re){ return els.filter(function(e){ return re.test(e.name) || re.test(e.id || ''); }); };
+    var c = pick(/^RETURN_(MEMO|BIGO|ETC|REMARK|NOTE)/i);
+    if (!c.length) c = pick(/MEMO|BIGO|REMARK|NOTE/i);
+    if (!c.length) c = els.filter(function(e){ return e.tagName === 'TEXTAREA'; });
+    return c.length === 1 ? c[0] : (c.filter(function(e){ return e.tagName === 'TEXTAREA'; })[0] || c[0] || null);
+  }
+  function fieldNames(fm){ return [].map.call(fm.elements, function(e){ return e.name; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(','); }
+
   /* 반영할 고객사: 스타 반품은 446, 화물 반품(?db=cargo)은 null = 제한 없음 (화면이 a.cust 로 보냄, 예전 화면은 안 보내므로 스타) */
   function custOf(a){ return a.cust === undefined ? STAR_CUST : a.cust; }
   function cmdFind(a){
@@ -181,6 +193,16 @@
       /* 반송사유: 휴대폰에서 고른 것(a.reco, 기본 고객변심) — 안 고른 예전 기록은 불량 있으면 402 상품불량 · 없으면 401 고객변심 */
       fm.RETURN_RECO.value = /^40[1-4]$/.test(a.reco || '') ? a.reco : lines.some(function(l){ return l.q === '2'; }) ? '402' : '401';
       fm.RETURN_QTY.value = String(tot);
+      /* 메모: 반품입고관리 「특이사항」(a.memo) → 팝업 메모 칸 (대표님 2026-10-25) — 칸 이름을 몰라 이름·모양으로 찾음, 못 찾으면 저장은 하되 memoMiss 로 알림 */
+      var memoEl = null, memoCut = false, memo = String(a.memo || '').trim();
+      if (memo){
+        memoEl = findMemo(fm, N);
+        if (memoEl){
+          var mv = memoEl.value ? memoEl.value.trim() + ' / ' + memo : memo;
+          if (memoEl.maxLength > 0 && mv.length > memoEl.maxLength){ mv = mv.slice(0, memoEl.maxLength); memoCut = true; }
+          memoEl.value = mv;
+        }
+      }
       [].forEach.call(N('RETURN_MALLYN'), function(r){ r.checked = (r.value === (partial ? '2' : '1')); });   /* 전량/부분입고 */
       [].forEach.call(N('RETURN_FNSH'), function(r){ r.checked = (r.value === '1'); });                      /* 완료 */
       return new Promise(function(res, rej){
@@ -193,7 +215,8 @@
         w.jQuery(w.document).ajaxComplete(function(ev, xhr, s){
           if (!/rtn101save/.test((s && s.url) || '')) return;
           var j = null; try { j = JSON.parse(xhr.responseText); } catch(e){}
-          if (j && String(j.success) === 'true') end(res, { ok: true, codes: j.return_codes || '', ordlist: j.return_ordlist || '' });
+          if (j && String(j.success) === 'true') end(res, { ok: true, codes: j.return_codes || '', ordlist: j.return_ordlist || '',
+            memo: memo ? (memoEl ? (memoCut ? 'cut' : 'ok') : 'miss') : '', memoField: memoEl ? memoEl.name : '', fields: memo && !memoEl ? fieldNames(fm) : '' });
           else end(rej, new Error('이벗 저장 실패' + (alerts.length ? ' — ' + alerts.join(' / ') : '') + (xhr.status !== 200 ? ' (http ' + xhr.status + ')' : '')));
         });
         var t1 = setTimeout(function(){ end(rej, new Error(alerts.length ? '이벗 확인 메시지: ' + alerts.join(' / ') : '이벗 저장 응답 없음 — 이벗 반품내역에서 확인 필요')); }, 25000);
