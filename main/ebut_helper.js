@@ -21,9 +21,15 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  if (window.__mkwEbutHelper){ window.__mkwEbutHelper.hello(); return; }
-
-  var VER = '2026-10-25a';
+  var VER = '2026-10-25b';
+  /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
+     stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
+  var old = window.__mkwEbutHelper;
+  if (old){
+    if (old.ver === VER){ old.hello(); return; }
+    if (typeof old.stop !== 'function'){ alert('이벗 도우미가 옛 버전(' + (old.ver || '?') + ')입니다.\n\n이 이벗 탭을 새로고침(F5)한 뒤 즐겨찾기 도우미를 다시 눌러 주세요.'); return; }
+    old.stop();
+  }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
   var PAGE = 'https://makewon.com/star_return.html';
   var STAR_CUST = '446';
@@ -234,7 +240,7 @@
   }
 
   var busy = 0;
-  window.addEventListener('message', function(e){
+  function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
     var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : null;
@@ -252,7 +258,8 @@
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: false, err: msg }, e.origin);
       say(msg === 'LOGIN' ? '⚠️ 이벗 로그아웃됨 — 다시 로그인한 뒤 도우미를 다시 눌러 주세요' : '⚠️ ' + msg);
     }).then(function(){ busy--; });
-  });
+  }
+  window.addEventListener('message', onMsg);
 
   /* 반품입고관리 창 찾기: 이 탭을 연 창(opener) → 없으면 반품입고관리를 새로 열기 */
   var peer = null, peerOrigin = '*';
@@ -265,8 +272,10 @@
     else say('⚠️ 팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용 후 다시 눌러 주세요');
   }
   /* 5분마다 가볍게 조회 — 이벗 자동 로그아웃(한동안 안 쓰면) 막기 */
-  setInterval(function(){ if (!busy) cmdPing().then(function(r){ if (!r.login) say('⚠️ 이벗 로그아웃됨 — 다시 로그인한 뒤 도우미를 다시 눌러 주세요'); }); }, 5 * 60 * 1000);
+  var beat = setInterval(function(){ if (!busy) cmdPing().then(function(r){ if (!r.login) say('⚠️ 이벗 로그아웃됨 — 다시 로그인한 뒤 도우미를 다시 눌러 주세요'); }); }, 5 * 60 * 1000);
 
-  window.__mkwEbutHelper = { hello: hello, ver: VER };
+  /* 새 버전 도우미가 이 버전을 끌 때 씀 */
+  function stop(){ window.removeEventListener('message', onMsg); clearInterval(beat); box.remove(); }
+  window.__mkwEbutHelper = { hello: hello, ver: VER, stop: stop };
   hello();
 })();

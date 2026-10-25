@@ -358,7 +358,9 @@ function setHelper(ok, login){
   /* 도우미가 없는 다른 PC 가 신호를 덮지 않게, 도우미와 이야기한 PC 만 씀 (끊기면 신호가 90초 뒤 낡아서 휴대폰이 알아챔) */
   if (base && ok) base.child('helperBeat').set({ ok: !!ok && login !== false, at: firebase.database.ServerValue.TIMESTAMP, by: byName() }).catch(function(){});
 }
-function ping(){ return hcall('ping', {}, 8000).then(function(r){ setHelper(true, r.login); return r; }, function(){ setHelper(false); }); }
+function ping(){ return hcall('ping', {}, 8000).then(function(r){ H.ver = r.ver || ''; setHelper(true, r.login); return r; }, function(){ setHelper(false); }); }
+/* 메모(특이사항)를 넣는 도우미는 2026-10-25a 부터 — 그 전 버전이면 반영 전에 멈춤 */
+var HELPER_MIN = '2026-10-25a';
 setInterval(function(){ if (H.win) ping(); }, 30000);
 /* 도우미가 이 화면을 열었을 때(이벗 탭이 opener) — 도우미의 첫 인사를 놓쳤을 수 있으니 이쪽에서 먼저 부름 */
 if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; try { H.win.postMessage({ to: 'ebut-helper', id: 0, cmd: 'ping' }, EBUT_ORIGIN); } catch(e){} ping(); setTimeout(knock, 1500); })(); }
@@ -637,6 +639,7 @@ function pushAll(){
   if (!H.ok || H.login === false){ toast('이벗 도우미 연결(로그인)부터 확인하세요'); $('setupCard').open = true; return; }
   var q = Object.keys(RECS).filter(function(k){ return RECS[k].state === 'ready'; }).sort(function(a, b){ return RECS[a].at - RECS[b].at; });
   if (!q.length){ toast('반영 대기 건이 없습니다'); return; }
+  if (!H.ver || H.ver < HELPER_MIN){ alert('이벗 도우미가 옛 버전(' + (H.ver || '?') + ')이라 특이사항 메모가 이벗에 안 들어갑니다.\n\n이벗 탭을 새로고침(F5)한 뒤 즐겨찾기 도우미를 다시 누르고, 다시 반영해 주세요.'); return; }
   if (!confirm('반영 대기 ' + q.length + '건을 이벗 반품입고로 저장합니다. 진행할까요?')) return;
   pushing = true; $('pushBtn').disabled = true;
   var ok = 0, bad = 0, stop = false;
@@ -655,7 +658,7 @@ function pushAll(){
       var memo = judge(r).info.join(' / ');
       return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines, cust: CFG.cust, courier: r.courier || '우체국', reco: r.reco || null, memo: memo }, 60000).then(function(res){
         ok++;
-        var mm = !memo ? '' : res.memo === 'ok' ? ' · 메모 기입' : res.memo === 'cut' ? ' · ⚠️ 메모가 길어 잘림 — 이벗에서 확인' : res.memo === 'miss' ? ' · ⚠️ 이벗 메모 칸을 못 찾음 — 메모는 손으로' : ' · ⚠️ 도우미 옛 버전이라 메모 안 들어감 — 이벗 탭에서 도우미 다시 누르기';
+        var mm = !memo ? '' : res.memo === 'ok' ? ' · 메모 기입' : res.memo === 'cut' ? ' · ⚠️ 메모가 길어 잘림 — 이벗에서 확인' : res.memo === 'miss' ? ' · ⚠️ 이벗 메모 칸을 못 찾음 — 메모는 손으로' : ' · ⚠️ 도우미 옛 버전이라 메모 안 들어감 — 이벗 탭 새로고침(F5) 후 도우미 다시 누르기 · 이 건 메모는 이벗에서 손으로';
         return save(RECS[k], { state: 'done', ebut: { at: Date.now(), msg: '저장됨' + mm, codes: res.codes || '', by: byName(), mode: 'auto', memo: memo || null, memoField: res.memoField || null, fields: res.fields || null } });
       }, function(e){
         var m = String(e.message || e);
