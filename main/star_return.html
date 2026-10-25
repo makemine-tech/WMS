@@ -134,6 +134,16 @@
   .notes-form input.v { font-family:'Space Mono',monospace; min-width:180px; }
   .notes-form input.m { flex:1; min-width:200px; }
   textarea.memo { width:100%; background:#0a0c10; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.5rem .6rem; font:.8rem 'Noto Sans KR',sans-serif; min-height:2.6rem; }
+  /* 사전 특이사항 목록: 3줄 정도만 보이고 나머지는 스크롤 (대표님 2026-10-25) */
+  .notes-scroll td, .notes-scroll th { white-space:nowrap; padding:.35rem .5rem; }
+  .notes-scroll td.ell { max-width:420px; overflow:hidden; text-overflow:ellipsis; }
+  .notes-scroll { max-height:9.6rem; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+  .notes-scroll thead th, .nl-scroll thead th { position:sticky; top:0; background:var(--surface); z-index:1; }
+  .nl-scroll { max-height:62vh; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+  .mdl-box.wide { max-width:1200px; }
+  .stg { display:inline-block; border-radius:6px; padding:.1rem .45rem; font-size:.7rem; font-weight:800; white-space:nowrap; }
+  .stg.none { background:#2a1414; color:#fca5a5; } .stg.wait { background:#2a2410; color:#fde68a; } .stg.move { background:#0f1d33; color:#93c5fd; }
+  .stg.done { background:#10261c; color:#6ee7b7; } .stg.found { background:var(--accent); color:#06281a; } .stg.unk { background:#1f2533; color:#94a3b8; }
   details > summary { cursor:pointer; list-style:none; }
   details > summary::-webkit-details-marker { display:none; }
 
@@ -202,7 +212,15 @@
       <input class="m" id="nMemo" placeholder="안내할 내용 (예: 고객사 요청 — 불량 확인 후 따로 보관)">
       <button class="btn p" onclick="addNote()">추가</button>
     </div>
-    <div class="scroll-x"><table><thead><tr><th>종류</th><th>번호 / 바코드</th><th>내용</th><th>등록</th><th>상태</th><th></th></tr></thead><tbody id="notesBody"></tbody></table></div>
+    <div class="notes-form">
+      <label class="btn attach">📄 파일 등록 (이벗 CS 접수 엑셀)<input type="file" accept=".xlsx,.xls,.csv" onchange="importNotes(this)"></label>
+      <button class="btn" onclick="openNotes()">🔍 목록 크게 보기</button>
+      <button class="btn" id="trkBtn" onclick="trackNotes(true)">🚚 반품 배송 단계 조회</button>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn r" onclick="clearNotes()">🗑 목록 전체 삭제</button>
+    </div>
+    <div class="sm dim" id="trkInfo" style="margin-bottom:.4rem"></div>
+    <div class="notes-scroll"><table><thead><tr><th>종류</th><th>번호 / 바코드</th><th>내용</th><th>반품 송장 · 단계</th><th>등록</th><th>상태</th><th></th></tr></thead><tbody id="notesBody"></tbody></table></div>
   </details>
 
   <!-- 스캔 -->
@@ -863,7 +881,7 @@ function editRec(k){
     + '<div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn p" onclick="saveEdit()">저장</button><button class="btn" onclick="closeEdit()">취소</button></div></div>';
   var m = $('mdl'); m.innerHTML = h; m.style.display = 'flex';
 }
-function closeEdit(){ EDIT = null; $('mdl').style.display = 'none'; $('mdl').innerHTML = ''; }
+function closeEdit(){ EDIT = null; NMODAL = false; $('mdl').style.display = 'none'; $('mdl').innerHTML = ''; }
 function saveEdit(){
   var k = EDIT, r0 = RECS[k]; if (!r0) { closeEdit(); return; }
   var r = JSON.parse(JSON.stringify(r0));
@@ -910,17 +928,169 @@ function addNote(){
 }
 function delNote(k){ if (!confirm('이 사전 특이사항을 지울까요?')) return; base.child('notes/' + k).remove(); }
 function unfindNote(k){ if (!confirm('「찾음」을 취소하고 다시 대기 중으로 돌릴까요?')) return; base.child('notes/' + k + '/found').remove(); }
-function renderNotes(){
-  var ks = Object.keys(NOTES).sort(function(a, b){ return (NOTES[b].at || 0) - (NOTES[a].at || 0); });
+/* 반품 진행 단계 (서버 함수 epostReturnStage — 원송장 배송조회의 「반품등기번호」 → 그 반품 송장 처리현황)
+   미접수: 반품등기번호 없음 · 미배송: 반품 송장만 있고 이동 없음 · 배송중 · 배송완료(창고 도착, 검수 전) · 입고: 검수에서 찾음 */
+var STG = { none: '미접수', wait: '미배송', move: '배송중', done: '배송완료', found: '입고', nodata: '조회 없음', err: '조회 실패', todo: '조회 전' };
+function stgOf(n){ if (n.found) return 'found'; if (n.kind !== 'inv') return ''; var t = n.trk; return !t ? 'todo' : t.err ? 'err' : t.stage || 'todo'; }
+function stgHtml(n, short){
+  var s = stgOf(n), t = n.trk || {}; if (!s) return '<span class="dim sm">-</span>';
+  var cls = { none: 'none', wait: 'wait', move: 'move', done: 'done', found: 'found' }[s] || 'unk';
+  var rno = n.found ? n.found.rno : t.rno;
+  return '<span class="stg ' + cls + '">' + STG[s] + '</span>'
+    + (rno ? ' <span class="mono sm">' + esc(rno) + '</span>' : '')
+    + (short ? '' : (!n.found && t.last ? '<div class="sm dim">' + esc(t.last.d.slice(5) + ' ' + t.last.t + ' ' + t.last.at + ' ' + t.last.ev) + '</div>' : '')
+      + (!n.found && t.at ? '<div class="sm dim">조회 ' + hm(t.at) + '</div>' : ''));
+}
+function kindName(n){ return n.kind === 'inv' ? '송장' : n.kind === 'vendor' ? '업체' : '상품'; }
+function sortedNotes(){
+  var ks = Object.keys(NOTES).filter(function(k){ return NOTES[k]; }).sort(function(a, b){ return (NOTES[b].rcvAt || NOTES[b].at || 0) - (NOTES[a].rcvAt || NOTES[a].at || 0); });
   var wait = ks.filter(function(k){ return !NOTES[k].found; }), found = ks.filter(function(k){ return NOTES[k].found; })
     .sort(function(a, b){ return NOTES[b].found.at - NOTES[a].found.at; });
-  $('notesCnt').textContent = ks.length ? '(대기 ' + wait.length + ' · 찾음 ' + found.length + ')' : '';
-  var row = function(k){ var n = NOTES[k], f = n.found;
-    return '<tr><td class="sm">' + (n.kind === 'inv' ? '송장' : n.kind === 'vendor' ? '업체' : '상품') + '</td><td class="' + (n.kind === 'vendor' ? '' : 'mono ') + 'sm">' + esc(n.val) + '</td><td class="sm">' + esc(n.memo) + '</td><td class="sm dim">' + hm(n.at) + ' ' + esc(n.by || '') + '</td>'
-      + '<td class="sm">' + (f ? '<b style="color:var(--accent)">✔ 찾음</b> ' + hm(f.at) + ' · ' + esc(f.by || '') + '<div class="mono dim" style="cursor:pointer" onclick="CUR=\'' + f.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">반품 ' + esc(f.rno) + '</div>' : n.kind === 'vendor' ? '<b style="color:var(--yellow)">📌 늘 안내</b>' : '<b style="color:var(--yellow)">⏳ 대기 중</b>') + '</td>'
-      + '<td style="white-space:nowrap">' + (f ? '<button class="btn sm" onclick="unfindNote(\'' + k + '\')">되돌리기</button> ' : '') + '<button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; };
-  $('notesBody').innerHTML = (wait.length ? wait.map(row).join('') : '<tr><td colspan="6" class="dim">찾는 중인 사전 특이사항이 없습니다</td></tr>')
-    + (found.length ? '<tr><td colspan="6" class="lbl" style="padding-top:1rem">✔ 찾음 ' + found.length + '건</td></tr>' + found.map(row).join('') : '');
+  return { wait: wait, found: found };
+}
+function noteStatus(k){
+  var n = NOTES[k], f = n.found;
+  return f ? '<b style="color:var(--accent)">✔ 찾음</b> ' + hm(f.at) + ' · ' + esc(f.by || '') + '<div class="mono dim" style="cursor:pointer" onclick="closeEdit();CUR=\'' + f.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">반품 ' + esc(f.rno) + '</div>'
+    : n.kind === 'vendor' ? '<b style="color:var(--yellow)">📌 늘 안내</b>' : '<b style="color:var(--yellow)">⏳ 대기 중</b>';
+}
+function renderNotes(){
+  var g = sortedNotes(), wait = g.wait, found = g.found;
+  $('notesCnt').textContent = (wait.length + found.length) ? '(대기 ' + wait.length + ' · 찾음 ' + found.length + ')' : '';
+  /* 한 줄씩 짧게 — 자세한 건 「목록 크게 보기」 */
+  var row = function(k){ var n = NOTES[k], f = n.found, tip = [n.memo, n.item, n.rman].filter(Boolean).join('\n');
+    return '<tr><td class="sm">' + kindName(n) + '</td><td class="' + (n.kind === 'vendor' ? '' : 'mono ') + 'sm">' + esc(n.val) + '</td>'
+      + '<td class="sm ell" title="' + esc(tip) + '">' + esc(n.memo) + (n.item ? ' <span class="dim">· ' + esc(n.item) + '</span>' : '') + '</td><td class="sm">' + stgHtml(n, true) + '</td>'
+      + '<td class="sm dim">' + (n.rcv ? esc(n.rcv.slice(5, 10)) + ' 접수' : hm(n.at)) + '</td>'
+      + '<td class="sm">' + (f ? '<b style="color:var(--accent);cursor:pointer" onclick="CUR=\'' + f.rno + '\';renderCur();window.scrollTo({top:0,behavior:\'smooth\'})">✔ 찾음</b>' : n.kind === 'vendor' ? '<b style="color:var(--yellow)">📌 늘 안내</b>' : '<b style="color:var(--yellow)">⏳ 대기</b>') + '</td>'
+      + '<td style="white-space:nowrap">' + (n.found ? '<button class="btn sm" onclick="unfindNote(\'' + k + '\')">되돌리기</button> ' : '') + '<button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; };
+  $('notesBody').innerHTML = (wait.length ? wait.map(row).join('') : '<tr><td colspan="7" class="dim">찾는 중인 사전 특이사항이 없습니다</td></tr>')
+    + (found.length ? '<tr><td colspan="7" class="lbl" style="padding-top:1rem">✔ 찾음 ' + found.length + '건 — 이벗 반영이 끝나면 목록에서 자동으로 빠집니다</td></tr>' + found.map(row).join('') : '');
+  if (NMODAL) renderNoteModal();
+}
+
+/* ── 파일 등록: 이벗 CS 접수 엑셀(cs100main_….xlsx) — 송장번호(원송장)·접수내용·상품정보, 완료여부 「대기중」만 (대표님 2026-10-25)
+   같은 송장 여러 줄은 한 건으로 합침(접수내용·상품정보 모음), 이미 등록된 송장은 건너뜀 */
+function importNotes(inp){
+  var f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
+  loadXlsx(function(){
+    var rd = new FileReader();
+    rd.onload = function(e){
+      var rows;
+      try { var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }); }
+      catch(err){ toast('엑셀을 읽지 못했습니다: ' + (err.message || err)); return; }
+      var col = function(r, names){ for (var i = 0; i < names.length; i++) if (r[names[i]] != null && String(r[names[i]]).trim() !== '') return String(r[names[i]]).trim(); return ''; };
+      if (!rows.length || !('송장번호' in rows[0]) || !('접수내용' in rows[0])){ toast('「송장번호」·「접수내용」 칸이 있는 이벗 CS 접수 엑셀이 아닙니다'); return; }
+      var have = {}; Object.keys(NOTES).forEach(function(k){ var n = NOTES[k]; if (n && n.kind === 'inv') have[n.val] = 1; });
+      var by = {}, order = [], notWait = 0, noInv = 0;
+      rows.forEach(function(r){
+        if (col(r, ['완료여부']) !== '대기중'){ notWait++; return; }
+        var inv = digits(col(r, ['송장번호'])); if (!okNo(inv) || inv.length < 8){ noInv++; return; }
+        var g = by[inv]; if (!g){ g = by[inv] = { memo: [], item: [], rcv: '', rman: '', ono: '' }; order.push(inv); }
+        var m = col(r, ['접수내용']).replace(/\s+/g, ' '), it = col(r, ['상품정보']), t = col(r, ['접수시각']);
+        if (m && g.memo.indexOf(m) < 0) g.memo.push(m);
+        if (it && g.item.indexOf(it) < 0) g.item.push(it);
+        if (t && (!g.rcv || t < g.rcv)) g.rcv = t;
+        g.rman = g.rman || col(r, ['수령자(주문자)', '수령자']); g.ono = g.ono || col(r, ['주문번호']);
+      });
+      var add = order.filter(function(inv){ return !have[inv]; }), dup = order.length - add.length;
+      if (!add.length){ toast('새로 등록할 건이 없습니다 (이미 등록 ' + dup + '건' + (notWait ? ' · 대기중 아님 ' + notWait + '줄' : '') + ')'); return; }
+      if (!confirm('「' + f.name + '」\n\n새로 등록 ' + add.length + '건 (같은 송장 여러 줄은 한 건으로)\n이미 등록돼 건너뜀 ' + dup + '건\n완료여부 「대기중」 아님 ' + notWait + '줄' + (noInv ? '\n송장번호 없음 ' + noInv + '줄' : '') + '\n\n등록할까요?')) return;
+      var up = {}, now = Date.now(), who = byName();
+      add.forEach(function(inv, i){ var g = by[inv], ts = g.rcv ? new Date(g.rcv.replace(' ', 'T')).getTime() : 0;
+        up[base.child('notes').push().key] = { kind: 'inv', val: inv, memo: g.memo.join(' / '), item: g.item.join(', '), rcv: g.rcv || null, rcvAt: ts || null, rman: g.rman || null, ono: g.ono || null, src: 'cs', file: f.name, at: now + i, by: who }; });
+      base.child('notes').update(up).then(function(){ toast('✔ 사전 특이사항 ' + add.length + '건 등록 — 반품 배송 단계를 조회합니다'); setTimeout(function(){ trackNotes(false); }, 800); },
+        function(err){ toast('등록 실패: ' + (err.code || err.message)); });
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+/* 목록 전체 삭제 — 업체 지시사항(📌 늘 안내)은 남김 */
+function clearNotes(){
+  var ks = Object.keys(NOTES).filter(function(k){ return NOTES[k] && NOTES[k].kind !== 'vendor'; });
+  if (!ks.length){ toast('지울 목록이 없습니다'); return; }
+  if (!confirm('사전 특이사항 ' + ks.length + '건을 모두 지울까요? (업체 지시사항은 남깁니다)')) return;
+  if (!confirm('정말 ' + ks.length + '건 모두 지웁니다. 되돌릴 수 없습니다.')) return;
+  var up = {}; ks.forEach(function(k){ up[k] = null; });
+  base.child('notes').update(up).then(function(){ toast('🗑 ' + ks.length + '건 지움'); });
+}
+/* 반품 배송 단계 조회 — force: 버튼(찾지 못한 송장 전부) / 아니면 조회 전·3시간 지난 것(배송완료는 6시간)만 */
+var trkBusy = false;
+function trackNotes(force){
+  if (trkBusy || !base) return;
+  var now = Date.now(), ks = Object.keys(NOTES).filter(function(k){ var n = NOTES[k];
+    if (!n || n.kind !== 'inv' || n.found) return false;
+    if (force) return true;
+    var t = n.trk; return !t || t.err || now - (t.at || 0) > (t.stage === 'done' ? 6 : 3) * 36e5; });
+  if (!ks.length){ if (force) toast('조회할 송장이 없습니다'); return; }
+  trkBusy = true; $('trkBtn').disabled = true;
+  var fn = firebase.app().functions('asia-northeast3').httpsCallable('epostReturnStage', { timeout: 300000 }), done = 0, fail = 0;
+  var parts = []; for (var i = 0; i < ks.length; i += 15) parts.push(ks.slice(i, i + 15));
+  var say = function(){ $('trkInfo').textContent = '🚚 반품 배송 단계 조회 중… ' + done + ' / ' + ks.length; };
+  say();
+  parts.reduce(function(p, part){ return p.then(function(){
+    var byInv = {}; part.forEach(function(k){ if (NOTES[k]) byInv[NOTES[k].val] = k; });
+    return fn({ nos: Object.keys(byInv) }).then(function(res){
+      var up = {}, at = Date.now();
+      ((res.data && res.data.rows) || []).forEach(function(x){ var k = byInv[x.orig]; if (!k || !NOTES[k]) return;
+        up[k + '/trk'] = x.err ? { at: at, err: x.err } : { at: at, stage: x.stage, rno: x.rno || null, rdate: x.rdate || null, last: x.last || null };
+        if (x.err) fail++; });
+      done += part.length; say();
+      return base.child('notes').update(up);
+    }, function(e){ fail += part.length; done += part.length; say(); console.warn('epostReturnStage', e); });
+  }); }, Promise.resolve()).then(function(){
+    trkBusy = false; $('trkBtn').disabled = false;
+    $('trkInfo').textContent = '🚚 반품 배송 단계 ' + hm(Date.now()) + ' 조회' + (fail ? ' · 실패 ' + fail + '건' : '');
+    if (force) toast('🚚 반품 배송 단계 조회 끝 — ' + ks.length + '건' + (fail ? ' · 실패 ' + fail : ''));
+  });
+}
+/* 이벗 반영이 끝난 반품의 사전 특이사항은 목록에서 자동 삭제 — 내용은 그 반품 기록(preNotes)에 남김 (판정·엑셀·PDF 에 계속 보이게) */
+var cleaning = {};
+function autoCleanNotes(){
+  if (!base) return;
+  Object.keys(NOTES).forEach(function(k){ var n = NOTES[k], r = n && n.found && RECS[n.found.rno];
+    if (!r || r.state !== 'done' || n.kind === 'vendor' || cleaning[k]) return;
+    cleaning[k] = 1;
+    var keep = { t: n.found.how || kindName(n), memo: n.memo || n.val, val: n.val };
+    base.child('recs/' + r.rno + '/preNotes/' + k).set(keep).then(function(){ return base.child('notes/' + k).remove(); })
+      .then(function(){ delete cleaning[k]; }, function(){ delete cleaning[k]; });
+  });
+}
+
+/* ── 목록 크게 보기 (팝업): 단계별 거르기·여러 건 골라 지우기 ── */
+var NMODAL = false, NF = 'all', NSEL = {};
+function openNotes(){ NMODAL = true; NSEL = {}; renderNoteModal(); }
+function nfOK(k){ var n = NOTES[k]; if (!n) return false; if (NF === 'all') return true; if (NF === 'old') return isOldNote(n); return stgOf(n) === NF || (NF === 'unk' && /^(todo|err|nodata)$/.test(stgOf(n))); }
+function isOldNote(n){ var s = stgOf(n); return (s === 'none' || s === 'wait') && Date.now() - (n.rcvAt || n.at || 0) > 14 * 864e5; }
+function renderNoteModal(){
+  var m = $('mdl'); if (!NMODAL) return;
+  var keep = m.querySelector('.nl-scroll'), top = keep ? keep.scrollTop : 0;
+  var g = sortedNotes(), all = g.wait.concat(g.found), ks = all.filter(nfOK), cnt = {};
+  all.forEach(function(k){ var s = stgOf(NOTES[k]) || 'vendor'; s = /^(todo|err|nodata)$/.test(s) ? 'unk' : s; cnt[s] = (cnt[s] || 0) + 1; if (isOldNote(NOTES[k])) cnt.old = (cnt.old || 0) + 1; });
+  var chips = [['all', '전체', all.length], ['none', '미접수', cnt.none], ['wait', '미배송', cnt.wait], ['move', '배송중', cnt.move], ['done', '배송완료', cnt.done], ['found', '입고', cnt.found], ['unk', '조회 전·실패', cnt.unk], ['old', '14일 지난 미접수·미배송', cnt.old]];
+  var nsel = Object.keys(NSEL).filter(function(k){ return NSEL[k] && NOTES[k]; }).length;
+  var h = '<div class="mdl-box wide"><div class="card-h">📌 사전 특이사항 목록 <span class="sm dim">' + all.length + '건</span><span class="sp"></span>'
+    + '<button class="btn sm" onclick="trackNotes(true)">🚚 배송 단계 조회</button> <button class="btn sm" onclick="NMODAL=false;closeEdit()">닫기</button></div>'
+    + '<div class="chips" style="margin-bottom:.6rem">' + chips.map(function(c){ return '<span class="chip' + (NF === c[0] ? ' on' : '') + '" onclick="NF=\'' + c[0] + '\';renderNoteModal()">' + c[1] + ' ' + (c[2] || 0) + '</span>'; }).join('') + '</div>'
+    + '<div class="notes-form"><button class="btn sm" onclick="selNotes(true)">보이는 것 모두 선택</button><button class="btn sm" onclick="selNotes(false)">선택 풀기</button>'
+    + '<span class="sp" style="flex:1"></span><button class="btn sm r"' + (nsel ? '' : ' disabled') + ' onclick="delSelNotes()">선택 ' + nsel + '건 지우기</button></div>'
+    + '<div class="nl-scroll"><table><thead><tr><th></th><th>접수</th><th>종류</th><th>번호 / 바코드</th><th>수령자</th><th>상품정보</th><th>안내할 내용 (접수내용)</th><th>반품 송장 · 단계</th><th>상태</th><th></th></tr></thead><tbody>'
+    + (ks.length ? ks.map(function(k){ var n = NOTES[k];
+        return '<tr' + (NSEL[k] ? ' class="hot"' : '') + '><td><input type="checkbox"' + (NSEL[k] ? ' checked' : '') + ' onchange="NSEL[\'' + k + '\']=this.checked;renderNoteModal()"></td>'
+          + '<td class="sm dim nw">' + (n.rcv ? esc(n.rcv.slice(5, 16)) : hm(n.at)) + '</td><td class="sm nw">' + kindName(n) + '</td><td class="mono sm">' + esc(n.val) + '</td>'
+          + '<td class="sm">' + esc(n.rman || '') + '</td><td class="sm">' + esc(n.item || '') + '</td><td class="sm">' + esc(n.memo || '') + '</td>'
+          + '<td class="sm">' + stgHtml(n) + '</td><td class="sm nw">' + noteStatus(k) + '</td>'
+          + '<td><button class="btn sm r" onclick="delNote(\'' + k + '\')">지우기</button></td></tr>'; }).join('')
+      : '<tr><td colspan="10" class="dim">해당하는 건이 없습니다</td></tr>')
+    + '</tbody></table></div></div>';
+  m.innerHTML = h; m.style.display = 'flex';
+  var sc = m.querySelector('.nl-scroll'); if (sc) sc.scrollTop = top;
+}
+function selNotes(on){ Object.keys(NOTES).filter(nfOK).forEach(function(k){ NSEL[k] = on; }); if (!on) NSEL = {}; renderNoteModal(); }
+function delSelNotes(){
+  var ks = Object.keys(NSEL).filter(function(k){ return NSEL[k] && NOTES[k]; }); if (!ks.length) return;
+  if (!confirm('고른 사전 특이사항 ' + ks.length + '건을 지울까요?')) return;
+  var up = {}; ks.forEach(function(k){ up[k] = null; }); NSEL = {};
+  base.child('notes').update(up).then(function(){ toast('🗑 ' + ks.length + '건 지움'); });
 }
 
 /* ── 엑셀 ── */
@@ -1052,7 +1222,7 @@ WMSync.onAuth(function(st){
   base = db.ref('wms_sync/groups/' + gid + '/' + CFG.path);
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (st.isAdmin ? ' 👑' : '');
   base.child('recs').orderByChild('at').startAt(Date.now() - 120 * 864e5).on('value', function(s){
-    RECS = s.val() || {}; renderNotes();
+    RECS = s.val() || {}; renderNotes(); autoCleanNotes();
     /* 펼친 곳에서 글자 넣는 중이면 다른 PC·휴대폰 변경으로 다시 그리지 않음 — 커서가 튐 (빈 스캔 칸은 괜찮음) */
     if (!busyTyping()){ if (CUR) renderCur(); else renderList(); }
     autoLook();
@@ -1062,7 +1232,8 @@ WMSync.onAuth(function(st){
     $('vendorIn').addEventListener('change', function(){ try { localStorage.setItem('retVendor_' + CFG.db, this.value.trim()); } catch(e){} renderVendorChips(); });
     renderCourierChips();
   }
-  base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
+  var trk1 = false;
+  base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); autoCleanNotes(); if (!trk1){ trk1 = true; setTimeout(function(){ trackNotes(false); }, 3000); } if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   $('rnoIn').focus();
 });

@@ -48,6 +48,49 @@ async function lookup(no) {
   return out;
 }
 
+/* ── 원송장 → 반품 진행 단계 (대표님 2026-10-25, 반품입고관리 사전 특이사항 목록)
+   원송장 배송조회 맨 아래 「반품등기번호:7077… (2026-10-22)」 → 그 반품 송장 배송조회의 처리현황 줄
+   stage: none 미접수(반품등기번호 없음) · wait 미배송(반품 송장만 있고 운송장출력뿐) · move 배송중 · done 배송완료(우리 창고 도착) */
+function events(t) {
+  const i = t.indexOf('처리현황'); if (i < 0) return [];
+  const s = t.slice(i), out = [], re = /(\d{4}\.\d{2}\.\d{2})\s*\n\s*(\d{2}:\d{2})\s*\n\s*([^\n]+?)\s*\n((?:\s*TEL[^\n]*\n)?)\s*([^\n(]+)/g;
+  let m; while ((m = re.exec(s))) out.push({ d: m[1].replace(/\./g, '-'), t: m[2], at: m[3].trim(), ev: m[5].trim() });
+  return out;
+}
+async function stage(orig) {
+  const out = { orig };
+  try {
+    const r = await get(URL + encodeURIComponent(orig));
+    if (!r.ok) { out.err = 'http ' + r.status; return out; }
+    const t = text(await r.text());
+    const m = t.match(/반품\s*등기번호\s*[:：]?\s*(\d{10,15})(?:\s*\(?\s*(\d{4}-\d{2}-\d{2})\s*\)?)?/);
+    if (!m) { out.stage = events(t).length ? 'none' : 'nodata'; return out; }   /* nodata = 원송장 자체가 조회 안 됨 */
+    out.rno = m[1]; if (m[2]) out.rdate = m[2];
+    const r2 = await get(URL + encodeURIComponent(out.rno));
+    if (!r2.ok) { out.err = 'http ' + r2.status; return out; }
+    const ev = events(text(await r2.text())).filter((e) => e.ev !== '운송장출력');
+    const last = ev[ev.length - 1];
+    out.stage = !last ? 'wait' : /배달완료/.test(last.ev) ? 'done' : 'move';
+    if (last) out.last = { d: last.d, t: last.t, at: last.at, ev: last.ev };
+  } catch (e) { out.err = String((e && e.cause && (e.cause.code || e.cause.message)) || (e && e.message) || e).slice(0, 120); }
+  return out;
+}
+
+async function allowed(uid) {
+  const [sa, ug] = await Promise.all([admin.database().ref('superadmins/' + uid).once('value'), admin.database().ref('userGroup/' + uid).once('value')]);
+  return sa.exists() || ug.exists();
+}
+exports.epostReturnStage = onCall({ region: 'asia-northeast3', timeoutSeconds: 300, memory: '256MiB' }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다');
+  if (!(await allowed(uid))) throw new HttpsError('permission-denied', '작업 그룹원만 쓸 수 있습니다');
+  const nos = [...new Set(((req.data && req.data.nos) || []).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 10 && x.length <= 15))].slice(0, MAX);
+  const rows = [];
+  for (let i = 0; i < nos.length; i += 5) rows.push(...(await Promise.all(nos.slice(i, i + 5).map(stage))));
+  logger.info('epostReturnStage', { n: nos.length, ret: rows.filter((r) => r.rno).length });
+  return { ok: true, rows };
+});
+
 exports.epostReturnOrigin = onCall({ region: 'asia-northeast3', timeoutSeconds: 300, memory: '256MiB' }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다');

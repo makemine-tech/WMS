@@ -76,6 +76,8 @@ function judge(r){
   if (r.reco && r.reco !== '401') info.push('반품사유 ' + recoName(r.reco));
   if (r.checked && r.state === 'scan') info.push('검수 완료 · 반영 전');
   noteHits(r).forEach(function(h){ info.push('📌 사전 특이사항 ' + h.t + ': ' + (h.n.memo || h.n.val)); });
+  /* 이벗 반영 뒤 목록에서 빠진 사전 특이사항은 반품 기록(preNotes)에 남아 있음 */
+  Object.keys(r.preNotes || {}).forEach(function(k){ if (NOTES[k]) return; var p = r.preNotes[k]; info.push('📌 사전 특이사항 ' + p.t + ': ' + (p.memo || p.val)); });
   if (r.memo) info.push('메모: ' + r.memo);
   return { block: block, info: info };
 }
