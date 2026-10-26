@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-25b';
+  var VER = '2026-10-26a';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -126,6 +126,17 @@
     if (!c.length) c = els.filter(function(e){ return e.tagName === 'TEXTAREA'; });
     return c.length === 1 ? c[0] : (c.filter(function(e){ return e.tagName === 'TEXTAREA'; })[0] || c[0] || null);
   }
+  /* 저장 실패 진단 (2026-10-26 첫 실반영 5건이 「실패했습니다.」만 받고 멈춤): 이벗에 보낸 값 중 머리 칸 전부 + 상품 줄 칸만 짧게 */
+  function sent(data){
+    try {
+      var p = new URLSearchParams(typeof data === 'string' ? data : ''), head = [], rows = {};
+      p.forEach(function(v, k){
+        if (/^(boptcode|qty|qtytype|INOUTSTOCK_LOCA|ordbasic_ordlist)$/.test(k)) (rows[k] = rows[k] || []).push(v);
+        else if (/^RETURN_|wah|DATE|LOCA|STATUS|GUBN/i.test(k)) head.push(k + '=' + v);
+      });
+      return head.join(' ') + ' | ' + Object.keys(rows).map(function(k){ return k + '[' + rows[k].join(';') + ']'; }).join(' ');
+    } catch(e){ return '(못 읽음)'; }
+  }
   function fieldNames(fm){ return [].map.call(fm.elements, function(e){ return e.name; }).filter(function(v, i, a){ return v && a.indexOf(v) === i; }).join(','); }
 
   /* 반영할 고객사: 스타 반품은 446, 화물 반품(?db=cargo)은 null = 제한 없음 (화면이 a.cust 로 보냄, 예전 화면은 안 보내므로 스타) */
@@ -223,7 +234,8 @@
           var j = null; try { j = JSON.parse(xhr.responseText); } catch(e){}
           if (j && String(j.success) === 'true') end(res, { ok: true, codes: j.return_codes || '', ordlist: j.return_ordlist || '',
             memo: memo ? (memoEl ? (memoCut ? 'cut' : 'ok') : 'miss') : '', memoField: memoEl ? memoEl.name : '', fields: memo && !memoEl ? fieldNames(fm) : '' });
-          else end(rej, new Error('이벗 저장 실패' + (alerts.length ? ' — ' + alerts.join(' / ') : '') + (xhr.status !== 200 ? ' (http ' + xhr.status + ')' : '')));
+          else end(rej, new Error('이벗 저장 실패' + (alerts.length ? ' — ' + alerts.join(' / ') : '') + (xhr.status !== 200 ? ' (http ' + xhr.status + ')' : '')
+            + ' ‖ 서버: ' + strip(xhr.responseText || '').replace(/\s+/g, ' ').slice(0, 300) + ' ‖ 보낸 값: ' + sent(s && s.data)));
         });
         var t1 = setTimeout(function(){ end(rej, new Error(alerts.length ? '이벗 확인 메시지: ' + alerts.join(' / ') : '이벗 저장 응답 없음 — 이벗 반품내역에서 확인 필요')); }, 25000);
         w.go_save();
