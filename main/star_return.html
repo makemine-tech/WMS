@@ -251,6 +251,7 @@
   <div class="card">
     <div class="card-h">🗂 반품입고 목록 <span class="sp"></span>
       <button class="btn" id="lookAllBtn" onclick="lookAll()">🔎 주문 조회 대기 <span id="nLook">0</span>건 찾기</button>
+      <button class="btn" onclick="readySelected()" title="체크한 미완료 건 중 막힌 것 없는 건을 한 번에 「반영 대기」로">✔ 체크한 건 반영 대기로</button>
       <button class="btn p" id="pushBtn" onclick="pushAll()">📤 이벗에 반영 (<span id="nReady">0</span>건)</button>
       <button class="btn" onclick="downloadXlsx()">📥 엑셀</button>
       <button class="btn" id="pdfBtn" onclick="downloadReport()">📄 선택 PDF 보고서</button>
@@ -884,6 +885,28 @@ function delSelected(){
   if (!confirm('체크한 ' + ks.length + '건을 지울까요?' + delWarn(ks))) return;
   var up = {}; ks.forEach(function(k){ up['recs/' + k] = null; }); dropPhotos(ks);
   base.update(up).then(function(){ if (CUR && SEL[CUR]){ CUR = null; renderCur(); } SEL = {}; toast(ks.length + '건 지웠습니다'); });
+}
+
+/* 체크한 미완료 건을 한 번에 「반영 대기」로 (대표님 2026-10-26) — 펼쳐서 「✔ 검수 완료 → 반영 대기」 누르는 것과 같은 판정:
+   빨간 막힘(원송장·주문 조회·다른 고객사·스캔 없음 등)이 있으면 건너뛰고 이유를 알려 줌. 주문에 없는 상품은 이벗에 안 들어감 */
+function readySelected(){
+  var ks = Object.keys(SEL).filter(function(k){ return RECS[k]; });
+  if (!ks.length){ toast('반영 대기로 올릴 줄을 먼저 체크하세요'); return; }
+  var go = [], skip = [], xn = 0, mix = 0;
+  ks.forEach(function(k){ var r = RECS[k];
+    if (r.state && r.state !== 'scan') { if (r.state !== 'ready') skip.push(k + ' — ' + stOf(r).t); return; }
+    var j = judge(r);
+    if (j.block.length) { skip.push(k + ' — ' + j.block[0]); return; }
+    go.push(k); if ((r.extras || []).length) xn++; if ((r.items || []).some(isMix)) mix++; });
+  if (!go.length){ alert('반영 대기로 올릴 수 있는 건이 없습니다.' + (skip.length ? '\n\n' + skip.join('\n') : '')); return; }
+  if (!confirm('체크한 ' + go.length + '건을 「반영 대기」로 올립니다.'
+    + (xn ? '\n\n· 주문에 없는 상품이 있는 ' + xn + '건 — 그 상품은 이벗에 안 들어갑니다.' : '')
+    + (mix ? '\n· 정상·불량 섞인 상품이 있는 ' + mix + '건 — 반영할 때 멈추니 이벗에서 손으로 나눠 넣으세요.' : '')
+    + (skip.length ? '\n\n건너뜀 ' + skip.length + '건:\n' + skip.join('\n') : '') + '\n\n진행할까요?')) return;
+  var by = byName(), now = Date.now();
+  Promise.all(go.map(function(k){ var r = RECS[k]; return patch(k, { state: 'ready', checked: true, checkedBy: r.checkedBy || by, checkedAt: r.checkedAt || now }); }))
+    .then(function(){ go.forEach(function(k){ delete SEL[k]; }); renderList(); if (CUR) renderCur();
+      toast('✔ ' + go.length + '건 반영 대기로 올렸습니다' + (skip.length ? ' · 건너뜀 ' + skip.length + '건' : '') + ' — 「📤 이벗에 반영」을 누르세요'); });
 }
 
 /* ── 목록에서 고치기 (반품송장·원송장·수령자·수량·정상/불량·특이사항·상태) ── */
