@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-26a';
+  var VER = '2026-10-26b';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -126,7 +126,14 @@
     if (!c.length) c = els.filter(function(e){ return e.tagName === 'TEXTAREA'; });
     return c.length === 1 ? c[0] : (c.filter(function(e){ return e.tagName === 'TEXTAREA'; })[0] || c[0] || null);
   }
-  /* 저장 실패 진단 (2026-10-26 첫 실반영 5건이 「실패했습니다.」만 받고 멈춤): 이벗에 보낸 값 중 머리 칸 전부 + 상품 줄 칸만 짧게 */
+  /* 이벗에 넣을 글자만 남김 (2026-10-26 첫 실반영 5건 실패 = 메모의 「📌」 이모지 — 이벗 서버가 이모지 같은 4바이트 글자를 못 받아
+     success:false 만 돌려줌). 📌 → ※, 그 밖에 한글·영숫자·한자·흔한 문장부호·기호 밖의 글자는 지움 */
+  function ebutText(v){
+    return String(v == null ? '' : v).replace(/📌/g, '※').replace(/🚨/g, '!')
+      .replace(/[^\u0009\u000A\u000D -~ -ÿᄀ-ᇿ‐-⁞←-⇿①-⓿■-◿　-〿㄰-㆏一-鿿가-힣＀-￯]/g, '')
+      .replace(/\s{2,}/g, ' ').trim();
+  }
+  /* 저장 실패 진단(2026-10-26 첫 실반영 5건이 「실패했습니다.」만 받고 멈춤): 이벗에 보낸 값 중 머리 칸 전부 + 상품 줄 칸만 짧게 */
   function sent(data){
     try {
       var p = new URLSearchParams(typeof data === 'string' ? data : ''), head = [], rows = {};
@@ -211,7 +218,7 @@
       fm.RETURN_RECO.value = /^40[1-4]$/.test(a.reco || '') ? a.reco : lines.some(function(l){ return l.q === '2'; }) ? '402' : '401';
       fm.RETURN_QTY.value = String(tot);
       /* 메모: 반품입고관리 「특이사항」(a.memo) → 팝업 메모 칸 (대표님 2026-10-25) — 칸 이름을 몰라 이름·모양으로 찾음, 못 찾으면 저장은 하되 memoMiss 로 알림 */
-      var memoEl = null, memoCut = false, memo = String(a.memo || '').trim();
+      var memoEl = null, memoCut = false, memo = ebutText(a.memo);
       if (memo){
         memoEl = findMemo(fm, N);
         if (memoEl){
