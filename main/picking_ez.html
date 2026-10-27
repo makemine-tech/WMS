@@ -56,6 +56,17 @@ h1 em{color:var(--g);font-style:normal}
 .dz-i{font-size:2.5rem;display:block;margin-bottom:.5rem}
 .dz-m{font-weight:700;font-size:1rem;margin-bottom:.2rem}
 .dz-s{font-size:.72rem;color:var(--mu);font-family:var(--mo)}
+.up-row{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.up-row .dz{padding:1.8rem 1rem}
+.col-box{border-color:rgba(74,240,168,.45);background:rgba(74,240,168,.05)}
+.col-box .dz-m{color:var(--g)}
+.col-box.busy{opacity:.6;pointer-events:none}
+.col-set{margin-top:.6rem;border:1px solid var(--br);border-radius:8px;background:var(--s1);font-size:.78rem}
+.col-set summary{cursor:pointer;padding:.5rem .8rem;color:var(--mu);font-weight:700}
+.col-set-b{padding:.2rem .9rem .8rem;display:flex;flex-direction:column;gap:.45rem}
+.col-set-b .sm{font-size:.7rem;color:var(--mu)}
+.col-set-b code{font-family:var(--mo);color:var(--tx)}
+@media(max-width:720px){.up-row{grid-template-columns:1fr}}
 /* FORMAT INFO */
 .fmt-box{background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.85rem 1.1rem;margin-top:1.2rem;font-size:.8rem;line-height:1.9}
 .fmt-box b{color:var(--g)}
@@ -310,14 +321,31 @@ h1 em{color:var(--g);font-style:normal}
 <!-- STEP 1 : 업로드 -->
 <div class="pg on" id="pg0">
   <div class="pg-t">전체 송장 PDF 업로드</div>
-  <div class="pg-s">이지어드민 출력 PDF를 한 번에 업로드하세요</div>
+  <div class="pg-s">📥 자동수집 = 이지어드민 출력 폴더의 오늘 PDF 를 합칠 필요 없이 그대로 · 또는 PDF 직접 올리기(여러 개 가능)</div>
   <div class="cur-job" id="curJob" style="display:none"></div>
-  <div class="dz" id="dz0">
-    <input type="file" id="f0" accept=".pdf">
-    <span class="dz-i">📦</span>
-    <div class="dz-m">전체 송장 PDF 드래그 또는 클릭</div>
-    <div class="dz-s">서버 전송 없음 · 로컬 처리만</div>
+  <div class="up-row">
+    <div class="dz col-box" id="colBox" onclick="pkCollectRun()" title="설정한 폴더 안의 오늘 날짜 폴더(YYYY-MM-DD)에서 새 PDF 만 가져옴">
+      <span class="dz-i">📥</span>
+      <div class="dz-m">송장 자동수집</div>
+      <div class="dz-s" id="colInfo">오늘 폴더의 새 PDF 만 · 이미 가져온 파일·송장번호는 다시 안 들어감</div>
+    </div>
+    <div class="dz" id="dz0">
+      <input type="file" id="f0" accept=".pdf" multiple>
+      <span class="dz-i">📦</span>
+      <div class="dz-m">송장 PDF 드래그 또는 클릭</div>
+      <div class="dz-s">여러 개 골라도 자동으로 합쳐 등록 · 작업은 그룹 DB·이 PC 에 저장(다른 PC 에서 이어서)</div>
+    </div>
   </div>
+  <details class="col-set" id="colSet">
+    <summary>⚙ 자동수집 설정</summary>
+    <div class="col-set-b">
+      <div>가져오는 폴더: <b id="colRoot">지정 안 됨</b> <button class="btn btn-s" onclick="pkCollectPick()">📁 폴더 지정</button></div>
+      <div class="sm">보통 <code>C:\ez_PrintAgent\PdfFile</code> 를 지정 — 그 안의 오늘 날짜 폴더(예: <span id="colToday"></span>)를 매번 자동으로 찾습니다</div>
+      <label><input type="checkbox" id="colDel" onchange="EZ_COLLECT.deleteAfter(this.checked)"> 수집이 끝나면 가져온 PDF 를 폴더에서 지우기 (용량 관리)</label>
+      <div class="sm">끄더라도 🗑 전체 초기화 때 수집했던 파일은 폴더에서 지워집니다 · 수집 뒤 새로 쌓인 송장은 남김</div>
+      <div class="sm" id="colLog"></div>
+    </div>
+  </details>
   <div class="prg" id="pw0" style="display:none">
     <div class="prg-l" id="pl0">로딩 중...</div>
     <div class="prg-b"><div class="prg-f" id="pf0"></div></div>
@@ -701,20 +729,126 @@ function resetAll() {
 (function(){
   var dz = document.getElementById('dz0');
   /* value 비움 — 추가/교체를 취소한 뒤 같은 파일을 다시 골라도 동작하게 */
-  document.getElementById('f0').onchange = function(e){ var f = e.target.files[0]; e.target.value = ''; if(f) loadFile(f); };
+  document.getElementById('f0').onchange = function(e){ var fs = [].slice.call(e.target.files); e.target.value = ''; pkLoadFiles(fs); };
   dz.ondragover  = function(e){ e.preventDefault(); dz.classList.add('drag'); };
   dz.ondragleave = function(){ dz.classList.remove('drag'); };
   dz.ondrop = function(e){
     e.preventDefault(); dz.classList.remove('drag');
-    var f = e.dataTransfer.files[0];
-    if (f && f.name.toLowerCase().endsWith('.pdf')) loadFile(f);
+    pkLoadFiles([].slice.call(e.dataTransfer.files));
   };
 })();
+/* PDF 여러 개 — 이름순으로 합쳐 한 파일처럼 등록 */
+function pkLoadFiles(files){
+  files = files.filter(function(f){ return /\.pdf$/i.test(f.name || ''); })
+               .sort(function(a, b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  if (!files.length) return;
+  if (files.length === 1) { loadFile(files[0]); return; }
+  pkMergeFiles(files, function(buf, bad){
+    if (bad.length) { setMsg('m0','er','❌ 열 수 없는 PDF ' + bad.length + '개: ' + bad.join(', ') + ' — 아무것도 등록하지 않았습니다'); return; }
+    loadFile(new File([buf], 'PDF ' + files.length + '개 합침 (' + files[0].name + ' 외).pdf'));
+  });
+}
+/* 여러 PDF 를 순서대로 한 PDF 로 — done(합친 ArrayBuffer, 못 연 파일 이름들) */
+function pkMergeFiles(files, done){
+  var pw=document.getElementById('pw0'), pf=document.getElementById('pf0'), pl=document.getElementById('pl0');
+  pw.style.display='block'; pf.style.width='0%';
+  setMsg('m0','inf','<span class="sp"></span>PDF ' + files.length + '개 합치는 중...');
+  loadPdfLib(function(){
+    var bad = [], out;
+    PDFLib.PDFDocument.create().then(function(d){
+      out = d;
+      return files.reduce(function(p, f, i){
+        return p.then(function(){
+          pl.textContent = 'PDF 합치는 중... (' + (i + 1) + '/' + files.length + ')';
+          pf.style.width = Math.round((i + 1) / files.length * 30) + '%';
+          return f.arrayBuffer().then(function(ab){ return PDFLib.PDFDocument.load(new Uint8Array(ab)); })
+            .then(function(src){ return out.copyPages(src, src.getPageIndices()); })
+            .then(function(ps){ ps.forEach(function(pg){ out.addPage(pg); }); })
+            .catch(function(){ bad.push(f.name); });
+        });
+      }, Promise.resolve());
+    }).then(function(){ return out.save(); }).then(function(bytes){
+      pw.style.display='none';
+      done(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), bad);
+    }).catch(function(err){ pw.style.display='none'; setMsg('m0','er','❌ PDF 합치기 실패: ' + (err && err.message || err)); });
+  });
+}
+
+/* ─────────────── 📥 송장 자동수집 (ez_collect.js) ───────────────
+   설정 폴더(보통 C:\ez_PrintAgent\PdfFile) 안의 오늘 날짜 폴더 → 새 PDF 만 합쳐 등록
+   중복 막기 ① 수집 기록(이름·크기·수정시각) ② 추가 등록의 송장번호 검사(목록·인쇄완료·인쇄이력)
+   등록이 끝까지 성공한 뒤에만 기록하고(설정 켜져 있으면) 폴더에서 지움 */
+var pkLoadCb = null;     /* loadFile 결과 알림 — 자동수집이 기다림 */
+function pkLoadDone(ok, info){ if (pkLoadCb) { var cb = pkLoadCb; pkLoadCb = null; cb(ok, info || {}); } }
+function pkCollectMsg(cls, html){ setMsg('m0', cls, html); }
+function pkCollectRefresh(){
+  var C = window.EZ_COLLECT; if (!C) return;
+  var today = C.dayFolder(new Date());
+  document.getElementById('colToday').textContent = today;
+  document.getElementById('colDel').checked = C.deleteAfter();
+  var n = Object.keys(C.logFor(C.loadLog(), today)).length;
+  document.getElementById('colLog').textContent = n ? '오늘(' + today + ') 수집한 파일 ' + n + '개 기록됨' : '';
+  if (!C.supported()) { document.getElementById('colInfo').textContent = '⚠️ 크롬·엣지(PC)에서만 됩니다'; return; }
+  C.getRoot().then(function(h){ document.getElementById('colRoot').textContent = h ? '📁 ' + h.name : '지정 안 됨'; });
+}
+function pkCollectPick(){
+  var C = window.EZ_COLLECT;
+  if (!C.supported()) { alert('자동수집은 PC 의 크롬·엣지에서만 됩니다.'); return Promise.resolve(null); }
+  return C.pickRoot().then(function(h){ pkCollectRefresh(); return h; }, function(){ return null; });
+}
+function pkCollectRun(){
+  var C = window.EZ_COLLECT, box = document.getElementById('colBox');
+  if (!C || !C.supported()) { alert('자동수집은 PC 의 크롬·엣지에서만 됩니다.'); return; }
+  if (box.classList.contains('busy')) return;
+  var day = C.dayFolder(new Date()), dir, pick;
+  var stop = function(cls, html){ box.classList.remove('busy'); if (html) pkCollectMsg(cls, html); pkCollectRefresh(); };
+  box.classList.add('busy');
+  C.getRoot().then(function(h){
+    if (h) return h;
+    alert('가져올 폴더를 먼저 지정합니다.\n보통 C:\\ez_PrintAgent\\PdfFile 을 고르세요 (날짜 폴더는 매일 자동으로 찾음).');
+    return pkCollectPick();
+  }).then(function(h){
+    if (!h) return stop('warn', '⚠️ 폴더를 지정하지 않았습니다');
+    return C.perm(h).then(function(ok){
+      if (!ok) return stop('warn', '⚠️ 폴더 접근을 허용해야 수집할 수 있습니다');
+      return C.dayDir(h, day).then(function(d){
+        if (!d) return stop('warn', '⚠️ 📁 ' + h.name + ' 안에 오늘 폴더(' + day + ')가 아직 없습니다 — 이지어드민에서 송장을 출력하면 생깁니다');
+        dir = d;
+        return C.list(dir).then(function(files){
+          pick = C.pickFiles(files, C.logFor(C.loadLog(), day), Date.now());
+          var skip = (pick.dup.length ? ' · 이미 수집한 파일 ' + pick.dup.length + '개 건너뜀' : '')
+                   + (pick.busy.length ? ' · 방금 만들어지는 중인 파일 ' + pick.busy.length + '개는 잠시 뒤 다시' : '');
+          if (!pick.take.length) return stop('warn', '⚠️ ' + day + ' 폴더에 새 송장 PDF 가 없습니다' + skip);
+          if (invoices.length && !rawBuffer) return stop('er', '❌ 이 PC 에 현재 작업의 PDF 원본이 없어 추가할 수 없습니다 — 원본을 먼저 받은 뒤 다시 수집해 주세요');
+          pkMergeFiles(pick.take.map(function(x){ return x.file; }), function(buf, bad){
+            if (bad.length) return stop('er', '❌ 열 수 없는 PDF ' + bad.length + '개(' + bad.join(', ') + ') — 출력이 덜 끝났을 수 있어 아무것도 등록하지 않았습니다. 잠시 뒤 다시 수집해 주세요');
+            pkLoadCb = function(ok, info){
+              if (!ok) return stop();   /* 실패 메시지는 loadFile 쪽에서 */
+              C.saveLog(C.logAdd(C.loadLog(), day, pick.take, Date.now()));
+              var tail = ' <br>📥 자동수집 ' + day + ' · 파일 ' + pick.take.length + '개' + skip;
+              var fin = function(t){ var el = document.getElementById('m0'); el.innerHTML += tail + t; stop(); };
+              if (!C.deleteAfter()) return fin(' · 폴더 파일은 그대로 (초기화 때 지움)');
+              C.remove(dir, pick.take).then(function(r){
+                fin(' · 폴더에서 ' + r.ok + '개 지움' + (r.fail.length ? ' ⚠️ 못 지운 파일 ' + r.fail.length + '개(다음 수집 때 자동 건너뜀)' : ''));
+              });
+            };
+            loadFile(new File([buf], '자동수집 ' + day + ' (' + pick.take.length + '개 파일).pdf'), { collect: true });
+          });
+        });
+      });
+    });
+  }).catch(function(err){ stop('er', '❌ 자동수집 실패: ' + (err && err.message || err)); });
+}
+document.addEventListener('DOMContentLoaded', pkCollectRefresh);
 
 /* ─────────────── PDF 로딩 ─────────────── */
 var pkCurrentFileName = '';   /* 마지막 업로드 파일명 — DB 발행 메타용 */
 var pkAppendCtx = null;       /* 추가 등록 중일 때 { oldBuf, oldInvoices, fileName } — processAllPages 가 교체 대신 합치기 */
-function loadFile(file) {
+function loadFile(file, opts) {
+  opts = opts || {};
+  /* 자동수집은 묻지 않고 늘 ➕ 추가 등록 (작업이 없으면 새로 시작) */
+  if (opts.collect && invoices.length) { pkAppendStart(file); return; }
+  if (!opts.collect) pkLoadCb = null;
   /* 이미 작업이 있으면 「추가」 / 「교체」 선택 */
   if (invoices.length) {
     var left = invoices.filter(function(i){ return !printedInvNums[i.invNum]; }).length;
@@ -745,7 +879,7 @@ function loadFile(file) {
         pdfDoc = doc; pf.style.width='60%'; pl.textContent='페이지 분석 중...';
         processAllPages(doc, pw, pf, pl);
       }).catch(function(err){
-        pw.style.display='none'; setMsg('m0','er','❌ '+err.message);
+        pw.style.display='none'; setMsg('m0','er','❌ '+err.message); pkLoadDone(false);
       });
     };
     reader.readAsArrayBuffer(file);
@@ -773,7 +907,7 @@ function pkAppendStart(file){
           pf.style.width='60%'; pl.textContent='페이지 분석 중...';
           processAllPages(doc, pw, pf, pl);
         }).catch(function(err){
-          pkAppendCtx = null; pw.style.display='none'; setMsg('m0','er','❌ '+err.message);
+          pkAppendCtx = null; pw.style.display='none'; setMsg('m0','er','❌ '+err.message); pkLoadDone(false);
         });
       };
       reader.readAsArrayBuffer(file);
@@ -782,9 +916,9 @@ function pkAppendStart(file){
   /* 다른 PC 가 방금 작업을 바꿨으면(추가/교체) 최신을 받은 뒤 다시 — 서로 덮어쓰기 방지 */
   if (pkReady && pkBase) {
     pkBase.child('meta/jobKey').once('value').then(function(s){
-      if ((s.val() || null) !== pkJobKey) { alert('다른 PC 에서 방금 작업이 바뀌었습니다.\n최신 작업을 불러온 뒤 다시 추가해 주세요.'); return; }
+      if ((s.val() || null) !== pkJobKey) { alert('다른 PC 에서 방금 작업이 바뀌었습니다.\n최신 작업을 불러온 뒤 다시 추가해 주세요.'); pkLoadDone(false); return; }
       go();
-    }).catch(function(err){ alert('작업 확인 실패: ' + (err && err.message || err)); });
+    }).catch(function(err){ alert('작업 확인 실패: ' + (err && err.message || err)); pkLoadDone(false); });
   } else go();
 }
 /* 새 PDF 에서 읽은 송장(newInv, 새 PDF 기준 페이지)을 기존 작업에 합침 */
@@ -881,6 +1015,7 @@ function processAllPages(doc, pw, pf, pl) {
     if (invoices.length === 0) msg += ' ⚠️ 0건 - 등기번호: 텍스트를 찾지 못했습니다';
     msg += dupNotice();
     setMsg('m0','ok', msg);
+    pkLoadDone(invoices.length > 0);
 
     setTimeout(function(){
       goTo(1);
@@ -888,7 +1023,7 @@ function processAllPages(doc, pw, pf, pl) {
       renderRawDbg(pageTexts);
     }, 400);
   }).catch(function(err){
-    pw.style.display='none'; setMsg('m0','er','❌ '+err.message); console.error(err);
+    pw.style.display='none'; setMsg('m0','er','❌ '+err.message); console.error(err); pkLoadDone(false);
   });
 }
 
@@ -903,10 +1038,11 @@ function pkAppendFinish(pageTexts, newDoc){
   pkAppendMerge(newInv, function(buf, res){
     pkAppendCtx = null;
     try { newDoc.destroy(); } catch(e){}
-    if (res.error) { setMsg('m0','er','❌ 추가 실패 (기존 작업은 그대로): ' + (res.error.message || res.error)); console.error(res.error); return; }
+    if (res.error) { setMsg('m0','er','❌ 추가 실패 (기존 작업은 그대로): ' + (res.error.message || res.error)); console.error(res.error); pkLoadDone(false); return; }
     var dupTxt = (res.dupPrinted ? ' · 이미 출력한 송장 ' + res.dupPrinted + '건 제외' : '')
                + (res.dupList ? ' · 이미 목록에 있는 송장 ' + res.dupList + '건 제외' : '');
-    if (!buf) { setMsg('m0','warn','⚠️ 추가할 새 송장이 없습니다 — 새 PDF ' + newInv.length + '건 모두 중복' + dupTxt + ' (기존 작업은 그대로)'); return; }
+    /* 전부 중복 = 이미 작업에 들어 있는 송장 → 자동수집에선 정상(그 파일은 수집 끝) */
+    if (!buf) { setMsg('m0','warn','⚠️ 추가할 새 송장이 없습니다 — 새 PDF ' + newInv.length + '건 모두 중복' + dupTxt + ' (기존 작업은 그대로)'); pkLoadDone(newInv.length > 0); return; }
     pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise.then(function(doc){
       rawBuffer = buf;
       pdfDoc = doc;
@@ -918,10 +1054,11 @@ function pkAppendFinish(pageTexts, newDoc){
       var left = invoices.filter(function(i){ return !printedInvNums[i.invNum]; }).length;
       setMsg('m0','ok','➕ 추가 등록 완료 — 새 송장 ' + res.added + '건 추가' + dupTxt
         + ' · 전체 ' + invoices.length + '건 · 출력할 송장 ' + left + '건 (같은 구성끼리 자동으로 합쳐 묶음)' + dupNotice());
+      pkLoadDone(true);
       if (typeof renderGrpPage === 'function') renderGrpPage();
       pkRerender();
       setTimeout(function(){ goTo(1); renderPick(); renderRawDbg(pageTexts); }, 400);
-    }).catch(function(err){ setMsg('m0','er','❌ 합본 PDF 확인 실패 (기존 작업은 그대로): ' + err.message); });
+    }).catch(function(err){ setMsg('m0','er','❌ 합본 PDF 확인 실패 (기존 작업은 그대로): ' + err.message); pkLoadDone(false); });
   });
 }
 
@@ -2412,6 +2549,7 @@ function esc2(s){ return String(s||'').replace(/"/g,'""'); }
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="wms_sync.js"></script>
+<script src="ez_collect.js"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════
    실시간 DB 연동 (PC 간 이어작업)
@@ -3004,11 +3142,21 @@ function pkResetAll(){
   var remoteWarn = pkReady
     ? '\n\n⚠ 그룹 DB 의 현재 작업도 삭제되어 다른 PC 에서도 사라집니다.'
     : '\n\n(현재 로그인 안 됨 — 이 PC 로컬만 초기화됩니다)';
-  if (!confirm('현재 작업을 전체 초기화합니다.\n업로드한 송장·PDF·인쇄기록이 모두 사라집니다.' + remoteWarn + '\n\n진행하시겠습니까?')) return;
+  var C = window.EZ_COLLECT, colN = 0;
+  if (C) C.logDays(C.loadLog()).forEach(function(d){ colN += Object.keys(C.logFor(C.loadLog(), d)).length; });
+  var colWarn = colN ? '\n\n📥 자동수집했던 PDF 가 이 PC 폴더에 남아 있으면 함께 지웁니다 (수집 뒤 새로 쌓인 송장은 남김).' : '';
+  if (!confirm('현재 작업을 전체 초기화합니다.\n업로드한 송장·PDF·인쇄기록이 모두 사라집니다.' + remoteWarn + colWarn + '\n\n진행하시겠습니까?')) return;
   try { localStorage.removeItem(SESSION_KEY); } catch(e){}
   pkClearRemoteJob();
-  pkIdbClear().then(function(){ location.reload(); }, function(){ location.reload(); });
-  setTimeout(function(){ location.reload(); }, 1500);  /* IDB 응답 없어도 강제 새로고침 */
+  /* 폴더 정리(권한 창이 뜰 수 있음)를 마친 뒤 새로고침 */
+  var cleanup = colN ? C.cleanupAll().then(function(r){
+    if (r.noPerm) alert('폴더 접근이 허용되지 않아 수집했던 PDF 를 지우지 못했습니다.\n다음 초기화 때 다시 지웁니다.');
+    else if (r.fail) alert('수집했던 PDF ' + r.ok + '개 지움 · ' + r.fail + '개는 못 지웠습니다 (다음 초기화 때 다시).');
+  }) : Promise.resolve();
+  cleanup.then(function(){
+    pkIdbClear().then(function(){ location.reload(); }, function(){ location.reload(); });
+    setTimeout(function(){ location.reload(); }, 1500);  /* IDB 응답 없어도 강제 새로고침 */
+  });
 }
 
 document.addEventListener('DOMContentLoaded', pkInitAuth);
