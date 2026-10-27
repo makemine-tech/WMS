@@ -30,7 +30,8 @@
     return 'b' + h.toString(36) + s.length.toString(36);
   }
 
-  /* ── 주문 묶기 ── flags: divided(이지어드민에서 이미 나뉨) · ori(오리진케어 섞임) · unknown(모르는 상품) · option(옵션 있음) */
+  /* ── 주문 묶기 ── flags: divided(이지어드민에서 이미 나뉨) · unknown(모르는 상품) · option(옵션 있음)
+     오리진케어(당쉼 등)는 다른 브랜드라 곡물도감과 합포하지 않고 늘 따로 송장 하나 (대표님 2026-10-27) */
   function buildOrders(rows){
     var map = {}, list = [];
     rows.forEach(function(r){
@@ -40,7 +41,6 @@
       if (r.divided) flag('divided');
       if (!qty) return;
       var prd = normName(r.name), cls = classify(prd);
-      if (cls.kind === 'ori') flag('ori');
       if (cls.kind === 'unknown') flag('unknown');
       if (String(r.options || '').trim()) flag('option');
       o.lines.push({ seq: String(r.product_seq), pid: String(r.product_id), prd: prd, qty: qty, cls: cls });
@@ -53,6 +53,7 @@
   function units(order){
     var u = [], small = null;
     order.lines.forEach(function(l){
+      if (l.cls.kind === 'ori') return;                      /* 오리진케어는 withOri 가 따로 붙임 */
       if (l.cls.kind === 'main'){ for (var i = 0; i < l.qty; i++) u.push({ seq: l.seq, prd: l.prd, kan: l.cls.kan, seori60: l.cls.seori60 }); }
       else { if (!small){ small = { small: true, lines: [] }; } small.lines.push({ seq: l.seq, prd: l.prd, qty: l.qty }); }
     });
@@ -71,6 +72,14 @@
     inv.lines.forEach(function(l){ var c = classify(l.prd); if (c.kind === 'main') k += c.kan * l.qty; else small = true; });
     return k + (small ? 1 : 0);
   }
+  /* 오리진케어 줄만 모은 송장 하나 (없으면 null) → 곡물도감 송장들 뒤에 붙임 */
+  function isOri(prd){ return classify(prd).kind === 'ori'; }
+  function hasOri(inv){ return inv.lines.some(function(l){ return isOri(l.prd); }); }
+  function withOri(order, invs){
+    var ori = order.lines.filter(function(l){ return l.cls.kind === 'ori'; });
+    if (!ori.length) return invs;
+    return invs.concat([{ lines: ori.map(function(l){ return { seq: l.seq, prd: l.prd, qty: l.qty }; }) }]);
+  }
   function hasSeori60(inv){ return inv.lines.some(function(l){ return classify(l.prd).seori60; }); }
 
   /* 막대 왼쪽 끝 = 전부 분리: 본품 단위 하나 = 송장 하나, 소형은 칸이 가장 작은 송장에 (서리태60 송장에는 안 넣음) */
@@ -82,7 +91,7 @@
       bins.forEach(function(b, i){ if (!b[0].seori60 && (best < 0 || b[0].kan < bins[best][0].kan)) best = i; });
       if (best < 0) bins.push([small]); else bins[best].push(small);
     }
-    return bins.map(toInvoice);
+    return withOri(order, bins.map(toInvoice));
   }
   /* 막대 오른쪽 끝 = 전부 합포: 4칸(60박스)까지, 칸 큰 것부터 first-fit. 소형은 1칸, 서리태60 상자에는 안 넣음 */
   function splitMin(order){
@@ -101,7 +110,7 @@
       for (var j = 0; j < bins.length && !sb; j++) if (bins[j].kan + 1 <= 4 && !bins[j].seori60) sb = bins[j];
       if (sb) sb.us.push(small); else bins.push({ us: [small] });
     }
-    return bins.map(function(b){ return toInvoice(b.us); });
+    return withOri(order, bins.map(function(b){ return toInvoice(b.us); }));
   }
   /* 송장 박스 크기: 피킹이지 기록 → 없으면 규칙 (소형만 15, 그 외 칸×15) */
   function boxSize(inv, boxes){
@@ -116,7 +125,8 @@
      처리 시간 등급 = 포장비 등급 (300 완제 단독 · 1000 믹스 2칸 이하 · 1500 그 외) */
   function invCost(inv, ctx){
     var size = boxSize(inv, ctx.boxes), key = boxKeyOf(inv.lines);
-    var f = ctx.fee.gokFee([''].concat(inv.lines.map(function(l){ return l.prd; })), [0].concat(inv.lines.map(function(l){ return l.qty; })));
+    var H = [''].concat(inv.lines.map(function(l){ return l.prd; })), R = [0].concat(inv.lines.map(function(l){ return l.qty; }));
+    var f = inv.lines.every(function(l){ return isOri(l.prd); }) ? ctx.fee.oriFee(H, R) : ctx.fee.gokFee(H, R);
     var sec = ctx.settings.sec, t = ctx.times && ctx.times[key];
     if (t == null) t = f.fee === 300 ? sec.single : f.fee === 1000 ? sec.mix2 : sec.mix3;
     return { size: size, sec: Number(t) || 0, ship: Number(ctx.settings.ship[parseInt(size, 10)]) || 0, fee: f.fee, pre: f.pre || 0 };
@@ -142,7 +152,7 @@
       var invs = cur[pack], top = null;
       for (var i = 0; i < invs.length; i++) for (var j = i + 1; j < invs.length; j++){
         var a = invs[i], b = invs[j];
-        if (hasSeori60(a) || hasSeori60(b)) continue;
+        if (hasSeori60(a) || hasSeori60(b) || hasOri(a) || hasOri(b)) continue;
         var m = merge(a, b);
         if (kanOf(m) > 4) continue;
         var ca = c(a), cb = c(b), cm = c(m);
@@ -224,7 +234,7 @@
     }
     var r = solve(cnt);
     if (!r){ warn(order, 'new'); return null; }
-    return r;
+    return withOri(order, r);
   }
   function planExisting(orders, ctx){
     var byPack = {};

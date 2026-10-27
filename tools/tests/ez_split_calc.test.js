@@ -53,17 +53,18 @@ test('buildOrders: 수량 0 줄은 뺌', () => {
   const o = Z.buildOrders([row(3, S15, 1), row(3, M15, 0)])[0];
   assert.strictEqual(o.lines.length, 1);
 });
-test('buildOrders: 이미 나뉨·오리진케어·모르는 상품·옵션은 flags, 나누지 않음', () => {
+test('buildOrders: 이미 나뉨·모르는 상품·옵션은 flags, 나누지 않음 (오리진케어 섞임은 나눔 — 따로 송장)', () => {
   const [d, o, u, p] = Z.buildOrders([
     row(4, S15, 1, { divided: true }),
     row(5, S15, 1), row(5, '1병_당쉼 검은콩', 1),
     row(6, '새 상품', 1),
     row(7, S15, 1, { options: '빨강' })]);
   assert.deepStrictEqual(d.flags, ['divided']);
-  assert.deepStrictEqual(o.flags, ['ori']);
+  assert.deepStrictEqual(o.flags, []);
+  assert.strictEqual(Z.canSplit(o), true);
   assert.deepStrictEqual(u.flags, ['unknown']);
   assert.deepStrictEqual(p.flags, ['option']);
-  [d, o, u, p].forEach(x => assert.strictEqual(Z.canSplit(x), false));
+  [d, u, p].forEach(x => assert.strictEqual(Z.canSplit(x), false));
 });
 
 module.exports = { row, S15, S30, S45, S60, M15, GR, N1 };
@@ -137,10 +138,15 @@ test('막대를 오른쪽으로 갈수록 택배비가 줄거나 같음', () => 
   let prev = Infinity;
   for (let n = 0; n <= steps.length; n++){ const s = Z.planAt(os, steps, n, ctx).totals.ship; assert.ok(s <= prev, 'n=' + n); prev = s; }
 });
-test('나눌 수 없는 주문(오리진케어 섞임)은 원래대로 1장', () => {
+test('오리진케어 섞인 주문(1병×2 + 서리태15): 양 끝 모두 오리진케어는 따로 1장, 합치기에도 안 섞임', () => {
   const os = sampleOrders(), ctx = ctxOf(), steps = Z.buildSteps(os, ctx);
-  assert.strictEqual(Z.planAt(os, steps, steps.length, ctx).byPack['26'].length, 1);
-  assert.ok(steps.every(s => s.pack !== '26'));
+  const end = Z.planAt(os, steps, steps.length, ctx).byPack['26'];
+  assert.strictEqual(end.length, 2);
+  assert.ok(end.some(i => i.lines.length === 1 && i.lines[0].prd === '1병_당쉼 검은콩'));
+  Object.values(Z.planAt(os, steps, steps.length, ctx).byPack).forEach(invs => invs.forEach(i => {
+    const ori = i.lines.filter(l => Z.classify(l.prd).kind === 'ori').length;
+    assert.ok(ori === 0 || ori === i.lines.length, '오리진케어와 곡물도감이 한 송장');
+  }));
 });
 
 /* ── Task 5: 기존대로·채우기 자료 ── */
@@ -218,4 +224,24 @@ test('verifyAfter: 박스 1 몫만 남으면 반영됨, 원래 수량 그대로�
   assert.deepStrictEqual(v.ok, ['1']);
   assert.deepStrictEqual(v.notApplied, ['2']);
   assert.deepStrictEqual(v.gone, ['3']);
+});
+
+/* ── 오리진케어(당쉼 등) = 다른 브랜드 → 곡물도감과 합포하지 않고 따로 송장 (대표님 2026-10-27) ── */
+const ORI = '1병_당쉼 검은콩', OTG = '오리진케어 OTG 레몬';
+test('오리진케어: 전부 합포여도 곡물도감과 따로 1장', () => {
+  assert.deepStrictEqual(shape(Z.splitMin(one([row(41, S15, 1), row(41, M15, 1), row(41, ORI, 6)]))), ['말차15입×1+서리태15입×1', '1병_당쉼×6']);
+});
+test('오리진케어만 있는 주문은 1장 그대로', () => {
+  const o = one([row(42, ORI, 2), row(42, OTG, 1)]);
+  assert.strictEqual(Z.splitMax(o).length, 1);
+  assert.strictEqual(Z.splitMin(o).length, 1);
+});
+test('기존대로: 곡물도감 몫은 기록대로, 오리진케어는 따로', () => {
+  const o = one([row(43, S30, 1), row(43, ORI, 3)]);
+  const boxes = { [keyOf([['서리태 가득콩물 30입 [곡물도감]', 1]])]: '30' };
+  assert.deepStrictEqual(shape(Z.existing(o, boxes)), ['서리태30입×1', '1병_당쉼×3']);
+});
+test('invCost: 오리진케어만 있는 송장은 오리진케어 포장비 (1병 7개 = 1500)', () => {
+  const c = Z.invCost({ lines: [{ seq: 'a', prd: ORI, qty: 7 }] }, ctxOf());
+  assert.strictEqual(c.fee, 1500);
 });
