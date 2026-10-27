@@ -87,9 +87,10 @@
     var tries = 0;
     (function wait(){
       if (window.firebase && firebase.apps && firebase.apps.length && firebase.database) {
+        var was = false;   /* 처음 연결 전의 「끊김」은 보이지 않음 */
         firebase.database().ref('.info/connected').on('value', function(s){
-          if (s.val()) status('sync', 'ok', syncText || '☁ 실시간 연동 중');
-          else status('sync', 'warn', '☁ 실시간 연동 끊김 — 다시 연결 중…');
+          if (s.val()) { was = true; status('sync', 'ok', syncText || '☁ 실시간 연동 중'); }
+          else if (was) status('sync', 'warn', '☁ 실시간 연동 끊김 — 다시 연결 중…');
         });
         return;
       }
