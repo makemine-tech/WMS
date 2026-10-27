@@ -22,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-27e';
+  var VER = '2026-10-27f';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -146,11 +146,19 @@
     return { done: done };
   }
 
-  /* ── 확정 (자동 확정 스위치를 켠 페이지만) ── 이지어드민 「일괄합포제외」 버튼을 누르고(확인창은 한 번만 통과) 서버 응답을 받아 돌려줌 */
+  /* ── 확정 ── 페이지의 「일괄합포제외 실행」 버튼(confirm:true) 또는 자동 확정 스위치(auto:true)일 때만.
+     lockUnpack 이면 이지어드민 「자동합포금지」 칸을 켠 뒤 실행 → 나눈 주문이 새 주문 수집 때 다시 합쳐지지 않음 (대표님 2026-10-27)
+     이지어드민 「일괄합포제외」 버튼을 누르고(확인창은 한 번만 통과) 서버 응답을 받아 돌려줌 */
   function cmdCommit(args){
-    if (!args || args.auto !== true) throw new Error('자동 확정이 꺼져 있습니다');
+    if (!args || (args.auto !== true && args.confirm !== true)) throw new Error('자동 확정이 꺼져 있습니다');
     var btn = document.getElementById('divide_pack_all');
     if (!isDG00() || !btn || !$) throw new Error('일괄합포제외 버튼을 찾지 못했습니다');
+    var lock = document.getElementById('auto_lock_unpack');
+    if (args.lockUnpack){
+      if (!lock || lock.type !== 'checkbox') throw new Error('이지어드민 「자동합포금지」 칸을 찾지 못해 실행하지 않았습니다');
+      lock.checked = true;
+    }
+    var sentLock = null;
     return new Promise(function(res, rej){
       var post = $.post, conf = window.confirm, t;
       function restore(){ $.post = post; window.confirm = conf; clearTimeout(t); }
@@ -166,10 +174,13 @@
       $.post = function(url, data, cb){
         if (isDrop(data)){
           var rest = Array.prototype.slice.call(arguments, 3);
+          var m = typeof data === 'string' ? data.match(/(?:^|&)auto_lock_unpack=(\d)/) : null;
+          sentLock = m ? Number(m[1]) : (data.auto_lock_unpack != null ? Number(data.auto_lock_unpack) : null);
           return post.apply($, [url, data, function(resp){
             restore();
             var r = parse(resp);
-            if (r) res({ error: r.error, fail_list: r.fail_list || [] }); else rej(new Error('이지어드민 응답을 읽지 못했습니다 (저장됐을 수 있음 — 이지어드민 화면 확인)'));
+            if (r) res({ error: r.error, fail_list: r.fail_list || [], lock: sentLock, raw: String(typeof resp === 'string' ? resp : JSON.stringify(resp)).slice(0, 500) });
+            else rej(new Error('이지어드민 응답을 읽지 못했습니다 (저장됐을 수 있음 — 이지어드민 화면 확인): ' + String(resp).slice(0, 200)));
             try { if (typeof cb === 'function') cb.apply(this, arguments); } catch(e){}
           }].concat(rest));
         }

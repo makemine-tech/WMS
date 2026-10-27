@@ -266,7 +266,25 @@
     return s;
   }
 
-  var api = { summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  /* ── 일괄합포제외 뒤 대조 ── 다시 읽은 줄(after)에서 원래 묶음에 「박스 1 몫」만 남았으면 반영됨.
+     ok = 반영됨 · notApplied = 아직 원래대로(또는 다르게) 남음 · gone = 묶음이 안 보임(검색 기간·출고 등으로 확인 필요) */
+  function verifyAfter(pay, after){
+    var by = {};
+    after.forEach(function(r){ (by[r.pack_seq] = by[r.pack_seq] || {})[r.product_seq] = Number(r.qty) || 0; });
+    var v = { ok: [], notApplied: [], gone: [] };
+    pay.forEach(function(pk){
+      var now = by[pk.pack_seq];
+      if (!now){ v.gone.push(pk.pack_seq); return; }
+      var good = pk.lines.every(function(l){
+        var keep = l.boxes.filter(function(b){ return b.no === 1; }).reduce(function(a, b){ return a + b.qty; }, 0);
+        return (now[l.product_seq] || 0) === keep;
+      });
+      (good ? v.ok : v.notApplied).push(pk.pack_seq);
+    });
+    return v;
+  }
+
+  var api = { verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;

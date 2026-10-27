@@ -102,3 +102,29 @@ test('검색: 시작일이 끝일보다 늦으면 거절', async () => {
   const { win } = searchPage();
   await assert.rejects(async () => win.__mkwEzHelper.search({ supplier: '곡물도감', from: '2026-10-28', to: '2026-10-27' }), /시작일/);
 });
+
+/* ── 자동합포금지 + 페이지 버튼으로 확정 (대표님 2026-10-27) ── */
+function lockPage(){
+  const lock = { type: 'checkbox', checked: false };
+  let sent = null;
+  const win = fakePage(w => {
+    if (!w.confirm('일괄합포제외 하시겠습니까?')) return;
+    const data = { template: 'DG00', action: 'drop_pack_all', info_all: 'x', auto_lock_unpack: lock.checked ? 1 : 0 };
+    sent = data;
+    w.jQuery.post('function.htm', data, function(){});
+  }, { auto_lock_unpack: lock });
+  win.jQuery.post = realPost('{"error":0,"fail_list":[]}');
+  return { win, lock, sent: () => sent };
+}
+test('확정: 페이지 버튼(confirm:true)으로도 실행되고, 자동합포금지를 켜서 보냄', async () => {
+  const { win, lock, sent } = lockPage();
+  const r = await win.__mkwEzHelper.commit({ confirm: true, lockUnpack: true });
+  assert.strictEqual(lock.checked, true);
+  assert.strictEqual(sent().auto_lock_unpack, 1);
+  assert.strictEqual(r.lock, 1);
+  assert.strictEqual(r.error, 0);
+});
+test('확정: 자동합포금지 칸이 없으면 실행하지 않음', async () => {
+  const win = fakePage(() => { throw new Error('눌리면 안 됨'); });
+  await assert.rejects(async () => win.__mkwEzHelper.commit({ confirm: true, lockUnpack: true }), /자동합포금지/);
+});

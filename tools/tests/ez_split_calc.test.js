@@ -200,3 +200,22 @@ test('summary: 박스 크기별 단포·합포 장수', () => {
   assert.deepStrictEqual(s.bySize['60'], { single: 1, multi: 0 });
   assert.deepStrictEqual({ single: s.single, multi: s.multi, total: s.total }, { single: 2, multi: 3, total: 5 });
 });
+
+/* ── 일괄합포제외 뒤 결과 대조: 다시 읽은 줄에서 원래 묶음에 박스 1 몫만 남았는지 ── */
+test('verifyAfter: 박스 1 몫만 남으면 반영됨, 원래 수량 그대로면 안 됨, 묶음이 없어지면 확인 필요', () => {
+  const pay = [
+    { pack_seq: '1', lines: [{ product_seq: 'a', product_id: 'x', qty: 2, boxes: [{ no: 1, qty: 1 }, { no: 2, qty: 1 }] },
+                             { product_seq: 'b', product_id: 'y', qty: 1, boxes: [{ no: 3, qty: 1 }] }] },
+    { pack_seq: '2', lines: [{ product_seq: 'c', product_id: 'x', qty: 1, boxes: [{ no: 1, qty: 1 }] },
+                             { product_seq: 'd', product_id: 'y', qty: 1, boxes: [{ no: 2, qty: 1 }] }] },
+    { pack_seq: '3', lines: [{ product_seq: 'e', product_id: 'x', qty: 1, boxes: [{ no: 1, qty: 1 }] },
+                             { product_seq: 'f', product_id: 'y', qty: 1, boxes: [{ no: 2, qty: 1 }] }] }];
+  const after = [
+    { pack_seq: '1', product_seq: 'a', qty: '1' },                                    /* 반영됨: a 1개만 남고 b 는 빠짐 */
+    { pack_seq: '2', product_seq: 'c', qty: '1' }, { pack_seq: '2', product_seq: 'd', qty: '1' }  /* 안 됨: d 가 그대로 */
+  ];                                                                                   /* 묶음 3 은 없음 */
+  const v = Z.verifyAfter(pay, after);
+  assert.deepStrictEqual(v.ok, ['1']);
+  assert.deepStrictEqual(v.notApplied, ['2']);
+  assert.deepStrictEqual(v.gone, ['3']);
+});
