@@ -45,6 +45,10 @@
 
   .slider-wrap { padding:.4rem .2rem .2rem; }
   .slider-lbl { display:flex; justify-content:space-between; font-size:.74rem; color:var(--muted); margin-bottom:.3rem; }
+  /* 「기존대로」 기준점 — 막대 위 표시 */
+  .ex-track { position:relative; height:1.1rem; margin:0 8px; }
+  .ex-mark { position:absolute; transform:translateX(-50%); font-size:.68rem; font-weight:800; color:var(--accent2); white-space:nowrap; cursor:pointer; }
+  .ex-mark.on { color:#06281a; background:var(--accent2); border-radius:6px; padding:0 .35rem; }
   input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
   .stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:.6rem; margin-top:.7rem; }
   .stat { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:.6rem .7rem; }
@@ -130,6 +134,7 @@
       <button class="btn sm w" onclick="setMode('existing')">기존대로 맞추기</button></div>
     <div class="slider-wrap">
       <div class="slider-lbl"><span>◀ 작업 쉬움 · 전부 분리</span><span>송장 최소 · 전부 합포 ▶</span></div>
+      <div class="ex-track"><span class="ex-mark" id="exMark" onclick="setMode('existing')" title="눌러서 기존대로로">▼ 기존대로</span></div>
       <input type="range" id="slider" min="0" max="0" value="0" oninput="setMode('slider')">
     </div>
     <div class="stats">
@@ -239,6 +244,7 @@ var db = null, gid = null, me = null, base = null, isSuper = false;
 var BOXES = {}, TIMES = {}, SET = defaults();
 var ORDERS = [], STEPS = [], TOTAL = 0, LOADED_AT = 0;
 var MODE = 'existing', OVR = {}, OPEN = {}, FILLED = [];
+var EXIST_POS = 0;   /* 「기존대로」와 송장 수가 가장 가까운 막대 눈금 = 기준점 */
 var HELPER_JS = 'https://makewon.com/ez_helper.js';
 var EZ_URL = 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00';
 
@@ -355,13 +361,17 @@ function rebuild(first){
   STEPS = Z.buildSteps(ORDERS, c);
   var ex = Z.planExisting(ORDERS, c);       /* 주문마다 기존대로 경고(new·toomany)를 붙여 둠 */
   $('slider').max = STEPS.length;
-  $('slider').value = first ? nearestStep(ex.totals.count) : Math.round(frac * STEPS.length);
+  EXIST_POS = nearestStep(ex.totals.count);
+  $('slider').value = (first || MODE === 'existing') ? EXIST_POS : Math.round(frac * STEPS.length);
   render();
 }
+/* 송장 수가 count 와 가장 가까운 눈금 — 눈금마다 송장 수는 합치기 한 번에 줄어든 만큼씩이라 한 번에 셈 */
 function nearestStep(count){
-  var c = ctx(), best = 0, bd = Infinity;
-  for (var n = 0; n <= STEPS.length; n += Math.max(1, Math.floor(STEPS.length / 60))){
-    var d = Math.abs(Z.planAt(ORDERS, STEPS, n, c).totals.count - count); if (d < bd){ bd = d; best = n; } }
+  var cur = Z.planAt(ORDERS, STEPS, 0, ctx()).totals.count, best = 0, bd = Math.abs(cur - count);
+  for (var n = 0; n < STEPS.length; n++){
+    cur -= STEPS[n].from.length - STEPS[n].to.length;
+    var d = Math.abs(cur - count); if (d < bd){ bd = d; best = n + 1; }
+  }
   return best;
 }
 
@@ -387,7 +397,8 @@ function currentPlan(){
   });
   return { byPack: byPack, totals: Z.totalsOf(byPack, c) };
 }
-function setMode(m){ MODE = m; render(); }
+/* 「기존대로 맞추기」 → 막대도 기준점 자리로 이동 (대표님 2026-10-27: 눌러도 막대가 안 움직여 헷갈림) */
+function setMode(m){ MODE = m; if (m === 'existing') $('slider').value = EXIST_POS; render(); }
 var GROUPS = [];   /* 지금 화면의 묶음 — select 는 번호로 가리킴 (상품명에 따옴표가 있어도 안전) */
 function setGrp(i, v){ var g = GROUPS[i]; if (!g) return; if (v) OVR[g.key] = v; else delete OVR[g.key]; render(); }
 function toggleGrp(i){ OPEN[i] = !OPEN[i]; render(); }
@@ -404,6 +415,9 @@ function render(){
   $('sFee').textContent = won(t.fee); $('eFee').textContent = won(e.fee);
   var shipSet = [15, 30, 45, 60].every(function(k){ return Number(SET.ship[k]) > 0; });
   $('preTxt').textContent = '소분포장 ' + t.pre + '건 × 300 = ' + won(t.pre * 300) + ' (나누기와 무관) ' + (shipSet ? '' : '· ⚙️ 설정에서 박스별 택배비를 넣으면 택배비가 계산됩니다');
+  var mx = Number($('slider').max) || 0;
+  $('exMark').style.left = (mx ? EXIST_POS / mx * 100 : 0) + '%';
+  $('exMark').className = 'ex-mark' + (MODE === 'existing' ? ' on' : '');
   var nOvr = Object.keys(OVR).length;
   $('modeTxt').innerHTML = (MODE === 'slider' ? '지금: <b>막대 ' + $('slider').value + ' / ' + STEPS.length + '</b>' : '지금: <b>기존대로</b> (피킹이지 박스 기록)')
     + (nOvr ? ' · 묶음 ' + nOvr + '개는 따로 정함' : '');
