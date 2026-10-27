@@ -184,7 +184,75 @@
     return { byPack: byPack, totals: totalsOf(byPack, ctx) };
   }
 
-  var api = { normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  /* ── 기존대로 ── 조각마다 피킹이지 기록이 있는 나누기 중 송장 수 최소. 경고는 order.warn (나누기는 막지 않음)
+     new = 그런 나누기 없음(처음 보는 구성) · toomany = 본품 단위 10개 초과라 찾지 않음 */
+  var EXIST_MAX = 10;
+  function warn(order, w){ order.warn = order.warn || []; if (order.warn.indexOf(w) < 0) order.warn.push(w); }
+  function existing(order, boxes){
+    var us = units(order), types = [], cnt = [];
+    if (us.filter(function(x){ return !x.small; }).length > EXIST_MAX){ warn(order, 'toomany'); return null; }
+    us.forEach(function(x){
+      var id = x.small ? 'small' : x.seq, k = types.map(function(t){ return t.id; }).indexOf(id);
+      if (k < 0){ types.push({ id: id, u: x }); cnt.push(1); } else cnt[k]++;
+    });
+    var memo = {};
+    function solve(rest){
+      var key = rest.join(',');
+      if (key in memo) return memo[key];
+      var first = -1;
+      for (var i = 0; i < rest.length; i++) if (rest[i]){ first = i; break; }
+      if (first < 0) return (memo[key] = []);
+      var best = null, take = rest.map(function(){ return 0; });
+      /* first 종류를 1개 이상 넣은 모든 부분 묶음 */
+      (function walk(i){
+        if (i === rest.length){
+          if (!take[first]) return;
+          var us2 = [];
+          take.forEach(function(n, t){ for (var m = 0; m < n; m++) us2.push(types[t].u); });
+          var inv = toInvoice(us2);
+          if (!boxes[boxKeyOf(inv.lines)]) return;
+          var sub = solve(rest.map(function(r, t){ return r - take[t]; }));
+          if (sub && (!best || sub.length + 1 < best.length)) best = [inv].concat(sub);
+          return;
+        }
+        var max = types[i].u.small ? Math.min(rest[i], 1) : rest[i];
+        for (var n = (i === first ? 1 : 0); n <= max; n++){ take[i] = n; walk(i + 1); }
+        take[i] = 0;
+      })(0);
+      return (memo[key] = best);
+    }
+    var r = solve(cnt);
+    if (!r){ warn(order, 'new'); return null; }
+    return r;
+  }
+  function planExisting(orders, ctx){
+    var byPack = {};
+    orders.forEach(function(o){
+      if (!canSplit(o)){ byPack[o.pack] = original(o); return; }
+      byPack[o.pack] = existing(o, ctx.boxes || {}) || splitMin(o);
+    });
+    return { byPack: byPack, totals: totalsOf(byPack, ctx) };
+  }
+
+  /* ── 이지어드민 채우기 자료 ── 첫 송장 = 박스 1(원래 송장), 다음부터 2·3… 한 장짜리 주문은 뺌 */
+  function fillPayload(orders, byPack){
+    var out = [];
+    orders.forEach(function(o){
+      var invs = byPack[o.pack];
+      if (!canSplit(o) || !invs || invs.length < 2) return;
+      out.push({ pack_seq: o.pack, lines: o.lines.map(function(l){
+        var boxes = [];
+        invs.forEach(function(inv, k){
+          var q = inv.lines.filter(function(x){ return x.seq === l.seq; }).reduce(function(a, x){ return a + x.qty; }, 0);
+          if (q) boxes.push({ no: k + 1, qty: q });
+        });
+        return { product_seq: l.seq, product_id: l.pid, qty: l.qty, boxes: boxes };
+      }) });
+    });
+    return out;
+  }
+
+  var api = { existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;

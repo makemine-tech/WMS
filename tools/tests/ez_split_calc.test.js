@@ -142,3 +142,40 @@ test('나눌 수 없는 주문(오리진케어 섞임)은 원래대로 1장', ()
   assert.strictEqual(Z.planAt(os, steps, steps.length, ctx).byPack['26'].length, 1);
   assert.ok(steps.every(s => s.pack !== '26'));
 });
+
+/* ── Task 5: 기존대로·채우기 자료 ── */
+const keyOf = pairs => Z.boxKeyOf(pairs.map(p => ({ prd: p[0], qty: p[1] })));
+test('기존대로: 기록된 조각으로만 나누기, 송장 수 최소', () => {
+  const o = one([row(31, S30, 1), row(31, GR, 40)]);
+  const boxes = { [keyOf([['서리태 가득콩물 30입 [곡물도감]', 1]])]: '30', [keyOf([['Granola 오리지널', 40]])]: '15' };
+  assert.deepStrictEqual(shape(Z.existing(o, boxes)), ['서리태30입×1', 'Granola×40']);
+  boxes[keyOf([['서리태 가득콩물 30입 [곡물도감]', 1], ['Granola 오리지널', 40]])] = '45';
+  assert.deepStrictEqual(shape(Z.existing(o, boxes)), ['Granola×40+서리태30입×1']);
+});
+test('기존대로: 기록이 없으면 null, 경고 new (나누기는 막지 않음)', () => {
+  const o = one([row(32, S15, 1), row(32, M15, 1)]);
+  assert.strictEqual(Z.existing(o, {}), null);
+  assert.deepStrictEqual(o.warn, ['new']);
+  assert.ok(Z.canSplit(o));
+});
+test('기존대로: 본품 단위 10개 넘으면 null, 경고 toomany', () => {
+  const o = one([row(33, S15, 11)]);
+  assert.strictEqual(Z.existing(o, {}), null);
+  assert.deepStrictEqual(o.warn, ['toomany']);
+});
+test('planExisting: 기록 없는 주문은 전부 합포 결과', () => {
+  const os = Z.buildOrders([row(34, S15, 5)]);
+  const r = Z.planExisting(os, ctxOf());
+  assert.strictEqual(r.byPack['34'].length, 2);
+  assert.strictEqual(r.totals.count, 2);
+});
+test('fillPayload: 서리태30×2 를 두 장으로 → 박스 1·2 에 1개씩, 한 장짜리 주문은 뺌', () => {
+  const os = Z.buildOrders([row(35, S30, 2), row(36, S15, 1)]);
+  const byPack = { '35': Z.splitMax(os[0]), '36': Z.splitMax(os[1]) };
+  const p = Z.fillPayload(os, byPack);
+  assert.strictEqual(p.length, 1);
+  assert.strictEqual(p[0].pack_seq, '35');
+  assert.deepStrictEqual(p[0].lines[0].boxes, [{ no: 1, qty: 1 }, { no: 2, qty: 1 }]);
+  assert.strictEqual(p[0].lines[0].qty, 2);
+  assert.strictEqual(p[0].lines[0].product_id, os[0].lines[0].pid);
+});
