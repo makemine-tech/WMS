@@ -93,6 +93,8 @@
 </style>
 </head>
 <body>
+<script src="ez_flow.js"></script>
+<script>EZ_FLOW.mount({ page: 'split', step: 1 });</script>
 <div class="container">
   <div class="header">
     <div>
@@ -214,6 +216,9 @@
     </div>
     <div class="sm" style="margin-top:.6rem;line-height:1.7" id="fillResult"></div>
   </div>
+
+  <!-- 다음 단계 — 일괄합포제외가 정상 완료되면 강조 (안 해도 되는 날은 바로 넘어가도 됨) -->
+  <a class="wz-next" id="nextUpload" href="picking_ez.html?step=2">다음 : STEP 2 송장 업로드 →<small id="nextUploadSub">합포 분할이 필요 없는 날은 바로 넘어가도 됩니다</small></a>
 </div>
 <div class="jump">
   <button title="맨 위로" onclick="mkwJump(0)">▲</button>
@@ -283,7 +288,10 @@ function setHelper(ok, page){
   H.ok = !!ok; H.page = page || '';
   $('hDot').className = 'dot' + (ok ? (page === 'DG00' ? ' on' : ' warn') : '');
   $('hTxt').textContent = ok ? (page === 'DG00' ? '이지어드민 도우미 연결됨' + (H.ver ? ' (' + H.ver + ')' : '') : '도우미 연결됨 — 이지어드민 일괄합포제외 화면으로 가 주세요') : '이지어드민 도우미 연결 안 됨';
+  EZ_FLOW.putHelper(H.ok, '🔌 ' + $('hTxt').textContent);
 }
+/* 흐름 메뉴 — 피킹이지 창도 도우미 연결 상태를 보게 5초마다 남김 */
+setInterval(function(){ EZ_FLOW.putHelper(H.ok, '🔌 ' + $('hTxt').textContent); }, 5000);
 function ping(){ return hcall('ping', {}, 8000).then(function(r){ H.ver = r.ver || H.ver; setHelper(true, r.page); return r; }, function(){ setHelper(false); }); }
 setInterval(function(){ if (H.win) ping(); }, 30000);
 if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; ping(); setTimeout(knock, 1500); })(); }
@@ -565,6 +573,11 @@ function runCommit(auto){
         + (v.gone.length ? '<div class="dim">다시 검색에 안 보이는 묶음 ' + v.gone.length + '건 (원래 송장에 2개 이상 남아야 하는데 안 보임 — 기간 밖·이미 출고인지 이지어드민에서 확인): ' + v.gone.slice(0, 20).map(esc).join(', ') + '</div>' : '');
       FILLED = []; FILLED_PAY = {}; FILL_HTML = '';
       applyRows(r, true);
+      if (allOk) {
+        $('nextUpload').className = 'wz-next go';
+        $('nextUploadSub').textContent = '✔ 일괄합포제외 정상 완료 — 이제 송장을 출력하고 수집·업로드하세요';
+        try { $('nextUpload').scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
+      }
     }, function(e){
       log.verifyError = e.message;
       $('fillResult').innerHTML = head + srv + '<div style="color:var(--yellow)">⚠️ 결과 대조를 못 했습니다(' + esc(LOAD_ERR[e.message] || e.message) + ') — 「불러오기」로 다시 확인해 주세요</div>';

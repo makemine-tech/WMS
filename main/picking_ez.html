@@ -123,7 +123,7 @@ h1 em{color:var(--g);font-style:normal}
 .box-inp:focus{border-color:var(--y);background:rgba(255,200,80,.06)}
 .box-inp::placeholder{color:var(--mu);font-size:.8rem;font-weight:400}
 /* 오른쪽 기둥 = 일괄합포제외실행기 + 파렛트 계산 (스크롤 따라다님, 둘이 같이 움직임) */
-.side-col{position:fixed;left:calc(50% + 512px);top:96px;z-index:50;width:210px;display:flex;flex-direction:column;gap:.5rem;max-height:calc(100vh - 110px)}
+.side-col{position:fixed;left:calc(50% + 512px);top:132px;z-index:50;width:210px;display:flex;flex-direction:column;gap:.5rem;max-height:calc(100vh - 146px)}
 .side-col .ezs-box{flex:0 0 auto}
 .jump-row{flex:0 0 auto;display:flex;gap:.4rem}
 .jump-row button{flex:1;background:rgba(14,16,22,.96);border:1.5px solid rgba(74,240,168,.45);border-radius:8px;color:var(--g);font-weight:800;font-size:.74rem;padding:.4rem 0;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.4)}
@@ -263,6 +263,12 @@ h1 em{color:var(--g);font-style:normal}
   </a>
 </div>
 
+<script src="ez_flow.js"></script>
+<script>
+  /* 상단 흐름 메뉴(일괄합포제외·업로드·피킹리스트·그룹 인쇄) — 헤더 바로 아래 고정 */
+  EZ_FLOW.mount({ page: 'pick', step: 2, after: document.querySelector('.unified-hdr'), go: function(n){ goStep(n - 2); } });
+</script>
+
 <style>
   /* 헤더 바 안의 인라인 홈 버튼 — fab 대신 사용 (메뉴 가림 방지) */
   .hdr-home-btn{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:rgba(255,255,255,.72);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;padding:5px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;transition:color .2s,border-color .2s,background .2s;flex-shrink:0;line-height:1;white-space:nowrap}
@@ -309,12 +315,6 @@ h1 em{color:var(--g);font-style:normal}
   <p class="hs">등기번호: 기준 자동 추출 · ▶수량개▶[로케이션]상품명 패턴</p>
 </div>
 
-<div class="steps">
-  <a class="step step-ez" href="ez_split.html" title="곡물도감 합포 분할 — 이지어드민 일괄합포제외까지 (필요할 때만, 보통은 2단계부터)"><span class="step-n">STEP 1</span>일괄합포제외</a>
-  <div class="step on" id="st0" onclick="goStep(0)" title="업로드 화면 — 작업이 있으면 PDF 를 올릴 때 ➕추가 / 교체 선택"><span class="step-n">STEP 2</span>업로드</div>
-  <div class="step"   id="st1" onclick="goStep(1)"><span class="step-n">STEP 3</span>피킹리스트</div>
-  <div class="step"   id="st2" onclick="goStep(2)"><span class="step-n">STEP 4</span>그룹 인쇄</div>
-</div>
 <div id="pkStatus" style="display:none;text-align:center;font-size:.7rem;font-family:var(--mo);color:var(--mu);margin:-.6rem 0 .5rem;letter-spacing:.02em">☁ 연결 중...</div>
 <div id="pkWarehouse" style="display:none;text-align:center;font-size:.72rem;font-family:var(--mo);margin:0 0 1rem;letter-spacing:.02em"></div>
 
@@ -351,6 +351,7 @@ h1 em{color:var(--g);font-style:normal}
     <div class="prg-b"><div class="prg-f" id="pf0"></div></div>
   </div>
   <div id="m0"></div>
+  <button class="wz-next go" id="nextPick" style="display:none" onclick="goStep(1)">다음 : STEP 3 피킹리스트 →<small id="nextPickSub"></small></button>
   <div style="display:flex;justify-content:flex-end;margin-top:.6rem">
     <button onclick="pkResetAll()" title="현재 진행 중인 작업을 전체 초기화 — 로컬 + 그룹 DB 에서 삭제(다른 PC 에서도 사라짐)"
       style="padding:.4rem .95rem;border-radius:6px;border:1.5px solid var(--r);background:transparent;color:var(--r);font-size:.76rem;font-weight:700;cursor:pointer">🗑 전체 초기화</button>
@@ -404,6 +405,7 @@ h1 em{color:var(--g);font-style:normal}
   <div class="raw-toggle" onclick="toggleDbg()">▶ 파싱 샘플 보기/숨기기</div>
   <div class="raw-box" id="rawDbg"></div>
 
+  <button class="wz-next go" onclick="goStep(2)">다음 : STEP 4 그룹 인쇄 →</button>
   <div class="brow">
     <button class="btn btn-g" onclick="goTo(2)">그룹 인쇄 →</button>
     <button class="btn btn-s" onclick="goTo(0)" title="업로드 화면으로 — 지금 작업은 그대로, PDF 를 올리면 ➕추가 / 교체 선택">← 업로드 (추가 등록)</button>
@@ -689,9 +691,7 @@ function goTo(n) {
   ['pg0','pg1','pg2'].forEach(function(id,i){
     document.getElementById(id).className = 'pg' + (i===n?' on':'');
   });
-  ['st0','st1','st2'].forEach(function(id,i){
-    document.getElementById(id).className = 'step' + (i===n?' on':i<n?' done':'');
-  });
+  EZ_FLOW.setStep(n + 2);   /* 화면 0·1·2 = 흐름 메뉴 STEP 2·3·4 */
   if (n===0) renderCurJob();
   if (n===1 && typeof renderPick === 'function') renderPick();
   if (n===2) renderGrpPage();
@@ -706,14 +706,24 @@ function goStep(n) {
 function renderCurJob() {
   var el = document.getElementById('curJob');
   if (!el) return;
+  var nx = document.getElementById('nextPick');
+  if (nx) nx.style.display = invoices.length ? '' : 'none';
   if (!invoices.length) { el.style.display = 'none'; return; }
   var left = invoices.filter(function(i){ return !printedInvNums[i.invNum]; }).length;
+  var ns = document.getElementById('nextPickSub');
+  if (ns) ns.textContent = '송장 ' + invoices.length + '건 · 출력할 송장 ' + left + '건';
   var parts = (pkMeta && pkMeta.parts) ? pkMeta.parts.length : 1;
   el.innerHTML = '📋 현재 작업 <b>송장 ' + invoices.length + '건</b> · 인쇄완료 ' + (invoices.length - left) + ' · <b>남음 ' + left + '건</b>'
     + (parts > 1 ? ' · 추가 등록 ' + (parts - 1) + '회' : '')
     + '<br><span style="color:var(--mu)">PDF 를 올리면 <b>➕ 추가 등록</b>(남은 송장과 합침 · 인쇄 기록 유지) 또는 교체를 고릅니다</span>'
     + ' <a href="#" onclick="goStep(2);return false" style="color:var(--g);margin-left:.4rem">그룹 인쇄로 →</a>';
   el.style.display = '';
+}
+/* 업로드·수집이 끝나면 2단계에 머물며 결과 + 「다음」 버튼 */
+function pkShowNext(){
+  if (curStep !== 0) goTo(0); else renderCurJob();
+  var b = document.getElementById('nextPick');
+  if (b && b.style.display !== 'none') try { b.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
 }
 function setMsg(id, cls, html) {
   var el = document.getElementById(id);
@@ -1017,10 +1027,11 @@ function processAllPages(doc, pw, pf, pl) {
     setMsg('m0','ok', msg);
     pkLoadDone(invoices.length > 0);
 
+    /* 결과를 보고 「다음 : 피킹리스트」 큰 버튼으로 넘어감 (자동으로 넘기지 않음) */
     setTimeout(function(){
-      goTo(1);
       renderPick();
       renderRawDbg(pageTexts);
+      pkShowNext();
     }, 400);
   }).catch(function(err){
     pw.style.display='none'; setMsg('m0','er','❌ '+err.message); console.error(err); pkLoadDone(false);
@@ -1057,7 +1068,7 @@ function pkAppendFinish(pageTexts, newDoc){
       pkLoadDone(true);
       if (typeof renderGrpPage === 'function') renderGrpPage();
       pkRerender();
-      setTimeout(function(){ goTo(1); renderPick(); renderRawDbg(pageTexts); }, 400);
+      setTimeout(function(){ renderPick(); renderRawDbg(pageTexts); pkShowNext(); }, 400);
     }).catch(function(err){ setMsg('m0','er','❌ 합본 PDF 확인 실패 (기존 작업은 그대로): ' + err.message); pkLoadDone(false); });
   });
 }
@@ -2572,7 +2583,9 @@ var pkBase = null;        /* firebase ref (job 노드) */
 var pkLoadingRemote = false;
 var pkSuppressPublish = false;  /* 원격 로드 중 재발행 방지 */
 var pkPdfState = null;          /* 현재 작업 job/pdf 노드 최신값 (창고 배지 표시용) */
-var pkFirstJobShown = false;    /* 페이지를 연 뒤 원격 작업을 한 번 보여 줬는지 (처음만 3단계로 자동 이동) */
+/* 흐름 메뉴에서 picking_ez.html?step=2~4 로 들어오면 그 단계로 (없으면 예전대로 그룹 인쇄) */
+var pkWantStep = (function(){ var m = /[?&]step=([234])/.exec(location.search); return m ? +m[1] - 2 : null; })();
+var pkFirstJobShown = false;   /* 페이지를 연 뒤 원격 작업을 한 번 보여 줬는지 (처음만 3단계로 자동 이동) */
 var pkMeta = null;              /* 현재 작업 job/meta (pageCount 로 원본 PDF 맞는지 확인, parts = 추가 등록 이력) */
 
 /* ── 창고 배지: 원본이 창고에 있는지 + 이 PC 인쇄 가능 여부 한 줄 표시 ── */
@@ -2747,7 +2760,9 @@ function pkSetStatus(text, kind, allowHtml){
   if (!el) return;
   if (allowHtml) el.innerHTML = text; else el.textContent = text;
   el.style.color = kind==='ok' ? 'var(--g)' : (kind==='warn' ? 'var(--y)' : (kind==='er' ? 'var(--r)' : 'var(--mu)'));
-  el.style.display = '';
+  /* 기본은 위 흐름 메뉴 상태줄에 — 링크가 든 안내(allowHtml)만 여기에도 보임 */
+  EZ_FLOW.syncDetail(kind, el.textContent);
+  el.style.display = allowHtml ? '' : 'none';
 }
 
 /* ── 실시간 리스너 부착 ── */
@@ -2918,7 +2933,7 @@ function pkLoadRemoteJob(meta){
       pkLoadingRemote = false;
       /* printed/batches 는 각 리스너가 곧 채움
          처음 열 때만 그룹 인쇄로. 이미 화면을 쓰는 중(다른 PC 가 추가 등록 등)이면 지금 단계 그대로 — 1단계에서 PDF 고르다 튕기지 않게 */
-      if (typeof goTo === 'function') { if (!pkFirstJobShown) goTo(2); else goTo(curStep); }
+      if (typeof goTo === 'function') { if (!pkFirstJobShown) goTo(pkWantStep != null ? pkWantStep : 2); else goTo(curStep); }
       pkFirstJobShown = true;
       if (typeof renderGrpPage === 'function') renderGrpPage();
       pkRerender();
