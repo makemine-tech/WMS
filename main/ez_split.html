@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>곡물도감 합포 분할 · 이지어드민 비서</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700;900&family=Space+Mono:wght@400;700&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --bg:#0d0f14; --surface:#151820; --surface2:#1b1f29; --border:#2a2f3d; --accent:#4af0a8; --accent2:#f0a84a;
+          --text:#e8eaf0; --muted:#6b7280; --red:#f05050; --yellow:#fbbf24; --blue:#3b82f6; }
+  body { font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:1.4rem 1rem 4rem; }
+  .container { width:100%; max-width:1180px; margin:0 auto; }
+  .mono { font-family:'Space Mono',monospace; }
+  .dim { color:var(--muted); }
+  .sm { font-size:.74rem; }
+  .header { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .badge { display:inline-block; font-family:'Space Mono',monospace; font-size:.62rem; letter-spacing:.14em; color:var(--accent);
+           border:1px solid rgba(74,240,168,.35); border-radius:20px; padding:.2rem .6rem; margin-bottom:.45rem; }
+  h1 { font-size:1.6rem; font-weight:900; letter-spacing:-.5px; }
+  h1 span { color:var(--accent); }
+  .hdr-r { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  .who { font-size:.72rem; color:var(--muted); }
+  .back { background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:8px; padding:.45rem .8rem;
+          font-size:.78rem; font-weight:700; text-decoration:none; }
+  .back:hover { color:var(--text); }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1rem; margin-bottom:.9rem; }
+  .card-h { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; font-size:.92rem; font-weight:800; margin-bottom:.7rem; }
+  .card-h .sp { flex:1; }
+  .btn { background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.5rem .85rem;
+         font:700 .8rem 'Noto Sans KR',sans-serif; cursor:pointer; white-space:nowrap; text-decoration:none; display:inline-block; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.p { background:var(--accent); color:#06281a; border-color:var(--accent); }
+  .btn.w { background:#2a2010; border-color:#5a4520; color:var(--accent2); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .btn.sm { padding:.3rem .55rem; font-size:.72rem; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .dot.on { background:var(--accent); box-shadow:0 0 8px var(--accent); }
+  .dot.warn { background:var(--yellow); }
+  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  .bm { border:1px dashed var(--accent); color:var(--accent); }
+
+  .slider-wrap { padding:.4rem .2rem .2rem; }
+  .slider-lbl { display:flex; justify-content:space-between; font-size:.74rem; color:var(--muted); margin-bottom:.3rem; }
+  input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
+  .stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:.6rem; margin-top:.7rem; }
+  .stat { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:.6rem .7rem; }
+  .stat .k { font-size:.7rem; color:var(--muted); }
+  .stat .v { font-family:'Space Mono',monospace; font-size:1.25rem; font-weight:700; margin-top:.15rem; }
+  .stat .e { font-size:.7rem; color:var(--muted); margin-top:.15rem; }
+  .stat .e b { color:var(--accent2); font-family:'Space Mono',monospace; }
+  .mode { font-size:.78rem; margin-top:.55rem; }
+  .mode b { color:var(--accent); }
+
+  .warn-box { border-color:#5a4520; background:#1d1a12; }
+  .err-box { border-color:#5a2525; background:#1d1212; color:#fca5a5; font-size:.84rem; font-weight:700; }
+  table { width:100%; border-collapse:collapse; font-size:.78rem; }
+  th { text-align:left; color:var(--muted); font-weight:700; font-size:.7rem; padding:.4rem .45rem; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td { padding:.45rem; border-bottom:1px solid var(--border); vertical-align:top; }
+  tr.grp { cursor:pointer; }
+  tr.grp:hover td { background:var(--surface2); }
+  tr.sub td { background:#11141b; color:var(--muted); font-size:.72rem; }
+  .tag { display:inline-block; border:1px solid var(--border); border-radius:6px; padding:.05rem .35rem; margin:.1rem .15rem .1rem 0; font-family:'Space Mono',monospace; font-size:.7rem; }
+  .tag.b15 { border-color:#3b82f6; color:#93c5fd; } .tag.b30 { border-color:#4af0a8; color:#86efac; }
+  .tag.b45 { border-color:#f0a84a; color:#fcd34d; } .tag.b60 { border-color:#f05050; color:#fca5a5; }
+  select, input.num { background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:.25rem .4rem; font:.76rem 'Noto Sans KR',sans-serif; }
+  input.num { width:5.2rem; font-family:'Space Mono',monospace; text-align:right; }
+  .tbl-scroll { overflow-x:auto; }
+  .set-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:.5rem .8rem; }
+  .set-grid label { font-size:.74rem; color:var(--muted); display:flex; justify-content:space-between; align-items:center; gap:.4rem; }
+  details > summary { cursor:pointer; list-style:none; }
+  details > summary::-webkit-details-marker { display:none; }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); background:#0b2b1d; color:var(--accent); border:1px solid var(--accent);
+           border-radius:10px; padding:.6rem 1rem; font-size:.84rem; font-weight:700; opacity:0; pointer-events:none; transition:.25s; z-index:50; max-width:90vw; }
+  #toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+  @media (max-width:640px){ .stats { grid-template-columns:repeat(2, minmax(0, 1fr)); } h1 { font-size:1.3rem; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <div class="badge">EZADMIN SECRETARY · 01</div>
+      <h1>곡물도감 <span>합포 분할</span></h1>
+    </div>
+    <div class="hdr-r">
+      <span class="who" id="who">로그인 확인 중…</span>
+      <a class="back" href="picking_ez.html">‹ 이지어드민 피킹</a>
+    </div>
+  </div>
+
+  <!-- ① 연결 -->
+  <div class="card">
+    <div class="card-h"><span class="dot" id="hDot"></span><span id="hTxt">이지어드민 도우미 연결 안 됨</span><span class="sp"></span>
+      <span class="sm dim" id="loadInfo"></span></div>
+    <div class="row">
+      <button class="btn" onclick="openEz()">이지어드민 일괄합포제외 열기</button>
+      <a class="btn bm" id="bmLink" href="#" onclick="toast('이 버튼을 북마크바로 끌어다 놓으세요');return false;">📦 이지어드민 합포 도우미</a>
+      <button class="btn p" id="loadBtn" onclick="loadOrders()">불러오기</button>
+    </div>
+    <div class="sm dim" style="margin-top:.5rem;line-height:1.7">
+      ① 이지어드민 일괄합포제외에서 <b>공급처 곡물도감 · 발주일</b>로 검색 → ② 북마크의 「📦 이지어드민 합포 도우미」 → ③ 여기서 「불러오기」
+    </div>
+  </div>
+
+  <div class="card err-box" id="errBox" style="display:none"></div>
+
+  <!-- ② 막대 -->
+  <div class="card" id="sliderCard" style="display:none">
+    <div class="card-h">작업 난이도<span class="sp"></span>
+      <button class="btn sm w" onclick="setMode('existing')">기존대로 맞추기</button></div>
+    <div class="slider-wrap">
+      <div class="slider-lbl"><span>◀ 작업 쉬움 · 전부 분리</span><span>송장 최소 · 전부 합포 ▶</span></div>
+      <input type="range" id="slider" min="0" max="0" value="0" oninput="setMode('slider')">
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">송장 수</div><div class="v" id="sCount">-</div><div class="e">기존대로 <b id="eCount">-</b></div></div>
+      <div class="stat"><div class="k">예상 소요시간</div><div class="v" id="sTime">-</div><div class="e">기존대로 <b id="eTime">-</b></div></div>
+      <div class="stat"><div class="k">택배비</div><div class="v" id="sShip">-</div><div class="e">기존대로 <b id="eShip">-</b></div></div>
+      <div class="stat"><div class="k">포장비</div><div class="v" id="sFee">-</div><div class="e">기존대로 <b id="eFee">-</b></div></div>
+    </div>
+    <div class="mode" id="modeTxt"></div>
+    <div class="sm dim" style="margin-top:.3rem" id="preTxt"></div>
+  </div>
+
+  <!-- ③ 확인 필요 -->
+  <div class="card warn-box" id="warnCard" style="display:none">
+    <div class="card-h">⚠️ 확인 필요<span class="sp"></span><span class="sm dim">이 주문들은 아래 이유로 자동으로 나누지 않거나 기준이 없습니다</span></div>
+    <div id="warnBody"></div>
+  </div>
+
+  <!-- ④ 구성별 묶음 -->
+  <div class="card" id="grpCard" style="display:none">
+    <div class="card-h">구성별 묶음<span class="sp"></span><span class="sm dim">줄을 누르면 수령자별 주문이 펼쳐집니다</span></div>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>원래 구성</th><th>건수</th><th>나눈 결과 (송장 1장씩)</th><th>이 묶음 처리</th></tr></thead>
+      <tbody id="grpBody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- ⑤ 송장 구성별 처리 시간 -->
+  <div class="card" id="timeCard" style="display:none">
+    <details>
+      <summary class="card-h" style="margin:0">⏱ 송장 구성별 1장 처리 시간 (초)<span class="sp"></span><span class="sm dim">비우면 등급 기본값</span></summary>
+      <div class="tbl-scroll" style="margin-top:.6rem"><table>
+        <thead><tr><th>송장 구성</th><th>박스</th><th>장수</th><th>등급</th><th>초</th></tr></thead>
+        <tbody id="timeBody"></tbody>
+      </table></div>
+    </details>
+  </div>
+
+  <!-- ⑥ 설정 -->
+  <div class="card">
+    <details id="setDetails">
+      <summary class="card-h" style="margin:0">⚙️ 설정<span class="sp"></span><span class="sm dim" id="setHint"></span></summary>
+      <div style="margin-top:.7rem" class="sm dim">박스별 택배비 (원)</div>
+      <div class="set-grid" style="margin-top:.3rem">
+        <label>15박스 <input class="num" data-ship="15" onchange="saveSettings()"></label>
+        <label>30박스 <input class="num" data-ship="30" onchange="saveSettings()"></label>
+        <label>45박스 <input class="num" data-ship="45" onchange="saveSettings()"></label>
+        <label>60박스 <input class="num" data-ship="60" onchange="saveSettings()"></label>
+      </div>
+      <div style="margin-top:.8rem" class="sm dim">송장 1장 기본 처리 시간 (초) — 포장비 등급과 같음</div>
+      <div class="set-grid" style="margin-top:.3rem">
+        <label>완제 단독 (300) <input class="num" data-sec="single" onchange="saveSettings()"></label>
+        <label>믹스 2칸 이하 (1000) <input class="num" data-sec="mix2" onchange="saveSettings()"></label>
+        <label>그 외 (1500) <input class="num" data-sec="mix3" onchange="saveSettings()"></label>
+      </div>
+      <div id="autoRow" style="margin-top:.9rem;display:none">
+        <label class="sm" style="display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="autoCommit" onchange="saveSettings()">
+          <b>확정까지 자동</b> — 채운 뒤 이지어드민 「일괄합포제외」까지 도우미가 누름 (슈퍼관리자만 바꿀 수 있음)</label>
+      </div>
+    </details>
+  </div>
+
+  <!-- ⑦ 채우기 -->
+  <div class="card" id="fillCard" style="display:none">
+    <div class="card-h">이지어드민에 채우기<span class="sp"></span><span class="sm dim" id="fillHint"></span></div>
+    <div class="row">
+      <button class="btn p" id="fillBtn" onclick="doFill()">이지어드민에 채우기</button>
+      <button class="btn" id="resetBtn" onclick="doReset()" disabled>채운 것 되돌리기</button>
+    </div>
+    <div class="sm" style="margin-top:.6rem;line-height:1.7" id="fillResult"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="wms_sync.js"></script>
+<script src="p9_fee.js"></script>
+<script src="ez_split_calc.js"></script>
+<script src="/wms_access.js" data-page="ez_split" data-floor="2"></script>
+<script>
+/* ============================================================
+   곡물도감 합포 분할 — 이지어드민 비서 1호 (대표님 2026-10-27)
+   설계서: docs/superpowers/specs/2026-10-27-ez-split-design.md
+   ① 이지어드민 DG00 화면의 도우미(ez_helper.js)가 주문 줄을 읽어 보냄
+   ② 막대(전부 분리 ↔ 전부 합포) 또는 「기존대로」(피킹이지 박스 기록)로 나누기, 숫자 4개 비교
+   ③ 「이지어드민에 채우기」 → 도우미가 「복수제외」로 박스 번호를 채움 (저장 안 함) → 대표님이 「일괄합포제외」
+   데이터: wms_sync/groups/{gid}/ez_split/ settings · times/{boxKey} · days/{날짜}/{id}
+           피킹이지 박스 기록 wms_sync/groups/{gid}/picking_ez/boxes (읽기만)
+============================================================ */
+var $ = function(id){ return document.getElementById(id); };
+var Z = window.EZ_SPLIT;
+var db = null, gid = null, me = null, base = null, isSuper = false;
+var BOXES = {}, TIMES = {}, SET = defaults();
+var ORDERS = [], STEPS = [], TOTAL = 0, LOADED_AT = 0;
+var MODE = 'existing', OVR = {}, OPEN = {}, FILLED = [];
+var HELPER_JS = 'https://makewon.com/ez_helper.js';
+var EZ_URL = 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00';
+
+function defaults(){ return { ship: { 15: 0, 30: 0, 45: 0, 60: 0 }, sec: { single: 20, mix2: 60, mix3: 90 }, autoCommit: false }; }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function won(n){ return Math.round(n).toLocaleString('ko-KR') + '원'; }
+function hm(sec){ var m = Math.round(sec / 60); return Math.floor(m / 60) + '시간 ' + String(m % 60).padStart(2, '0') + '분'; }
+function today(){ var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+var toastT = null;
+function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2800); }
+function ctx(){ return { boxes: BOXES, fee: window.P9_FEE, settings: SET, times: TIMES }; }
+function short(prd){ return prd.replace(' [곡물도감]', ''); }
+function invText(inv){ return inv.lines.map(function(l){ return short(l.prd) + (l.qty > 1 ? '×' + l.qty : ''); }).join(' + '); }
+function compKey(o){ return o.lines.map(function(l){ return short(l.prd) + '×' + l.qty; }).sort().join(' + '); }
+
+/* ── 이지어드민 도우미 연결 (postMessage, star_return.html 과 같은 틀) ── */
+var H = { win: null, ok: false, page: '', seq: 0, pend: {}, ver: '' };
+var EZ_ORIGIN = 'https://ga89.ezadmin.co.kr';
+window.addEventListener('message', function(e){
+  var m = e.data;
+  if (!m || m.from !== 'ez-helper' || !/^https:\/\/[a-z0-9-]+\.ezadmin\.co\.kr$/.test(e.origin)) return;
+  if (m.cmd === 'ready'){ H.win = e.source; EZ_ORIGIN = e.origin; H.ver = m.ver || ''; ping(); return; }
+  var p = H.pend[m.id]; if (!p) return;
+  delete H.pend[m.id]; clearTimeout(p.t);
+  if (m.ok) p.res(m.data); else p.rej(new Error(m.err || '도우미 오류'));
+});
+function hcall(cmd, args, ms){
+  return new Promise(function(res, rej){
+    if (!H.win || H.win.closed){ setHelper(false); rej(new Error('NOHELPER')); return; }
+    var id = ++H.seq;
+    H.pend[id] = { res: res, rej: rej, t: setTimeout(function(){ delete H.pend[id]; rej(new Error('TIMEOUT')); }, ms || 30000) };
+    try { H.win.postMessage({ to: 'ez-helper', id: id, cmd: cmd, args: args || {} }, EZ_ORIGIN); } catch(e){ delete H.pend[id]; rej(e); }
+  });
+}
+function setHelper(ok, page){
+  H.ok = !!ok; H.page = page || '';
+  $('hDot').className = 'dot' + (ok ? (page === 'DG00' ? ' on' : ' warn') : '');
+  $('hTxt').textContent = ok ? (page === 'DG00' ? '이지어드민 도우미 연결됨' + (H.ver ? ' (' + H.ver + ')' : '') : '도우미 연결됨 — 이지어드민 일괄합포제외 화면으로 가 주세요') : '이지어드민 도우미 연결 안 됨';
+}
+function ping(){ return hcall('ping', {}, 8000).then(function(r){ H.ver = r.ver || H.ver; setHelper(true, r.page); return r; }, function(){ setHelper(false); }); }
+setInterval(function(){ if (H.win) ping(); }, 30000);
+if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; ping(); setTimeout(knock, 1500); })(); }
+function openEz(){
+  var w = window.open(EZ_URL, 'mkw_ez_tab');
+  if (!w){ toast('팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용'); return; }
+  H.win = w; toast('곡물도감으로 검색한 뒤 북마크의 「📦 이지어드민 합포 도우미」를 눌러 주세요');
+}
+$('bmLink').href = "javascript:(function(){var s=document.createElement('script');s.src='" + HELPER_JS + "?v='+Date.now();document.head.appendChild(s);})();";
+
+/* ── 불러오기 ── */
+function loadOrders(){
+  if (!H.ok){ toast('먼저 이지어드민 탭에서 도우미를 눌러 연결해 주세요'); return; }
+  $('loadBtn').disabled = true;
+  hcall('read', {}, 60000).then(function(r){
+    ORDERS = Z.buildOrders(r.rows); TOTAL = r.total; LOADED_AT = Date.now(); OVR = {}; OPEN = {}; FILLED = []; $('resetBtn').disabled = true; $('fillResult').innerHTML = '';
+    var err = r.rows.length !== r.total ? '이지어드민에는 ' + r.total + '줄이 있는데 ' + r.rows.length + '줄만 읽혔습니다. 이지어드민 화면에서 한 페이지에 전부 보이게 다시 검색한 뒤 불러와 주세요. (채우기 막힘)' : '';
+    $('errBox').style.display = err ? '' : 'none'; $('errBox').textContent = err;
+    var c = ctx();
+    STEPS = Z.buildSteps(ORDERS, c);
+    Z.planExisting(ORDERS, c);       /* 주문마다 기존대로 경고(new·toomany)를 먼저 붙여 둠 */
+    $('slider').max = STEPS.length;
+    $('slider').value = nearestStep(Z.planExisting(ORDERS, c).totals.count);
+    MODE = 'existing';
+    $('loadInfo').textContent = '주문 ' + ORDERS.length + '건 · ' + r.rows.length + '줄 · ' + new Date(LOADED_AT).toLocaleTimeString('ko-KR');
+    ['sliderCard', 'grpCard', 'timeCard', 'fillCard'].forEach(function(id){ $(id).style.display = ''; });
+    render();
+  }, function(e){ toast('불러오기 실패: ' + e.message); }).then(function(){ $('loadBtn').disabled = false; });
+}
+function nearestStep(count){
+  var c = ctx(), best = 0, bd = Infinity;
+  for (var n = 0; n <= STEPS.length; n += Math.max(1, Math.floor(STEPS.length / 60))){
+    var d = Math.abs(Z.planAt(ORDERS, STEPS, n, c).totals.count - count); if (d < bd){ bd = d; best = n; } }
+  return best;
+}
+
+/* ── 지금 결과 = 막대(또는 기존대로) + 묶음별 바꾸기 ── */
+var GRP_MODES = [['', '전체 설정 따름'], ['max', '전부 분리'], ['min', '전부 합포'], ['existing', '기존대로'], ['keep', '나누지 않음']];
+function groupsOf(){
+  var g = {}, list = [];
+  ORDERS.forEach(function(o){ if (!Z.canSplit(o)) return; var k = compKey(o); if (!g[k]){ g[k] = { key: k, orders: [] }; list.push(g[k]); } g[k].orders.push(o); });
+  list.sort(function(a, b){ return b.orders.length - a.orders.length || (a.key < b.key ? -1 : 1); });
+  return list;
+}
+function currentPlan(){
+  var c = ctx();
+  var p = MODE === 'slider' ? Z.planAt(ORDERS, STEPS, Number($('slider').value), c) : Z.planExisting(ORDERS, c);
+  var byPack = p.byPack;
+  ORDERS.forEach(function(o){
+    if (!Z.canSplit(o)) return;
+    var m = OVR[compKey(o)];
+    if (m === 'max') byPack[o.pack] = Z.splitMax(o);
+    else if (m === 'min') byPack[o.pack] = Z.splitMin(o);
+    else if (m === 'existing') byPack[o.pack] = Z.existing(o, BOXES) || Z.splitMin(o);
+    else if (m === 'keep') byPack[o.pack] = Z.original(o);
+  });
+  return { byPack: byPack, totals: Z.totalsOf(byPack, c) };
+}
+function setMode(m){ MODE = m; render(); }
+function setGrp(k, v){ if (v) OVR[k] = v; else delete OVR[k]; render(); }
+function toggleGrp(i){ OPEN[i] = !OPEN[i]; render(); }
+
+/* ── 그리기 ── */
+function sizeTag(s){ var n = parseInt(s, 10); return '<span class="tag b' + n + '">' + esc(s) + '</span>'; }
+function render(){
+  if (!ORDERS.length) return;
+  var c = ctx(), cur = currentPlan(), ex = Z.planExisting(ORDERS, c);
+  var t = cur.totals, e = ex.totals;
+  $('sCount').textContent = t.count + '장'; $('eCount').textContent = e.count + '장';
+  $('sTime').textContent = hm(t.sec); $('eTime').textContent = hm(e.sec);
+  $('sShip').textContent = won(t.ship); $('eShip').textContent = won(e.ship);
+  $('sFee').textContent = won(t.fee); $('eFee').textContent = won(e.fee);
+  var shipSet = [15, 30, 45, 60].every(function(k){ return Number(SET.ship[k]) > 0; });
+  $('preTxt').textContent = '소분포장 ' + t.pre + '건 × 300 = ' + won(t.pre * 300) + ' (나누기와 무관) ' + (shipSet ? '' : '· ⚙️ 설정에서 박스별 택배비를 넣으면 택배비가 계산됩니다');
+  var nOvr = Object.keys(OVR).length;
+  $('modeTxt').innerHTML = (MODE === 'slider' ? '지금: <b>막대 ' + $('slider').value + ' / ' + STEPS.length + '</b>' : '지금: <b>기존대로</b> (피킹이지 박스 기록)')
+    + (nOvr ? ' · 묶음 ' + nOvr + '개는 따로 정함' : '');
+
+  /* 확인 필요 */
+  var W = { divided: '이지어드민에서 이미 나뉨 — 손대지 않음', ori: '오리진케어 상품 섞임 — 나누지 않음', unknown: '모르는 상품 — 나누지 않음',
+            option: '옵션 있는 상품 — 나누지 않음', 'new': '피킹이지 기록에 없는 구성 — 기존대로 기준 없음(전부 합포로 넣어 둠)', toomany: '본품 10개 초과 — 기존대로 기준 없음(전부 합포로 넣어 둠)' };
+  var wl = {};
+  ORDERS.forEach(function(o){ o.flags.concat(o.warn || []).forEach(function(f){ (wl[f] = wl[f] || []).push(o); }); });
+  var wk = Object.keys(wl);
+  $('warnCard').style.display = wk.length ? '' : 'none';
+  $('warnBody').innerHTML = wk.map(function(f){
+    return '<div style="margin-bottom:.55rem"><b class="sm" style="color:var(--yellow)">' + esc(W[f] || f) + ' · ' + wl[f].length + '건</b>'
+      + '<div class="sm dim" style="margin-top:.2rem;line-height:1.7">' + wl[f].slice(0, 30).map(function(o){ return esc(o.recv || o.pack) + ' — ' + esc(compKey(o)); }).join('<br>')
+      + (wl[f].length > 30 ? '<br>… 외 ' + (wl[f].length - 30) + '건' : '') + '</div></div>';
+  }).join('');
+
+  /* 구성별 묶음 */
+  var groups = groupsOf();
+  $('grpBody').innerHTML = groups.map(function(g, i){
+    var invs = cur.byPack[g.orders[0].pack];
+    var res = invs.map(function(inv){ return sizeTag(Z.boxSize(inv, BOXES)) + '<span class="sm">' + esc(invText(inv)) + '</span>'; }).join('<br>');
+    var sel = '<select onclick="event.stopPropagation()" onchange="setGrp(\'' + esc(g.key).replace(/'/g, '&#39;') + '\', this.value)">'
+      + GRP_MODES.map(function(m){ return '<option value="' + m[0] + '"' + ((OVR[g.key] || '') === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'; }).join('') + '</select>';
+    var head = '<tr class="grp" onclick="toggleGrp(' + i + ')"><td>' + (OPEN[i] ? '▾ ' : '▸ ') + esc(g.key) + '</td><td class="mono">' + g.orders.length + '</td><td>' + res + '</td><td>' + sel + '</td></tr>';
+    if (!OPEN[i]) return head;
+    return head + g.orders.map(function(o){ return '<tr class="sub"><td colspan="4">' + esc(o.recv || '') + ' · 묶음 ' + esc(o.pack) + ' → ' + cur.byPack[o.pack].length + '장</td></tr>'; }).join('');
+  }).join('');
+
+  /* 송장 구성별 시간 */
+  var tc = {}, tl = [];
+  Object.keys(cur.byPack).forEach(function(p){ cur.byPack[p].forEach(function(inv){
+    var k = Z.boxKeyOf(inv.lines);
+    if (!tc[k]){ tc[k] = { k: k, inv: inv, n: 0, c: Z.invCost(inv, c) }; tl.push(tc[k]); }
+    tc[k].n++;
+  }); });
+  tl.sort(function(a, b){ return b.n - a.n; });
+  var GR = { 300: '완제 단독', 1000: '믹스 2칸 이하', 1500: '그 외' };
+  $('timeBody').innerHTML = tl.slice(0, 120).map(function(x){
+    var f = window.P9_FEE.gokFee([''].concat(x.inv.lines.map(function(l){ return l.prd; })), [0].concat(x.inv.lines.map(function(l){ return l.qty; })));
+    return '<tr><td>' + esc(invText(x.inv)) + '</td><td>' + sizeTag(x.c.size) + '</td><td class="mono">' + x.n + '</td><td class="sm dim">' + (GR[f.fee] || f.fee) + '</td>'
+      + '<td><input class="num" placeholder="' + x.c.sec + '" value="' + (TIMES[x.k] != null ? TIMES[x.k] : '') + '" onchange="saveTime(\'' + x.k + '\', this.value)"></td></tr>';
+  }).join('');
+
+  var pay = Z.fillPayload(ORDERS, cur.byPack);
+  $('fillHint').textContent = '나눌 주문 ' + pay.length + '건 (한 장으로 그대로인 주문은 손대지 않음)';
+  $('fillBtn').disabled = !pay.length || $('errBox').style.display !== 'none';
+}
+$('slider').addEventListener('change', function(){ setMode('slider'); });
+
+/* ── 설정·시간 저장 ── */
+function paintSettings(){
+  [].forEach.call(document.querySelectorAll('[data-ship]'), function(i){ i.value = SET.ship[i.getAttribute('data-ship')] || ''; });
+  [].forEach.call(document.querySelectorAll('[data-sec]'), function(i){ i.value = SET.sec[i.getAttribute('data-sec')]; });
+  $('autoCommit').checked = !!SET.autoCommit;
+  $('setHint').textContent = (SET.autoCommit ? '확정까지 자동 켜짐 · ' : '') + ([15, 30, 45, 60].every(function(k){ return Number(SET.ship[k]) > 0; }) ? '' : '택배비 단가 입력 필요');
+}
+function saveSettings(){
+  var s = defaults();
+  [].forEach.call(document.querySelectorAll('[data-ship]'), function(i){ s.ship[i.getAttribute('data-ship')] = Number(i.value) || 0; });
+  [].forEach.call(document.querySelectorAll('[data-sec]'), function(i){ var k = i.getAttribute('data-sec'); s.sec[k] = i.value === '' ? defaults().sec[k] : Number(i.value) || 0; });
+  s.autoCommit = isSuper ? $('autoCommit').checked : !!SET.autoCommit;
+  SET = s; paintSettings(); render();
+  if (base) base.child('settings').set(s).catch(function(e){ toast('설정 저장 실패: ' + e.message); });
+}
+function saveTime(k, v){
+  var n = v === '' ? null : Number(v);
+  if (n == null) delete TIMES[k]; else TIMES[k] = n;
+  render();
+  if (base) base.child('times/' + k).set(n).catch(function(e){ toast('시간 저장 실패: ' + e.message); });
+}
+
+/* ── 채우기·되돌리기·기록 ── */
+function doFill(){
+  var cur = currentPlan(), pay = Z.fillPayload(ORDERS, cur.byPack);
+  if (!pay.length) return;
+  if (!H.ok){ toast('이지어드민 도우미가 연결되어 있지 않습니다'); return; }
+  $('fillBtn').disabled = true;
+  $('fillResult').textContent = '채우는 중… (' + pay.length + '건)';
+  var log = { at: firebase.database.ServerValue.TIMESTAMP, by: me ? (me.email || '').split('@')[0] : '', orders: ORDERS.length, total: TOTAL,
+              slider: MODE === 'slider' ? Number($('slider').value) : 'existing', steps: STEPS.length, overrides: Object.keys(OVR).length,
+              totals: cur.totals, existing: Z.planExisting(ORDERS, ctx()).totals, committed: false };
+  hcall('fill', { packs: pay }, 300000).then(function(r){
+    FILLED = r.done; $('resetBtn').disabled = !FILLED.length;
+    log.filled = r.done.length; log.skipped = r.skipped;
+    var html = '✔ 채움 <b>' + r.done.length + '</b>건' + (r.skipped.length ? ' · 건너뜀 <b style="color:var(--yellow)">' + r.skipped.length + '</b>건' : '')
+      + (r.skipped.length ? '<div class="dim" style="margin-top:.3rem">' + r.skipped.slice(0, 50).map(function(s){ return '묶음 ' + esc(s.pack_seq) + ' — ' + esc(s.why); }).join('<br>') + '</div>' : '');
+    if (!SET.autoCommit){
+      $('fillResult').innerHTML = html + '<div style="margin-top:.4rem;color:var(--accent)">이지어드민 화면에서 박스 번호를 확인한 뒤 「일괄합포제외」를 눌러 주세요.</div>';
+      return;
+    }
+    $('fillResult').innerHTML = html + '<div style="margin-top:.4rem">일괄합포제외 실행 중…</div>';
+    return hcall('commit', { auto: true }, 200000).then(function(c){
+      log.committed = true; log.commitError = c.error; log.failList = c.fail_list;
+      $('fillResult').innerHTML = html + '<div style="margin-top:.4rem;color:var(--accent)">✔ 일괄합포제외 완료' + (c.fail_list && c.fail_list.length ? ' · 실패 ' + c.fail_list.length + '건' : '') + '</div>';
+      FILLED = []; $('resetBtn').disabled = true;
+    });
+  }).catch(function(e){ log.error = e.message; $('fillResult').textContent = '⚠️ ' + e.message; })
+  .then(function(){
+    $('fillBtn').disabled = false;
+    if (base) base.child('days/' + today()).push(JSON.parse(JSON.stringify(log, function(k, v){ return v === undefined ? null : v; })))
+      .catch(function(){});
+  });
+}
+function doReset(){
+  if (!FILLED.length) return;
+  hcall('reset', { packs: FILLED }, 120000).then(function(r){ toast('되돌림 ' + r.done.length + '건'); FILLED = []; $('resetBtn').disabled = true; $('fillResult').textContent = '되돌렸습니다.'; },
+    function(e){ toast('되돌리기 실패: ' + e.message); });
+}
+
+/* ── 시작 ── */
+paintSettings();
+WMSync.init('ez_split', { requireAuth: true });
+WMSync.onAuth(function(st){
+  if (!st.user){ $('who').textContent = '로그인 필요'; return; }
+  if (!st.groupId){ $('who').textContent = '작업 그룹 미등록 — 관리자에게 초대코드를 받으세요'; return; }
+  me = st.user; gid = st.groupId; db = firebase.database(); isSuper = !!st.isAdmin;
+  base = db.ref('wms_sync/groups/' + gid + '/ez_split');
+  $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (isSuper ? ' 👑' : '');
+  $('autoRow').style.display = isSuper ? '' : 'none';
+  base.child('settings').on('value', function(s){ var v = s.val(); SET = v ? { ship: Object.assign(defaults().ship, v.ship), sec: Object.assign(defaults().sec, v.sec), autoCommit: !!v.autoCommit } : defaults(); paintSettings(); render(); });
+  base.child('times').on('value', function(s){ TIMES = s.val() || {}; render(); });
+  db.ref('wms_sync/groups/' + gid + '/picking_ez/boxes').on('value', function(s){ BOXES = s.val() || {}; render(); });
+});
+</script>
+<script src="/mm_copy.js" defer></script>
+</body>
+</html>
