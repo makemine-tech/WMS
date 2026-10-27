@@ -103,3 +103,42 @@ test('boxSize: 피킹이지 기록이 있으면 기록값', () => {
   const key = Z.boxKeyOf(inv.lines);
   assert.strictEqual(Z.boxSize(inv, { [key]: '30' }), '30');
 });
+
+/* ── Task 4: 막대·숫자 ── */
+const FEE = require('../../main/p9_fee.js');
+const SHIP = { '15': 3000, '30': 3500, '45': 4000, '60': 4500 };
+const ctxOf = () => ({ boxes: {}, fee: FEE, settings: { ship: SHIP, sec: { single: 20, mix2: 60, mix3: 90 } }, times: {} });
+function sampleOrders(){
+  return Z.buildOrders([
+    row(21, S15, 1), row(21, M15, 1), row(21, GR, 20),
+    row(22, S30, 2), row(22, N1, 1),
+    row(23, S15, 3),
+    row(24, S60, 1), row(24, GR, 10),
+    row(25, S45, 1),
+    row(26, '1병_당쉼 검은콩', 2), row(26, S15, 1)]);
+}
+const sum = (os, f) => os.filter(Z.canSplit).reduce((a, o) => a + f(o).length, 0) + os.filter(o => !Z.canSplit(o)).length;
+
+test('invCost: 서리태15+말차15 한 장 = 포장비 1000, 소분 0, 30박스, 믹스2 60초', () => {
+  const c = Z.invCost({ lines: [{ seq: 'a', prd: '서리태 가득콩물 15입 [곡물도감]', qty: 1 }, { seq: 'b', prd: '말차 가득콩물 15입 [곡물도감]', qty: 1 }] }, ctxOf());
+  assert.deepStrictEqual(c, { size: '30', sec: 60, ship: 3500, fee: 1000, pre: 0 });
+});
+test('막대 0 = 전부 분리 송장 수, 끝 = 전부 합포 이하', () => {
+  const os = sampleOrders(), ctx = ctxOf(), steps = Z.buildSteps(os, ctx);
+  assert.strictEqual(Z.planAt(os, steps, 0, ctx).totals.count, sum(os, Z.splitMax));
+  assert.ok(Z.planAt(os, steps, steps.length, ctx).totals.count <= sum(os, Z.splitMin));
+});
+test('같은 입력이면 합치기 순서가 항상 같음', () => {
+  const ctx = ctxOf(), os = sampleOrders();
+  assert.strictEqual(JSON.stringify(Z.buildSteps(os, ctx)), JSON.stringify(Z.buildSteps(os, ctx)));
+});
+test('막대를 오른쪽으로 갈수록 택배비가 줄거나 같음', () => {
+  const os = sampleOrders(), ctx = ctxOf(), steps = Z.buildSteps(os, ctx);
+  let prev = Infinity;
+  for (let n = 0; n <= steps.length; n++){ const s = Z.planAt(os, steps, n, ctx).totals.ship; assert.ok(s <= prev, 'n=' + n); prev = s; }
+});
+test('나눌 수 없는 주문(오리진케어 섞임)은 원래대로 1장', () => {
+  const os = sampleOrders(), ctx = ctxOf(), steps = Z.buildSteps(os, ctx);
+  assert.strictEqual(Z.planAt(os, steps, steps.length, ctx).byPack['26'].length, 1);
+  assert.ok(steps.every(s => s.pack !== '26'));
+});

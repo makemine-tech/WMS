@@ -110,8 +110,83 @@
     return main ? String(15 * kanOf(inv)) : '15';
   }
 
+  /* ── 송장 하나의 숫자 ──
+     ctx = { boxes, fee: P9_FEE, settings: { ship: {'15':원,…}, sec: { single, mix2, mix3 } }, times: { [boxKey]: 초 } }
+     처리 시간 등급 = 포장비 등급 (300 완제 단독 · 1000 믹스 2칸 이하 · 1500 그 외) */
+  function invCost(inv, ctx){
+    var size = boxSize(inv, ctx.boxes), key = boxKeyOf(inv.lines);
+    var f = ctx.fee.gokFee([''].concat(inv.lines.map(function(l){ return l.prd; })), [0].concat(inv.lines.map(function(l){ return l.qty; })));
+    var sec = ctx.settings.sec, t = ctx.times && ctx.times[key];
+    if (t == null) t = f.fee === 300 ? sec.single : f.fee === 1000 ? sec.mix2 : sec.mix3;
+    return { size: size, sec: Number(t) || 0, ship: Number(ctx.settings.ship[parseInt(size, 10)]) || 0, fee: f.fee, pre: f.pre || 0 };
+  }
+  function original(order){ return [{ lines: order.lines.map(function(l){ return { seq: l.seq, prd: l.prd, qty: l.qty }; }) }]; }
+  function merge(a, b){
+    var lines = a.lines.map(function(l){ return { seq: l.seq, prd: l.prd, qty: l.qty }; });
+    b.lines.forEach(function(l){
+      var hit = lines.filter(function(x){ return x.seq === l.seq; })[0];
+      if (hit) hit.qty += l.qty; else lines.push({ seq: l.seq, prd: l.prd, qty: l.qty });
+    });
+    return { lines: lines };
+  }
+
+  /* ── 막대: 합치기 순서 ──
+     전부 분리에서 시작해 「줄어드는 택배비 ÷ 늘어나는 초」가 큰 두 송장 합치기부터 하나씩 (같으면 묶음번호 순).
+     더 합칠 게 없으면 전부 합포 결과가 더 적은 주문을 그 결과로 바꾸는 단계를 묶음번호 순으로 붙임 */
+  function packCmp(a, b){ var x = Number(a), y = Number(b); return (isNaN(x) || isNaN(y)) ? (a < b ? -1 : a > b ? 1 : 0) : x - y; }
+  function buildSteps(orders, ctx){
+    var cost = {}, steps = [], cur = {}, best = {};
+    function c(inv){ var k = JSON.stringify(inv.lines); return cost[k] || (cost[k] = invCost(inv, ctx)); }
+    function bestOf(pack){
+      var invs = cur[pack], top = null;
+      for (var i = 0; i < invs.length; i++) for (var j = i + 1; j < invs.length; j++){
+        var a = invs[i], b = invs[j];
+        if (hasSeori60(a) || hasSeori60(b)) continue;
+        var m = merge(a, b);
+        if (kanOf(m) > 4) continue;
+        var ca = c(a), cb = c(b), cm = c(m);
+        var score = (ca.ship + cb.ship - cm.ship) / Math.max(cm.sec - ca.sec - cb.sec, 1);
+        if (!top || score > top.score) top = { score: score, i: i, j: j, m: m };
+      }
+      return top;
+    }
+    var packs = orders.filter(canSplit).map(function(o){ return o.pack; }).sort(packCmp);
+    var byPack = {};
+    orders.forEach(function(o){ byPack[o.pack] = o; });
+    packs.forEach(function(p){ cur[p] = splitMax(byPack[p]); best[p] = bestOf(p); });
+    for (;;){
+      var pick = null;
+      packs.forEach(function(p){ var b = best[p]; if (b && (!pick || b.score > best[pick].score)) pick = p; });
+      if (!pick) break;
+      var b = best[pick], from = cur[pick];
+      var to = from.filter(function(x, k){ return k !== b.i && k !== b.j; });
+      to.splice(b.i, 0, b.m);
+      steps.push({ pack: pick, from: from, to: to });
+      cur[pick] = to; best[pick] = bestOf(pick);
+    }
+    packs.forEach(function(p){
+      var min = splitMin(byPack[p]);
+      if (min.length < cur[p].length){ steps.push({ pack: p, from: cur[p], to: min }); cur[p] = min; }
+    });
+    return steps;
+  }
+  /* 눈금 n 의 결과 + 합계 (나눌 수 없는 주문은 원래 그대로 1장) */
+  function totalsOf(byPack, ctx){
+    var t = { count: 0, sec: 0, ship: 0, fee: 0, pre: 0 };
+    Object.keys(byPack).forEach(function(p){ byPack[p].forEach(function(inv){
+      var c = invCost(inv, ctx); t.count++; t.sec += c.sec; t.ship += c.ship; t.fee += c.fee; t.pre += c.pre; }); });
+    return t;
+  }
+  function planAt(orders, steps, n, ctx){
+    var byPack = {};
+    orders.forEach(function(o){ byPack[o.pack] = canSplit(o) ? splitMax(o) : original(o); });
+    for (var i = 0; i < n && i < steps.length; i++) byPack[steps[i].pack] = steps[i].to;
+    return { byPack: byPack, totals: totalsOf(byPack, ctx) };
+  }
+
   var api = { normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
-              units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize };
+              units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
+              invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
