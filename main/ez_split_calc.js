@@ -221,7 +221,8 @@
           var us2 = [];
           take.forEach(function(n, t){ for (var m = 0; m < n; m++) us2.push(types[t].u); });
           var inv = toInvoice(us2);
-          if (!boxes[boxKeyOf(inv.lines)]) return;
+          /* 4칸(60박스) 넘는 조각은 기록이 있어도 안 씀 — 예전 「45입×2 = 45추가」(송장 하나+추가송장) 같은 기록 (대표님 2026-10-27) */
+          if (kanOf(inv) > 4 || !boxes[boxKeyOf(inv.lines)]) return;
           var sub = solve(rest.map(function(r, t){ return r - take[t]; }));
           if (sub && (!best || sub.length + 1 < best.length)) best = [inv].concat(sub);
           return;

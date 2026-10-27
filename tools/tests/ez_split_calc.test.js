@@ -245,3 +245,25 @@ test('invCost: 오리진케어만 있는 송장은 오리진케어 포장비 (1�
   const c = Z.invCost({ lines: [{ seq: 'a', prd: ORI, qty: 7 }] }, ctxOf());
   assert.strictEqual(c.fee, 1500);
 });
+
+/* ── 기존대로도 4칸(60박스) 넘는 송장은 안 만듦 (대표님 2026-10-27: 45입×2 가 합포된 채로 남음) ──
+   피킹이지 기록에 「서리태45×2 = 45추가」(예전에 송장 하나 + 추가송장으로 나간 것)가 있어도 2장으로 나눔 */
+test('기존대로: 기록이 있어도 45입×2 는 2장', () => {
+  const o = one([row(51, S45, 2)]);
+  const boxes = { [keyOf([['서리태 가득콩물 45입 [곡물도감]', 2]])]: '45추가', [keyOf([['서리태 가득콩물 45입 [곡물도감]', 1]])]: '45' };
+  assert.deepStrictEqual(shape(Z.existing(o, boxes)), ['서리태45입×1', '서리태45입×1']);
+});
+test('기존대로: 4칸 넘는 기록 조각은 버리고, 기록 안에서 못 나누면 new 경고', () => {
+  const o = one([row(52, S30, 2), row(52, M15, 1)]);
+  const boxes = { [keyOf([['서리태 가득콩물 30입 [곡물도감]', 2], ['말차 가득콩물 15입 [곡물도감]', 1]])]: '60' };
+  assert.strictEqual(Z.existing(o, boxes), null);
+  assert.deepStrictEqual(o.warn, ['new']);
+});
+test('어느 방식이든 4칸 넘는 송장 없음 (전부 분리·전부 합포·기존대로)', () => {
+  const os = Z.buildOrders([row(53, S45, 2), row(54, S30, 2), row(54, S30, 1), row(55, S15, 7)]);
+  const boxes = { [keyOf([['서리태 가득콩물 45입 [곡물도감]', 2]])]: '45추가' };
+  const ctx = Object.assign(ctxOf(), { boxes });
+  const steps = Z.buildSteps(os, ctx);
+  [Z.planAt(os, steps, 0, ctx), Z.planAt(os, steps, steps.length, ctx), Z.planExisting(os, ctx)].forEach(p =>
+    Object.values(p.byPack).forEach(invs => invs.forEach(i => assert.ok(Z.kanOf(i) <= 4, JSON.stringify(i.lines)))));
+});
