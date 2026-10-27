@@ -469,6 +469,7 @@ h1 em{color:var(--g);font-style:normal}
 var rawBuffer = null;
 var pdfDoc    = null;
 var dupInvPages = [];   // 원본 PDF 에서 중복 사본으로 버린 페이지 { invNum, page(1부터) }
+var cancelPages = [];   // 「주문이 삭제되었습니다」 빈 장 { page(1부터), mng(관리번호) } — 송장도 순번도 아님 (2026-10-27)
 var invoices  = [];      // { invNum, totalQty, pages[], items[], customer } — 불변
 var locGroups = [];      // 피킹리스트
 /* 송장 단위 인쇄 추적 (그룹화는 렌더 시점에 동적으로 계산) */
@@ -1038,16 +1039,19 @@ function extractCustomerByCoord(coord) {
 /* ─────────────── 송장 빌드 ─────────────── */
 /* 원본 PDF 중복 사본 안내 (특이사항) */
 function dupNotice(){
-  if (!dupInvPages.length) return '';
+  var cn = cancelPages.length ? '<br>⚠️ 특이사항: 이지어드민에서 삭제된 주문 ' + cancelPages.length + '장(빈 송장)은 송장 건수·인쇄에서 뺐습니다 — 관리번호 '
+    + cancelPages.slice(0,8).map(function(c){ return (c.mng || '?') + '(' + c.page + '쪽)'; }).join(', ') + (cancelPages.length > 8 ? ' 외 ' + (cancelPages.length-8) + '장' : '') : '';
+  if (!dupInvPages.length) return cn;
   var nums = {};
   dupInvPages.forEach(function(d){ (nums[d.invNum] = nums[d.invNum] || []).push(d.page); });
   var keys = Object.keys(nums);
-  return '<br>⚠️ 특이사항: 원본 PDF 에 같은 송장이 두 번 들어 있어 사본 ' + dupInvPages.length + '장은 인쇄에서 뺐습니다 — '
+  return cn + '<br>⚠️ 특이사항: 원본 PDF 에 같은 송장이 두 번 들어 있어 사본 ' + dupInvPages.length + '장은 인쇄에서 뺐습니다 — '
     + keys.slice(0,5).map(function(k){ return k + '(' + nums[k].join('·') + '쪽)'; }).join(', ') + (keys.length > 5 ? ' 외 ' + (keys.length-5) + '건' : '');
 }
 function buildInvoices(pageTexts) {
   invoices = [];
   dupInvPages = [];
+  cancelPages = [];
   var invMap = {}, lastInv = null, skipCont = false;
   /* 같은 송장이 원본 PDF 에 두 번 들어 있으면(이지어드민 중복 출력) 두 번째 사본은 버림
      → 안 버리면 1건 송장에 페이지 2장이 붙어 같은 송장이 연달아 2장 인쇄됨 */
@@ -1055,6 +1059,12 @@ function buildInvoices(pageTexts) {
 
   pageTexts.forEach(function(pg){
     var parsed = parseEasyAdmin(pg.raw);
+    /* 이지어드민에서 삭제된 주문 = 등기번호 없는 빈 송장 장 → 앞 송장의 다음 장으로 붙이지 않고 뺌 (2026-10-27 대표님) */
+    if (parsed.invNum === null && /주문이\s*삭제되었습니다/.test(pg.raw)) {
+      var mm = pg.raw.match(/관리번호\s*[：:]\s*(\d+)/);
+      cancelPages.push({ page: pg.idx + 1, mng: mm ? mm[1] : '' });
+      return;
+    }
     if (parsed.invNum !== null) {
       lastInv = parsed.invNum;
       skipCont = false;
