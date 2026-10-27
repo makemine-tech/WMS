@@ -214,7 +214,7 @@ test('verifyAfter: 박스 1 몫만 남으면 반영됨, 원래 수량 그대로�
                              { product_seq: 'b', product_id: 'y', qty: 1, boxes: [{ no: 3, qty: 1 }] }] },
     { pack_seq: '2', lines: [{ product_seq: 'c', product_id: 'x', qty: 1, boxes: [{ no: 1, qty: 1 }] },
                              { product_seq: 'd', product_id: 'y', qty: 1, boxes: [{ no: 2, qty: 1 }] }] },
-    { pack_seq: '3', lines: [{ product_seq: 'e', product_id: 'x', qty: 1, boxes: [{ no: 1, qty: 1 }] },
+    { pack_seq: '3', lines: [{ product_seq: 'e', product_id: 'x', qty: 2, boxes: [{ no: 1, qty: 2 }] },          /* 박스 1 에 2개 남아야 함 */
                              { product_seq: 'f', product_id: 'y', qty: 1, boxes: [{ no: 2, qty: 1 }] }] }];
   const after = [
     { pack_seq: '1', product_seq: 'a', qty: '1' },                                    /* 반영됨: a 1개만 남고 b 는 빠짐 */
@@ -266,4 +266,16 @@ test('어느 방식이든 4칸 넘는 송장 없음 (전부 분리·전부 합�
   const steps = Z.buildSteps(os, ctx);
   [Z.planAt(os, steps, 0, ctx), Z.planAt(os, steps, steps.length, ctx), Z.planExisting(os, ctx)].forEach(p =>
     Object.values(p.byPack).forEach(invs => invs.forEach(i => assert.ok(Z.kanOf(i) <= 4, JSON.stringify(i.lines)))));
+});
+
+/* ── 이지어드민 일괄합포제외 화면은 상품 1개짜리 송장을 안 보여 줌 → 박스 1 몫이 상품 1개면 안 보여도 반영됨 (대표님 2026-10-27) ── */
+test('verifyAfter: 박스 1 몫이 상품 1개(45입×2 → 1+1)면 묶음이 안 보여도 반영됨', () => {
+  const pay = [
+    { pack_seq: '7', lines: [{ product_seq: 'g', product_id: 'x', qty: 2, boxes: [{ no: 1, qty: 1 }, { no: 2, qty: 1 }] }] },
+    { pack_seq: '8', lines: [{ product_seq: 'h', product_id: 'x', qty: 1, boxes: [{ no: 1, qty: 1 }] },
+                             { product_seq: 'i', product_id: 'y', qty: 1, boxes: [{ no: 1, qty: 1 }] },
+                             { product_seq: 'j', product_id: 'z', qty: 1, boxes: [{ no: 2, qty: 1 }] }] }];
+  const v = Z.verifyAfter(pay, []);
+  assert.deepStrictEqual(v.ok, ['7']);        /* 원래 송장에 45입 1개만 남음 → 화면에서 빠지는 게 정상 */
+  assert.deepStrictEqual(v.gone, ['8']);      /* 원래 송장에 2개 남아야 하는데 안 보임 → 확인 필요 */
 });

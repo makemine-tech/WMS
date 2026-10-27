@@ -283,13 +283,16 @@
     var by = {};
     after.forEach(function(r){ (by[r.pack_seq] = by[r.pack_seq] || {})[r.product_seq] = Number(r.qty) || 0; });
     var v = { ok: [], notApplied: [], gone: [] };
+    function keepOf(l){ return l.boxes.filter(function(b){ return b.no === 1; }).reduce(function(a, b){ return a + b.qty; }, 0); }
     pay.forEach(function(pk){
       var now = by[pk.pack_seq];
-      if (!now){ v.gone.push(pk.pack_seq); return; }
-      var good = pk.lines.every(function(l){
-        var keep = l.boxes.filter(function(b){ return b.no === 1; }).reduce(function(a, b){ return a + b.qty; }, 0);
-        return (now[l.product_seq] || 0) === keep;
-      });
+      if (!now){
+        /* 일괄합포제외 화면은 상품 1개짜리 송장을 안 보여 줌 → 박스 1 몫이 상품 1개면 안 보이는 게 정상 (2026-10-27) */
+        var kept = pk.lines.reduce(function(a, l){ return a + keepOf(l); }, 0);
+        (kept === 1 ? v.ok : v.gone).push(pk.pack_seq);
+        return;
+      }
+      var good = pk.lines.every(function(l){ return (now[l.product_seq] || 0) === keepOf(l); });
       (good ? v.ok : v.notApplied).push(pk.pack_seq);
     });
     return v;
