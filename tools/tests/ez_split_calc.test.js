@@ -67,3 +67,39 @@ test('buildOrders: 이미 나뉨·오리진케어·모르는 상품·옵션은 f
 });
 
 module.exports = { row, S15, S30, S45, S60, M15, GR, N1 };
+
+/* ── Task 3: 양 끝·박스 크기 ── */
+const one = rows => Z.buildOrders(rows)[0];
+const shape = invs => invs.map(i => i.lines.map(l => l.prd.split(' ')[0] + (l.prd.match(/\d+입/) || [''])[0] + '×' + l.qty).sort().join('+'));
+
+test('서리태30×2 + 그래놀라40: 전부 분리 2장(소형은 앞 송장), 전부 합포도 2장(4칸 꽉 참)', () => {
+  const o = one([row(10, S30, 2), row(10, GR, 40)]);
+  assert.deepStrictEqual(shape(Z.splitMax(o)), ['Granola×40+서리태30입×1', '서리태30입×1']);
+  assert.deepStrictEqual(shape(Z.splitMin(o)), ['서리태30입×2', 'Granola×40']);
+});
+test('서리태15 + 말차15 + 그래놀라40: 전부 합포 1장, 3칸, 기록 없으면 45', () => {
+  const o = one([row(11, S15, 1), row(11, M15, 1), row(11, GR, 40)]);
+  const inv = Z.splitMin(o);
+  assert.strictEqual(inv.length, 1);
+  assert.strictEqual(Z.kanOf(inv[0]), 3);
+  assert.strictEqual(Z.boxSize(inv[0], {}), '45');
+});
+test('서리태60 + 그래놀라: 양 끝 모두 서리태60 따로·소형 따로', () => {
+  const o = one([row(12, S60, 1), row(12, GR, 10)]);
+  assert.deepStrictEqual(shape(Z.splitMax(o)), ['서리태60입×1', 'Granola×10']);
+  assert.deepStrictEqual(shape(Z.splitMin(o)), ['서리태60입×1', 'Granola×10']);
+});
+test('소형만 = 1장, 15박스', () => {
+  const inv = Z.splitMax(one([row(13, GR, 12)]));
+  assert.strictEqual(inv.length, 1);
+  assert.strictEqual(Z.boxSize(inv[0], {}), '15');
+});
+test('서리태15×5 전부 합포 = 4칸 + 1칸 2장', () => {
+  assert.deepStrictEqual(shape(Z.splitMin(one([row(14, S15, 5)]))), ['서리태15입×4', '서리태15입×1']);
+});
+test('boxSize: 피킹이지 기록이 있으면 기록값', () => {
+  const inv = Z.splitMin(one([row(15, S15, 1), row(15, M15, 1), row(15, N1, 1)]))[0];
+  assert.strictEqual(Z.boxSize(inv, {}), '45');
+  const key = Z.boxKeyOf(inv.lines);
+  assert.strictEqual(Z.boxSize(inv, { [key]: '30' }), '30');
+});
