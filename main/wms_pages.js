@@ -73,7 +73,7 @@ var WMS_PAGES=[
     {key:'tutorial_ez',  file:'tutorial_ez.html',  label:'튜토리얼(이지)', floor:0, gate:true},
     {key:'picking_ebut', file:'picking_ebut.html', label:'피킹(이벗)', floor:0, gate:true},
     {key:'picking_ez',   file:'picking_ez.html',   label:'피킹(이지)', floor:0, gate:true},
-    {key:'ez_split',     file:'ez_split.html',     label:'곡물도감 합포 분할(이지)', floor:2, gate:true},
+    {key:'ez_split',     file:'ez_split.html',     label:'이지어드민 일괄합포제외', floor:2, gate:true},
   ]},
   {group:'기타 · 부가 서비스', items:[
     {key:'index',        file:'index.html',        label:'홈 / 랜딩', floor:0, gate:true},
