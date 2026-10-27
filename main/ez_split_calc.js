@@ -11,7 +11,8 @@
   'use strict';
 
   /* ── 이름·구분 ── */
-  function normName(name){ return String(name == null ? '' : name).replace(/★/g, '').trim(); }
+  /* ★ 제거 + 끝의 「-구성」 꼬리 제거 (이지어드민 「N1 스타터팩 두유 6종-약,21,말,비,카,맷」 = PDF 「N1 스타터팩 두유 6종」) */
+  function normName(name){ return String(name == null ? '' : name).replace(/★/g, '').trim().replace(/-[^\s-]+$/, '').trim(); }
 
   var KAN = { 15: 1, 30: 2, 45: 3, 60: 4 };
   function classify(prd){

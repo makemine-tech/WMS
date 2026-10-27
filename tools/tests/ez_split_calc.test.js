@@ -179,3 +179,9 @@ test('fillPayload: 서리태30×2 를 두 장으로 → 박스 1·2 에 1개씩,
   assert.strictEqual(p[0].lines[0].qty, 2);
   assert.strictEqual(p[0].lines[0].product_id, os[0].lines[0].pid);
 });
+
+/* ── Task 6 에서 찾음: 이지어드민 N1 스타터팩 이름 뒤 「-약,21,…」는 송장 PDF 에 없음 ── */
+test('normName: 끝의 「-구성」 꼬리 제거 (N1 스타터팩)', () => {
+  assert.strictEqual(Z.normName('N1 스타터팩 두유 6종-약,21,말,비,카,맷'), 'N1 스타터팩 두유 6종');
+  assert.strictEqual(Z.normName('C 그래놀라 4종x2개 8개 PACK'), 'C 그래놀라 4종x2개 8개 PACK');
+});
