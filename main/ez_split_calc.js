@@ -253,7 +253,20 @@
     return out;
   }
 
-  var api = { existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  /* ── 박스 크기별 · 단포/합포 장수 ── 단포 = 상품 1개(1종 1개)짜리 송장, 그 외 합포 */
+  function summary(byPack, boxes){
+    var s = { bySize: {}, single: 0, multi: 0, total: 0 };
+    Object.keys(byPack).forEach(function(p){ byPack[p].forEach(function(inv){
+      var size = String(parseInt(boxSize(inv, boxes), 10) || boxSize(inv, boxes));
+      var one = inv.lines.length === 1 && inv.lines[0].qty === 1;
+      var b = s.bySize[size] || (s.bySize[size] = { single: 0, multi: 0 });
+      if (one){ b.single++; s.single++; } else { b.multi++; s.multi++; }
+      s.total++;
+    }); });
+    return s;
+  }
+
+  var api = { summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;

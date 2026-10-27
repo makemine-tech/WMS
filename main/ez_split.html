@@ -53,6 +53,9 @@
   .stat .e { font-size:.7rem; color:var(--muted); margin-top:.15rem; }
   .stat .e b { color:var(--accent2); font-family:'Space Mono',monospace; }
   .mode { font-size:.78rem; margin-top:.55rem; }
+  .sum-tbl td, .sum-tbl th { text-align:right; font-family:'Space Mono',monospace; }
+  .sum-tbl td:first-child, .sum-tbl th:first-child { text-align:left; }
+  .sum-tbl tr.tot td { font-weight:700; color:var(--accent); border-top:2px solid var(--border); }
   .mode b { color:var(--accent); }
 
   .warn-box { border-color:#5a4520; background:#1d1a12; }
@@ -129,6 +132,10 @@
       <div class="stat"><div class="k">택배비</div><div class="v" id="sShip">-</div><div class="e">기존대로 <b id="eShip">-</b></div></div>
       <div class="stat"><div class="k">포장비</div><div class="v" id="sFee">-</div><div class="e">기존대로 <b id="eFee">-</b></div></div>
     </div>
+    <div class="tbl-scroll" style="margin-top:.8rem"><table class="sum-tbl">
+      <thead><tr><th>박스</th><th>단포 <span class="dim" style="font-weight:400">(상품 1개)</span></th><th>합포</th><th>합계</th></tr></thead>
+      <tbody id="sumBody"></tbody>
+    </table></div>
     <div class="mode" id="modeTxt"></div>
     <div class="sm dim" style="margin-top:.3rem" id="preTxt"></div>
   </div>
@@ -148,10 +155,10 @@
     </table></div>
   </div>
 
-  <!-- ⑤ 송장 구성별 처리 시간 -->
+  <!-- ⑤ 송장 구성별 처리 시간 (필요할 때만 펼침) -->
   <div class="card" id="timeCard" style="display:none">
     <details>
-      <summary class="card-h" style="margin:0">⏱ 송장 구성별 1장 처리 시간 (초)<span class="sp"></span><span class="sm dim">비우면 등급 기본값</span></summary>
+      <summary class="card-h" style="margin:0;font-size:.8rem;color:var(--muted)">⏱ 구성별 1장 처리 시간 고치기 (필요할 때만)<span class="sp"></span><span class="sm dim">비우면 등급 기본값</span></summary>
       <div class="tbl-scroll" style="margin-top:.6rem"><table>
         <thead><tr><th>송장 구성</th><th>박스</th><th>장수</th><th>등급</th><th>초</th></tr></thead>
         <tbody id="timeBody"></tbody>
@@ -404,6 +411,14 @@ function render(){
     if (!OPEN[i]) return head;
     return head + g.orders.map(function(o){ return '<tr class="sub"><td colspan="4">' + esc(o.recv || '') + ' · 묶음 ' + esc(o.pack) + ' → ' + cur.byPack[o.pack].length + '장</td></tr>'; }).join('');
   }).join('');
+
+  /* 박스 크기별 · 단포/합포 요약 (구성 하나하나 대신) */
+  var sm = Z.summary(cur.byPack, BOXES);
+  var sizes = Object.keys(sm.bySize).sort(function(a, b){ return (parseInt(a, 10) || 999) - (parseInt(b, 10) || 999); });
+  $('sumBody').innerHTML = sizes.map(function(k){
+    var b = sm.bySize[k];
+    return '<tr><td>' + sizeTag(k) + (/^\d+$/.test(k) && k !== '1' ? '박스' : '') + '</td><td>' + b.single + '</td><td>' + b.multi + '</td><td>' + (b.single + b.multi) + '</td></tr>';
+  }).join('') + '<tr class="tot"><td>합계</td><td>' + sm.single + '</td><td>' + sm.multi + '</td><td>' + sm.total + '</td></tr>';
 
   /* 송장 구성별 시간 */
   var tc = {}, tl = [];

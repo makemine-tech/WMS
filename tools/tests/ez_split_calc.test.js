@@ -185,3 +185,18 @@ test('normName: 끝의 「-구성」 꼬리 제거 (N1 스타터팩)', () => {
   assert.strictEqual(Z.normName('N1 스타터팩 두유 6종-약,21,말,비,카,맷'), 'N1 스타터팩 두유 6종');
   assert.strictEqual(Z.normName('C 그래놀라 4종x2개 8개 PACK'), 'C 그래놀라 4종x2개 8개 PACK');
 });
+
+/* ── 박스 크기별 · 단포/합포 요약 (대표님 2026-10-27: 구성 하나하나 말고 묶어서) ── 단포 = 상품 1개(1종 1개)짜리 송장 */
+test('summary: 박스 크기별 단포·합포 장수', () => {
+  const inv = pairs => ({ lines: pairs.map((p, i) => ({ seq: String(i), prd: p[0], qty: p[1] })) });
+  const byPack = {
+    a: [inv([['서리태 가득콩물 15입 [곡물도감]', 1]]), inv([['말차 가득콩물 15입 [곡물도감]', 1], ['Granola 오리지널', 10]])],
+    b: [inv([['서리태 가득콩물 15입 [곡물도감]', 2]])],
+    c: [inv([['서리태 가득콩물 60입 [곡물도감]', 1]]), inv([['Granola 오리지널', 10]])]
+  };
+  const s = Z.summary(byPack, {});
+  assert.deepStrictEqual(s.bySize['15'], { single: 1, multi: 1 });   /* 서리태15 1개 = 단포, 그래놀라만 = 합포 */
+  assert.deepStrictEqual(s.bySize['30'], { single: 0, multi: 2 });   /* 말차15+그래놀라, 서리태15×2 */
+  assert.deepStrictEqual(s.bySize['60'], { single: 1, multi: 0 });
+  assert.deepStrictEqual({ single: s.single, multi: s.multi, total: s.total }, { single: 2, multi: 3, total: 5 });
+});
