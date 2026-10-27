@@ -22,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-27a';
+  var VER = '2026-10-27b';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -124,14 +124,23 @@
       var post = $.post, conf = window.confirm, t;
       function restore(){ $.post = post; window.confirm = conf; clearTimeout(t); }
       window.confirm = function(){ window.confirm = conf; return true; };
+      /* 보내는 값이 객체든 serialize 문자열이든, 응답이 문자열이든 이미 객체(json)든 읽음.
+         결과를 먼저 돌려준 뒤 이지어드민 콜백을 부름 — 콜백이 화면을 새로 그리거나 옮겨도 페이지는 「저장됨」을 받음 */
+      function isDrop(d){ return d && (typeof d === 'string' ? /(^|&)action=drop_pack_all(&|$)/.test(d) : d.action === 'drop_pack_all'); }
+      function parse(resp){
+        if (resp && typeof resp === 'object') return resp;
+        try { return JSON.parse(resp); } catch(e){}
+        try { return eval('(' + resp + ')'); } catch(e){ return null; }
+      }
       $.post = function(url, data, cb){
-        if (data && data.action === 'drop_pack_all'){
-          return post.call($, url, data, function(resp){
+        if (isDrop(data)){
+          var rest = Array.prototype.slice.call(arguments, 3);
+          return post.apply($, [url, data, function(resp){
             restore();
-            var r = null; try { r = eval('(' + resp + ')'); } catch(e){}
-            try { cb(resp); } catch(e){}
-            if (r) res({ error: r.error, fail_list: r.fail_list || [] }); else rej(new Error('이지어드민 응답을 읽지 못했습니다'));
-          });
+            var r = parse(resp);
+            if (r) res({ error: r.error, fail_list: r.fail_list || [] }); else rej(new Error('이지어드민 응답을 읽지 못했습니다 (저장됐을 수 있음 — 이지어드민 화면 확인)'));
+            try { if (typeof cb === 'function') cb.apply(this, arguments); } catch(e){}
+          }].concat(rest));
         }
         return post.apply($, arguments);
       };
@@ -170,6 +179,6 @@
     else say('⚠️ 팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용 후 다시 눌러 주세요');
   }
   function stop(){ window.removeEventListener('message', onMsg); box.remove(); }
-  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, read: cmdRead, fill: cmdFill, reset: cmdReset };
+  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, read: cmdRead, fill: cmdFill, reset: cmdReset, commit: cmdCommit };
   hello();
 })();

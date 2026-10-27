@@ -265,16 +265,23 @@ function loadOrders(){
     ORDERS = Z.buildOrders(r.rows); TOTAL = r.total; LOADED_AT = Date.now(); OVR = {}; OPEN = {}; FILLED = []; $('resetBtn').disabled = true; $('fillResult').innerHTML = '';
     var err = r.rows.length !== r.total ? '이지어드민에는 ' + r.total + '줄이 있는데 ' + r.rows.length + '줄만 읽혔습니다. 이지어드민 화면에서 한 페이지에 전부 보이게 다시 검색한 뒤 불러와 주세요. (채우기 막힘)' : '';
     $('errBox').style.display = err ? '' : 'none'; $('errBox').textContent = err;
-    var c = ctx();
-    STEPS = Z.buildSteps(ORDERS, c);
-    Z.planExisting(ORDERS, c);       /* 주문마다 기존대로 경고(new·toomany)를 먼저 붙여 둠 */
-    $('slider').max = STEPS.length;
-    $('slider').value = nearestStep(Z.planExisting(ORDERS, c).totals.count);
+    rebuild(true);
     MODE = 'existing';
     $('loadInfo').textContent = '주문 ' + ORDERS.length + '건 · ' + r.rows.length + '줄 · ' + new Date(LOADED_AT).toLocaleTimeString('ko-KR');
     ['sliderCard', 'grpCard', 'timeCard', 'fillCard'].forEach(function(id){ $(id).style.display = ''; });
     render();
   }, function(e){ toast('불러오기 실패: ' + e.message); }).then(function(){ $('loadBtn').disabled = false; });
+}
+/* 단가·시간·박스 기록이 바뀌면 합치기 순서(STEPS)와 기존대로 경고를 다시 계산. 막대는 같은 비율 자리에 둠 */
+function rebuild(first){
+  if (!ORDERS.length){ render(); return; }
+  var c = ctx(), max = Number($('slider').max) || 0, frac = max ? Number($('slider').value) / max : 0;
+  ORDERS.forEach(function(o){ o.warn = []; });
+  STEPS = Z.buildSteps(ORDERS, c);
+  var ex = Z.planExisting(ORDERS, c);       /* 주문마다 기존대로 경고(new·toomany)를 붙여 둠 */
+  $('slider').max = STEPS.length;
+  $('slider').value = first ? nearestStep(ex.totals.count) : Math.round(frac * STEPS.length);
+  render();
 }
 function nearestStep(count){
   var c = ctx(), best = 0, bd = Infinity;
@@ -306,7 +313,8 @@ function currentPlan(){
   return { byPack: byPack, totals: Z.totalsOf(byPack, c) };
 }
 function setMode(m){ MODE = m; render(); }
-function setGrp(k, v){ if (v) OVR[k] = v; else delete OVR[k]; render(); }
+var GROUPS = [];   /* 지금 화면의 묶음 — select 는 번호로 가리킴 (상품명에 따옴표가 있어도 안전) */
+function setGrp(i, v){ var g = GROUPS[i]; if (!g) return; if (v) OVR[g.key] = v; else delete OVR[g.key]; render(); }
 function toggleGrp(i){ OPEN[i] = !OPEN[i]; render(); }
 
 /* ── 그리기 ── */
@@ -339,11 +347,11 @@ function render(){
   }).join('');
 
   /* 구성별 묶음 */
-  var groups = groupsOf();
+  var groups = GROUPS = groupsOf();
   $('grpBody').innerHTML = groups.map(function(g, i){
     var invs = cur.byPack[g.orders[0].pack];
     var res = invs.map(function(inv){ return sizeTag(Z.boxSize(inv, BOXES)) + '<span class="sm">' + esc(invText(inv)) + '</span>'; }).join('<br>');
-    var sel = '<select onclick="event.stopPropagation()" onchange="setGrp(\'' + esc(g.key).replace(/'/g, '&#39;') + '\', this.value)">'
+    var sel = '<select onclick="event.stopPropagation()" onchange="setGrp(' + i + ', this.value)">'
       + GRP_MODES.map(function(m){ return '<option value="' + m[0] + '"' + ((OVR[g.key] || '') === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'; }).join('') + '</select>';
     var head = '<tr class="grp" onclick="toggleGrp(' + i + ')"><td>' + (OPEN[i] ? '▾ ' : '▸ ') + esc(g.key) + '</td><td class="mono">' + g.orders.length + '</td><td>' + res + '</td><td>' + sel + '</td></tr>';
     if (!OPEN[i]) return head;
@@ -366,8 +374,9 @@ function render(){
   }).join('');
 
   var pay = Z.fillPayload(ORDERS, cur.byPack);
-  $('fillHint').textContent = '나눌 주문 ' + pay.length + '건 (한 장으로 그대로인 주문은 손대지 않음)';
-  $('fillBtn').disabled = !pay.length || $('errBox').style.display !== 'none';
+  /* 이미 채운 게 화면에 남아 있으면 다시 채우기를 막음 — 이지어드민은 채운 묶음을 「이미 나뉨」으로 건너뛰어 예전 결과가 남기 때문 */
+  $('fillHint').textContent = FILLED.length ? '이미 채운 주문 ' + FILLED.length + '건 — 바꾸려면 「채운 것 되돌리기」 먼저' : '나눌 주문 ' + pay.length + '건 (한 장으로 그대로인 주문은 손대지 않음)';
+  $('fillBtn').disabled = !pay.length || FILLED.length > 0 || $('errBox').style.display !== 'none';
 }
 $('slider').addEventListener('change', function(){ setMode('slider'); });
 
@@ -383,13 +392,13 @@ function saveSettings(){
   [].forEach.call(document.querySelectorAll('[data-ship]'), function(i){ s.ship[i.getAttribute('data-ship')] = Number(i.value) || 0; });
   [].forEach.call(document.querySelectorAll('[data-sec]'), function(i){ var k = i.getAttribute('data-sec'); s.sec[k] = i.value === '' ? defaults().sec[k] : Number(i.value) || 0; });
   s.autoCommit = isSuper ? $('autoCommit').checked : !!SET.autoCommit;
-  SET = s; paintSettings(); render();
+  SET = s; paintSettings(); rebuild();
   if (base) base.child('settings').set(s).catch(function(e){ toast('설정 저장 실패: ' + e.message); });
 }
 function saveTime(k, v){
   var n = v === '' ? null : Number(v);
   if (n == null) delete TIMES[k]; else TIMES[k] = n;
-  render();
+  rebuild();
   if (base) base.child('times/' + k).set(n).catch(function(e){ toast('시간 저장 실패: ' + e.message); });
 }
 
@@ -404,30 +413,34 @@ function doFill(){
               slider: MODE === 'slider' ? Number($('slider').value) : 'existing', steps: STEPS.length, overrides: Object.keys(OVR).length,
               totals: cur.totals, existing: Z.planExisting(ORDERS, ctx()).totals, committed: false };
   hcall('fill', { packs: pay }, 300000).then(function(r){
-    FILLED = r.done; $('resetBtn').disabled = !FILLED.length;
+    r.done.forEach(function(p){ if (FILLED.indexOf(p) < 0) FILLED.push(p); });   /* 되돌리기 목록은 누적 */
+    $('resetBtn').disabled = !FILLED.length;
     log.filled = r.done.length; log.skipped = r.skipped;
     var html = '✔ 채움 <b>' + r.done.length + '</b>건' + (r.skipped.length ? ' · 건너뜀 <b style="color:var(--yellow)">' + r.skipped.length + '</b>건' : '')
       + (r.skipped.length ? '<div class="dim" style="margin-top:.3rem">' + r.skipped.slice(0, 50).map(function(s){ return '묶음 ' + esc(s.pack_seq) + ' — ' + esc(s.why); }).join('<br>') + '</div>' : '');
-    if (!SET.autoCommit){
-      $('fillResult').innerHTML = html + '<div style="margin-top:.4rem;color:var(--accent)">이지어드민 화면에서 박스 번호를 확인한 뒤 「일괄합포제외」를 눌러 주세요.</div>';
+    if (!SET.autoCommit || !r.done.length){
+      $('fillResult').innerHTML = html + (r.done.length ? '<div style="margin-top:.4rem;color:var(--accent)">이지어드민 화면에서 박스 번호를 확인한 뒤 「일괄합포제외」를 눌러 주세요.</div>'
+        : '<div style="margin-top:.4rem;color:var(--yellow)">채운 주문이 없어 일괄합포제외는 하지 않았습니다.</div>');
       return;
     }
     $('fillResult').innerHTML = html + '<div style="margin-top:.4rem">일괄합포제외 실행 중…</div>';
     return hcall('commit', { auto: true }, 200000).then(function(c){
       log.committed = true; log.commitError = c.error; log.failList = c.fail_list;
-      $('fillResult').innerHTML = html + '<div style="margin-top:.4rem;color:var(--accent)">✔ 일괄합포제외 완료' + (c.fail_list && c.fail_list.length ? ' · 실패 ' + c.fail_list.length + '건' : '') + '</div>';
-      FILLED = []; $('resetBtn').disabled = true;
+      var bad = c.error && c.error !== '0';
+      $('fillResult').innerHTML = html + (bad ? '<div style="margin-top:.4rem;color:var(--red)">⚠️ 일괄합포제외 결과 오류: ' + esc(c.error) + ' — 이지어드민 화면을 확인해 주세요</div>'
+        : '<div style="margin-top:.4rem;color:var(--accent)">✔ 일괄합포제외 완료' + (c.fail_list && c.fail_list.length ? ' · 실패 ' + c.fail_list.length + '건' : '') + '</div>');
+      if (!bad){ FILLED = []; $('resetBtn').disabled = true; }
     });
   }).catch(function(e){ log.error = e.message; $('fillResult').textContent = '⚠️ ' + e.message; })
   .then(function(){
-    $('fillBtn').disabled = false;
+    render();
     if (base) base.child('days/' + today()).push(JSON.parse(JSON.stringify(log, function(k, v){ return v === undefined ? null : v; })))
       .catch(function(){});
   });
 }
 function doReset(){
   if (!FILLED.length) return;
-  hcall('reset', { packs: FILLED }, 120000).then(function(r){ toast('되돌림 ' + r.done.length + '건'); FILLED = []; $('resetBtn').disabled = true; $('fillResult').textContent = '되돌렸습니다.'; },
+  hcall('reset', { packs: FILLED }, 120000).then(function(r){ toast('되돌림 ' + r.done.length + '건'); FILLED = []; $('resetBtn').disabled = true; $('fillResult').textContent = '되돌렸습니다.'; render(); },
     function(e){ toast('되돌리기 실패: ' + e.message); });
 }
 
@@ -441,9 +454,9 @@ WMSync.onAuth(function(st){
   base = db.ref('wms_sync/groups/' + gid + '/ez_split');
   $('who').textContent = (me.email || '').split('@')[0] + ' · 그룹 ' + gid + (isSuper ? ' 👑' : '');
   $('autoRow').style.display = isSuper ? '' : 'none';
-  base.child('settings').on('value', function(s){ var v = s.val(); SET = v ? { ship: Object.assign(defaults().ship, v.ship), sec: Object.assign(defaults().sec, v.sec), autoCommit: !!v.autoCommit } : defaults(); paintSettings(); render(); });
-  base.child('times').on('value', function(s){ TIMES = s.val() || {}; render(); });
-  db.ref('wms_sync/groups/' + gid + '/picking_ez/boxes').on('value', function(s){ BOXES = s.val() || {}; render(); });
+  base.child('settings').on('value', function(s){ var v = s.val(); SET = v ? { ship: Object.assign(defaults().ship, v.ship), sec: Object.assign(defaults().sec, v.sec), autoCommit: !!v.autoCommit } : defaults(); paintSettings(); rebuild(); });
+  base.child('times').on('value', function(s){ TIMES = s.val() || {}; rebuild(); });
+  db.ref('wms_sync/groups/' + gid + '/picking_ez/boxes').on('value', function(s){ BOXES = s.val() || {}; rebuild(); });
 });
 </script>
 <script src="/mm_copy.js" defer></script>
