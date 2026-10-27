@@ -92,3 +92,13 @@ test('검색: 로딩이 끝나지 않으면 시간 초과', async () => {
   const { win } = searchPage({ stuck: true });
   await assert.rejects(async () => win.__mkwEzHelper.search({ supplier: '곡물도감', date: '2026-10-27', ms: 400 }), /검색이 .*끝나지 않/);
 });
+test('검색: 시작일~끝일 기간으로 검색', async () => {
+  const { win, ex } = searchPage();
+  await win.__mkwEzHelper.search({ supplier: '곡물도감', from: '2026-10-20', to: '2026-10-27' });
+  assert.strictEqual(ex['input[name=start_date]'].value, '2026-10-20');
+  assert.strictEqual(ex['input[name=end_date]'].value, '2026-10-27');
+});
+test('검색: 시작일이 끝일보다 늦으면 거절', async () => {
+  const { win } = searchPage();
+  await assert.rejects(async () => win.__mkwEzHelper.search({ supplier: '곡물도감', from: '2026-10-28', to: '2026-10-27' }), /시작일/);
+});

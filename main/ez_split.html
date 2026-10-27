@@ -100,7 +100,10 @@
       <button class="btn" onclick="openEz()">이지어드민 일괄합포제외 열기</button>
       <a class="btn bm" id="bmLink" href="#" onclick="toast('이 버튼을 북마크바로 끌어다 놓으세요');return false;">📦 이지어드민 합포 도우미</a>
       <span class="sp" style="flex:1"></span>
-      <label class="sm dim">발주일 <input type="date" id="ezDate" class="num" style="width:auto"></label>
+      <label class="sm dim">발주일 <input type="date" id="ezFrom" class="num" style="width:auto" onchange="saveFrom()"></label>
+      <span class="sm dim">~</span>
+      <input type="date" id="ezTo" class="num" style="width:auto">
+      <button class="btn sm" onclick="$('ezTo').value=today()" title="끝일을 오늘로">오늘</button>
       <label class="sm dim" title="끄면 이지어드민 화면에 지금 검색된 그대로 읽음"><input type="checkbox" id="ezSearch" checked> 곡물도감 검색부터</label>
       <button class="btn p" id="loadBtn" onclick="loadOrders()">불러오기</button>
     </div>
@@ -283,15 +286,23 @@ function loadState(kind, msg){
 }
 var LOAD_ERR = { NOHELPER: '이지어드민 탭이 닫혔거나 연결이 끊겼습니다 — 이지어드민 탭에서 북마크 「📦 이지어드민 합포 도우미」를 다시 눌러 주세요',
                  TIMEOUT: '이지어드민이 제때 답하지 않았습니다 — 이지어드민 탭이 「일괄합포제외」 화면인지, 오른쪽 아래 도우미 상자가 떠 있는지 확인해 주세요' };
-var HELPER_SEARCH = '2026-10-27d';   /* 검색 명령이 있는 도우미 최소 버전 */
+var HELPER_SEARCH = '2026-10-27e';   /* 발주일 기간 검색이 있는 도우미 최소 버전 */
+/* 시작일은 이 PC 에 기억 (처음엔 7일 전), 끝일은 늘 오늘로 시작 */
+function saveFrom(){ try { localStorage.setItem('ezSplitFrom', $('ezFrom').value); } catch(e){} }
+function initDates(){
+  var f = ''; try { f = localStorage.getItem('ezSplitFrom') || ''; } catch(e){}
+  if (!f){ var d = new Date(); d.setDate(d.getDate() - 7); f = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  $('ezFrom').value = f; $('ezTo').value = today();
+}
 function loadOrders(){
   if (!H.ok){ loadState('err', '도우미가 연결되지 않았습니다 — 이지어드민 일괄합포제외 탭에서 북마크 「📦 이지어드민 합포 도우미」를 누르고, 이 페이지 맨 위가 🟢 로 바뀐 뒤 다시 눌러 주세요'); return; }
-  var doSearch = $('ezSearch').checked, date = $('ezDate').value || today();
+  var doSearch = $('ezSearch').checked, from = $('ezFrom').value, to = $('ezTo').value || today();
+  if (doSearch && (!from || from > to)){ loadState('err', '발주일 시작일을 끝일보다 앞이거나 같게 넣어 주세요'); return; }
   if (doSearch && H.ver && H.ver < HELPER_SEARCH){ loadState('err', '이지어드민 도우미가 옛 버전(' + H.ver + ')이라 검색을 못 합니다 — 이지어드민 탭을 새로고침(F5)한 뒤 북마크를 다시 눌러 주세요'); return; }
   $('loadBtn').disabled = true; $('loadBtn').textContent = '불러오는 중…';
   LS.t0 = 0;
-  loadState('run', doSearch ? '① 이지어드민에서 공급처 곡물도감 · 발주일 ' + date + ' 검색 중… (보통 5초 안팎)' : '① 이지어드민 화면의 주문 줄 읽는 중…');
-  (doSearch ? hcall('search', { supplier: '곡물도감', date: date }, 100000) : hcall('read', {}, 60000)).then(function(r){
+  loadState('run', doSearch ? '① 이지어드민에서 공급처 곡물도감 · 발주일 ' + from + ' ~ ' + to + ' 검색 중… (보통 5초 안팎)' : '① 이지어드민 화면의 주문 줄 읽는 중…');
+  (doSearch ? hcall('search', { supplier: '곡물도감', from: from, to: to }, 100000) : hcall('read', {}, 60000)).then(function(r){
     loadState('run', '② ' + r.rows.length + '줄 받음 → 주문 묶고 나누기 계산 중…');
     return new Promise(function(res){ setTimeout(function(){ res(r); }, 30); });   /* 글자가 먼저 그려지게 한 박자 쉼 */
   }).then(function(r){
@@ -482,7 +493,7 @@ function doReset(){
 
 /* ── 시작 ── */
 paintSettings();
-$('ezDate').value = today();
+initDates();
 WMSync.init('ez_split', { requireAuth: true });
 WMSync.onAuth(function(st){
   if (!st.user){ $('who').textContent = '로그인 필요'; return; }

@@ -22,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-27d';
+  var VER = '2026-10-27e';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -73,10 +73,13 @@
     var name = String(args.supplier || '곡물도감'), opt = null;
     for (var i = 0; i < sel.options.length; i++) if (String(sel.options[i].text).trim() === name) opt = sel.options[i];
     if (!opt) throw new Error('공급처 「' + name + '」를 이지어드민 목록에서 찾지 못했습니다');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(args.date || ''))) throw new Error('발주일이 올바르지 않습니다');
+    /* 발주일 기간: from~to (예전 페이지는 date 하루) */
+    var from = String(args.from || args.date || ''), to = String(args.to || args.date || ''), ymd = /^\d{4}-\d{2}-\d{2}$/;
+    if (!ymd.test(from) || !ymd.test(to)) throw new Error('발주일이 올바르지 않습니다');
+    if (from > to) throw new Error('시작일이 끝일보다 늦습니다');
     sel.value = opt.value;
     if (dt) dt.value = 'collect_date';
-    sd.value = args.date; ed.value = args.date;
+    sd.value = from; ed.value = to;
     var limit = Number(args.ms) || 90000, t0 = Date.now(), shown = false;
     function loading(){ return !!ld && window.getComputedStyle(ld).display !== 'none'; }
     return new Promise(function(res, rej){
