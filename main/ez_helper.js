@@ -22,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-27c';
+  var VER = '2026-10-27d';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -61,6 +61,34 @@
     var total = rows.length;
     try { if ($) total = Number($('#grid1').getGridParam('records')) || rows.length; } catch(e){}
     return { rows: rows, total: total };
+  }
+
+  /* ── 검색 ── 공급처(이름이 정확히 같은 것)·발주일을 넣고 「검색(F2)」 → 이지어드민 로딩 표시(#load_grid1)가 사라지면 읽음
+     공급처·날짜 말고 다른 검색 조건은 화면에 있던 그대로 둔다 */
+  function cmdSearch(args){
+    if (!isDG00()) throw new Error('일괄합포제외(DG00) 화면이 아닙니다');
+    var sel = document.getElementById('str_supply_code'), btn = document.getElementById('search'), ld = document.getElementById('load_grid1');
+    var sd = document.querySelector('input[name=start_date]'), ed = document.querySelector('input[name=end_date]'), dt = document.getElementById('date_type');
+    if (!sel || !btn || !sd || !ed) throw new Error('검색 칸을 찾지 못했습니다');
+    var name = String(args.supplier || '곡물도감'), opt = null;
+    for (var i = 0; i < sel.options.length; i++) if (String(sel.options[i].text).trim() === name) opt = sel.options[i];
+    if (!opt) throw new Error('공급처 「' + name + '」를 이지어드민 목록에서 찾지 못했습니다');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(args.date || ''))) throw new Error('발주일이 올바르지 않습니다');
+    sel.value = opt.value;
+    if (dt) dt.value = 'collect_date';
+    sd.value = args.date; ed.value = args.date;
+    var limit = Number(args.ms) || 90000, t0 = Date.now(), shown = false;
+    function loading(){ return !!ld && window.getComputedStyle(ld).display !== 'none'; }
+    return new Promise(function(res, rej){
+      btn.click();
+      (function wait(){
+        if (loading()) shown = true;
+        /* 로딩 표시가 한 번 보였다 사라졌거나, 1.5초가 지나도록 안 보였으면 끝난 것으로 봄 */
+        if (!loading() && (shown || Date.now() - t0 > 1500)){ try { res(cmdRead()); } catch(e){ rej(e); } return; }
+        if (Date.now() - t0 > limit){ rej(new Error('검색이 ' + Math.round(limit / 1000) + '초 안에 끝나지 않았습니다')); return; }
+        setTimeout(wait, 200);
+      })();
+    });
   }
 
   /* ── 채우기 ── */
@@ -149,8 +177,8 @@
     });
   }
 
-  var CMDS = { ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, fill: cmdFill, reset: cmdReset, commit: cmdCommit };
-  var SAYS = { read: '주문 줄 읽는 중…', fill: '분할 채우는 중… (저장 안 함)', reset: '되돌리는 중…', commit: '일괄합포제외 실행 중…' };
+  var CMDS = { ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit };
+  var SAYS = { search: '곡물도감 검색 중… (이지어드민 화면이 잠깐 바뀝니다)', read: '주문 줄 읽는 중…', fill: '분할 채우는 중… (저장 안 함)', reset: '되돌리는 중…', commit: '일괄합포제외 실행 중…' };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ez-helper' || !ALLOW.test(e.origin)) return;
@@ -179,6 +207,6 @@
     else say('⚠️ 팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용 후 다시 눌러 주세요');
   }
   function stop(){ window.removeEventListener('message', onMsg); box.remove(); }
-  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, read: cmdRead, fill: cmdFill, reset: cmdReset, commit: cmdCommit };
+  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit };
   hello();
 })();

@@ -99,11 +99,14 @@
     <div class="row">
       <button class="btn" onclick="openEz()">이지어드민 일괄합포제외 열기</button>
       <a class="btn bm" id="bmLink" href="#" onclick="toast('이 버튼을 북마크바로 끌어다 놓으세요');return false;">📦 이지어드민 합포 도우미</a>
+      <span class="sp" style="flex:1"></span>
+      <label class="sm dim">발주일 <input type="date" id="ezDate" class="num" style="width:auto"></label>
+      <label class="sm dim" title="끄면 이지어드민 화면에 지금 검색된 그대로 읽음"><input type="checkbox" id="ezSearch" checked> 곡물도감 검색부터</label>
       <button class="btn p" id="loadBtn" onclick="loadOrders()">불러오기</button>
     </div>
     <div class="load-state" id="loadState" style="display:none"></div>
     <div class="sm dim" style="margin-top:.5rem;line-height:1.7">
-      ① 이지어드민 일괄합포제외에서 <b>공급처 곡물도감 · 발주일</b>로 검색 → ② 북마크의 「📦 이지어드민 합포 도우미」 → ③ 여기서 「불러오기」
+      ① 「이지어드민 일괄합포제외 열기」 → ② 그 탭에서 북마크 「📦 이지어드민 합포 도우미」 → ③ 여기서 「불러오기」 (도우미가 <b>공급처 곡물도감 · 발주일</b>로 검색까지 함)
     </div>
   </div>
 
@@ -279,12 +282,16 @@ function loadState(kind, msg){
   el.style.display = '';
 }
 var LOAD_ERR = { NOHELPER: '이지어드민 탭이 닫혔거나 연결이 끊겼습니다 — 이지어드민 탭에서 북마크 「📦 이지어드민 합포 도우미」를 다시 눌러 주세요',
-                 TIMEOUT: '이지어드민이 60초 안에 답하지 않았습니다 — 이지어드민 탭이 「일괄합포제외」 화면인지, 오른쪽 아래 도우미 상자가 떠 있는지 확인해 주세요' };
+                 TIMEOUT: '이지어드민이 제때 답하지 않았습니다 — 이지어드민 탭이 「일괄합포제외」 화면인지, 오른쪽 아래 도우미 상자가 떠 있는지 확인해 주세요' };
+var HELPER_SEARCH = '2026-10-27d';   /* 검색 명령이 있는 도우미 최소 버전 */
 function loadOrders(){
   if (!H.ok){ loadState('err', '도우미가 연결되지 않았습니다 — 이지어드민 일괄합포제외 탭에서 북마크 「📦 이지어드민 합포 도우미」를 누르고, 이 페이지 맨 위가 🟢 로 바뀐 뒤 다시 눌러 주세요'); return; }
+  var doSearch = $('ezSearch').checked, date = $('ezDate').value || today();
+  if (doSearch && H.ver && H.ver < HELPER_SEARCH){ loadState('err', '이지어드민 도우미가 옛 버전(' + H.ver + ')이라 검색을 못 합니다 — 이지어드민 탭을 새로고침(F5)한 뒤 북마크를 다시 눌러 주세요'); return; }
   $('loadBtn').disabled = true; $('loadBtn').textContent = '불러오는 중…';
-  LS.t0 = 0; loadState('run', '① 이지어드민에 주문 줄 요청 중… (이지어드민 탭 오른쪽 아래 도우미 상자에도 「읽는 중」이 보입니다)');
-  hcall('read', {}, 60000).then(function(r){
+  LS.t0 = 0;
+  loadState('run', doSearch ? '① 이지어드민에서 공급처 곡물도감 · 발주일 ' + date + ' 검색 중… (보통 5초 안팎)' : '① 이지어드민 화면의 주문 줄 읽는 중…');
+  (doSearch ? hcall('search', { supplier: '곡물도감', date: date }, 100000) : hcall('read', {}, 60000)).then(function(r){
     loadState('run', '② ' + r.rows.length + '줄 받음 → 주문 묶고 나누기 계산 중…');
     return new Promise(function(res){ setTimeout(function(){ res(r); }, 30); });   /* 글자가 먼저 그려지게 한 박자 쉼 */
   }).then(function(r){
@@ -475,6 +482,7 @@ function doReset(){
 
 /* ── 시작 ── */
 paintSettings();
+$('ezDate').value = today();
 WMSync.init('ez_split', { requireAuth: true });
 WMSync.onAuth(function(st){
   if (!st.user){ $('who').textContent = '로그인 필요'; return; }
