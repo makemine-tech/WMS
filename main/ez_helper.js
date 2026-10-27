@@ -22,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-27b';
+  var VER = '2026-10-27c';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -42,7 +42,7 @@
   function say(t){ var m = document.getElementById('mkwEzMsg'); if (m) m.textContent = t; }
 
   function isDG00(){ return /template=DG00/.test(location.search) && !!document.getElementById('grid1'); }
-  function txt(el){ return el ? String(el.innerText || el.textContent || '').trim() : ''; }
+  function txt(el){ return el ? String(el.textContent || '').replace(/\s+/g, ' ').trim() : ''; }   /* textContent: innerText 는 칸마다 화면 다시 계산이라 느림 */
   function cell(tr, c){ return tr.querySelector('td.' + c); }
   function gridRows(){ return Array.prototype.filter.call(document.querySelectorAll('#grid1 > tbody > tr'), function(tr){ return !!cell(tr, 'pack_seq'); }); }
   function span(tr){ var td = cell(tr, 'divide_pack_no'); return td && td.querySelector('span'); }

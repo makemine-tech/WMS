@@ -39,6 +39,9 @@
   .dot.warn { background:var(--yellow); }
   .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
   .bm { border:1px dashed var(--accent); color:var(--accent); }
+  .load-state { margin-top:.6rem; padding:.55rem .7rem; background:var(--surface2); border:1px solid var(--border); border-radius:8px; font-size:.8rem; font-weight:700; line-height:1.6; }
+  .spin { display:inline-block; width:12px; height:12px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; vertical-align:-1px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
 
   .slider-wrap { padding:.4rem .2rem .2rem; }
   .slider-lbl { display:flex; justify-content:space-between; font-size:.74rem; color:var(--muted); margin-bottom:.3rem; }
@@ -98,6 +101,7 @@
       <a class="btn bm" id="bmLink" href="#" onclick="toast('이 버튼을 북마크바로 끌어다 놓으세요');return false;">📦 이지어드민 합포 도우미</a>
       <button class="btn p" id="loadBtn" onclick="loadOrders()">불러오기</button>
     </div>
+    <div class="load-state" id="loadState" style="display:none"></div>
     <div class="sm dim" style="margin-top:.5rem;line-height:1.7">
       ① 이지어드민 일괄합포제외에서 <b>공급처 곡물도감 · 발주일</b>로 검색 → ② 북마크의 「📦 이지어드민 합포 도우미」 → ③ 여기서 「불러오기」
     </div>
@@ -258,10 +262,32 @@ function openEz(){
 $('bmLink').href = "javascript:(function(){var s=document.createElement('script');s.src='" + HELPER_JS + "?v='+Date.now();document.head.appendChild(s);})();";
 
 /* ── 불러오기 ── */
+/* 진행 표시 — 단계 글자 + 흐른 초 (2026-10-27 대표님: 불러오는 중인지 멈췄는지 알 수 없음) */
+var LS = { t0: 0, msg: '', tick: null };
+function loadState(kind, msg){
+  var el = $('loadState');
+  clearInterval(LS.tick); LS.msg = msg;
+  if (kind === 'run'){
+    if (!LS.t0) LS.t0 = Date.now();
+    var draw = function(){ el.innerHTML = '<span class="spin"></span> ' + esc(LS.msg) + ' <span class="mono dim">' + ((Date.now() - LS.t0) / 1000).toFixed(0) + '초</span>'; };
+    draw(); LS.tick = setInterval(draw, 500);
+  } else {
+    var sec = LS.t0 ? ' <span class="mono dim">' + ((Date.now() - LS.t0) / 1000).toFixed(1) + '초</span>' : '';
+    el.innerHTML = (kind === 'ok' ? '<span style="color:var(--accent)">✔ ' : '<span style="color:var(--red)">⚠️ ') + esc(msg) + '</span>' + sec;
+    LS.t0 = 0;
+  }
+  el.style.display = '';
+}
+var LOAD_ERR = { NOHELPER: '이지어드민 탭이 닫혔거나 연결이 끊겼습니다 — 이지어드민 탭에서 북마크 「📦 이지어드민 합포 도우미」를 다시 눌러 주세요',
+                 TIMEOUT: '이지어드민이 60초 안에 답하지 않았습니다 — 이지어드민 탭이 「일괄합포제외」 화면인지, 오른쪽 아래 도우미 상자가 떠 있는지 확인해 주세요' };
 function loadOrders(){
-  if (!H.ok){ toast('먼저 이지어드민 탭에서 도우미를 눌러 연결해 주세요'); return; }
-  $('loadBtn').disabled = true;
+  if (!H.ok){ loadState('err', '도우미가 연결되지 않았습니다 — 이지어드민 일괄합포제외 탭에서 북마크 「📦 이지어드민 합포 도우미」를 누르고, 이 페이지 맨 위가 🟢 로 바뀐 뒤 다시 눌러 주세요'); return; }
+  $('loadBtn').disabled = true; $('loadBtn').textContent = '불러오는 중…';
+  LS.t0 = 0; loadState('run', '① 이지어드민에 주문 줄 요청 중… (이지어드민 탭 오른쪽 아래 도우미 상자에도 「읽는 중」이 보입니다)');
   hcall('read', {}, 60000).then(function(r){
+    loadState('run', '② ' + r.rows.length + '줄 받음 → 주문 묶고 나누기 계산 중…');
+    return new Promise(function(res){ setTimeout(function(){ res(r); }, 30); });   /* 글자가 먼저 그려지게 한 박자 쉼 */
+  }).then(function(r){
     ORDERS = Z.buildOrders(r.rows); TOTAL = r.total; LOADED_AT = Date.now(); OVR = {}; OPEN = {}; FILLED = []; $('resetBtn').disabled = true; $('fillResult').innerHTML = '';
     var err = r.rows.length !== r.total ? '이지어드민에는 ' + r.total + '줄이 있는데 ' + r.rows.length + '줄만 읽혔습니다. 이지어드민 화면에서 한 페이지에 전부 보이게 다시 검색한 뒤 불러와 주세요. (채우기 막힘)' : '';
     $('errBox').style.display = err ? '' : 'none'; $('errBox').textContent = err;
@@ -270,7 +296,10 @@ function loadOrders(){
     $('loadInfo').textContent = '주문 ' + ORDERS.length + '건 · ' + r.rows.length + '줄 · ' + new Date(LOADED_AT).toLocaleTimeString('ko-KR');
     ['sliderCard', 'grpCard', 'timeCard', 'fillCard'].forEach(function(id){ $(id).style.display = ''; });
     render();
-  }, function(e){ toast('불러오기 실패: ' + e.message); }).then(function(){ $('loadBtn').disabled = false; });
+    if (!r.rows.length) loadState('err', '이지어드민 화면에 주문 줄이 없습니다 — 공급처 곡물도감·발주일로 검색했는지 확인해 주세요');
+    else loadState('ok', '불러오기 완료 — 주문 ' + ORDERS.length + '건 · ' + r.rows.length + '줄');
+  }).catch(function(e){ loadState('err', '불러오기 실패: ' + (LOAD_ERR[e.message] || e.message)); })
+  .then(function(){ $('loadBtn').disabled = false; $('loadBtn').textContent = '불러오기'; });
 }
 /* 단가·시간·박스 기록이 바뀌면 합치기 순서(STEPS)와 기존대로 경고를 다시 계산. 막대는 같은 비율 자리에 둠 */
 function rebuild(first){
