@@ -61,6 +61,14 @@ h1 em{color:var(--g);font-style:normal}
 .col-box{border-color:rgba(74,240,168,.45);background:rgba(74,240,168,.05)}
 .col-box .dz-m{color:var(--g)}
 .col-box.busy{opacity:.6;pointer-events:none}
+.col-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;margin-top:.6rem;font-size:.78rem}
+.col-tools label{display:flex;align-items:center;gap:.35rem;color:var(--y);font-weight:700;cursor:pointer}
+.bak-ov{position:fixed;inset:0;z-index:9995;background:rgba(0,0,0,.7);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow:auto}
+.bak-box{background:var(--s1);border:1px solid var(--br);border-radius:12px;max-width:760px;width:100%;padding:1rem 1.1rem}
+.bak-h{display:flex;align-items:center;gap:.6rem;font-weight:800;margin-bottom:.4rem}
+.bak-row{border:1px solid var(--br);border-radius:8px;padding:.55rem .7rem;margin-top:.5rem;font-size:.78rem}
+.bak-row .bt{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.4rem}
+.bak-row .sm{color:var(--mu);font-size:.7rem}
 .col-set{margin-top:.6rem;border:1px solid var(--br);border-radius:8px;background:var(--s1);font-size:.78rem}
 .col-set summary{cursor:pointer;padding:.5rem .8rem;color:var(--mu);font-weight:700}
 .col-set-b{padding:.2rem .9rem .8rem;display:flex;flex-direction:column;gap:.45rem}
@@ -309,6 +317,10 @@ h1 em{color:var(--g);font-style:normal}
       <div class="dz-m">송장 PDF 드래그 또는 클릭</div>
       <div class="dz-s">여러 개 골라도 자동으로 합쳐 등록 · 작업은 그룹 DB·이 PC 에 저장(다른 PC 에서 이어서)</div>
     </div>
+  </div>
+  <div class="col-tools">
+    <label title="체크하면 이미 수집한 파일·이미 출력한 송장번호도 다시 받아들입니다 (한 번 쓰고 끄세요)"><input type="checkbox" id="colNoDup"> 🔁 재등록 — 중복 확인 안 함</label>
+    <button class="btn btn-s" onclick="pkBakOpen()" title="자동수집 원본·초기화 전 작업·밀려난 캐시를 이 PC 에서 다시 꺼냄">🛟 백업함 (직전 송장 살리기)</button>
   </div>
   <details class="col-set" id="colSet">
     <summary>⚙ 자동수집 설정</summary>
@@ -763,7 +775,11 @@ function pkMergeFiles(files, done){
    중복 막기 ① 수집 기록(이름·크기·수정시각) ② 추가 등록의 송장번호 검사(목록·인쇄완료·인쇄이력)
    등록이 끝까지 성공한 뒤에만 기록하고(설정 켜져 있으면) 폴더에서 지움 */
 var pkLoadCb = null;     /* loadFile 결과 알림 — 자동수집이 기다림 */
-function pkLoadDone(ok, info){ if (pkLoadCb) { var cb = pkLoadCb; pkLoadCb = null; cb(ok, info || {}); } }
+function pkLoadDone(ok, info){
+  pkNoDupOnce = false;
+  /* 🔁 재등록은 한 번만 — 등록이 되면 체크를 끔 (다음 수집부터 다시 중복 확인) */
+  var nd = document.getElementById('colNoDup'); if (ok && nd && nd.checked) { nd.checked = false; setTimeout(function(){ var el = document.getElementById('m0'); if (el) el.innerHTML += ' <br>🔁 재등록 완료 — 「중복 확인 안 함」 체크를 껐습니다'; }, 0); }
+  if (pkLoadCb) { var cb = pkLoadCb; pkLoadCb = null; cb(ok, info || {}); } }
 function pkCollectMsg(cls, html){ setMsg('m0', cls, html); }
 function pkCollectRefresh(){
   var C = window.EZ_COLLECT; if (!C) return;
@@ -799,13 +815,16 @@ function pkCollectRun(){
         if (!d) return stop('warn', '⚠️ 📁 ' + h.name + ' 안에 오늘 폴더(' + day + ')가 아직 없습니다 — 이지어드민에서 송장을 출력하면 생깁니다');
         dir = d;
         return C.list(dir).then(function(files){
-          pick = C.pickFiles(files, C.logFor(C.loadLog(), day), Date.now());
+          pick = C.pickFiles(files, pkNoDupOn() ? {} : C.logFor(C.loadLog(), day), Date.now());
           var skip = (pick.dup.length ? ' · 이미 수집한 파일 ' + pick.dup.length + '개 건너뜀' : '')
                    + (pick.busy.length ? ' · 방금 만들어지는 중인 파일 ' + pick.busy.length + '개는 잠시 뒤 다시' : '');
           if (!pick.take.length) return stop('warn', '⚠️ ' + day + ' 폴더에 새 송장 PDF 가 없습니다' + skip);
           if (invoices.length && !rawBuffer) return stop('er', '❌ 이 PC 에 현재 작업의 PDF 원본이 없어 추가할 수 없습니다 — 원본을 먼저 받은 뒤 다시 수집해 주세요');
           pkMergeFiles(pick.take.map(function(x){ return x.file; }), function(buf, bad){
             if (bad.length) return stop('er', '❌ 열 수 없는 PDF ' + bad.length + '개(' + bad.join(', ') + ') — 출력이 덜 끝났을 수 있어 아무것도 등록하지 않았습니다. 잠시 뒤 다시 수집해 주세요');
+            /* 🛟 폴더에서 지우기 전 원본을 이 PC 백업함에 */
+            if (window.PK_BACKUP) PK_BACKUP.add({ kind: 'collect', buf: buf.slice(0),
+              label: '📥 자동수집 ' + day + ' · 파일 ' + pick.take.length + '개 (' + pick.take.map(function(x){ return x.name; }).join(', ').slice(0, 120) + ')' });
             pkLoadCb = function(ok, info){
               if (!ok) return stop();   /* 실패 메시지는 loadFile 쪽에서 */
               C.saveLog(C.logAdd(C.loadLog(), day, pick.take, Date.now()));
@@ -825,11 +844,125 @@ function pkCollectRun(){
 }
 document.addEventListener('DOMContentLoaded', pkCollectRefresh);
 
+/* ─────────────── 🔁 재등록 · 🛟 백업함 (pk_backup.js) ───────────────
+   재등록 체크 = 수집 기록(이미 가져온 파일)·인쇄완료·인쇄이력 검사를 건너뜀
+   ※ 같은 PDF 안의 같은 송장 사본, 지금 목록에 이미 있는 번호는 그대로 걸러냄 (한 장 두 번 출력 방지) */
+var pkNoDupOnce = false;   /* 백업함 「다시 등록」 한 번만 */
+function pkNoDupOn(){ var el = document.getElementById('colNoDup'); return pkNoDupOnce || !!(el && el.checked); }
+
+/* 지금 작업(PDF + 송장 + 인쇄 기록)을 백업함에 */
+function pkBakSnapshot(why){
+  if (!window.PK_BACKUP || !rawBuffer || !invoices.length) return Promise.resolve();
+  var done = invoices.filter(function(i){ return printedInvNums[i.invNum]; }).length;
+  return PK_BACKUP.add({ kind: 'job', buf: rawBuffer.slice(0), invCount: invoices.length,
+    label: why + ' · 송장 ' + invoices.length + '건 (인쇄완료 ' + done + ' · 남음 ' + (invoices.length - done) + ')' + (pkCurrentFileName ? ' · ' + pkCurrentFileName : ''),
+    snap: { invoices: JSON.parse(JSON.stringify(invoices)), locGroups: JSON.parse(JSON.stringify(locGroups)),
+            printedInvNums: JSON.parse(JSON.stringify(printedInvNums)), printedMeta: JSON.parse(JSON.stringify(printedMeta || {})),
+            printedBatches: JSON.parse(JSON.stringify(printedBatches)), invCenter: JSON.parse(JSON.stringify(invCenter)),
+            fileName: pkCurrentFileName || '' } });
+}
+
+function pkBakOpen(){
+  if (!window.PK_BACKUP) { alert('백업함을 불러오지 못했습니다 — 새로고침해 주세요.'); return; }
+  var ov = document.getElementById('bakOv');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'bakOv'; ov.className = 'bak-ov';
+    ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = '<div class="bak-box"><div class="bak-h">🛟 백업함 <span style="color:var(--mu);font-weight:400;font-size:.75rem">이 PC 에서 찾는 중…</span></div></div>';
+  /* 이 PC 캐시에 남은 다른 작업 원본(다른 PC 가 초기화·교체한 것)도 먼저 백업함으로 */
+  pkIdbStash(pkJobKey).then(PK_BACKUP.list).then(pkBakRender);
+}
+function pkBakRender(list){
+  var ov = document.getElementById('bakOv'); if (!ov) return;
+  var KIND = { collect: '📥 자동수집 원본', job: '🧩 작업 통째(인쇄 기록 포함)', cache: '💾 PC 캐시 원본' };
+  var rows = list.map(function(m){
+    var mb = (m.size / 1048576).toFixed(1) + 'MB';
+    return '<div class="bak-row"><div><b>' + escHtml(m.label || '') + '</b></div>'
+      + '<div class="sm">' + new Date(m.ts).toLocaleString('ko-KR') + ' 보관 · ' + (KIND[m.kind] || m.kind) + ' · ' + mb + '</div>'
+      + '<div class="bt">'
+      + (m.snap ? '<button class="btn btn-s" style="border-color:var(--g);color:var(--g)" onclick="pkBakRestore(\'' + m.id + '\')">🧩 이 작업 그대로 되살리기</button>' : '')
+      + '<button class="btn btn-s" onclick="pkBakRegister(\'' + m.id + '\')">🔁 다시 등록 (중복 확인 안 함)</button>'
+      + '<button class="btn btn-s" onclick="pkBakDownload(\'' + m.id + '\')">💾 PDF 내려받기</button>'
+      + '<button class="btn btn-s" style="margin-left:auto;color:var(--mu)" onclick="pkBakDel(\'' + m.id + '\')">지우기</button>'
+      + '</div></div>';
+  }).join('');
+  ov.innerHTML = '<div class="bak-box"><div class="bak-h">🛟 백업함 <span style="color:var(--mu);font-weight:400;font-size:.72rem">이 PC 에만 · 최근 ' + PK_BACKUP.KEEP + '개 · ' + PK_BACKUP.KEEP_DAYS + '일</span>'
+    + '<button class="btn btn-s" style="margin-left:auto" onclick="document.getElementById(\'bakOv\').remove()">닫기</button></div>'
+    + '<div class="sm" style="color:var(--mu);font-size:.72rem;line-height:1.5">🧩 되살리기 = 송장 목록·인쇄완료 기록까지 그때 상태로 (모든 PC 에 다시 공유)<br>'
+    + '🔁 다시 등록 = PDF 만 새로 등록 · 이미 출력한 송장도 다시 들어오니 <b style="color:var(--y)">인쇄 전 확인</b><br>'
+    + '여기에 없으면 → 다른 PC(전에 이 작업을 열었던 PC)에서 이 백업함을 열어 보세요 · 그 PC 에서 새 작업을 받기 전에!</div>'
+    + (rows || '<div class="bak-row" style="color:var(--mu)">이 PC 백업함이 비어 있습니다.</div>') + '</div>';
+}
+function escHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+function pkBakFind(id){ return PK_BACKUP.list().then(function(l){ return l.filter(function(m){ return m.id === id; })[0] || null; }); }
+function pkBakDownload(id){
+  Promise.all([pkBakFind(id), PK_BACKUP.getBuf(id)]).then(function(r){
+    if (!r[1]) { alert('백업 PDF 를 읽지 못했습니다.'); return; }
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([r[1]], { type: 'application/pdf' }));
+    a.download = '백업_' + new Date(r[0] ? r[0].ts : Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+}
+function pkBakDel(id){ if (confirm('이 백업을 지울까요? (되돌릴 수 없음)')) PK_BACKUP.del(id).then(PK_BACKUP.list).then(pkBakRender); }
+function pkBakRegister(id){
+  PK_BACKUP.getBuf(id).then(function(buf){
+    if (!buf) { alert('백업 PDF 를 읽지 못했습니다.'); return; }
+    var ov = document.getElementById('bakOv'); if (ov) ov.remove();
+    goTo(0);
+    loadFile(new File([buf], '백업에서 다시 등록.pdf'), { noDup: true });
+  });
+}
+/* 그때 작업 그대로 — PDF·송장·인쇄완료·인쇄이력·센터를 되돌리고 모든 PC 에 다시 발행 */
+function pkBakRestore(id){
+  Promise.all([pkBakFind(id), PK_BACKUP.getBuf(id)]).then(function(r){
+    var m = r[0], buf = r[1], sn = m && m.snap;
+    if (!sn || !buf) { alert('백업을 읽지 못했습니다.'); return; }
+    var done = Object.keys(sn.printedInvNums || {}).length;
+    if (!confirm('이 작업을 그대로 되살립니다.\n송장 ' + (sn.invoices || []).length + '건 · 인쇄완료 ' + done + '건 기록까지 그때 상태로 돌아갑니다.'
+      + (invoices.length ? '\n\n⚠ 지금 작업(송장 ' + invoices.length + '건)은 백업함으로 옮기고 바꿉니다.' : '')
+      + (pkReady ? '\n다른 PC 에도 이 작업이 다시 공유됩니다.' : '') + '\n\n진행할까요?')) return;
+    var go = function(){
+      loadPdfjs(function(){
+        pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise.then(function(doc){
+          rawBuffer = buf; pdfDoc = doc;
+          invoices = sn.invoices || []; locGroups = sn.locGroups || [];
+          printedInvNums = sn.printedInvNums || {}; printedMeta = sn.printedMeta || {};
+          printedBatches = sn.printedBatches || []; invCenter = sn.invCenter || {};
+          pkCurrentFileName = sn.fileName || '백업에서 되살림';
+          pkAppendCtx = null;
+          saveSession();
+          var ov = document.getElementById('bakOv'); if (ov) ov.remove();
+          var fin = function(){
+            setMsg('m0', 'ok', '🧩 백업에서 되살림 — 송장 ' + invoices.length + '건 · 인쇄완료 ' + done + '건 기록 복원');
+            pkRerender(); goTo(0); pkShowNext();
+          };
+          var pub = pkPublishJob();
+          if (!pub || !pkBase) { fin(); return; }
+          var keep = { p: printedInvNums, m: printedMeta, b: printedBatches, c: invCenter };
+          pub.then(function(){
+            var pr = {};
+            Object.keys(keep.p).forEach(function(n){ var mm = keep.m[n] || {}; pr[pkSafeKey(n)] = { inv: n, ts: mm.ts || Date.now(), by: mm.by || pkUid }; });
+            var bt = {};
+            keep.b.slice().reverse().forEach(function(b){ bt[pkBase.child('batches').push().key] = b; });
+            return pkBase.update({ printed: Object.keys(pr).length ? pr : null, batches: Object.keys(bt).length ? bt : null,
+                                   center: Object.keys(keep.c).length ? keep.c : null });
+          }).then(fin, function(err){ alert('되살린 인쇄 기록을 공유하지 못했습니다: ' + (err && err.message || err)); fin(); });
+        }).catch(function(err){ alert('백업 PDF 를 열지 못했습니다: ' + (err && err.message || err)); });
+      });
+    };
+    if (invoices.length) pkBakSnapshot('🔄 백업 되살리기 전 작업').then(go); else go();
+  });
+}
+
 /* ─────────────── PDF 로딩 ─────────────── */
 var pkCurrentFileName = '';   /* 마지막 업로드 파일명 — DB 발행 메타용 */
 var pkAppendCtx = null;       /* 추가 등록 중일 때 { oldBuf, oldInvoices, fileName } — processAllPages 가 교체 대신 합치기 */
 function loadFile(file, opts) {
   opts = opts || {};
+  pkNoDupOnce = !!opts.noDup;
   /* 자동수집은 묻지 않고 늘 ➕ 추가 등록 (작업이 없으면 새로 시작) */
   if (opts.collect && invoices.length) { pkAppendStart(file); return; }
   if (!opts.collect) pkLoadCb = null;
@@ -846,7 +979,8 @@ function loadFile(file, opts) {
       pkAppendStart(file);
       return;
     }
-    if (!confirm('🔄 교체하면 현재 작업(송장 ' + invoices.length + '건 · 남은 ' + left + '건 · 인쇄완료 기록·재출력 목록)이 모두 지워지고 새로 시작합니다.\n\n교체할까요?')) return;
+    if (!confirm('🔄 교체하면 현재 작업(송장 ' + invoices.length + '건 · 남은 ' + left + '건 · 인쇄완료 기록·재출력 목록)이 모두 지워지고 새로 시작합니다.\n(지금 작업은 🛟 백업함에 남깁니다)\n\n교체할까요?')) return;
+    pkBakSnapshot('🔄 교체 전 작업');
   }
   pkAppendCtx = null;
   pkCurrentFileName = (file && file.name) || '';
@@ -911,8 +1045,12 @@ function pkAppendMerge(newInv, done){
   /* ① 이미 있는 송장번호 — 기존 목록 + 인쇄완료 + 인쇄이력 전부 */
   var seen = {};
   (ctx.oldInvoices || []).forEach(function(i){ seen[i.invNum] = 'list'; });
-  Object.keys(printedInvNums || {}).forEach(function(n){ seen[n] = 'printed'; });
-  (printedBatches || []).forEach(function(b){ (b.invNums || []).forEach(function(n){ seen[n] = 'printed'; }); });
+  /* 🔁 재등록(중복 확인 안 함) — 인쇄완료·인쇄이력 검사는 건너뜀 (지금 목록에 같은 번호가 두 줄 생기는 것만 막음) */
+  if (!pkNoDupOn()) {
+    Object.keys(printedInvNums || {}).forEach(function(n){ seen[n] = 'printed'; });
+    (printedBatches || []).forEach(function(b){ (b.invNums || []).forEach(function(n){ seen[n] = 'printed'; }); });
+  }
+  pkNoDupOnce = false;
   var keep = [], dupList = 0, dupPrinted = 0;
   newInv.forEach(function(inv){
     var s = seen[inv.invNum];
@@ -2535,6 +2673,7 @@ function esc2(s){ return String(s||'').replace(/"/g,'""'); }
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="wms_sync.js"></script>
 <script src="ez_collect.js"></script>
+<script src="pk_backup.js"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════
    실시간 DB 연동 (PC 간 이어작업)
@@ -2617,7 +2756,7 @@ function pkIdbOpen(){
 /* 이전 캐시 비우고 새 PDF 저장 (jobKey 로 식별) */
 function pkIdbReplace(key, buf){
   if (!key || !buf) return Promise.resolve();
-  return pkIdbOpen().then(function(db){
+  return pkIdbStash(key).then(pkIdbOpen).then(function(db){
     return new Promise(function(res){
       try {
         var tx = db.transaction(PK_IDB_STORE, 'readwrite'), st = tx.objectStore(PK_IDB_STORE);
@@ -2639,8 +2778,28 @@ function pkIdbGet(key){
     });
   }).catch(function(){ return null; });
 }
-function pkIdbClear(){
+/* 지우기 전에 다른 작업 캐시를 🛟 백업함으로 — 다른 PC 가 초기화·교체해도 이 PC 에 원본이 남음 */
+function pkIdbStash(exceptKey){
+  if (!window.PK_BACKUP) return Promise.resolve();
   return pkIdbOpen().then(function(db){
+    return new Promise(function(res){
+      var out = [];
+      try {
+        var rq = db.transaction(PK_IDB_STORE, 'readonly').objectStore(PK_IDB_STORE).openCursor();
+        rq.onsuccess = function(){ var c = rq.result; if (!c) { res(out); return; } if (c.key !== exceptKey) out.push({ key: c.key, buf: c.value }); c.continue(); };
+        rq.onerror = function(){ res(out); };
+      } catch(e){ res(out); }
+    });
+  }).then(function(list){
+    return list.reduce(function(p, it){
+      var t = PK_BACKUP.jobKeyTs(it.key), name = String(it.key).replace(/^J\d+_?/, '');
+      return p.then(function(){ return PK_BACKUP.add({ kind: 'cache', src: String(it.key), buf: it.buf,
+        label: '💾 이 PC 에 남아 있던 작업 원본' + (t ? ' (' + new Date(t).toLocaleString('ko-KR') + ' 등록)' : '') + (name ? ' · ' + name : '') }); });
+    }, Promise.resolve());
+  }).catch(function(){});
+}
+function pkIdbClear(){
+  return pkIdbStash(null).then(pkIdbOpen).then(function(db){
     return new Promise(function(res){
       try {
         var tx = db.transaction(PK_IDB_STORE, 'readwrite'); tx.objectStore(PK_IDB_STORE).clear();
@@ -3013,7 +3172,7 @@ function pkPublishJob(opts){
   pkPdfState = payload.pdf; pkUpdateWarehouseBadge();  /* 업로더 즉시 배지 반영 */
 
   pkSetStatus('☁ 작업 업로드 중...', 'warn');
-  (opts.append ? pkBase.update(payload) : pkBase.set(payload)).then(function(){
+  return (opts.append ? pkBase.update(payload) : pkBase.set(payload)).then(function(){
     if (small){
       pkSetStatus('☁ 실시간 연동 중 · ' + (pkCurrentFileName||'') + ' 업로드됨 (' + mb + 'MB)', 'ok');
       return;
@@ -3134,7 +3293,10 @@ function pkResetAll(){
   var C = window.EZ_COLLECT, colN = 0;
   if (C) C.logDays(C.loadLog()).forEach(function(d){ colN += Object.keys(C.logFor(C.loadLog(), d)).length; });
   var colWarn = colN ? '\n\n📥 자동수집했던 PDF 가 이 PC 폴더에 남아 있으면 함께 지웁니다 (수집 뒤 새로 쌓인 송장은 남김).' : '';
-  if (!confirm('현재 작업을 전체 초기화합니다.\n업로드한 송장·PDF·인쇄기록이 모두 사라집니다.' + remoteWarn + colWarn + '\n\n진행하시겠습니까?')) return;
+  if (!confirm('현재 작업을 전체 초기화합니다.\n업로드한 송장·PDF·인쇄기록이 모두 사라집니다.' + remoteWarn + colWarn + '\n\n🛟 지우기 전 작업은 이 PC 백업함에 남깁니다 (2단계 🛟 백업함에서 되살림).\n\n진행하시겠습니까?')) return;
+  pkBakSnapshot('🗑 전체 초기화 전 작업').then(function(){ pkResetGo(colN, C); });
+}
+function pkResetGo(colN, C){
   try { localStorage.removeItem(SESSION_KEY); } catch(e){}
   pkClearRemoteJob();
   /* 폴더 정리(권한 창이 뜰 수 있음)를 마친 뒤 새로고침 */
@@ -3144,7 +3306,7 @@ function pkResetAll(){
   }) : Promise.resolve();
   cleanup.then(function(){
     pkIdbClear().then(function(){ location.reload(); }, function(){ location.reload(); });
-    setTimeout(function(){ location.reload(); }, 1500);  /* IDB 응답 없어도 강제 새로고침 */
+    setTimeout(function(){ location.reload(); }, 8000);  /* IDB 응답 없어도 강제 새로고침 (백업함 옮기기 시간 포함) */
   });
 }
 
