@@ -103,7 +103,7 @@ dialog h2{font-size:15px;font-weight:700;margin-bottom:.8rem}
 <div class="top">
   <div class="top-in">
     <div class="brand">🕒 QR 출퇴근기록기 <small>QR ATTENDANCE</small></div>
-    <select id="companySel" class="hide" onchange="pick(this.value)" aria-label="고객사 선택"></select>
+    <span id="coName" style="font-weight:700"></span><select id="companySel" class="hide" onchange="pick(this.value)" aria-label="고객사 선택"></select>
     <div class="top-r"><span id="who"></span><a class="btn sm" href="/index.html">홈</a></div>
   </div>
   <nav class="tabs" id="tabs"></nav>
@@ -181,7 +181,16 @@ firebase.auth().onAuthStateChanged(function(u){
   }).catch(function(e){ showNone('권한을 확인하지 못했습니다: ' + (e.code || e.message)); });
 });
 
-function showNone(text){ $('main').classList.add('hide'); var b = $('noCompany'); b.textContent = text; b.classList.remove('hide'); }
+function showNone(text){
+  $('main').classList.add('hide');
+  var b = $('noCompany'); b.textContent = text; b.classList.remove('hide');
+  var again = document.createElement('button');
+  again.type = 'button'; again.className = 'btn'; again.style.cssText = 'display:block;margin-top:.8rem'; again.textContent = '다른 구글 계정으로 로그인';
+  again.onclick = function(){
+    firebase.auth().signOut().then(function(){ location.replace('/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search)); });
+  };
+  b.appendChild(again);
+}
 
 function loadCompanies(){
   var load = S.isSuper
@@ -195,11 +204,15 @@ function loadCompanies(){
   return load.then(function(cs){
     S.companies = cs;
     var ids = Object.keys(cs).sort(function(a, b){ return String(cs[a].name).localeCompare(String(cs[b].name), 'ko'); });
-    if (!ids.length && !S.isSuper) { showNone('담당 고객사가 없습니다. 등록된 구글 메일로 로그인했는지 확인해 주세요.'); return; }
+    var wanted = new URLSearchParams(location.search).get('c');
+    if (!S.isSuper && (!ids.length || (wanted && !cs[wanted]))) { showNone('이 고객사의 담당자로 등록된 메일이 아닙니다 (' + (S.user.email || '') + '). 등록된 구글 메일로 로그인해 주세요.'); return; }
+    if (wanted && cs[wanted] && !S.cid) S.cid = wanted;
+    document.querySelector('.top-r .btn').classList.toggle('hide', !S.isSuper);
     $('noCompany').classList.add('hide'); $('main').classList.remove('hide');
     var sel = $('companySel');
     sel.innerHTML = ids.map(function(id){ return '<option value="' + esc(id) + '">' + esc(cs[id].name) + (cs[id].off ? ' (중지)' : '') + '</option>'; }).join('');
     sel.classList.toggle('hide', ids.length < 2);
+    $('coName').textContent = (!S.isSuper && ids.length === 1) ? cs[ids[0]].name : '';
     if (!S.cid || !cs[S.cid]) S.cid = ids[0] || null;
     if (S.cid) sel.value = S.cid;
     if (!S.cid) S.tab = 'companies';
@@ -210,7 +223,7 @@ function pick(cid){ S.cid = cid; openTab(S.tab); }
 
 var TABS = [['records','기록'],['qr','QR·회사 정보'],['workers','직원'],['mail','자동 메일']];
 function renderTabs(){
-  var list = TABS.slice(); if (S.isSuper) list.push(['companies','고객사 관리']);
+  var list = S.isSuper ? TABS.concat([['companies','고객사 관리']]) : TABS.slice(0, 1);
   if (!S.cid) list = list.filter(function(t){ return t[0] === 'companies'; });
   $('tabs').innerHTML = list.map(function(t){ return '<button type="button" data-t="' + t[0] + '" onclick="openTab(\'' + t[0] + '\')">' + t[1] + '</button>'; }).join('');
 }
@@ -228,7 +241,7 @@ function tabRecords(){
     '<div class="row"><input type="date" id="rFrom" value="' + esc(S.from) + '" aria-label="시작일"> ~ <input type="date" id="rTo" value="' + esc(S.to) + '" aria-label="종료일">'
     + '<input id="rQ" placeholder="이름 검색" value="' + esc(S.q) + '" oninput="S.q=this.value;drawLogs()" aria-label="이름 검색">'
     + '<button type="button" class="btn" onclick="loadLogs()">조회</button><span class="sp"></span>'
-    + '<button type="button" class="btn" onclick="addLog()">수기 추가</button><button type="button" class="btn pri" onclick="downloadExcel()">엑셀 다운로드</button></div>'
+    + (S.isSuper ? '<button type="button" class="btn" onclick="addLog()">수기 추가</button>' : '') + '<button type="button" class="btn pri" onclick="downloadExcel()">엑셀 다운로드</button></div>'
     + '<div id="rSum" class="sum"></div><div id="rList" class="tblwrap"></div>';
   loadLogs();
 }
@@ -285,12 +298,12 @@ function drawLogs(){
   $('rSum').innerHTML = stat('기록', list.length + '건') + stat('인원', Object.keys(people).length + '명') + stat('총 근무', dur(total)) + stat('퇴근 미기록', noout + '건')
     + (flags ? stat('한 폰 여러 이름', flags + '건') : '');
   if (!list.length) { $('rList').innerHTML = '<div class="empty">이 기간의 기록이 없습니다.</div>'; return; }
-  $('rList').innerHTML = '<table><thead><tr><th>날짜</th><th>이름</th><th>휴대폰</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>상태</th><th></th></tr></thead><tbody>'
+  $('rList').innerHTML = '<table><thead><tr><th>날짜</th><th>이름</th><th>휴대폰</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>상태</th>' + (S.isSuper ? '<th></th>' : '') + '</tr></thead><tbody>'
     + list.map(function(l){
       return '<tr><td>' + dayStr(l.in) + '</td><td>' + esc(l.name) + '</td><td>' + esc(maskPhone(l.phone)) + '</td><td>' + hm(l.in) + '</td><td>' + hm(l.out) + '</td><td>'
         + (l.out != null ? dur(Math.round((l.out - l.in) / 60000)) : '') + '</td><td>' + statusOf(l)
         + (l.manual ? '<span class="tag">수기</span>' : '') + (l.edits ? '<span class="tag">수정됨</span>' : '') + (shared(l) ? '<span class="tag warn">한 폰 여러 이름</span>' : '')
-        + '</td><td><button type="button" class="btn sm" onclick="editLog(\'' + esc(l.id) + '\')">수정</button></td></tr>';
+        + '</td>' + (S.isSuper ? '<td><button type="button" class="btn sm" onclick="editLog(\'' + esc(l.id) + '\')">수정</button></td>' : '') + '</tr>';
     }).join('') + '</tbody></table>';
 }
 function dlg(html){ var d = $('dlg'); d.innerHTML = html; if (!d.open) d.showModal(); return d; }
@@ -349,13 +362,15 @@ function qrDataUrl(url){
   var c = host.querySelector('canvas');
   return c ? c.toDataURL('image/png') : '';
 }
-function posterHtml(c, qrSrc){
+function adminUrl(cid){ return 'https://makewon.com/qr_attend.html?c=' + encodeURIComponent(cid); }
+function posterHtml(c, qrSrc, forAdmin){
   var logoOk = c.logo && c.logo.indexOf('data:image/') === 0;
   return '<div class="poster"><div class="pl">' + (logoOk ? '<img alt="" src="' + esc(c.logo) + '">' : esc(String(c.name || '').slice(0, 1))) + '</div>'
-    + '<div class="pn">' + esc(c.name) + '</div>' + (c.site ? '<div class="ps">' + esc(c.site) + '</div>' : '') + '<div class="pt">출퇴근 QR</div>'
+    + '<div class="pn">' + esc(c.name) + '</div>' + (c.site ? '<div class="ps">' + esc(c.site) + '</div>' : '') + '<div class="pt">' + (forAdmin ? '관리자 QR' : '출퇴근 QR') + '</div>'
     + '<img class="pq" alt="출퇴근 QR 코드" src="' + esc(qrSrc) + '">'
-    + '<div class="pa">출근과 퇴근 때 한 번씩 찍어 주세요</div>'
-    + '<ol><li>1. 휴대폰 카메라로 QR을 찍습니다</li><li>2. 이름을 확인합니다</li><li>3. 출근하기 또는 퇴근하기를 누릅니다</li></ol></div>';
+    + (forAdmin
+      ? '<div class="pa">직원 근태 기록 확인용입니다</div><ol><li>1. 휴대폰 카메라로 QR을 찍습니다</li><li>2. 등록된 담당자 구글 메일로 로그인합니다</li><li>3. 우리 회사 직원의 출퇴근 기록을 확인합니다</li></ol></div>'
+      : '<div class="pa">출근과 퇴근 때 한 번씩 찍어 주세요</div><ol><li>1. 휴대폰 카메라로 QR을 찍습니다</li><li>2. 이름을 확인합니다</li><li>3. 출근하기 또는 퇴근하기를 누릅니다</li></ol></div>');
 }
 function tabQr(){
   var c = S.companies[S.cid];
@@ -368,7 +383,7 @@ function tabQr(){
     + (c.logo ? '<button type="button" class="btn dan" onclick="saveLogo(null)">로고 지우기</button>' : '') + '</div>'
     + '<label class="f">현장명 (폰 화면과 인쇄물의 회사명 아래에 나옵니다)<input id="siteInput" maxlength="40" value="' + esc(c.site || '') + '"></label>'
     + '<button type="button" class="btn" onclick="saveSite()">현장명 저장</button></div>'
-    + '<div class="card"><h2>QR 안내문</h2><div class="row"><button type="button" class="btn pri" onclick="printPoster()">A4 인쇄</button><button type="button" class="btn" onclick="saveQrImage()">QR 이미지 저장</button>'
+    + '<div class="card"><h2>직원용 출퇴근 QR 안내문</h2><div class="row"><button type="button" class="btn pri" onclick="printPoster()">A4 인쇄</button><button type="button" class="btn" onclick="saveQrImage()">QR 이미지 저장</button>'
     + '<button type="button" class="btn" onclick="copyUrl()">주소 복사</button>' + (S.isSuper ? '<span class="sp"></span><button type="button" class="btn dan" onclick="rotateKey()">QR 재발급</button>' : '') + '</div>'
     + (S.isSuper ? '<p class="hint" style="margin-bottom:12px">재발급하면 이전 QR은 바로 쓸 수 없게 되니 인쇄물을 교체해야 합니다.</p>' : '')
     + posterHtml(c, src) + '</div>';
@@ -466,8 +481,8 @@ function tabMail(){
   var opt = function(v, t){ return '<option value="' + v + '"' + ((m.freq || 'off') === v ? ' selected' : '') + '>' + t + '</option>'; };
   $('tab-mail').innerHTML =
     (m.lastError ? '<div class="card err">최근 자동 메일 실패: ' + esc(m.lastError) + '</div>' : '')
-    + '<div class="card"><h2>자동 발송 설정</h2>'
-    + '<label class="f">주기<select id="mFreq">' + opt('off', '보내지 않음') + opt('daily', '매일 (오전 7시, 전날 기록)') + opt('weekly', '일주일에 한 번 (월요일 오전 7시, 지난주 기록)') + opt('monthly', '말일 기준 (다음 달 1일 오전 7시, 지난달 기록)') + '</select></label>'
+    + '<div class="card"><h2>' + esc(c.name) + ' 자동 발송 설정</h2><p class="hint" style="margin-bottom:.7rem">고객사마다 따로 저장됩니다. 주기에 따라 보고서 양식이 달라집니다.</p>'
+    + '<label class="f">주기<select id="mFreq">' + opt('off', '보내지 않음') + opt('daily', '매일 오전 7시 — 일간 근태일지 (전날 기록)') + opt('weekly', '매주 월요일 오전 7시 — 주간 근태표 (지난주 기록)') + opt('monthly', '매월 1일 오전 7시 — 월간 근태표 (지난달 기록)') + '</select></label>'
     + '<label class="f">받는 사람 (여러 명은 쉼표로 구분)<textarea id="mTo">' + esc((m.to || []).join(', ')) + '</textarea></label>'
     + '<label class="f">참조 (여러 명은 쉼표로 구분)<textarea id="mCc">' + esc((m.cc || []).join(', ')) + '</textarea></label>'
     + '<div id="mErr" class="err" style="margin-bottom:8px"></div><button type="button" class="btn pri" onclick="saveMail()">저장</button></div>'
@@ -505,11 +520,41 @@ function sendNow(){
 function tabCompanies(){
   var ids = Object.keys(S.companies).sort(function(a, b){ return String(S.companies[a].name).localeCompare(String(S.companies[b].name), 'ko'); });
   $('tab-companies').innerHTML = '<div class="row"><span class="sp"></span><button type="button" class="btn pri" onclick="companyForm()">고객사 등록</button></div>'
-    + (ids.length ? '<div class="tblwrap"><table><thead><tr><th>회사명</th><th>현장명</th><th>담당자 메일</th><th>상태</th><th></th></tr></thead><tbody>' + ids.map(function(id){
+    + (ids.length ? '<div class="tblwrap"><table><thead><tr><th>회사명</th><th>현장명</th><th>담당자 메일</th><th>자동 메일</th><th>상태</th><th></th></tr></thead><tbody>' + ids.map(function(id){
         var c = S.companies[id];
-        return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.site) + '</td><td>' + esc(Object.values(c.adminEmails || {}).join(', ')) + '</td><td>' + (c.off ? '<span class="tag warn">중지</span>' : '<span class="tag on">사용 중</span>') + '</td>'
-          + '<td><button type="button" class="btn sm" onclick="companyForm(\'' + esc(id) + '\')">수정</button></td></tr>';
+        return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.site) + '</td><td>' + esc(Object.values(c.adminEmails || {}).join(', ')) + '</td><td>' + mailLabel(c) + '</td><td>' + (c.off ? '<span class="tag warn">중지</span>' : '<span class="tag on">사용 중</span>') + '</td>'
+          + '<td><button type="button" class="btn sm" onclick="companyForm(\'' + esc(id) + '\')">수정</button> '
+          + '<button type="button" class="btn sm" onclick="adminQr(\'' + esc(id) + '\')">관리자 QR</button> '
+          + '<button type="button" class="btn sm" onclick="openCompanyMail(\'' + esc(id) + '\')">메일 설정</button></td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty">첫 고객사를 등록해 주세요.</div>');
+}
+var FREQ_LABEL = { off:'보내지 않음', daily:'매일 (일간 근태일지)', weekly:'매주 월요일 (주간 근태표)', monthly:'매월 1일 (월간 근태표)' };
+function mailLabel(c){
+  var m = c.mail || {}, t = FREQ_LABEL[m.freq || 'off'];
+  if (m.freq && m.freq !== 'off') t += ' · ' + ((m.to || []).length + (m.cc || []).length) + '명';
+  return esc(t) + (m.lastError ? '<span class="tag warn">실패</span>' : '');
+}
+function openCompanyMail(id){ S.cid = id; $('companySel').value = id; openTab('mail'); }
+function adminQr(id){
+  var c = S.companies[id], url = adminUrl(id), src = qrDataUrl(url);
+  S.adminPoster = { c:c, src:src, url:url };
+  dlg('<h2>' + esc(c.name) + ' 관리자 QR</h2>'
+    + '<p class="hint" style="margin-bottom:.7rem">담당자가 찍거나 주소로 들어와 등록된 구글 메일로 로그인하면, 이 회사의 기록만 볼 수 있습니다. 직원용 출퇴근 QR과 다르니 직원에게 나눠 주지 마세요.</p>'
+    + posterHtml(c, src, true)
+    + '<div class="row" style="margin:14px 0 0"><button type="button" class="btn pri" onclick="printAdminPoster()">A4 인쇄</button><button type="button" class="btn" onclick="saveAdminQr()">이미지 저장</button><button type="button" class="btn" onclick="copyAdminUrl()">주소 복사</button><span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">닫기</button></div>');
+}
+function printAdminPoster(){
+  $('printArea').innerHTML = posterHtml(S.adminPoster.c, S.adminPoster.src, true);
+  window.print();
+}
+function saveAdminQr(){
+  var a = document.createElement('a'); a.href = S.adminPoster.src; a.download = '관리자QR_' + S.adminPoster.c.name + '.png';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function copyAdminUrl(){
+  var u = S.adminPoster.url;
+  if (navigator.clipboard) navigator.clipboard.writeText(u).then(function(){ toast('주소를 복사했습니다'); }, function(){ prompt('주소를 복사해 주세요', u); });
+  else prompt('주소를 복사해 주세요', u);
 }
 function companyForm(id){
   var c = id ? S.companies[id] : {};

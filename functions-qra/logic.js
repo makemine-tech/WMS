@@ -8,7 +8,7 @@ const STALE_MS = 18 * 3600e3;   /* 출근 후 이만큼 지나면 「퇴근 미�
 const DUP_MS = 60000;           /* 이 안의 같은 요청은 한 번으로 침 */
 const KST = 9 * 3600e3;
 const DAY = 24 * 3600e3;
-const RETAIN_MONTHS = 36;
+const RETAIN_MONTHS = 12;
 const COMPANY_OFF_MESSAGE = '담당자에게 새 QR을 요청해 주세요';
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -62,19 +62,28 @@ function duePeriod(freq, now){
   const d = new Date(today + KST);
   if (freq === 'daily'){
     const from = today - DAY;
-    return { id: 'D' + dayOf(from), fromMs: from, toMs: today, label: dayOf(from) };
+    return { id: 'D' + dayOf(from), kind: 'daily', fromMs: from, toMs: today, label: dayOf(from) };
   }
   if (freq === 'weekly'){
     if (d.getUTCDay() !== 1) return null;
     const from = today - 7 * DAY;
-    return { id: 'W' + dayOf(from), fromMs: from, toMs: today, label: dayOf(from) + ' ~ ' + dayOf(today - DAY) };
+    return { id: 'W' + dayOf(from), kind: 'weekly', fromMs: from, toMs: today, label: dayOf(from) + ' ~ ' + dayOf(today - DAY) };
   }
   if (freq === 'monthly'){
     if (d.getUTCDate() !== 1) return null;
     const from = kstDate(d.getUTCFullYear(), d.getUTCMonth() - 1, 1);
-    return { id: 'M' + monthOf(from), fromMs: from, toMs: today, label: monthOf(from) };
+    return { id: 'M' + monthOf(from), kind: 'monthly', fromMs: from, toMs: today, label: monthOf(from) };
   }
   return null;
+}
+
+/* 직접 고른 기간의 보고서 양식 — 하루·이레·한 달(1일~말일)은 자동 메일과 같은 양식 */
+function kindOf(fromMs, toMs){
+  const days = Math.round((toMs - fromMs) / DAY);
+  if (days === 1) return 'daily';
+  if (days === 7) return 'weekly';
+  if (dayOf(fromMs).endsWith('-01') && dayOf(toMs).endsWith('-01') && days >= 28 && days <= 31) return 'monthly';
+  return 'custom';
 }
 
 /* toMs 는 기간에 포함되지 않음 */
@@ -133,4 +142,4 @@ function summarize(logs){
 }
 
 module.exports = { STALE_MS, DUP_MS, COMPANY_OFF_MESSAGE, normalizePhone, normalizeName, workerId, hashToken, checkCompany, resolveIdentity,
-  decidePunch, nextAction, monthOf, dayOf, duePeriod, monthsInRange, monthsToPurge, validateEdit, parseRecipients, workMinutes, summarize };
+  decidePunch, nextAction, monthOf, dayOf, duePeriod, kindOf, monthsInRange, monthsToPurge, validateEdit, parseRecipients, workMinutes, summarize };

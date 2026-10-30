@@ -47,6 +47,16 @@ test('담당자 판별: 자기 회사만, 미인증 메일 거부', async () => 
   assert.equal(await a.canManage(null, 'c1'), false);
 });
 
+test('담당자는 자기 회사 엑셀만, 수정·직원 관리·발송은 거부', async () => {
+  const { a } = setup(IN + 3600e3);
+  const c = { cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN };
+  await assert.rejects(a.editLog(c, MGR), denied);
+  await assert.rejects(a.editLog({ cid: 'c1', create: { name: '가', phone: '01099998888' }, inMs: IN }, MGR), denied);
+  await assert.rejects(a.editWorker({ cid: 'c1', wid: 'W1', name: 'x' }, MGR), denied);
+  await assert.rejects(a.sendNow({ cid: 'c1', fromMs: IN, toMs: IN + 1 }, MGR), denied);
+  assert.ok((await a.exportLogs({ cid: 'c1', fromMs: IN, toMs: IN + 3600e3 }, MGR)).base64);
+});
+
 test('다른 고객사 담당자는 수정·엑셀·발송 거부', async () => {
   const { a } = setup(IN + 3600e3);
   const c = { cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN };
@@ -58,44 +68,44 @@ test('다른 고객사 담당자는 수정·엑셀·발송 거부', async () => 
 
 test('퇴근이 출근보다 앞이면 거부', async () => {
   const { a, db } = setup(IN + 3600e3);
-  await assert.rejects(a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN, outMs: IN - 60e3 }, MGR), /앞입니다/);
+  await assert.rejects(a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN, outMs: IN - 60e3 }, SUPER), /앞입니다/);
   assert.equal(db.get('qra/logs/c1/2026-10/L1/out'), null);
 });
 
 test('다른 달로 옮기는 수정은 거부', async () => {
   const { a } = setup(at('2026-11-05T09:00:00'));
-  await assert.rejects(a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: at('2026-11-01T09:00:00') }, MGR), /다른 달/);
+  await assert.rejects(a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: at('2026-11-01T09:00:00') }, SUPER), /다른 달/);
 });
 
 test('수정 전 값을 남기고, 근무 중 기록의 출근 수정은 open 에 반영', async () => {
   const { a, db } = setup(IN + 3600e3);
-  await a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN - 600e3 }, MGR);
+  await a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN - 600e3 }, SUPER);
   const log = db.get('qra/logs/c1/2026-10/L1');
   assert.equal(log.in, IN - 600e3);
   assert.equal(log.status, 'open');
   const e = Object.values(log.edits)[0];
   assert.equal(e.in, IN);
-  assert.equal(e.by, 'Kim.Mgr@gmail.com');
+  assert.equal(e.by, 'boss@gmail.com');
   assert.equal(db.get('qra/open/c1/W1/in'), IN - 600e3);
 });
 
 test('근무 중 기록에 퇴근을 넣으면 근무 중이 풀림', async () => {
   const { a, db } = setup(IN + 7200e3);
-  await a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN, outMs: IN + 3600e3 }, MGR);
+  await a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', inMs: IN, outMs: IN + 3600e3 }, SUPER);
   assert.equal(db.get('qra/logs/c1/2026-10/L1/status'), 'done');
   assert.equal(db.get('qra/open/c1/W1/logId'), null);
 });
 
 test('기록 삭제 시 근무 중도 풀림', async () => {
   const { a, db } = setup(IN + 3600e3);
-  await a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', remove: true }, MGR);
+  await a.editLog({ cid: 'c1', month: '2026-10', logId: 'L1', remove: true }, SUPER);
   assert.equal(db.get('qra/logs/c1/2026-10/L1'), null);
   assert.equal(db.get('qra/open/c1/W1'), null);
 });
 
 test('수기 추가: 기존 직원에 붙고 동의 기록은 만들지 않음', async () => {
   const { a, db } = setup(at('2026-10-31T09:00:00'));
-  await a.editLog({ cid: 'c1', create: { name: '박지수', phone: '010-9999-8888' }, inMs: IN, outMs: IN + 3600e3 }, MGR);
+  await a.editLog({ cid: 'c1', create: { name: '박지수', phone: '010-9999-8888' }, inMs: IN, outMs: IN + 3600e3 }, SUPER);
   const logs = Object.values(db.get('qra/logs/c1/2026-10'));
   const made = logs.find((l) => l.name === '박지수');
   assert.equal(made.status, 'done');
@@ -107,9 +117,9 @@ test('수기 추가: 기존 직원에 붙고 동의 기록은 만들지 않음',
 
 test('직원 이름 수정, 삭제해도 기록은 남고 토큰은 지워짐', async () => {
   const { a, db } = setup(IN + 3600e3);
-  await a.editWorker({ cid: 'c1', wid: 'W1', name: '김 민 지2' }, MGR);
+  await a.editWorker({ cid: 'c1', wid: 'W1', name: '김 민 지2' }, SUPER);
   assert.equal(db.get('qra/workers/c1/W1/name'), '김민지2');
-  await a.editWorker({ cid: 'c1', wid: 'W1', remove: true }, MGR);
+  await a.editWorker({ cid: 'c1', wid: 'W1', remove: true }, SUPER);
   assert.equal(db.get('qra/workers/c1/W1'), null);
   assert.equal(db.get('qra/tokens/c1/H1'), null);
   assert.equal(db.get('qra/open/c1/W1'), null);
@@ -134,7 +144,7 @@ test('엑셀은 기간 안의 기록만', async () => {
   const r = await a.exportLogs({ cid: 'c1', fromMs: at('2026-10-31T00:00:00'), toMs: at('2026-11-02T00:00:00') }, MGR);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(Buffer.from(r.base64, 'base64'));
-  assert.equal(wb.getWorksheet('근태일지').rowCount, 3);
+  assert.equal(wb.getWorksheet('근태일지').rowCount, 7);   /* 머리 5줄 + 기록 2건 */
   assert.ok(r.filename.endsWith('.xlsx'));
 });
 
@@ -181,18 +191,18 @@ test('예약: 18시간 넘게 열린 기록을 미기록으로 닫음', async ()
   assert.equal(s.db.get('qra/open/c1/W1/logId'), null);
 });
 
-test('예약: 7시 회차에 3년 지난 기록·직원 삭제, 다른 시각엔 안 함', async () => {
-  const old = at('2023-08-15T09:00:00');
-  const extra = { logs: { c1: { '2023-09': { O: { wid: 'W0', in: old } }, '2023-10': { K: { wid: 'W1', in: at('2023-10-01T09:00:00') } } } },
+test('예약: 7시 회차에 1년 지난 기록·직원 삭제, 다른 시각엔 안 함', async () => {
+  const old = at('2025-08-15T09:00:00');
+  const extra = { logs: { c1: { '2025-09': { O: { wid: 'W0', in: old } }, '2025-10': { K: { wid: 'W1', in: at('2025-10-01T09:00:00') } } } },
     workers: { c1: { W0: { name: '옛', phone: '1', lastAt: old, tokens: { H0: { at: 1 } } }, W1: { name: '새', phone: '2', lastAt: at('2026-10-01T09:00:00') } } },
     tokens: { c1: { H0: 'W0' } }, open: {} };
   const s = setup(at('2026-10-31T08:00:00'), extra);
   await s.a.runTick();
-  assert.ok(s.db.get('qra/logs/c1/2023-09'));
+  assert.ok(s.db.get('qra/logs/c1/2025-09'));
   s.clock.now = at('2026-10-31T07:00:00');
   await s.a.runTick();
-  assert.equal(s.db.get('qra/logs/c1/2023-09'), null);
-  assert.ok(s.db.get('qra/logs/c1/2023-10'));
+  assert.equal(s.db.get('qra/logs/c1/2025-09'), null);
+  assert.ok(s.db.get('qra/logs/c1/2025-10'));
   assert.equal(s.db.get('qra/workers/c1/W0'), null);
   assert.equal(s.db.get('qra/tokens/c1/H0'), null);
   assert.ok(s.db.get('qra/workers/c1/W1'));
@@ -200,7 +210,7 @@ test('예약: 7시 회차에 3년 지난 기록·직원 삭제, 다른 시각엔
 
 test('지금 보내기는 예약 기록을 건드리지 않음', async () => {
   const s = setup(at('2026-11-05T09:00:00'), dailyLog);
-  await s.a.sendNow({ cid: 'c1', fromMs: at('2026-10-31T00:00:00'), toMs: at('2026-11-01T00:00:00') }, MGR);
+  await s.a.sendNow({ cid: 'c1', fromMs: at('2026-10-31T00:00:00'), toMs: at('2026-11-01T00:00:00') }, SUPER);
   assert.equal(s.sent.length, 1);
   assert.equal(s.db.get('qra/companies/c1/mail/lastPeriod'), null);
   assert.equal(Object.values(s.db.get('qra/mailLog/c1'))[0].ok, true);

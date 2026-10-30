@@ -78,6 +78,9 @@ test('메일 대상 기간', () => {
   assert.equal(duePeriod('monthly', at('2027-01-01T07:00:00')).fromMs, at('2026-12-01T00:00:00'));
   assert.equal(duePeriod('monthly', at('2026-11-02T07:00:00')), null);
   assert.equal(duePeriod('off', at('2026-11-01T07:00:00')), null);
+  assert.equal(duePeriod('daily', at('2026-11-01T07:00:00')).kind, 'daily');
+  assert.equal(duePeriod('weekly', at('2026-11-02T07:00:00')).kind, 'weekly');
+  assert.equal(duePeriod('monthly', at('2026-11-01T07:00:00')).kind, 'monthly');
   assert.equal(duePeriod(undefined, at('2026-11-01T07:00:00')), null);
 });
 
@@ -87,8 +90,8 @@ test('기간에 걸친 달 목록', () => {
   assert.deepEqual(monthsInRange(at('2026-12-31T00:00:00'), at('2027-01-02T00:00:00')), ['2026-12', '2027-01']);
 });
 
-test('3년 지난 달만 삭제', () => {
-  assert.deepEqual(monthsToPurge(['2023-09', '2023-10', '2026-10'], at('2026-10-31T07:00:00')), ['2023-09']);
+test('1년 지난 달만 삭제', () => {
+  assert.deepEqual(monthsToPurge(['2023-09', '2025-09', '2025-10', '2026-10'], at('2026-10-31T07:00:00')), ['2023-09', '2025-09']);
 });
 
 test('기록 수정 검증', () => {
@@ -113,4 +116,13 @@ test('근무시간과 요약', () => {
     { wid: 'A', in: 0, out: null, status: 'noout' },
     { wid: 'B', in: 0, out: 30 * 60e3, status: 'done' },
   ]), { people: 2, totalMinutes: 120, noout: 1 });
+});
+
+test('기간 길이로 보고서 종류 판단', () => {
+  assert.equal(L.kindOf(at('2026-10-30T00:00:00'), at('2026-10-31T00:00:00')), 'daily');
+  assert.equal(L.kindOf(at('2026-10-26T00:00:00'), at('2026-11-02T00:00:00')), 'weekly');
+  assert.equal(L.kindOf(at('2026-10-01T00:00:00'), at('2026-11-01T00:00:00')), 'monthly');
+  assert.equal(L.kindOf(at('2026-02-01T00:00:00'), at('2026-03-01T00:00:00')), 'monthly');
+  assert.equal(L.kindOf(at('2026-10-01T00:00:00'), at('2026-10-20T00:00:00')), 'custom');
+  assert.equal(L.kindOf(at('2026-10-15T00:00:00'), at('2026-11-15T00:00:00')), 'custom');
 });

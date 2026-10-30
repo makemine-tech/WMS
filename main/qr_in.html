@@ -38,6 +38,7 @@
   .consent ul { list-style:none; }
   .check { display:flex; align-items:center; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); color:var(--ink); font-size:14px; cursor:pointer; }
   .check input { width:20px; height:20px; accent-color:var(--gold); flex-shrink:0; }
+  .help { text-align:center; }
   .main { width:100%; min-height:58px; border:0; border-radius:12px; background:var(--gold); color:var(--gold-ink); font:inherit; font-size:18px; font-weight:500; letter-spacing:.04em; cursor:pointer; margin-top:4px; }
   .main.out { background:transparent; color:var(--gold2); border:1px solid var(--gold); }
   .main:disabled { opacity:.55; cursor:default; }
@@ -77,7 +78,6 @@
 
     <div id="knownBox" class="known hide">
       <b id="knownName"></b>
-      <button type="button" class="linkbtn" onclick="notMe()">본인이 아닌가요?</button>
     </div>
     <div id="formBox" class="hide">
       <label class="field"><span>이름</span><input id="name" autocomplete="name" maxlength="20" placeholder="홍길동"></label>
@@ -90,6 +90,7 @@
 
     <button type="button" id="mainBtn" class="main" onclick="press()">출근하기</button>
     <div id="msg" class="msg" role="status"></div>
+    <div class="help"><button type="button" class="linkbtn" onclick="say('관리 담당자에게 문의해 주세요', true)">잘 안 되나요?</button></div>
 
     <section class="sec">
       <h2>이번 달 내 기록</h2>
@@ -164,7 +165,7 @@ function consentHtml(host){
   [ '수집하는 곳: ' + st.company,
     '항목: 이름, 휴대폰번호, 출퇴근 시각, 접속 기기 식별값',
     '목적: 출퇴근 기록과 근태·급여 관리',
-    '보관 기간: 수집일부터 3년, 이후 파기',
+    '보관 기간: 수집일부터 1년, 이후 파기',
     '처리 위탁: 기록 시스템의 운영은 메이크마인이 맡습니다.',
     '동의하지 않으실 수 있으나, 이 경우 QR 출퇴근 기록을 이용할 수 없습니다. 담당자에게 다른 기록 방법을 문의해 주세요.'
   ].forEach(function(t){ var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
@@ -200,7 +201,7 @@ function render(){
   b.disabled = st.busy;
 }
 
-function notMe(){
+function resetForm(){
   store(TOKEN_KEY, null);
   st.known = false; st.name = ''; st.next = 'in'; st.needConsent = false;
   $('name').value = ''; $('phone').value = '';
@@ -228,7 +229,7 @@ function press(){
   call('qraPunch', data).then(function(r){
     st.busy = false;
     if (r.needConsent) { st.needConsent = true; render(); say('처음 오셨네요. 아래 내용을 확인하고 동의해 주세요', true); $('consentBox').scrollIntoView({ block:'center', behavior:'smooth' }); return; }
-    if (r.needPhone) { notMe(); say('이름과 휴대폰번호를 입력해 주세요', true); return; }
+    if (r.needPhone) { resetForm(); say('이름과 휴대폰번호를 입력해 주세요', true); return; }
     if (r.token) store(TOKEN_KEY, r.token);
     st.needConsent = false; st.known = true; st.name = r.name; st.next = r.next;
     render(); renderRecords(r.records);

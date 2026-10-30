@@ -6,11 +6,11 @@
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
-const { STALE_MS, normalizePhone, normalizeName, workerId, validateEdit, duePeriod, monthsInRange, monthsToPurge, monthOf, dayOf } = require('./logic');
-const { buildWorkbook, sendReport } = require('./mail');
+const { STALE_MS, normalizePhone, normalizeName, workerId, validateEdit, duePeriod, kindOf, monthsInRange, monthsToPurge, monthOf, dayOf } = require('./logic');
+const { buildWorkbook, sendReport, TITLES } = require('./mail');
 
 const KST = 9 * 3600e3;
-const RETAIN_MS = 3 * 365.25 * 24 * 3600e3;
+const RETAIN_MS = 365.25 * 24 * 3600e3;
 const KEY_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 
 function newKey(){
@@ -39,6 +39,11 @@ function makeAdmin(db, nowFn, mailer){
     if (!await canManage(auth, cid)) throw new HttpsError('permission-denied', '이 고객사를 관리할 권한이 없습니다');
   }
 
+  /* 담당자는 기록 보기와 엑셀만, 기록 수정·직원·메일은 슈퍼관리자 */
+  async function mustSuper(auth){
+    if (!await isSuper(auth)) throw new HttpsError('permission-denied', '슈퍼관리자만 할 수 있습니다');
+  }
+
   async function collectLogs(cid, fromMs, toMs){
     const out = [];
     for (const m of monthsInRange(fromMs, toMs)) {
@@ -46,6 +51,10 @@ function makeAdmin(db, nowFn, mailer){
       Object.keys(logs).forEach((id) => { if (logs[id].in >= fromMs && logs[id].in < toMs) out.push(logs[id]); });
     }
     return out;
+  }
+  function periodOf(fromMs, toMs){
+    const label = dayOf(fromMs) === dayOf(toMs - 1) ? dayOf(fromMs) : dayOf(fromMs) + ' ~ ' + dayOf(toMs - 1);
+    return { id: 'NOW', kind: kindOf(fromMs, toMs), label, fromMs, toMs };
   }
   function checkRange(fromMs, toMs){
     if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) throw new HttpsError('invalid-argument', '기간을 다시 확인해 주세요');
@@ -74,7 +83,7 @@ function makeAdmin(db, nowFn, mailer){
 
   async function editLog(data, auth){
     const d = data || {};
-    await must(auth, d.cid);
+    await mustSuper(auth);
     const now = nowFn();
     if (d.create) return createLog(d, auth, now);
 
@@ -115,7 +124,7 @@ function makeAdmin(db, nowFn, mailer){
 
   async function editWorker(data, auth){
     const d = data || {};
-    await must(auth, d.cid);
+    await mustSuper(auth);
     if (!/^[a-f0-9A-Z]{1,40}$/.test(String(d.wid))) throw new HttpsError('invalid-argument', '직원을 찾을 수 없습니다');
     const wpath = 'qra/workers/' + d.cid + '/' + d.wid;
     const worker = await val(wpath);
@@ -153,8 +162,9 @@ function makeAdmin(db, nowFn, mailer){
     await must(auth, d.cid);
     checkRange(d.fromMs, d.toMs);
     const company = await val('qra/companies/' + d.cid);
-    const buf = await buildWorkbook(company, await collectLogs(d.cid, d.fromMs, d.toMs));
-    return { base64: buf.toString('base64'), filename: '근태일지_' + dayOf(d.fromMs) + '_' + dayOf(d.toMs - 1) + '.xlsx' };
+    const period = periodOf(d.fromMs, d.toMs);
+    const buf = await buildWorkbook(company, await collectLogs(d.cid, d.fromMs, d.toMs), period);
+    return { base64: buf.toString('base64'), filename: TITLES[period.kind] + '_' + period.label.replace(/\s/g, '') + '.xlsx' };
   }
 
   async function recordMail(cid, period, ok, error, company, now){
@@ -163,12 +173,11 @@ function makeAdmin(db, nowFn, mailer){
 
   async function sendNow(data, auth){
     const d = data || {};
-    await must(auth, d.cid);
+    await mustSuper(auth);
     checkRange(d.fromMs, d.toMs);
     const now = nowFn();
     const company = await val('qra/companies/' + d.cid);
-    const label = dayOf(d.fromMs) === dayOf(d.toMs - 1) ? dayOf(d.fromMs) : dayOf(d.fromMs) + ' ~ ' + dayOf(d.toMs - 1);
-    const period = { id: 'NOW', label };
+    const period = periodOf(d.fromMs, d.toMs);
     if (!company || !company.mail || !company.mail.to || !company.mail.to.length) throw new HttpsError('failed-precondition', '받는 사람을 먼저 저장해 주세요');
     const { transport, from } = mailer();
     try {
