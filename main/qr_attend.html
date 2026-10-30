@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="copyright" content="© 2026 Makemine Design. All rights reserved.">
+<title>QR 출퇴근기록기</title>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script src="/wms_access.js" data-page="qr_attend" data-floor="1"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500&family=Noto+Serif+KR:wght@600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+  :root { --bg:#14171c; --card:#1b1f26; --line:#2c3038; --line2:#3a3e46; --ink:#f3efe6; --dim:#9a9a92; --gold:#c9ab6c; --gold2:#d9c08a; --gold-ink:#1a1710; --err:#ffb4a8; --ok:#a8dcb4; }
+  body { background:var(--bg); color:var(--ink); font-family:'Noto Sans KR',system-ui,sans-serif; font-size:14px; line-height:1.6; }
+  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 30px; }
+  .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  h1 { font-family:'Noto Serif KR',serif; font-weight:600; font-size:20px; letter-spacing:.02em; }
+  .top .sp { flex:1; }
+  .who { font-size:12px; color:var(--dim); }
+  select, input, textarea { background:var(--bg); color:var(--ink); border:1px solid var(--line2); border-radius:7px; padding:8px 10px; font:inherit; max-width:100%; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--gold); }
+  textarea { width:100%; min-height:62px; resize:vertical; }
+  button { font:inherit; cursor:pointer; }
+  .btn { background:transparent; color:var(--ink); border:1px solid var(--line2); border-radius:7px; padding:8px 13px; white-space:nowrap; }
+  .btn:hover { border-color:var(--gold); }
+  .btn.pri { background:var(--gold); border-color:var(--gold); color:var(--gold-ink); font-weight:500; }
+  .btn.dan { color:var(--err); }
+  .btn.sm { padding:4px 9px; font-size:12.5px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; overflow-x:auto; }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent; color:var(--dim); padding:9px 14px; white-space:nowrap; }
+  .tabs button.on { color:var(--gold2); border-bottom-color:var(--gold); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .card h2 { font-size:14px; font-weight:500; color:var(--gold2); margin-bottom:10px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .row .sp { flex:1; }
+  label.f { display:block; margin-bottom:10px; font-size:12.5px; color:var(--dim); }
+  label.f input, label.f textarea, label.f select { display:block; width:100%; margin-top:3px; color:var(--ink); font-size:14px; }
+  .tblwrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-weight:500; color:var(--dim); padding:7px 8px; border-bottom:1px solid var(--line2); white-space:nowrap; }
+  td { padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .tag { display:inline-block; font-size:11.5px; border:1px solid var(--line2); border-radius:5px; padding:0 6px; color:var(--dim); margin-left:4px; }
+  .tag.warn { color:var(--err); border-color:var(--err); }
+  .tag.on { color:var(--gold2); border-color:var(--gold); }
+  .hint { font-size:12px; color:var(--dim); }
+  .err { color:var(--err); font-size:13px; }
+  .empty { color:var(--dim); padding:22px 0; text-align:center; }
+  .sum { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--dim); margin-bottom:10px; }
+  .sum b { color:var(--ink); font-weight:500; }
+  .logoThumb { width:56px; height:56px; border:1px solid var(--line2); border-radius:8px; object-fit:contain; background:#fff; }
+  dialog { background:var(--card); color:var(--ink); border:1px solid var(--line2); border-radius:12px; padding:20px; width:min(420px,calc(100vw - 32px)); margin:auto; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  dialog h2 { font-size:15px; font-weight:500; margin-bottom:12px; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--gold); color:var(--gold-ink); border-radius:8px; padding:9px 16px; font-size:13px; display:none; z-index:9; max-width:90vw; }
+  #toast.bad { background:#5a2620; color:#ffd9d2; }
+  .hide { display:none !important; }
+
+  /* 인쇄 안내문 */
+  .poster { background:#fbf9f4; color:#1c1b18; border-radius:6px; padding:36px 24px; text-align:center; width:100%; max-width:380px; margin:0 auto; }
+  .poster .pl { width:76px; height:76px; margin:0 auto 12px; border-radius:50%; border:1px solid #b89b5e; overflow:hidden; display:flex; align-items:center; justify-content:center; font-family:'Noto Serif KR',serif; font-size:30px; color:#8a6f35; background:#fff; }
+  .poster .pl img { width:100%; height:100%; object-fit:contain; }
+  .poster .pn { font-family:'Noto Serif KR',serif; font-weight:600; font-size:24px; letter-spacing:.04em; word-break:keep-all; }
+  .poster .ps { font-size:13px; color:#6b675d; }
+  .poster .pt { font-size:13px; color:#6b675d; margin:4px 0 20px; }
+  .poster .pq { width:210px; height:210px; display:block; margin:0 auto; }
+  .poster .pa { font-size:16px; font-weight:500; margin-top:20px; }
+  .poster ol { list-style:none; font-size:13.5px; line-height:2; color:#55524a; margin-top:10px; }
+  #printArea { display:none; }
+  @media print {
+    @page { size:A4; margin:18mm; }
+    html, body { background:#fff; }
+    body > *:not(#printArea) { display:none !important; }
+    #printArea { display:block; }
+    #printArea .poster { max-width:none; background:#fff; padding:30mm 0; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    #printArea .poster .pl { width:34mm; height:34mm; font-size:56px; }
+    #printArea .poster .pn { font-size:38px; }
+    #printArea .poster .ps, #printArea .poster .pt { font-size:18px; }
+    #printArea .poster .pq { width:95mm; height:95mm; }
+    #printArea .poster .pa { font-size:24px; margin-top:12mm; }
+    #printArea .poster ol { font-size:20px; margin-top:6mm; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <div class="top">
+    <h1>QR 출퇴근기록기</h1>
+    <select id="companySel" class="hide" onchange="pick(this.value)" aria-label="고객사 선택"></select>
+    <span class="sp"></span>
+    <span class="who" id="who"></span>
+  </div>
+  <div id="noCompany" class="card hide"></div>
+  <div id="main" class="hide">
+    <nav class="tabs" id="tabs"></nav>
+    <section id="tab-records" class="tab"></section>
+    <section id="tab-qr" class="tab"></section>
+    <section id="tab-workers" class="tab"></section>
+    <section id="tab-mail" class="tab"></section>
+    <section id="tab-companies" class="tab"></section>
+  </div>
+</div>
+<div id="printArea"></div>
+<div id="toast"></div>
+<dialog id="dlg"></dialog>
+<div id="qrGen" class="hide"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+var FIREBASE_CONFIG = {
+  apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
+  authDomain:"makewon.com",
+  databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"makechango-wms",
+  storageBucket:"makechango-wms.firebasestorage.app",
+  messagingSenderId:"333385336098",
+  appId:"1:333385336098:web:94f07492421965ab32917b"
+};
+if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+var db = firebase.database();
+var $ = function(id){ return document.getElementById(id); };
+var KST = 9 * 3600e3, DAY = 24 * 3600e3;
+var S = { user:null, isSuper:false, companies:{}, cid:null, tab:'records', logs:[], workers:{}, from:'', to:'', q:'' };
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+function fn(name, data){ return firebase.app().functions('asia-northeast3').httpsCallable(name)(data).then(function(r){ return r.data; }); }
+var toastT;
+function toast(text, bad){ var t = $('toast'); t.textContent = text; t.className = bad ? 'bad' : ''; t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(function(){ t.style.display = 'none'; }, 3500); }
+function fail(e){ toast((e && e.message) || '처리하지 못했습니다', true); }
+function ekey(m){ return String(m || '').trim().toLowerCase().replace(/\./g, ','); }
+
+/* 한국 시간 변환 */
+function kstIso(ms){ return new Date(ms + KST).toISOString(); }
+function dayStr(ms){ return kstIso(ms).slice(0, 10); }
+function hm(ms){ return ms == null ? '' : kstIso(ms).slice(11, 16); }
+function dtLocal(ms){ return ms == null ? '' : kstIso(ms).slice(0, 16); }
+function parseLocal(v){ return v ? Date.parse(v + ':00+09:00') : null; }
+function dayStart(d){ return Date.parse(d + 'T00:00:00+09:00'); }
+function monthsBetween(fromMs, toMs){
+  var out = [], m = kstIso(fromMs).slice(0, 7), end = kstIso(toMs - 1).slice(0, 7);
+  while (m <= end) { out.push(m); var p = m.split('-').map(Number); m = kstIso(Date.UTC(p[0], p[1], 1) - KST).slice(0, 7); }
+  return out;
+}
+function maskPhone(p){ p = String(p || ''); return p.length >= 10 ? p.slice(0, 3) + '-****-' + p.slice(-4) : p; }
+function dur(min){ return min == null ? '' : Math.floor(min / 60) + '시간 ' + (min % 60) + '분'; }
+
+/* ── 시작 ── */
+firebase.auth().onAuthStateChanged(function(u){
+  if (!u) return;   /* 로그인 이동은 wms_access.js 가 처리 */
+  if (S.user) return;
+  S.user = u;
+  $('who').textContent = u.email || '';
+  db.ref('superadmins/' + u.uid).get().then(function(s){
+    S.isSuper = s.exists();
+    return loadCompanies();
+  }).catch(function(e){ showNone('권한을 확인하지 못했습니다: ' + (e.code || e.message)); });
+});
+
+function showNone(text){ $('main').classList.add('hide'); var b = $('noCompany'); b.textContent = text; b.classList.remove('hide'); }
+
+function loadCompanies(){
+  var load = S.isSuper
+    ? db.ref('qra/companies').get().then(function(s){ return s.val() || {}; })
+    : db.ref('qra/admins/' + ekey(S.user.email)).get().then(function(s){
+        var ids = Object.keys(s.val() || {});
+        return Promise.all(ids.map(function(id){ return db.ref('qra/companies/' + id).get(); })).then(function(list){
+          var o = {}; list.forEach(function(x, i){ if (x.exists()) o[ids[i]] = x.val(); }); return o;
+        });
+      });
+  return load.then(function(cs){
+    S.companies = cs;
+    var ids = Object.keys(cs).sort(function(a, b){ return String(cs[a].name).localeCompare(String(cs[b].name), 'ko'); });
+    if (!ids.length && !S.isSuper) { showNone('담당 고객사가 없습니다. 등록된 구글 메일로 로그인했는지 확인해 주세요.'); return; }
+    $('noCompany').classList.add('hide'); $('main').classList.remove('hide');
+    var sel = $('companySel');
+    sel.innerHTML = ids.map(function(id){ return '<option value="' + esc(id) + '">' + esc(cs[id].name) + (cs[id].off ? ' (중지)' : '') + '</option>'; }).join('');
+    sel.classList.toggle('hide', ids.length < 2);
+    if (!S.cid || !cs[S.cid]) S.cid = ids[0] || null;
+    if (S.cid) sel.value = S.cid;
+    if (!S.cid) S.tab = 'companies';
+    renderTabs(); openTab(S.tab);
+  });
+}
+function pick(cid){ S.cid = cid; openTab(S.tab); }
+
+var TABS = [['records','기록'],['qr','QR·회사 정보'],['workers','직원'],['mail','자동 메일']];
+function renderTabs(){
+  var list = TABS.slice(); if (S.isSuper) list.push(['companies','고객사 관리']);
+  if (!S.cid) list = list.filter(function(t){ return t[0] === 'companies'; });
+  $('tabs').innerHTML = list.map(function(t){ return '<button type="button" data-t="' + t[0] + '" onclick="openTab(\'' + t[0] + '\')">' + t[1] + '</button>'; }).join('');
+}
+function openTab(t){
+  S.tab = t;
+  document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-t') === t); });
+  document.querySelectorAll('.tab').forEach(function(s){ s.classList.toggle('hide', s.id !== 'tab-' + t); });
+  ({ records:tabRecords, qr:tabQr, workers:tabWorkers, mail:tabMail, companies:tabCompanies })[t]();
+}
+
+/* ── 기록 ── */
+function tabRecords(){
+  if (!S.from) { var today = dayStr(Date.now()); S.from = today.slice(0, 8) + '01'; S.to = today; }
+  $('tab-records').innerHTML =
+    '<div class="row"><input type="date" id="rFrom" value="' + esc(S.from) + '" aria-label="시작일"> ~ <input type="date" id="rTo" value="' + esc(S.to) + '" aria-label="종료일">'
+    + '<input id="rQ" placeholder="이름 검색" value="' + esc(S.q) + '" oninput="S.q=this.value;drawLogs()" aria-label="이름 검색">'
+    + '<button type="button" class="btn" onclick="loadLogs()">조회</button><span class="sp"></span>'
+    + '<button type="button" class="btn" onclick="addLog()">수기 추가</button><button type="button" class="btn pri" onclick="downloadExcel()">엑셀 다운로드</button></div>'
+    + '<div id="rSum" class="sum"></div><div id="rList" class="tblwrap"></div>';
+  loadLogs();
+}
+function rangeMs(){
+  S.from = $('rFrom').value; S.to = $('rTo').value;
+  if (!S.from || !S.to || S.from > S.to) { toast('기간을 다시 확인해 주세요', true); return null; }
+  return { fromMs:dayStart(S.from), toMs:dayStart(S.to) + DAY };
+}
+function loadLogs(){
+  var r = rangeMs(); if (!r) return;
+  var cid = S.cid;
+  $('rList').innerHTML = '<div class="empty">불러오는 중…</div>';
+  Promise.all(monthsBetween(r.fromMs, r.toMs).map(function(m){
+    return db.ref('qra/logs/' + cid + '/' + m).get().then(function(s){
+      var v = s.val() || {}; return Object.keys(v).map(function(id){ return Object.assign({ id:id, month:m }, v[id]); });
+    });
+  })).then(function(parts){
+    if (cid !== S.cid) return;
+    S.logs = [].concat.apply([], parts).filter(function(l){ return l.in >= r.fromMs && l.in < r.toMs; }).sort(function(a, b){ return b.in - a.in; });
+    drawLogs();
+  }).catch(function(e){ $('rList').innerHTML = '<div class="err">불러오지 못했습니다: ' + esc(e.code || e.message) + '</div>'; });
+}
+/* 같은 날 한 폰으로 여러 사람이 찍힌 기록 */
+function sharedPhones(logs){
+  var seen = {}, flagged = {};
+  logs.forEach(function(l){
+    [l.inDev, l.outDev].forEach(function(d){
+      if (!d) return;
+      var k = dayStr(l.in) + '|' + d;
+      seen[k] = seen[k] || {}; seen[k][l.wid] = 1;
+      if (Object.keys(seen[k]).length > 1) flagged[k] = 1;
+    });
+  });
+  return function(l){ return [l.inDev, l.outDev].some(function(d){ return d && flagged[dayStr(l.in) + '|' + d]; }); };
+}
+function statusOf(l){
+  if (l.status === 'open') return Date.now() - l.in >= 18 * 3600e3 ? '<span class="tag warn">퇴근 미기록</span>' : '<span class="tag on">근무 중</span>';
+  if (l.status === 'noout') return '<span class="tag warn">퇴근 미기록</span>';
+  return '';
+}
+function drawLogs(){
+  if (!$('rList')) return;
+  var q = String(S.q || '').replace(/\s/g, '');
+  var shared = sharedPhones(S.logs);
+  var list = S.logs.filter(function(l){ return !q || String(l.name).indexOf(q) >= 0; });
+  var people = {}, total = 0, noout = 0, flags = 0;
+  list.forEach(function(l){
+    people[l.wid] = 1;
+    if (l.out != null) total += Math.round((l.out - l.in) / 60000);
+    if (l.status === 'noout') noout++;
+    if (shared(l)) flags++;
+  });
+  $('rSum').innerHTML = '<span>기록 <b>' + list.length + '</b>건</span><span>인원 <b>' + Object.keys(people).length + '</b>명</span><span>총 근무 <b>' + dur(total) + '</b></span><span>퇴근 미기록 <b>' + noout + '</b>건</span>'
+    + (flags ? '<span>한 폰 여러 이름 <b>' + flags + '</b>건</span>' : '');
+  if (!list.length) { $('rList').innerHTML = '<div class="empty">이 기간의 기록이 없습니다.</div>'; return; }
+  $('rList').innerHTML = '<table><thead><tr><th>날짜</th><th>이름</th><th>휴대폰</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>상태</th><th></th></tr></thead><tbody>'
+    + list.map(function(l){
+      return '<tr><td>' + dayStr(l.in) + '</td><td>' + esc(l.name) + '</td><td>' + esc(maskPhone(l.phone)) + '</td><td>' + hm(l.in) + '</td><td>' + hm(l.out) + '</td><td>'
+        + (l.out != null ? dur(Math.round((l.out - l.in) / 60000)) : '') + '</td><td>' + statusOf(l)
+        + (l.manual ? '<span class="tag">수기</span>' : '') + (l.edits ? '<span class="tag">수정됨</span>' : '') + (shared(l) ? '<span class="tag warn">한 폰 여러 이름</span>' : '')
+        + '</td><td><button type="button" class="btn sm" onclick="editLog(\'' + esc(l.id) + '\')">수정</button></td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function dlg(html){ var d = $('dlg'); d.innerHTML = html; if (!d.open) d.showModal(); return d; }
+function closeDlg(){ $('dlg').close(); }
+function editLog(id){
+  var l = S.logs.filter(function(x){ return x.id === id; })[0]; if (!l) return;
+  var hist = Object.values(l.edits || {}).sort(function(a, b){ return b.at - a.at; }).map(function(e){
+    return '<div class="hint">' + dayStr(e.at) + ' ' + hm(e.at) + ' ' + esc(e.by) + ': 이전 ' + hm(e.in) + ' ~ ' + hm(e.out) + '</div>';
+  }).join('');
+  dlg('<h2>' + esc(l.name) + ' 기록 수정</h2>'
+    + '<label class="f">출근<input type="datetime-local" id="eIn" value="' + dtLocal(l.in) + '"></label>'
+    + '<label class="f">퇴근 (비우면 퇴근 미기록)<input type="datetime-local" id="eOut" value="' + dtLocal(l.out) + '"></label>'
+    + (hist ? '<div style="margin-bottom:10px">' + hist + '</div>' : '')
+    + '<div class="row" style="margin:14px 0 0"><button type="button" class="btn dan" onclick="removeLog(\'' + esc(id) + '\')">삭제</button><span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">취소</button><button type="button" class="btn pri" onclick="saveLog(\'' + esc(id) + '\')">저장</button></div>');
+}
+function saveLog(id){
+  var l = S.logs.filter(function(x){ return x.id === id; })[0];
+  fn('qraEditLog', { cid:S.cid, month:l.month, logId:id, inMs:parseLocal($('eIn').value), outMs:parseLocal($('eOut').value) })
+    .then(function(){ closeDlg(); toast('수정했습니다'); loadLogs(); }).catch(fail);
+}
+function removeLog(id){
+  if (!confirm('이 기록을 삭제할까요? 되돌릴 수 없습니다.')) return;
+  var l = S.logs.filter(function(x){ return x.id === id; })[0];
+  fn('qraEditLog', { cid:S.cid, month:l.month, logId:id, remove:true }).then(function(){ closeDlg(); toast('삭제했습니다'); loadLogs(); }).catch(fail);
+}
+function addLog(){
+  dlg('<h2>기록 수기 추가</h2><label class="f">이름<input id="aName" maxlength="20"></label><label class="f">휴대폰번호<input id="aPhone" type="tel"></label>'
+    + '<label class="f">출근<input type="datetime-local" id="aIn"></label><label class="f">퇴근<input type="datetime-local" id="aOut"></label>'
+    + '<div class="row" style="margin:14px 0 0"><span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">취소</button><button type="button" class="btn pri" onclick="saveNewLog()">추가</button></div>');
+}
+function saveNewLog(){
+  fn('qraEditLog', { cid:S.cid, create:{ name:$('aName').value, phone:$('aPhone').value }, inMs:parseLocal($('aIn').value), outMs:parseLocal($('aOut').value) })
+    .then(function(){ closeDlg(); toast('추가했습니다'); loadLogs(); }).catch(fail);
+}
+function saveBase64(b64, filename, type){
+  var bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([arr], { type:type }));
+  a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+}
+function downloadExcel(){
+  var r = rangeMs(); if (!r) return;
+  toast('엑셀을 만드는 중입니다');
+  fn('qraExport', { cid:S.cid, fromMs:r.fromMs, toMs:r.toMs }).then(function(x){
+    saveBase64(x.base64, x.filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  }).catch(fail);
+}
+
+/* ── QR·회사 정보 ── */
+function qrUrl(c){ return 'https://makewon.com/qr_in.html?key=' + encodeURIComponent(c.qrKey || ''); }
+function qrDataUrl(url){
+  var host = $('qrGen'); host.innerHTML = '';
+  new QRCode(host, { text:url, width:800, height:800, correctLevel:QRCode.CorrectLevel.M });
+  var c = host.querySelector('canvas');
+  return c ? c.toDataURL('image/png') : '';
+}
+function posterHtml(c, qrSrc){
+  var logoOk = c.logo && c.logo.indexOf('data:image/') === 0;
+  return '<div class="poster"><div class="pl">' + (logoOk ? '<img alt="" src="' + esc(c.logo) + '">' : esc(String(c.name || '').slice(0, 1))) + '</div>'
+    + '<div class="pn">' + esc(c.name) + '</div>' + (c.site ? '<div class="ps">' + esc(c.site) + '</div>' : '') + '<div class="pt">출퇴근 QR</div>'
+    + '<img class="pq" alt="출퇴근 QR 코드" src="' + esc(qrSrc) + '">'
+    + '<div class="pa">출근과 퇴근 때 한 번씩 찍어 주세요</div>'
+    + '<ol><li>1. 휴대폰 카메라로 QR을 찍습니다</li><li>2. 이름을 확인합니다</li><li>3. 출근하기 또는 퇴근하기를 누릅니다</li></ol></div>';
+}
+function tabQr(){
+  var c = S.companies[S.cid];
+  var src = window.QRCode ? qrDataUrl(qrUrl(c)) : '';
+  if (!src) { $('tab-qr').innerHTML = '<div class="err">QR을 만들지 못했습니다. 새로고침해 주세요.</div>'; return; }
+  S.qrSrc = src;
+  $('tab-qr').innerHTML =
+    '<div class="card"><h2>회사 정보</h2><div class="row"><img id="logoPrev" class="logoThumb ' + (c.logo ? '' : 'hide') + '" alt="로고" src="' + esc(c.logo || '') + '">'
+    + '<label class="btn">로고 올리기<input type="file" accept="image/*" class="hide" onchange="uploadLogo(this.files[0]);this.value=\'\'"></label>'
+    + (c.logo ? '<button type="button" class="btn dan" onclick="saveLogo(null)">로고 지우기</button>' : '') + '</div>'
+    + '<label class="f">현장명 (폰 화면과 인쇄물의 회사명 아래에 나옵니다)<input id="siteInput" maxlength="40" value="' + esc(c.site || '') + '"></label>'
+    + '<button type="button" class="btn" onclick="saveSite()">현장명 저장</button></div>'
+    + '<div class="card"><h2>QR 안내문</h2><div class="row"><button type="button" class="btn pri" onclick="printPoster()">A4 인쇄</button><button type="button" class="btn" onclick="saveQrImage()">QR 이미지 저장</button>'
+    + '<button type="button" class="btn" onclick="copyUrl()">주소 복사</button>' + (S.isSuper ? '<span class="sp"></span><button type="button" class="btn dan" onclick="rotateKey()">QR 재발급</button>' : '') + '</div>'
+    + (S.isSuper ? '<p class="hint" style="margin-bottom:12px">재발급하면 이전 QR은 바로 쓸 수 없게 되니 인쇄물을 교체해야 합니다.</p>' : '')
+    + posterHtml(c, src) + '</div>';
+}
+function printPoster(){
+  $('printArea').innerHTML = posterHtml(S.companies[S.cid], S.qrSrc);
+  window.print();
+}
+function saveQrImage(){
+  var a = document.createElement('a'); a.href = S.qrSrc; a.download = 'QR_' + S.companies[S.cid].name + '.png';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function copyUrl(){
+  var u = qrUrl(S.companies[S.cid]);
+  if (navigator.clipboard) navigator.clipboard.writeText(u).then(function(){ toast('주소를 복사했습니다'); }, function(){ prompt('주소를 복사해 주세요', u); });
+  else prompt('주소를 복사해 주세요', u);
+}
+function rotateKey(){
+  if (!confirm('QR을 재발급할까요? 이전 QR은 바로 쓸 수 없게 됩니다.')) return;
+  fn('qraRotateKey', { cid:S.cid }).then(function(r){ S.companies[S.cid].qrKey = r.qrKey; toast('재발급했습니다. 새 안내문을 인쇄해 주세요'); tabQr(); }).catch(fail);
+}
+function saveSite(){
+  var v = $('siteInput').value.trim();
+  db.ref('qra/companies/' + S.cid + '/site').set(v).then(function(){ S.companies[S.cid].site = v; toast('저장했습니다'); tabQr(); }).catch(fail);
+}
+/* 긴 변 400px, 저장 크기 안에 들 때까지 품질을 낮춘다 */
+function shrinkLogo(file){
+  return new Promise(function(res, rej){
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function(){
+      URL.revokeObjectURL(url);
+      var r = Math.min(1, 400 / Math.max(img.width, img.height));
+      var cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(img.width * r)); cv.height = Math.max(1, Math.round(img.height * r));
+      var g = cv.getContext('2d');
+      g.drawImage(img, 0, 0, cv.width, cv.height);
+      var out = cv.toDataURL('image/png');
+      if (out.length < 200000) { res(out); return; }
+      g.globalCompositeOperation = 'destination-over'; g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+      for (var q = 0.85; q > 0.3; q -= 0.15) { out = cv.toDataURL('image/jpeg', q); if (out.length < 200000) { res(out); return; } }
+      rej(new Error('로고 파일이 너무 큽니다. 더 작은 이미지를 올려 주세요'));
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); rej(new Error('이미지를 읽지 못했습니다')); };
+    img.src = url;
+  });
+}
+function uploadLogo(file){ if (!file) return; shrinkLogo(file).then(saveLogo).catch(fail); }
+function saveLogo(dataUrl){
+  db.ref('qra/companies/' + S.cid + '/logo').set(dataUrl).then(function(){
+    if (dataUrl) S.companies[S.cid].logo = dataUrl; else delete S.companies[S.cid].logo;
+    toast('저장했습니다'); tabQr();
+  }).catch(fail);
+}
+
+/* ── 직원 ── */
+function tabWorkers(){
+  var cid = S.cid;
+  $('tab-workers').innerHTML = '<div class="empty">불러오는 중…</div>';
+  db.ref('qra/workers/' + cid).get().then(function(s){
+    if (cid !== S.cid) return;
+    S.workers = s.val() || {};
+    var ids = Object.keys(S.workers).sort(function(a, b){ return String(S.workers[a].name).localeCompare(String(S.workers[b].name), 'ko'); });
+    $('tab-workers').innerHTML = ids.length
+      ? '<div class="tblwrap"><table><thead><tr><th>이름</th><th>휴대폰</th><th>동의일</th><th>최근 기록</th><th></th></tr></thead><tbody>' + ids.map(function(id){
+          var w = S.workers[id];
+          return '<tr><td>' + esc(w.name) + '</td><td>' + esc(maskPhone(w.phone)) + '</td><td>' + (w.consentAt ? dayStr(w.consentAt) : '<span class="tag">미동의</span>') + '</td><td>' + (w.lastAt ? dayStr(w.lastAt) : '') + '</td>'
+            + '<td><button type="button" class="btn sm" onclick="renameWorker(\'' + esc(id) + '\')">이름 수정</button> <button type="button" class="btn sm dan" onclick="removeWorker(\'' + esc(id) + '\')">삭제</button></td></tr>';
+        }).join('') + '</tbody></table></div><p class="hint" style="margin-top:10px">직원을 삭제해도 지난 근태 기록은 보관 기간까지 남습니다. 다음에 QR을 찍으면 동의를 다시 받습니다.</p>'
+      : '<div class="empty">아직 등록된 직원이 없습니다. QR을 찍으면 자동으로 등록됩니다.</div>';
+  }).catch(function(e){ $('tab-workers').innerHTML = '<div class="err">불러오지 못했습니다: ' + esc(e.code || e.message) + '</div>'; });
+}
+function renameWorker(wid){
+  var w = S.workers[wid];
+  dlg('<h2>이름 수정</h2><label class="f">이름<input id="wName" maxlength="20" value="' + esc(w.name) + '"></label><p class="hint">지난 기록의 이름은 바뀌지 않습니다.</p>'
+    + '<div class="row" style="margin:14px 0 0"><span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">취소</button><button type="button" class="btn pri" onclick="saveWorker(\'' + esc(wid) + '\')">저장</button></div>');
+}
+function saveWorker(wid){
+  fn('qraEditWorker', { cid:S.cid, wid:wid, name:$('wName').value }).then(function(){ closeDlg(); toast('저장했습니다'); tabWorkers(); }).catch(fail);
+}
+function removeWorker(wid){
+  if (!confirm(S.workers[wid].name + ' 직원을 삭제할까요?')) return;
+  fn('qraEditWorker', { cid:S.cid, wid:wid, remove:true }).then(function(){ toast('삭제했습니다'); tabWorkers(); }).catch(fail);
+}
+
+/* ── 자동 메일 ── */
+function parseMails(s){
+  var valid = [], invalid = [];
+  String(s || '').split(/[,;\n]/).map(function(x){ return x.trim(); }).filter(Boolean).forEach(function(x){
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) { invalid.push(x); return; }
+    if (!valid.some(function(v){ return v.toLowerCase() === x.toLowerCase(); })) valid.push(x);
+  });
+  return { valid:valid, invalid:invalid };
+}
+function tabMail(){
+  var c = S.companies[S.cid], m = c.mail || {}, today = dayStr(Date.now());
+  var opt = function(v, t){ return '<option value="' + v + '"' + ((m.freq || 'off') === v ? ' selected' : '') + '>' + t + '</option>'; };
+  $('tab-mail').innerHTML =
+    (m.lastError ? '<div class="card err">최근 자동 메일 실패: ' + esc(m.lastError) + '</div>' : '')
+    + '<div class="card"><h2>자동 발송 설정</h2>'
+    + '<label class="f">주기<select id="mFreq">' + opt('off', '보내지 않음') + opt('daily', '매일 (오전 7시, 전날 기록)') + opt('weekly', '일주일에 한 번 (월요일 오전 7시, 지난주 기록)') + opt('monthly', '말일 기준 (다음 달 1일 오전 7시, 지난달 기록)') + '</select></label>'
+    + '<label class="f">받는 사람 (여러 명은 쉼표로 구분)<textarea id="mTo">' + esc((m.to || []).join(', ')) + '</textarea></label>'
+    + '<label class="f">참조 (여러 명은 쉼표로 구분)<textarea id="mCc">' + esc((m.cc || []).join(', ')) + '</textarea></label>'
+    + '<div id="mErr" class="err" style="margin-bottom:8px"></div><button type="button" class="btn pri" onclick="saveMail()">저장</button></div>'
+    + '<div class="card"><h2>지금 보내기</h2><div class="row"><input type="date" id="nFrom" value="' + today.slice(0, 8) + '01" aria-label="시작일"> ~ <input type="date" id="nTo" value="' + today + '" aria-label="종료일"><button type="button" class="btn" id="nBtn" onclick="sendNow()">저장된 수신자에게 보내기</button></div></div>'
+    + '<div class="card"><h2>발송 기록</h2><div id="mLog" class="tblwrap"><div class="empty">불러오는 중…</div></div></div>';
+  var cid = S.cid;
+  db.ref('qra/mailLog/' + cid).limitToLast(30).get().then(function(s){
+    if (cid !== S.cid || !$('mLog')) return;
+    var list = Object.values(s.val() || {}).sort(function(a, b){ return b.at - a.at; });
+    $('mLog').innerHTML = list.length ? '<table><thead><tr><th>보낸 때</th><th>대상 기간</th><th>결과</th><th>받는 사람</th></tr></thead><tbody>' + list.map(function(l){
+      return '<tr><td>' + dayStr(l.at) + ' ' + hm(l.at) + '</td><td>' + esc(l.period) + '</td><td>' + (l.ok ? '<span style="color:var(--ok)">성공</span>' : '<span class="err">' + esc(l.error || '실패') + '</span>') + '</td><td>' + esc((l.to || []).join(', ')) + '</td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="empty">아직 보낸 메일이 없습니다.</div>';
+  }).catch(function(){ if ($('mLog')) $('mLog').innerHTML = '<div class="err">불러오지 못했습니다.</div>'; });
+}
+function saveMail(){
+  var to = parseMails($('mTo').value), cc = parseMails($('mCc').value), freq = $('mFreq').value;
+  var bad = to.invalid.concat(cc.invalid);
+  if (bad.length) { $('mErr').textContent = '잘못된 주소: ' + bad.join(', '); return; }
+  if (freq !== 'off' && !to.valid.length) { $('mErr').textContent = '받는 사람을 한 명 이상 입력해 주세요'; return; }
+  $('mErr').textContent = '';
+  db.ref('qra/companies/' + S.cid + '/mail').update({ freq:freq, to:to.valid, cc:cc.valid }).then(function(){
+    var m = S.companies[S.cid].mail = S.companies[S.cid].mail || {};
+    m.freq = freq; m.to = to.valid; m.cc = cc.valid;
+    toast('저장했습니다');
+  }).catch(fail);
+}
+function sendNow(){
+  var f = $('nFrom').value, t = $('nTo').value;
+  if (!f || !t || f > t) { toast('기간을 다시 확인해 주세요', true); return; }
+  $('nBtn').disabled = true;
+  fn('qraSendNow', { cid:S.cid, fromMs:dayStart(f), toMs:dayStart(t) + DAY }).then(function(){ toast('보냈습니다'); tabMail(); }).catch(function(e){ fail(e); tabMail(); });
+}
+
+/* ── 고객사 관리 (슈퍼관리자) ── */
+function tabCompanies(){
+  var ids = Object.keys(S.companies).sort(function(a, b){ return String(S.companies[a].name).localeCompare(String(S.companies[b].name), 'ko'); });
+  $('tab-companies').innerHTML = '<div class="row"><span class="sp"></span><button type="button" class="btn pri" onclick="companyForm()">고객사 등록</button></div>'
+    + (ids.length ? '<div class="tblwrap"><table><thead><tr><th>회사명</th><th>현장명</th><th>담당자 메일</th><th>상태</th><th></th></tr></thead><tbody>' + ids.map(function(id){
+        var c = S.companies[id];
+        return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.site) + '</td><td>' + esc(Object.values(c.adminEmails || {}).join(', ')) + '</td><td>' + (c.off ? '<span class="tag warn">중지</span>' : '<span class="tag on">사용 중</span>') + '</td>'
+          + '<td><button type="button" class="btn sm" onclick="companyForm(\'' + esc(id) + '\')">수정</button></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">첫 고객사를 등록해 주세요.</div>');
+}
+function companyForm(id){
+  var c = id ? S.companies[id] : {};
+  dlg('<h2>' + (id ? '고객사 수정' : '고객사 등록') + '</h2>'
+    + '<label class="f">회사명<input id="cName" maxlength="40" value="' + esc(c.name) + '"></label>'
+    + '<label class="f">담당자 구글 메일 (여러 명은 쉼표로 구분)<textarea id="cMails">' + esc(Object.values(c.adminEmails || {}).join(', ')) + '</textarea></label>'
+    + (id ? '<label class="row" style="margin-bottom:0"><input type="checkbox" id="cOff"' + (c.off ? ' checked' : '') + '> 사용 중지 (QR로 기록할 수 없고 메일도 나가지 않습니다)</label>' : '<p class="hint">로고와 현장명은 등록 후 QR·회사 정보 탭에서 넣습니다.</p>')
+    + '<div id="cErr" class="err"></div>'
+    + '<div class="row" style="margin:14px 0 0"><span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">취소</button><button type="button" class="btn pri" onclick="saveCompany(' + (id ? '\'' + esc(id) + '\'' : '') + ')">저장</button></div>');
+}
+function randId(len){
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', a = crypto.getRandomValues(new Uint8Array(len)), s = '';
+  for (var i = 0; i < len; i++) s += chars[a[i] % chars.length];
+  return s;
+}
+function saveCompany(id){
+  var name = $('cName').value.trim();
+  var mails = parseMails($('cMails').value);
+  if (!name) { $('cErr').textContent = '회사명을 입력해 주세요'; return; }
+  if (mails.invalid.length) { $('cErr').textContent = '잘못된 주소: ' + mails.invalid.join(', '); return; }
+  var emails = {}; mails.valid.forEach(function(m){ emails[ekey(m)] = m.trim().toLowerCase(); });
+  var up = {};
+  var cid = id || randId(20);
+  if (id) {
+    var old = S.companies[id].adminEmails || {};
+    Object.keys(old).forEach(function(k){ if (!emails[k]) up['qra/admins/' + k + '/' + cid] = null; });
+    up['qra/companies/' + cid + '/name'] = name;
+    up['qra/companies/' + cid + '/adminEmails'] = emails;
+    up['qra/companies/' + cid + '/off'] = $('cOff').checked ? true : null;
+  } else {
+    var key = randId(24);
+    up['qra/companies/' + cid] = { name:name, qrKey:key, adminEmails:emails, mail:{ freq:'off' }, at:firebase.database.ServerValue.TIMESTAMP, by:S.user.email || '' };
+    up['qra/keys/' + key] = cid;
+  }
+  Object.keys(emails).forEach(function(k){ up['qra/admins/' + k + '/' + cid] = true; });
+  db.ref().update(up).then(function(){
+    closeDlg(); toast('저장했습니다');
+    S.cid = cid;
+    if (!id) S.tab = 'qr';
+    return loadCompanies();
+  }).catch(fail);
+}
+</script>
+<script src="/mm_copy.js" defer></script>
+</body>
+</html>

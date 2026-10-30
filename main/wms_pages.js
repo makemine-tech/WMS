@@ -36,6 +36,12 @@ var WMS_PAGES=[
     {key:'vendor_status',file:'vendor_status.html',label:'업체별 재고 현황 (담당자 보고서)', floor:1, gate:true,
       self:'자체 인증: vendorByEmail 매칭 — 거래처 담당자는 그룹 미가입이므로 초대회원 이상으로 올리지 마세요'},
   ]},
+  {group:'고객사 서비스', items:[
+    {key:'qr_attend',    file:'qr_attend.html',    label:'QR 출퇴근기록기 (고객사 관리 · 근태 기록 · 자동 메일)', floor:1, gate:true,
+      self:'자체 인증: qra/admins 담당자 또는 슈퍼관리자 — 고객사 담당자는 그룹 미가입이므로 초대회원 이상으로 올리지 마세요'},
+    {key:'qr_in',        file:'qr_in.html',        label:'└ QR 출퇴근 폰 화면 (직원용)', floor:0, gate:false,
+      locked:'항상 공개', self:'로그인 없는 공개 화면 — 서버 함수만 호출, 잠그면 직원이 기록할 수 없음'},
+  ]},
   {group:'출고 · 입고 도구 (그룹 동기화)', items:[
     {key:'cargo_log',    file:'cargo_log.html',    label:'입출고반품관리 (기록지·파렛트 통계)', floor:2, gate:true},
     {key:'star_coupang', file:'star_coupang.html', label:'쿠팡 출고', floor:2, gate:true},
@@ -131,6 +137,7 @@ var WMS_MENU=[
     {key:'barcodeprint',   name:'바코드 라벨 인쇄', eng:'BARCODE PRINT'},
     {key:'pdf_pdf',        name:'PDF 텍스트 진단', eng:'PDF DIAGNOSE'},
     {key:'excel_merge',    name:'엑셀 합치기', eng:'EXCEL MERGE'},
+    {key:'qr_attend',      name:'QR 출퇴근기록기', eng:'QR ATTENDANCE', subs:[{key:'qr_in'}]},
     {key:'payroll',        name:'급여관리', eng:'PAYROLL', hidden:true},
     {key:'settlement',     name:'정산관리', eng:'SETTLEMENT', hidden:true},
     {key:'site_stats',     name:'사이트 통계', eng:'ANALYTICS', hidden:true},

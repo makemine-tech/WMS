@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<meta name="copyright" content="© 2026 Makemine Design. All rights reserved.">
+<title>출퇴근 기록</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500&family=Noto+Serif+KR:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* 공개 화면 — QR 로 들어오는 직원용. 어두운 바탕 + 금색 포인트. DB 를 직접 읽지 않고 서버 함수만 부른다. */
+  *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  :root { --bg:#14171c; --line:#2c3038; --line2:#3a3e46; --ink:#f3efe6; --dim:#9a9a92; --soft:#d8d4ca; --gold:#c9ab6c; --gold2:#d9c08a; --gold-ink:#1a1710; --err:#ffb4a8; }
+  html, body { background:var(--bg); }
+  body { font-family:'Noto Sans KR',system-ui,sans-serif; color:var(--ink); min-height:100dvh; font-weight:400; }
+  .wrap { max-width:420px; margin:0 auto; padding:calc(22px + env(safe-area-inset-top)) 24px 16px; }
+  .brand { text-align:center; }
+  .logo { width:60px; height:60px; margin:0 auto 10px; border-radius:50%; border:1px solid var(--gold); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#fff; }
+  .logo img { width:100%; height:100%; object-fit:contain; }
+  .logo.mono { background:transparent; color:var(--gold2); font-family:'Noto Serif KR',serif; font-size:24px; }
+  .cname { font-family:'Noto Serif KR',serif; font-weight:600; font-size:20px; letter-spacing:.04em; line-height:1.35; word-break:keep-all; }
+  .csite { font-size:12.5px; color:var(--dim); margin-top:2px; letter-spacing:.04em; }
+  .clock { text-align:center; margin:16px 0 14px; }
+  .date { font-size:12.5px; color:var(--dim); letter-spacing:.03em; }
+  .time { font-size:46px; font-weight:300; letter-spacing:.03em; line-height:1.2; font-variant-numeric:tabular-nums; }
+  .field { display:block; margin-bottom:10px; }
+  .field span { display:block; font-size:11.5px; color:var(--dim); margin-bottom:2px; }
+  .field input { width:100%; background:transparent; border:0; border-bottom:1px solid var(--line2); border-radius:0; color:var(--ink); font:inherit; font-size:17px; padding:7px 2px; outline:none; }
+  .field input:focus { border-bottom-color:var(--gold); }
+  .known { display:flex; align-items:baseline; justify-content:space-between; gap:12px; border-bottom:1px solid var(--line2); padding:8px 2px; margin-bottom:14px; }
+  .known b { font-weight:500; font-size:17px; }
+  .linkbtn { background:none; border:0; color:var(--dim); font:inherit; font-size:12px; text-decoration:underline; text-underline-offset:3px; cursor:pointer; padding:4px 0; white-space:nowrap; }
+  .consent { border:1px solid var(--line2); border-radius:10px; padding:12px 14px; margin:12px 0; font-size:12.5px; line-height:1.75; color:var(--soft); }
+  .consent h2 { font-size:13px; font-weight:500; color:var(--gold2); margin-bottom:4px; }
+  .consent ul { list-style:none; }
+  .check { display:flex; align-items:center; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); color:var(--ink); font-size:14px; cursor:pointer; }
+  .check input { width:20px; height:20px; accent-color:var(--gold); flex-shrink:0; }
+  .main { width:100%; min-height:58px; border:0; border-radius:12px; background:var(--gold); color:var(--gold-ink); font:inherit; font-size:18px; font-weight:500; letter-spacing:.04em; cursor:pointer; margin-top:4px; }
+  .main.out { background:transparent; color:var(--gold2); border:1px solid var(--gold); }
+  .main:disabled { opacity:.55; cursor:default; }
+  .msg { min-height:20px; margin-top:9px; font-size:13px; text-align:center; color:var(--err); line-height:1.5; word-break:keep-all; }
+  .msg.info { color:var(--gold2); }
+  .done { text-align:center; border:1px solid var(--gold); border-radius:12px; padding:16px 12px; margin-bottom:8px; }
+  .done .k { font-size:13px; color:var(--gold2); }
+  .done .v { font-size:30px; font-weight:300; font-variant-numeric:tabular-nums; margin-top:1px; }
+  .sec { margin-top:24px; }
+  .sec h2 { font-size:12.5px; font-weight:500; color:var(--gold2); letter-spacing:.03em; margin-bottom:5px; }
+  .rec { display:flex; justify-content:space-between; gap:10px; font-size:13.5px; padding:8px 0; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  .rec .st { color:var(--gold2); }
+  .note { font-size:12px; color:var(--dim); line-height:1.6; margin-top:8px; word-break:keep-all; }
+  .empty { font-size:13px; color:var(--dim); padding:6px 0; }
+  ol.guide { list-style:none; font-size:13px; line-height:2; color:var(--soft); counter-reset:g; }
+  ol.guide li { counter-increment:g; display:flex; gap:8px; }
+  ol.guide li::before { content:counter(g) "."; color:var(--gold2); }
+  details { margin-top:18px; font-size:12px; color:var(--dim); }
+  details summary { cursor:pointer; padding:4px 0; }
+  details .consent { margin-top:6px; }
+  .blocked { text-align:center; padding:90px 12px; line-height:1.8; font-size:15px; color:var(--soft); word-break:keep-all; }
+  .hide { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="blocked" class="blocked hide"></div>
+  <div id="app" class="hide">
+    <header class="brand">
+      <div id="logo" class="logo mono"></div>
+      <div id="cname" class="cname"></div>
+      <div id="csite" class="csite"></div>
+    </header>
+    <div class="clock"><div id="date" class="date"></div><div id="time" class="time"></div></div>
+
+    <div id="done" class="done hide"><div id="doneK" class="k"></div><div id="doneV" class="v"></div></div>
+
+    <div id="knownBox" class="known hide">
+      <b id="knownName"></b>
+      <button type="button" class="linkbtn" onclick="notMe()">본인이 아닌가요?</button>
+    </div>
+    <div id="formBox" class="hide">
+      <label class="field"><span>이름</span><input id="name" autocomplete="name" maxlength="20" placeholder="홍길동"></label>
+      <label class="field"><span>휴대폰번호</span><input id="phone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="16" placeholder="010-0000-0000"></label>
+    </div>
+    <div id="consentBox" class="consent hide">
+      <div id="consentText"></div>
+      <label class="check"><input type="checkbox" id="agree">위 내용에 동의합니다</label>
+    </div>
+
+    <button type="button" id="mainBtn" class="main" onclick="press()">출근하기</button>
+    <div id="msg" class="msg" role="status"></div>
+
+    <section class="sec">
+      <h2>이번 달 내 기록</h2>
+      <div id="records"></div>
+      <p class="note">이 화면에는 이번 달 1일부터 말일까지의 기록만 보입니다.</p>
+    </section>
+
+    <section class="sec">
+      <h2>이용 순서</h2>
+      <ol class="guide">
+        <li>출근할 때 QR을 찍습니다</li>
+        <li>이름을 확인하고 출근하기를 누릅니다</li>
+        <li>퇴근할 때 QR을 다시 찍고 퇴근하기를 누릅니다</li>
+      </ol>
+    </section>
+
+    <details><summary>개인정보 처리 안내</summary><div id="consentInfo" class="consent"></div></details>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script>
+var FIREBASE_CONFIG = {
+  apiKey:"AIzaSyAM2t9dvtStrXNam-YAiq19yD8FHwKpPmI",
+  authDomain:"makewon.com",
+  databaseURL:"https://makechango-wms-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"makechango-wms",
+  storageBucket:"makechango-wms.firebasestorage.app",
+  messagingSenderId:"333385336098",
+  appId:"1:333385336098:web:94f07492421965ab32917b"
+};
+var $ = function(id){ return document.getElementById(id); };
+var KEY = new URLSearchParams(location.search).get('key') || '';
+var TZ = { timeZone:'Asia/Seoul' };
+var st = { next:'in', known:false, name:'', needConsent:false, busy:false, company:'' };
+
+/* 저장소가 막힌 브라우저에서는 매번 이름·번호를 입력하게 된다 */
+function store(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} return null; }
+var TOKEN_KEY = 'qra_t_' + KEY.slice(0, 8);
+function devId(){
+  var d = store('qra_dev');
+  if (!d) { d = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); store('qra_dev', d); }
+  return d;
+}
+
+function call(name, data){
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  return firebase.app().functions('asia-northeast3').httpsCallable(name)(data).then(function(r){ return r.data; });
+}
+/* 서버가 정한 안내는 그대로, 연결 문제 등은 알아듣게 */
+function errText(e){
+  var code = String((e && e.code) || '').replace('functions/', '');
+  if (['permission-denied','failed-precondition','invalid-argument','resource-exhausted'].indexOf(code) >= 0 && e.message) return e.message;
+  return '연결이 원활하지 않습니다. 다시 눌러 주세요';
+}
+function hhmm(ms){ return new Date(ms).toLocaleTimeString('ko-KR', Object.assign({ hour:'2-digit', minute:'2-digit', hourCycle:'h23' }, TZ)); }
+function md(ms){ return new Date(ms).toLocaleDateString('ko-KR', Object.assign({ month:'numeric', day:'numeric', weekday:'short' }, TZ)); }
+
+function tick(){
+  var n = new Date();
+  $('date').textContent = n.toLocaleDateString('ko-KR', Object.assign({ month:'long', day:'numeric', weekday:'long' }, TZ));
+  $('time').textContent = hhmm(n.getTime());
+}
+function say(text, info){ var m = $('msg'); m.textContent = text || ''; m.className = 'msg' + (info ? ' info' : ''); }
+function block(text){ $('app').classList.add('hide'); var b = $('blocked'); b.textContent = text; b.classList.remove('hide'); }
+
+function consentHtml(host){
+  host.textContent = '';
+  var h = document.createElement('h2'); h.textContent = '개인정보 수집·이용 동의'; host.appendChild(h);
+  var ul = document.createElement('ul');
+  [ '수집하는 곳: ' + st.company,
+    '항목: 이름, 휴대폰번호, 출퇴근 시각, 접속 기기 식별값',
+    '목적: 출퇴근 기록과 근태·급여 관리',
+    '보관 기간: 수집일부터 3년, 이후 파기',
+    '처리 위탁: 기록 시스템의 운영은 메이크마인이 맡습니다.',
+    '동의하지 않으실 수 있으나, 이 경우 QR 출퇴근 기록을 이용할 수 없습니다. 담당자에게 다른 기록 방법을 문의해 주세요.'
+  ].forEach(function(t){ var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+  host.appendChild(ul);
+}
+
+function renderRecords(list){
+  var host = $('records'); host.textContent = '';
+  if (!list || !list.length) { var e = document.createElement('div'); e.className = 'empty'; e.textContent = '이번 달 기록이 아직 없습니다.'; host.appendChild(e); return; }
+  list.forEach(function(r){
+    var row = document.createElement('div'); row.className = 'rec';
+    var a = document.createElement('span'); a.textContent = md(r.in);
+    var b = document.createElement('span');
+    b.textContent = hhmm(r.in) + ' ~ ' + (r.out ? hhmm(r.out) : '');
+    if (!r.out) {
+      var s = document.createElement('span'); s.className = 'st';
+      s.textContent = r.status === 'open' ? '근무 중' : '퇴근 미기록';
+      b.appendChild(s);
+    }
+    row.appendChild(a); row.appendChild(b); host.appendChild(row);
+  });
+}
+
+function render(){
+  $('knownBox').classList.toggle('hide', !st.known);
+  $('knownName').textContent = st.name;
+  $('formBox').classList.toggle('hide', st.known);
+  $('consentBox').classList.toggle('hide', !st.needConsent);
+  var b = $('mainBtn');
+  var word = st.next === 'out' ? '퇴근하기' : '출근하기';
+  b.textContent = st.needConsent ? '동의하고 ' + word : word;
+  b.classList.toggle('out', st.next === 'out');
+  b.disabled = st.busy;
+}
+
+function notMe(){
+  store(TOKEN_KEY, null);
+  st.known = false; st.name = ''; st.next = 'in'; st.needConsent = false;
+  $('name').value = ''; $('phone').value = '';
+  $('done').classList.add('hide');
+  renderRecords([]); say(''); render();
+  $('name').focus();
+}
+
+function press(){
+  if (st.busy) return;
+  say('');
+  var data = { key:KEY, action:st.next, dev:devId() };
+  var token = store(TOKEN_KEY);
+  if (st.known && token) data.token = token;
+  else {
+    data.name = $('name').value; data.phone = $('phone').value;
+    if (!data.name.trim()) { say('이름을 입력해 주세요'); $('name').focus(); return; }
+    if (!data.phone.trim()) { say('휴대폰번호를 입력해 주세요'); $('phone').focus(); return; }
+  }
+  if (st.needConsent) {
+    if (!$('agree').checked) { say('개인정보 수집·이용에 동의해 주세요'); return; }
+    data.agree = true;
+  }
+  st.busy = true; render();
+  call('qraPunch', data).then(function(r){
+    st.busy = false;
+    if (r.needConsent) { st.needConsent = true; render(); say('처음 오셨네요. 아래 내용을 확인하고 동의해 주세요', true); $('consentBox').scrollIntoView({ block:'center', behavior:'smooth' }); return; }
+    if (r.needPhone) { notMe(); say('이름과 휴대폰번호를 입력해 주세요', true); return; }
+    if (r.token) store(TOKEN_KEY, r.token);
+    st.needConsent = false; st.known = true; st.name = r.name; st.next = r.next;
+    render(); renderRecords(r.records);
+    if (r.kind === 'stale') { say(r.next === 'out' ? '이미 출근 기록이 있습니다. 퇴근할 때 퇴근하기를 눌러 주세요' : '출근 기록이 없습니다. 출근하기를 눌러 주세요', true); return; }
+    $('doneK').textContent = (data.action === 'out' ? '퇴근' : '출근') + ' 기록 완료';
+    $('doneV').textContent = hhmm(r.at);
+    $('done').classList.remove('hide');
+    if (navigator.vibrate) navigator.vibrate(40);
+  }).catch(function(e){
+    st.busy = false; render();
+    if (e && e.code === 'functions/permission-denied') { block(e.message); return; }
+    say(errText(e));
+  });
+}
+
+function boot(){
+  if (!/^[A-Za-z0-9]{16,64}$/.test(KEY)) { block('QR을 다시 찍어 주세요.'); return; }
+  tick(); setInterval(tick, 1000);
+  var token = store(TOKEN_KEY);
+  call('qraInfo', token ? { key:KEY, token:token } : { key:KEY }).then(function(r){
+    var c = r.company || {};
+    st.company = c.name || '';
+    document.title = st.company + ' 출퇴근 기록';
+    $('cname').textContent = st.company;
+    $('csite').textContent = c.site || '';
+    var lg = $('logo'); lg.textContent = '';
+    if (c.logo && c.logo.indexOf('data:image/') === 0) {
+      var img = document.createElement('img'); img.alt = ''; img.src = c.logo;
+      lg.classList.remove('mono'); lg.appendChild(img);
+    } else lg.textContent = st.company.slice(0, 1);
+    consentHtml($('consentText')); consentHtml($('consentInfo'));
+    if (r.me) { st.known = true; st.name = r.me.name; st.next = r.me.next; renderRecords(r.me.records); }
+    else { if (token) store(TOKEN_KEY, null); renderRecords([]); }
+    $('app').classList.remove('hide');
+    render();
+  }).catch(function(e){
+    var known = (e && e.code === 'functions/permission-denied') || (e && e.code === 'functions/resource-exhausted');
+    block(known ? errText(e) : '연결이 원활하지 않습니다. 화면을 닫고 QR을 다시 찍어 주세요');
+  });
+}
+boot();
+</script>
+<script src="/mm_copy.js" defer></script>
+</body>
+</html>
