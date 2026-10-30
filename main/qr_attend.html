@@ -109,6 +109,7 @@ dialog h2{font-size:15px;font-weight:700;margin-bottom:.8rem}
   <nav class="tabs" id="tabs"></nav>
 </div>
 <div class="wrap" id="wrap">
+  <div id="previewBar" class="card hide" style="border-color:var(--y);color:var(--y)">담당자 화면 미리보기입니다. 담당자에게는 이 안내 없이 이 회사의 기록만 보입니다. 이 창을 닫으면 끝납니다.</div>
   <div id="noCompany" class="card hide"></div>
   <div id="main" class="hide">
     <section id="tab-records" class="tab"></section>
@@ -174,6 +175,9 @@ firebase.auth().onAuthStateChanged(function(u){
   $('who').textContent = u.email || '';
   db.ref('superadmins/' + u.uid).get().then(function(s){
     S.isSuper = s.exists();
+    /* 담당자 화면 미리보기: 슈퍼관리자만, 화면만 담당자처럼 한 회사·기록 탭으로 줄인다 */
+    var q = new URLSearchParams(location.search);
+    if (S.isSuper && q.get('preview') === '1' && q.get('c')) { S.isSuper = false; S.previewCid = q.get('c'); }
     return loadCompanies();
   }).catch(function(e){ showNone('권한을 확인하지 못했습니다: ' + (e.code || e.message)); });
 });
@@ -190,7 +194,9 @@ function showNone(text){
 }
 
 function loadCompanies(){
-  var load = S.isSuper
+  var load = S.previewCid
+    ? db.ref('qra/companies/' + S.previewCid).get().then(function(s){ var o = {}; if (s.exists()) o[S.previewCid] = s.val(); return o; })
+    : S.isSuper
     ? db.ref('qra/companies').get().then(function(s){ return s.val() || {}; })
     : db.ref('qra/admins/' + ekey(S.user.email)).get().then(function(s){
         var ids = Object.keys(s.val() || {});
@@ -206,6 +212,7 @@ function loadCompanies(){
     if (wanted && cs[wanted] && !S.cid) S.cid = wanted;
     document.querySelector('.top-r .btn').classList.toggle('hide', !S.isSuper);
     $('noCompany').classList.add('hide'); $('main').classList.remove('hide');
+    $('previewBar').classList.toggle('hide', !S.previewCid);
     var sel = $('companySel');
     sel.innerHTML = ids.map(function(id){ return '<option value="' + esc(id) + '">' + esc(cs[id].name) + (cs[id].off ? ' (중지)' : '') + '</option>'; }).join('');
     sel.classList.toggle('hide', ids.length < 2);
@@ -381,7 +388,7 @@ function qrDialog(id, forAdmin){
       : '현장에 붙여 두는 출퇴근 QR입니다. 재발급하면 이전 QR은 바로 쓸 수 없게 되니 인쇄물을 교체해야 합니다.') + '</p>'
     + posterHtml(c, src, forAdmin)
     + '<div class="row" style="margin:14px 0 0"><button type="button" class="btn pri" onclick="qrPrint()">A4 인쇄</button><button type="button" class="btn" onclick="qrSave()">이미지 저장</button><button type="button" class="btn" onclick="qrCopy()">주소 복사</button>'
-    + (forAdmin ? '' : '<button type="button" class="btn dan" onclick="qrRotate()">재발급</button>')
+    + (forAdmin ? '<a class="btn" target="_blank" rel="noopener" href="/qr_attend.html?c=' + encodeURIComponent(id) + '&preview=1">담당자 화면 미리보기</a>' : '<button type="button" class="btn dan" onclick="qrRotate()">재발급</button>')
     + '<span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">닫기</button></div>');
 }
 function qrPrint(){
