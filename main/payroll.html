@@ -258,6 +258,7 @@ table.list tr.left td{opacity:.5}
     <div class="tabs">
       <button class="tab on" data-t="run">월 급여</button>
       <button class="tab" data-t="att">근태</button>
+      <button class="tab" data-t="qr">QR 출퇴근</button>
       <button class="tab" data-t="emp">사원</button>
       <button class="tab" data-t="ledger">급여대장</button>
       <button class="tab" data-t="slip">명세서</button>
@@ -339,6 +340,11 @@ table.list tr.left td{opacity:.5}
         <button class="btn btn-p" onclick="printPane('bank')">🖨 인쇄</button>
       </div>
       <div id="bankBody"></div>
+    </div>
+
+    <!-- QR 출퇴근기록기 (고객사용 — 급여 데이터와 분리, 담당자는 qr_attend.html 로 직접 접속) -->
+    <div class="pane hide" id="p-qr">
+      <iframe id="qrFrame" title="QR 출퇴근기록기" style="display:block;width:100%;height:calc(100vh - 145px);min-height:480px;border:1px solid var(--br);border-radius:12px;background:var(--bg)"></iframe>
     </div>
 
     <!-- 설정 -->
@@ -584,6 +590,8 @@ function doRecover(){
 var lastAct = Date.now(), lockTick = null;
 function autoLockMin(){ return (S && S.settings && S.settings.autoLockMin) || 10; }
 ['mousemove','keydown','click','touchstart','scroll'].forEach(function(ev){ window.addEventListener(ev, function(){ lastAct = Date.now(); }, { passive: true }); });
+/* QR 출퇴근 탭(iframe) 안에서 작업하는 동안에도 자동잠금 시간을 늘린다 */
+window.addEventListener('message', function(e){ if (e.origin === location.origin && e.data === 'qra-activity') lastAct = Date.now(); });
 function startLockTimer(){
   clearInterval(lockTick);
   lockTick = setInterval(function(){
@@ -600,6 +608,7 @@ function lockNow(why){
   clearInterval(lockTick);
   ['runBody','attBody','empBody','ledBody','slipBody','slipSel','bankBody','setBody'].forEach(function(id){ $(id).innerHTML = ''; });
   $('modalRoot').innerHTML = '';
+  $('qrFrame').removeAttribute('src');
   gmsg('uMsg', 'wa', why ? esc(why) + ' — 다시 인증하세요' : '');
   showGate('gUnlock');
 }
@@ -670,8 +679,9 @@ function showTab(t){
   curTab = t;
   document.querySelectorAll('.tab').forEach(function(b){ b.classList.toggle('on', b.dataset.t === t); });
   document.querySelectorAll('.pane').forEach(function(p){ p.classList.toggle('hide', p.id !== 'p-' + t); });
-  ({ run: renderRun, att: renderAtt, emp: renderEmp, ledger: renderLedger, slip: renderSlip, bank: renderBank, set: renderSet })[t]();
+  ({ run: renderRun, att: renderAtt, qr: renderQr, emp: renderEmp, ledger: renderLedger, slip: renderSlip, bank: renderBank, set: renderSet })[t]();
 }
+function renderQr(){ var f = $('qrFrame'); if (!f.getAttribute('src')) f.setAttribute('src', '/qr_attend.html?embed=1'); }
 function fillYmSelect(sel){
   var ks = Object.keys(S.runs).sort().reverse(), cur = sel.value || $('runYm').value;
   sel.innerHTML = ks.length ? ks.map(function(k){ return '<option value="' + k + '">' + ymLabel(k) + (S.runs[k].status === 'closed' ? ' ✓' : ' (작성중)') + '</option>'; }).join('') : '<option value="">급여 데이터 없음</option>';
