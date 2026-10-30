@@ -606,10 +606,11 @@ function lockNow(why){
 window.addEventListener('beforeunload', function(e){ if (runDirty || attDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ─────────── 데이터 적재 ─────────── */
-function defaultCompany(){ return { name:'', ceo:'', bizNo:'', addr:'', tel:'', stab:'lt150', accidentRate:0, payDay:10 }; }
+function defaultCompany(){ return { name:'', ceo:'', bizNo:'', addr:'', tel:'', stab:'lt150', accidentRate:0, payDay:25, payDayMode:'same' }; }
 function loadAll(){
   return Promise.all([getEnc('company'), getEnc('employees'), getEnc('settings'), ref('enc/runs').get(), ref('enc/att').get()]).then(function(r){
     S = { company: Object.assign(defaultCompany(), r[0] || {}), employees: (r[1] && r[1].list) || [], settings: r[2] || {}, runs: {}, att: {} };
+    if (r[0] && r[0].payDayMode !== 'same') S.company.payDay = 25;   /* 예전 '익월 N일' 값 → 당월 25일 선지급으로 */
     var boxes = r[3].val() || {}, abox = r[4].val() || {};
     return Promise.all(Object.keys(boxes).map(function(ym){
       return decObj('runs/' + ym, boxes[ym]).then(function(run){ S.runs[ym] = run; });
@@ -883,7 +884,7 @@ function createRun(mode){
     prev.rows.forEach(function(pr){ var e = empById(pr.empId); if (e && !e.left) rows.push(newRow(e, pr)); });
     active.forEach(function(e){ if (!rows.some(function(r){ return r.empId === e.id; })) rows.push(newRow(e)); });
   } else active.forEach(function(e){ rows.push(newRow(e)); });
-  var pd = S.company.payDay ? (function(){ var y = +ym.slice(0,4), m = +ym.slice(5,7) + 1; if (m > 12){ m = 1; y++; } return y + '-' + String(m).padStart(2,'0') + '-' + String(Math.min(28, +S.company.payDay)).padStart(2,'0'); })() : '';
+  var pd = S.company.payDay ? ym + '-' + String(Math.min(28, +S.company.payDay)).padStart(2,'0') : '';   /* 귀속월 당월 지급(선지급) */
   curRun = { ym: ym, payDate: pd, status: 'draft', rows: rows, createdAt: Date.now() };
   setDirty(true); renderRun();
   toast(rows.length + '명으로 ' + ymLabel(ym) + ' 급여를 만들었습니다 — 확인 후 저장하세요');
@@ -943,9 +944,37 @@ function leaveUsedFn(empId){
 }
 function hm(min){ if (!min) return ''; var h = Math.floor(min / 60), m = Math.round(min % 60); return h + (m ? ':' + String(m).padStart(2, '0') : '') ; }
 
+/* 급여는 귀속월 1일~말일분을 그달 25일에 선지급 — 근태도 한 달 전체로 기록한다.
+   기록이 있는 사원의 마지막 기록 다음 날부터 말일까지 빈 소정근무일을 채운다(중간에 빈 날은 건드리지 않음).
+   사원당 한 번만(extended) — 채운 날을 일부러 지우고 저장하면 다시 채우지 않는다. */
+function attExtendToMonthEnd(ym){
+  var y = +ym.slice(0,4), mo = +ym.slice(5,7), last = new Date(y, mo, 0).getDate(), res = { people: 0, days: 0 };
+  curAtt.extended = curAtt.extended || {};
+  attEmps(ym).forEach(function(e){
+    var days = (curAtt.days || {})[e.id], keys = days ? Object.keys(days).sort() : [];
+    if (!keys.length || curAtt.extended[e.id]) return;
+    curAtt.extended[e.id] = 1;
+    var lastKey = keys[keys.length - 1], pat = days[lastKey].pat, own = effSched(e), s = pat || own, n = 0;
+    for (var d = +lastKey + 1; d <= last; d++){
+      var dd = String(d).padStart(2, '0'), date = ym + '-' + dd, dow = new Date(y, mo - 1, d).getDay();
+      if (own.days.indexOf(dow) < 0 || C.holidayName(date, S.settings)) continue;
+      if ((e.joined && date < e.joined) || (e.left && date > e.left)) continue;
+      days[dd] = { in: s.in, out: s.out };
+      if (pat) days[dd].pat = Object.assign({}, pat);
+      n++;
+    }
+    if (n){ res.people++; res.days += n; }
+  });
+  return res;
+}
+
 function renderAtt(){
   var ym = $('attYm').value || ($('attYm').value = $('runYm').value || ymNow());
-  if (!curAtt || curAtt.ym !== ym){ curAtt = S.att[ym] ? JSON.parse(JSON.stringify(S.att[ym])) : { ym: ym, days: {} }; attDirty = false; }
+  if (!curAtt || curAtt.ym !== ym){
+    curAtt = S.att[ym] ? JSON.parse(JSON.stringify(S.att[ym])) : { ym: ym, days: {} }; attDirty = false;
+    var ext = attExtendToMonthEnd(ym);
+    if (ext.days){ attDirty = true; toast(ext.people + '명의 남은 근무일 ' + ext.days + '일을 말일까지 채웠습니다 — 확인 후 저장하세요'); }
+  }
   var list = attEmps(ym);
   if (attSel !== '__all' && !list.some(function(e){ return e.id === attSel; })) attSel = '__all';
   $('attEmp').innerHTML = '<option value="__all">📋 전체 요약</option>' + list.map(function(e){ return '<option value="' + e.id + '"' + (attSel === e.id ? ' selected' : '') + '>' + esc(e.name) + '</option>'; }).join('');
@@ -973,7 +1002,8 @@ function renderAttSummary(ym, list){
   });
   h += '</tbody><tfoot><tr style="font-weight:700"><td>합계</td><td>' + T.workDays + '</td><td>' + hm(T.workMin) + '</td><td>' + hm(T.otMin) + '</td><td>' + hm(T.nightMin) + '</td><td>' + hm(T.holMin) + '</td><td></td><td></td><td>' + (T.absent || '') + '</td><td>' + (T.leave || '') + '</td><td></td></tr></tfoot></table></div>';
   h += '<div class="note" style="margin-top:.6rem">· 사원을 누르면 날짜별 입력 화면이 열립니다. 시간은 <b>시:분</b> 표기(8:30 = 8시간 30분).<br>' +
-    '· [⚡ 소정근무로 채우기]는 비어 있는 근무일에 사원별 기본 출퇴근 시각을 넣습니다(이번 달은 오늘까지만). 다른 날만 고치면 됩니다.<br>' +
+    '· 근태는 <b>귀속월 1일~말일 한 달 전체</b>로 기록합니다(그달 분을 ' + (+S.company.payDay || 25) + '일에 선지급). 기록이 있는 사원은 남은 근무일이 말일까지 자동으로 채워지니, 실제와 다른 날은 연차·결근 등으로 고치세요.<br>' +
+    '· [⚡ 소정근무로 채우기]는 비어 있는 근무일에 사원별 기본 출퇴근 시각을 넣습니다(기본 1일~말일). 다른 날만 고치면 됩니다.<br>' +
     '· 연장 = 하루 8시간·주 40시간 초과 + 토요일 등 휴무일 근무 / 야간 = 22시~06시 / 휴일 = 일요일·공휴일 근무. 저장 후 [월 급여 → ⏱ 근태 반영]으로 급여에 넣습니다.</div>';
   $('attBody').innerHTML = h;
 }
@@ -1037,8 +1067,8 @@ function updateAttDays(ym, e){
 /* 소정근무로 채우기 — 대상·근무패턴·기간·덮어쓰기를 골라 채운다.
    '사원별 기본'이 아닌 패턴으로 채운 날은 rec.pat 에 그 패턴을 남겨 휴게·지각 판정도 그 패턴으로 한다. */
 function attFillSched(){
-  var ym = curAtt.ym, last = new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate(), today = todayStr();
-  var endD = ym + '-' + String(last).padStart(2, '0'); if (today.slice(0, 7) === ym) endD = today;
+  var ym = curAtt.ym, last = new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate();
+  var endD = ym + '-' + String(last).padStart(2, '0');
   var who = attSel === '__all' ? '재직자 전체 (' + attEmps(ym).length + '명)' : esc(empById(attSel).name);
   $('modalRoot').innerHTML = '<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px"><h3>⚡ 소정근무로 채우기</h3>' +
     '<div class="fg">' +
@@ -1166,7 +1196,8 @@ function attImport(file){
           if (g.inT) rec.in = g.inT; if (g.outT) rec.out = g.outT;
           days[g.dd] = rec;
         });
-        setAttDirty(true); renderAtt(); toast('출퇴근 기록 ' + keys.length + '건을 넣었습니다 — 확인 후 저장하세요');
+        var ext = attExtendToMonthEnd(ym);
+        setAttDirty(true); renderAtt(); toast('출퇴근 기록 ' + keys.length + '건을 넣었습니다' + (ext.days ? ' · 남은 근무일 ' + ext.days + '일은 말일까지 채움' : '') + ' — 확인 후 저장하세요');
       } catch (er){ toast('가져오기 실패: ' + er.message); }
     };
     fr.readAsArrayBuffer(file);
@@ -1399,7 +1430,7 @@ function renderSet(){
   var h = '<div class="card"><div class="fsec" style="margin-top:0">회사 정보</div><div class="fg">' +
     ['name:회사명','ceo:대표자','bizNo:사업자등록번호','tel:전화번호'].map(function(x){ var k = x.split(':'); return '<label>' + k[1] + '<input data-c="' + k[0] + '" value="' + esc(co[k[0]] || '') + '"></label>'; }).join('') +
     '<label class="full">주소<input data-c="addr" value="' + esc(co.addr || '') + '"></label>' +
-    '<label>급여 지급일 (익월 N일)<input data-c="payDay" type="number" min="1" max="31" value="' + esc(co.payDay || '') + '"></label>' +
+    '<label>급여 지급일 (귀속월 당월 N일)<input data-c="payDay" type="number" min="1" max="31" value="' + esc(co.payDay || '') + '"></label>' +
     '<label>고용안정·직능 (사업주)<select data-c="stab">' + Object.keys(C.STAB_LABEL).map(function(k){ return '<option value="' + k + '"' + ((co.stab || 'lt150') === k ? ' selected' : '') + '>' + C.STAB_LABEL[k] + '</option>'; }).join('') + '</select></label>' +
     '<label>산재보험 요율 % (사업장 고지 요율)<input data-c="accidentRate" type="number" step="0.001" value="' + esc(co.accidentRate || '') + '" placeholder="예: 0.9"></label>' +
     '<div class="chks" style="grid-column:1/-1"><label><input type="checkbox" data-c="under5"' + (co.under5 ? ' checked' : '') + '>상시근로자 5인 미만 사업장 — 연장·야간·휴일 가산수당, 연차휴가 미적용</label></div>' +
