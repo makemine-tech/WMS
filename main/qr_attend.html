@@ -109,7 +109,7 @@ dialog h2{font-size:15px;font-weight:700;margin-bottom:.8rem}
   <nav class="tabs" id="tabs"></nav>
 </div>
 <div class="wrap" id="wrap">
-  <div id="previewBar" class="card hide" style="border-color:var(--y);color:var(--y)">담당자 화면 미리보기입니다. 담당자에게는 이 안내 없이 이 회사의 기록만 보입니다. 이 창을 닫으면 끝납니다.</div>
+  <div id="previewBar" class="card hide" style="border-color:var(--y);color:var(--y)">슈퍼관리자 계정으로 보는 담당자 화면입니다. 담당자에게는 이 안내 없이 이 회사의 기록만 보입니다. 전체 관리는 급여관리의 QR 출퇴근 탭에서 합니다.</div>
   <div id="noCompany" class="card hide"></div>
   <div id="main" class="hide">
     <section id="tab-records" class="tab"></section>
@@ -175,9 +175,12 @@ firebase.auth().onAuthStateChanged(function(u){
   $('who').textContent = u.email || '';
   db.ref('superadmins/' + u.uid).get().then(function(s){
     S.isSuper = s.exists();
-    /* 담당자 화면 미리보기: 슈퍼관리자만, 화면만 담당자처럼 한 회사·기록 탭으로 줄인다 */
+    /* 전체 관리는 급여관리 탭 안에서만. 그 밖에서는 슈퍼관리자도 관리자 QR 주소의 한 회사·기록 탭만 본다 */
     var q = new URLSearchParams(location.search);
-    if (S.isSuper && q.get('preview') === '1' && q.get('c')) { S.isSuper = false; S.previewCid = q.get('c'); }
+    if (S.isSuper && !(q.get('embed') && window.parent !== window)) {
+      if (!q.get('c')) { location.replace('/payroll.html'); return; }
+      S.isSuper = false; S.previewCid = q.get('c');
+    }
     return loadCompanies();
   }).catch(function(e){ showNone('권한을 확인하지 못했습니다: ' + (e.code || e.message)); });
 });
@@ -205,9 +208,11 @@ function loadCompanies(){
         });
       });
   return load.then(function(cs){
+    var wanted = new URLSearchParams(location.search).get('c');
+    /* 관리자 QR 로 들어오면 담당 회사가 여럿이어도 그 회사만 */
+    if (!S.isSuper && wanted) { var one = {}; if (cs[wanted]) one[wanted] = cs[wanted]; cs = one; }
     S.companies = cs;
     var ids = Object.keys(cs).sort(function(a, b){ return String(cs[a].name).localeCompare(String(cs[b].name), 'ko'); });
-    var wanted = new URLSearchParams(location.search).get('c');
     if (!S.isSuper && (!ids.length || (wanted && !cs[wanted]))) { showNone('이 고객사의 담당자로 등록된 메일이 아닙니다 (' + (S.user.email || '') + '). 등록된 구글 메일로 로그인해 주세요.'); return; }
     if (wanted && cs[wanted] && !S.cid) S.cid = wanted;
     document.querySelector('.top-r .btn').classList.toggle('hide', !S.isSuper);
@@ -388,7 +393,7 @@ function qrDialog(id, forAdmin){
       : '현장에 붙여 두는 출퇴근 QR입니다. 재발급하면 이전 QR은 바로 쓸 수 없게 되니 인쇄물을 교체해야 합니다.') + '</p>'
     + posterHtml(c, src, forAdmin)
     + '<div class="row" style="margin:14px 0 0"><button type="button" class="btn pri" onclick="qrPrint()">A4 인쇄</button><button type="button" class="btn" onclick="qrSave()">이미지 저장</button><button type="button" class="btn" onclick="qrCopy()">주소 복사</button>'
-    + (forAdmin ? '<a class="btn" target="_blank" rel="noopener" href="/qr_attend.html?c=' + encodeURIComponent(id) + '&preview=1">담당자 화면 미리보기</a>' : '<button type="button" class="btn dan" onclick="qrRotate()">재발급</button>')
+    + (forAdmin ? '<a class="btn" target="_blank" rel="noopener" href="/qr_attend.html?c=' + encodeURIComponent(id) + '">담당자 화면 미리보기</a>' : '<button type="button" class="btn dan" onclick="qrRotate()">재발급</button>')
     + '<span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">닫기</button></div>');
 }
 function qrPrint(){
