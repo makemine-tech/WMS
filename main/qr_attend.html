@@ -534,11 +534,19 @@ function companyForm(id){
     + '<label class="f">회사명<input id="cName" maxlength="40" value="' + esc(c.name) + '"></label>'
     + '<label class="f">현장명 (폰 화면과 인쇄물의 회사명 아래에 나옵니다)<input id="cSite" maxlength="40" value="' + esc(c.site) + '"></label>'
     + '<div class="row"><img id="cLogoPrev" class="logoThumb" alt="로고"><label class="btn sm">로고 올리기<input type="file" accept="image/*" class="hide" onchange="pickLogo(this.files[0]);this.value=\'\'"></label><button type="button" class="btn sm dan" id="cLogoDel" onclick="setFormLogo(null)">로고 지우기</button></div>'
-    + '<label class="f">담당자 구글 메일 (여러 명은 쉼표로 구분)<textarea id="cMails">' + esc(Object.values(c.adminEmails || {}).join(', ')) + '</textarea></label>'
+    + '<label class="f">담당자 구글 메일 (여러 명은 쉼표로 구분)<textarea id="cMails" oninput="checkAdminMails()">' + esc(Object.values(c.adminEmails || {}).join(', ')) + '</textarea></label>'
+    + '<p class="hint" style="margin:-.4rem 0 .4rem">본 버전은 구글 로그인만 지원합니다. 담당자 메일은 구글 계정이어야 합니다. 자동 메일을 받는 주소는 어떤 메일이든 됩니다.</p>'
+    + '<p id="cMailWarn" class="hint" style="color:var(--y);margin-bottom:.7rem"></p>'
     + (id ? '<label class="row" style="margin-bottom:0"><input type="checkbox" id="cOff"' + (c.off ? ' checked' : '') + '> 사용 중지 (QR로 기록할 수 없고 메일도 나가지 않습니다)</label>' : '')
     + '<div id="cErr" class="err"></div>'
     + '<div class="row" style="margin:14px 0 0"><span class="sp"></span><button type="button" class="btn" onclick="closeDlg()">취소</button><button type="button" class="btn pri" onclick="saveCompany(' + (id ? '\'' + esc(id) + '\'' : '') + ')">저장</button></div>');
   setFormLogo(S.formLogo);
+  checkAdminMails();
+}
+/* 회사 도메인도 구글 계정일 수 있어 막지 않고 알려만 준다 */
+function checkAdminMails(){
+  var others = parseMails($('cMails').value).valid.filter(function(m){ return !/@(gmail|googlemail)\.com$/i.test(m); });
+  $('cMailWarn').textContent = others.length ? '구글 계정이 아니면 로그인할 수 없습니다. 확인해 주세요: ' + others.join(', ') : '';
 }
 function setFormLogo(v){
   S.formLogo = v;
