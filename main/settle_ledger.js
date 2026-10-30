@@ -119,7 +119,7 @@ function renderLedger(){
     + '</style>'
     + '<div class="lg-top"><span class="bar-t">' + esc(ymLabel(ym)) + ' 삼자물류정산관리</span>' + lgMonthBar(ym)
     + '<label class="btn" style="cursor:pointer;white-space:nowrap;font-size:12px">📥 관리표 가져오기<input type="file" accept=".xlsx,.xls" style="display:none" onchange="lgImport(this)"></label>'
-    + '<button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgExportMenu(this)">📤 내보내기 ▾</button><button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgAddExtra()">＋ 기타 거래처</button><button class="btn p" style="white-space:nowrap;font-size:12px" onclick="lgCostOpen()">💸 고정비·지출</button></div>'
+    + '<button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgExportMenu(this)">📤 내보내기 ▾</button><button class="btn" style="white-space:nowrap;font-size:12px" onclick="lgAddExtra()" title="목록 맨 아래에 빈 줄이 생깁니다 — 업체명·정산금액 등을 바로 적으세요">＋ 업체 추가</button><button class="btn p" style="white-space:nowrap;font-size:12px" onclick="lgCostOpen()">💸 고정비·지출</button></div>'
     + '<div class="lg-cards">'
     + card('정산 업체', S.n + '곳', '금액 있는 곳') + card('청구 합계 (VAT 포함)', '₩' + won0(S.amt), '공급가 ₩' + won0(S.amt / 1.1))
     + card('송금·토스 (보낼 돈)', '₩' + won0(S.send), '관리표 송금토스') + card('입금 완료', '₩' + won0(S.paid), S.pd + ' / ' + S.n + '곳', 'var(--g)') + card('미수 합계', '₩' + won0(S.unpaid), '전미수 포함', S.unpaid ? '#f87171' : 'var(--g)')
@@ -134,7 +134,9 @@ function renderLedger(){
   rows.forEach(function(r){
     var s = r.s, rec = s.rec, I = r.I || {}, stg = lgStage(rec);
     var num = function(k, v, ph, red){ return '<input type="number" class="famt" style="width:105px' + (red ? ';color:#f87171;font-weight:700' : '') + '" value="' + (v != null && v !== '' ? v : '') + '" placeholder="' + (ph || '') + '" onchange="lgSet(\'' + P(r, k) + '\', this.value === \'\' ? null : +this.value)">'; };
-    var dl = r.file ? '<button class="btn p" style="padding:.1rem .5rem;font-size:12px" onclick="lgDownload(\'' + esc(r.key) + '\')" title="' + esc(r.file.m.name) + '">📄 ' + (r.file.m.final ? '확정본' : '거래내역서') + '</button>' : r.kind === 'v' ? '<span class="sm dim">' + (r.skip ? '이번 달 없음' : '파일 없음') + '</span>' : '';
+    /* 파일 없음 → 눌러서 확정 거래내역서 올리기 = 그 업체 이번 달 확정 (대표님 2026-10-30) */
+    var dl = r.file ? '<button class="btn p" style="padding:.1rem .5rem;font-size:12px" onclick="lgDownload(\'' + esc(r.key) + '\')" title="' + esc(r.file.m.name) + '">📄 ' + (r.file.m.final ? '확정본' : '거래내역서') + '</button>'
+      : (r.skip ? '<span class="sm dim">이번 달 없음</span>' : '<a href="javascript:void 0" class="sm" style="color:var(--mu);text-decoration:underline dotted" title="눌러서 확정 거래내역서 올리기" onclick="lgUpFinal(\'' + r.kind + '\', \'' + esc(r.key) + '\')">파일 없음</a>');
     var rr = s.reread ? '<div><button class="btn" style="padding:.05rem .45rem;font-size:11px;color:#fbbf24" onclick="lgReread(\'' + esc(r.key) + '\')" title="완료 확정 때 합계를 못 읽어 0 으로 저장됨 — 확정본 파일에서 다시 읽기">↻ 확정본 합계 다시 읽기</button></div>' : '';
     var amtCell = rr + (r.kind === 'v' && s.src && s.src !== '직접' ? '<b>' + won0(s.amt) + '</b><div class="sm dim">' + s.src + (s.man != null && Math.abs(s.man - s.amt) > 1 ? ' · <span style="color:#fbbf24">관리표 ' + won0(s.man) + '</span>' : '') + '</div>' : num('amount', rec.amount, '정산금액'));
     /* 진행 글자색: 대기 노랑 · 전달완료 주황 · 계산서발행완료 초록 · 체크완료 회색 */
@@ -142,7 +144,7 @@ function renderLedger(){
     var sel = '<select class="tsel" style="font-size:12px;padding:.1rem .3rem;font-weight:600;color:' + STC[stg] + '" onchange="this.style.color=[\'' + STC.join('\',\'') + '\'][this.value];lgSetStage(\'' + P(r) + '\', this.value)">' + ['대기', '1 전달완료', '2 계산서발행완료', '3 체크완료'].map(function(t, k){ return '<option value="' + k + '" style="color:' + STC[k] + '"' + (k === stg ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select>';
     var carryRed = s.carry > 0;
     h += '<tr' + (r.skip ? ' style="opacity:.45"' : '') + '>'
-      + '<td class="stk" style="min-width:200px;max-width:240px"><b>' + esc(r.name) + '</b>' + (r.kind === 'v' ? ' <a href="javascript:void 0" class="sm" title="정산서 전달메일 · 세금계산서용 정보" onclick="lgInfo(\'' + esc(r.key) + '\')">⚙' + (I.biz && I.mail ? '' : '<span style="color:#fbbf24">!</span>') + '</a>' : '') + (rec.xlName && rec.xlName !== r.name ? '<div class="sm dim" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">관리표: ' + esc(rec.xlName) + '</div>' : '') + '</td>'
+      + '<td class="stk" style="min-width:200px;max-width:240px">' + (r.kind === 'x' ? '<input type="text" class="famt" id="lgx_' + esc(r.key) + '" style="width:170px;text-align:left;font-weight:700" placeholder="업체명 입력" value="' + esc(r.I.name || '') + '" onchange="lgSet(\'' + P(r, 'name') + '\', this.value.trim())">' : '<b>' + esc(r.name) + '</b>') + (r.kind === 'v' ? ' <a href="javascript:void 0" class="sm" title="정산서 전달메일 · 세금계산서용 정보" onclick="lgInfo(\'' + esc(r.key) + '\')">⚙' + (I.biz && I.mail ? '' : '<span style="color:#fbbf24">!</span>') + '</a>' : '') + (rec.xlName && rec.xlName !== r.name ? '<div class="sm dim" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">관리표: ' + esc(rec.xlName) + '</div>' : '') + '</td>'
       + '<td><input type="text" class="famt" style="width:80px" value="' + esc(r.group) + '" onchange="lgSet(\'' + (r.kind === 'v' ? 'ledgerInfo/' + r.key + '/group' : P(r, 'group')) + '\', this.value.trim())"></td>'
       + '<td class="n">' + num('carry', rec.carry, s.carry ? won0(s.carry) : '', carryRed) + (carryRed && (rec.carry == null || rec.carry === '') ? '<div class="sm" style="color:#f87171">미수 ' + won0(s.carry) + '</div>' : '') + '</td>'
       + '<td class="n">' + amtCell + '</td><td class="n">' + num('send', rec.send, '보낼 돈') + '</td><td class="n">' + num('paidAmt', rec.paidAmt, rec.chk && rec.paidAmt == null ? '전액 입금(체크완료)' : rec.paid && rec.paidAmt == null ? '관리표 입금' : '입금액') + '</td>'
@@ -194,7 +196,60 @@ function lgInfo(vk){
     + '<div class="sm dim" style="margin-top:.5rem">고치면 바로 저장 · 다음 달에도 그대로 · 디자인 거래명세서의 공급받는자 상호로도 씀</div></div>';
   ov.addEventListener('click', function(e){ if (e.target === ov) ov.remove(); }); document.body.appendChild(ov);
 }
-function lgAddExtra(){ var n = prompt('기타 거래처 이름 (예: (주)영우컴퍼니, 알바도급비, 운송비)', ''); if (!n || !n.trim()) return; db.ref('settlement/ledgerExtra/' + lgYM()).push({ name: n.trim(), at: firebase.database.ServerValue.TIMESTAMP }); }
+/* ＋ 업체 추가 = 목록에 빈 줄 하나 (새 창 없이) — 업체명·정산금액·송금·입금·메모를 그 줄에 바로 적음 (대표님 2026-10-30, 중간 추가·중간정산) */
+function lgAddExtra(){
+  var ref = db.ref('settlement/ledgerExtra/' + lgYM()).push();
+  ref.set({ name: '', at: firebase.database.ServerValue.TIMESTAMP }).then(function(){
+    var go = function(n){ var el = document.getElementById('lgx_' + ref.key); if (el){ el.scrollIntoView({ block: 'center' }); el.focus(); } else if (n < 10) setTimeout(function(){ go(n + 1); }, 100); };
+    renderLedger(); go(0);
+  }).catch(function(e){ toast('추가 실패: ' + ((e && e.code) || e)); });
+}
+/* 「파일 없음」 → 확정 거래내역서 올리기 = 이번 달 확정 (업체 정산 탭 「완료 확정」과 같은 기록: 파일함 statement final + vendors/{키}/done/{ym})
+   추가한 줄(기타)은 확정하면 정식 업체로 바뀜 — 적어 둔 송금·입금·진행·메모·관리업체는 그대로 옮기고 추가 줄은 지움 (다음 달부터 업체 목록에 자동으로 나옴) */
+function lgUpFinal(kind, key){
+  var ym = lgYM(), name;
+  if (kind === 'x'){ var x = (LEXTRA[ym] || {})[key]; if (!x) return; name = String(x.name || '').trim();
+    var el = document.getElementById('lgx_' + key); if (el && el.value.trim()) name = el.value.trim();
+    if (!name){ toast('업체명을 먼저 적어 주세요'); if (el) el.focus(); return; } }
+  else { var V = monthVendors(ym).filter(function(v){ return v.vk === key; })[0]; name = V ? V.name : key; }
+  if (!confirm(name + ' — ' + ymLabel(ym) + '\n\n확정 거래내역서를 업로드하시겠습니까?\n(올리면 이 파일로 이번 달 정산이 확정됩니다)')) return;
+  var inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx,.xls,.xlsm';
+  inp.onchange = function(){ var f = inp.files[0]; if (f) lgDoFinal(kind, key, name, ym, f); };
+  inp.click();
+}
+function lgDoFinal(kind, key, name, ym, file){
+  if (!/\.(xlsx|xls|xlsm)$/i.test(file.name)){ alert('엑셀 파일(xlsx)을 올려 주세요'); return; }
+  var vk = vKey(name), prev = doneOf(vk, ym);
+  if (kind === 'x' && monthVendors(ym).some(function(v){ return v.vk === vk; }) && !confirm('「' + name + '」 업체가 이미 목록에 있습니다.\n\n이 줄을 그 업체의 ' + ymLabel(ym) + ' 확정본으로 합칠까요?')) return;
+  if (prev && !confirm('이미 확정된 파일이 있습니다.\n\n기존: ' + (prev.orig || prev.name) + '\n새 파일: ' + file.name + '\n\n새 파일을 정본으로 할까요? (기존 파일은 이력으로 남습니다)')) return;
+  var ext = (file.name.split('.').pop() || 'xlsx').toLowerCase(), fname = ym.slice(5, 7) + '월_거래내역서_' + name + '.' + ext;
+  var id = newId(), path = 'settlement/' + ym + '/' + id, buf, fwb, total = null;
+  toast('확정 거래내역서 올리는 중…');
+  file.arrayBuffer().then(function(b){
+    buf = b; fwb = XLSX.read(b, { type: 'array', cellFormula: true });
+    try { var A = SETTLE_STMT.analyze(fwb); total = A && A.totals ? (A.totals.total != null ? A.totals.total : (A.totals.sub != null ? A.totals.sub * 1.1 : null)) : null; if (total != null) total = Math.round(total); } catch (e) {}
+    return WMS2FA.encrypt(path, buf);
+  }).then(function(enc){ return putBytes(path, enc.data).then(function(){ return enc.iv; }); }).then(function(iv){
+    var now = firebase.database.ServerValue.TIMESTAMP, by = (me && me.email) || '', u = {};
+    var hist = (prev && prev.hist) || {}; if (prev && prev.id) hist[prev.id] = { name: prev.name, orig: prev.orig || '', at: prev.at || 0 };
+    u['box/' + ym + '/' + id] = { name: fname, orig: file.name, size: file.size, ext: ext, type: 'statement', final: vk, summary: '✅ 완료 확정 (삼자물류정산관리에서 올림)' + (total != null ? ' · 합계 ' + won0(total) + '원' : ''),
+      sheets: fwb.SheetNames.map(function(n){ var ws = fwb.Sheets[n]; return { n: n, r: ws && ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).e.r : 0 }; }).slice(0, 40),
+      sheetKey: fwb.SheetNames.slice().sort().join('|'), headKey: '', iv: iv, path: path, at: now, by: by };
+    u['vendors/' + vk + '/done/' + ym] = { id: id, name: fname, orig: file.name, at: now, by: by, total: total, nDiff: null, diff: null, diffErr: '삼자물류정산관리에서 바로 확정 (초안 비교 없음)', hist: Object.keys(hist).length ? hist : null };
+    if (prev && prev.id && ((ALLBOX || {})[ym] || {})[prev.id]) u['box/' + ym + '/' + prev.id + '/superseded'] = id;
+    if (kind === 'x'){   /* 추가 줄 → 정식 업체 줄로 옮김 */
+      var x = (LEXTRA[ym] || {})[key] || {}, L = 'ledger/' + ym + '/' + vk + '/';
+      ['carry', 'send', 'paidAmt', 'paid', 'sent', 'inv', 'chk', 'memo'].forEach(function(k){ if (x[k] != null && x[k] !== '') u[L + k] = x[k]; });
+      if (x.amount != null && x.amount !== '') u[L + 'amount'] = x.amount;   /* 확정본에서 합계를 못 읽으면 적어 둔 정산금액 */
+      if (x.group && !(LINFO[vk] || {}).group) u['ledgerInfo/' + vk + '/group'] = x.group;
+      if (x.mail && !(LINFO[vk] || {}).mail) u['ledgerInfo/' + vk + '/mail'] = x.mail;
+      u['ledgerExtra/' + ym + '/' + key] = null;
+    }
+    return db.ref('settlement').update(u);
+  }).then(function(){
+    toast('✅ ' + ymLabel(ym) + ' ' + name + ' 확정' + (total != null ? ' · 합계 ' + won0(total) + '원' : ' — 합계를 못 읽어 정산금액은 적어 둔 값(또는 직접 입력)'));
+  }).catch(function(e){ alert('확정 올리기 실패: ' + ((e && (e.code || e.message)) || e)); console.error(e); });
+}
 function lgDelExtra(id){ var ym = lgYM(), x = (LEXTRA[ym] || {})[id]; if (!x || !confirm('「' + (x.name || '') + '」 줄을 지울까요?')) return; db.ref('settlement/ledgerExtra/' + ym + '/' + id).set(null); }
 
 /* ── 엑셀에서 가져오기 ── */
