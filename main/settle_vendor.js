@@ -103,7 +103,7 @@ function renderVendors(){
           + '<div class="lb">' + stTag + (cnt ? '<small>⚙️ 반영된 룰 ' + cnt + '개</small>' : '<small>아직 반영된 룰 없음</small>') + stx
           + (pc != null ? '<div class="vpct"><div class="wbar"><i style="width:' + pc + '%;background:' + pctColor(pc) + '"></i></div><b style="color:' + pctColor(pc) + '">정확도 ' + pc + '%</b></div>' : '') + '</div>'
           + '<div class="fi">' + memoInput(vKey(n), v) + pickSel + '</div>'
-          + '<div class="ac"><button class="btn p" data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + ' 작성 ▸</button>'
+          + '<div class="ac"><button class="btn p"' + (dn ? ' style="background:#f97316;border-color:#f97316"' : '') + ' data-n="' + esc(n) + '" onclick="startVendor(this.dataset.n)">' + esc(ymLabel(YM)) + (dn ? ' 확정' : ' 작성') + ' ▸</button>'
           + '<a class="sm dim vhide" href="javascript:void 0" style="display:block;text-align:right;margin-top:.3rem" data-n="' + esc(n) + '" onclick="vendorHide(this.dataset.n, true)">목록에서 빼기</a></div>'
           + '<div class="vmove"><button title="맨 위로" onclick="vMove(\'' + vk + '\', -1e6)"><span class="tb">▲</span></button><button title="위로" onclick="vMove(\'' + vk + '\', -1)">▲</button><button title="아래로" onclick="vMove(\'' + vk + '\', 1)">▼</button><button title="맨 아래로" onclick="vMove(\'' + vk + '\', 1e6)"><span class="bb">▼</span></button></div></div>';
       }).join('') + '</div>';
