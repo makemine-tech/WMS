@@ -45,7 +45,8 @@ qra/companies/{cid}   { name, site, logo, off, qrKey, adminEmails:{ekey:email},
 qra/keys/{qrKey}      cid
 qra/admins/{ekey}/{cid}  true
 qra/workers/{cid}/{wid}  { name, phone, consentAt, consentVer, tokens:{해시:{at}}, lastAt, at }
-qra/open/{cid}/{wid}     { logId, month, in }            현재 근무 중인 기록
+qra/open/{cid}/{wid}     { logId, month, in, lastAt, lastType }  근무 중 기록과 마지막 동작
+qra/tokens/{cid}/{해시}  wid                             폰 토큰으로 직원을 찾는 색인 (함수 전용)
 qra/logs/{cid}/{YYYY-MM}/{logId}
                       { wid, name, phone, in, out, inDev, outDev, status, edits:{...} }
 qra/mailLog/{cid}/{id}   { at, period, ok, error, to }
@@ -76,6 +77,7 @@ qra/mailLog/{cid}/{id}   { at, period, ok, error, to }
 | `qraEditLog` | 담당자·슈퍼관리자 | 기록 시간 수정, 수기 추가·삭제. 고친 내역 보존 |
 | `qraEditWorker` | 담당자·슈퍼관리자 | 직원 이름 수정, 삭제 |
 | `qraRotateKey` | 슈퍼관리자 | QR 재발급. 이전 QR 즉시 무효 |
+| `qraExport` | 담당자·슈퍼관리자 | 선택 기간 엑셀 생성. 메일과 같은 양식 |
 | `qraSendNow` | 담당자·슈퍼관리자 | 선택 기간 메일 즉시 발송 (시험·재발송) |
 | `qraMailTick` | 예약 | 매일 7~10시 정각 실행. 발송 대상 처리, 3년 지난 기록 삭제 |
 
