@@ -18,6 +18,7 @@ function hours(min){
 function remark(log){
   const r = [];
   if (log.status === 'noout') r.push('퇴근 미기록');
+  if (log.status === 'open') r.push('근무 중');
   if (log.edits) r.push('수정됨');
   return r.join(', ');
 }
