@@ -11,6 +11,13 @@ const CONSENT_VER = 1;
 const RATE_LIMIT = 120;       /* 주소당 분당 호출 — 같은 와이파이의 출근 몰림을 막지 않을 만큼 */
 const RATE_WINDOW = 60000;
 
+/* 프록시 뒤에서는 req.ip 가 프록시 주소일 수 있어 전달 헤더를 먼저 본다 (호출 제한용, 위조돼도 제한만 느슨해짐) */
+function clientIp(req){
+  const fwd = req && req.headers && req.headers['x-forwarded-for'];
+  const first = fwd ? String(fwd).split(',')[0].trim() : '';
+  return first || (req && req.ip) || 'unknown';
+}
+
 function makeHandlers(db, nowFn){
   const hits = new Map();
 
@@ -114,7 +121,13 @@ function makeHandlers(db, nowFn){
       up[W + 'tokens/' + th] = { at: now };
       up['qra/tokens/' + cid + '/' + th] = wid;
     }
-    await db.ref().update(up);
+    try {
+      await db.ref().update(up);
+    } catch (e) {
+      /* 기록이 저장되지 않았으면 근무 상태도 되돌려 직원이 다시 누를 수 있게 한다 */
+      if (decision.kind === 'in' || decision.kind === 'out') await db.ref('qra/open/' + cid + '/' + wid).set(prev);
+      throw e;
+    }
 
     const open = await val('qra/open/' + cid + '/' + wid);
     return { kind: decision.kind, at: now, next: nextAction(open, now), name, token, records: await myRecords(cid, wid, now) };
@@ -123,4 +136,4 @@ function makeHandlers(db, nowFn){
   return { info, punch };
 }
 
-module.exports = { makeHandlers, CONSENT_VER };
+module.exports = { makeHandlers, clientIp, CONSENT_VER };

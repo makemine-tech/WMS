@@ -161,3 +161,25 @@ test('같은 주소의 호출이 너무 많으면 거부', async () => {
   s.clock.now += 61e3;
   await s.h.info({ key: KEY }, c);
 });
+
+test('호출 제한 주소는 프록시 헤더의 실제 접속 주소', () => {
+  const { clientIp } = require('../public');
+  assert.equal(clientIp({ headers: { 'x-forwarded-for': '203.0.113.5, 169.254.1.1' }, ip: '169.254.1.1' }), '203.0.113.5');
+  assert.equal(clientIp({ headers: {}, ip: '203.0.113.9' }), '203.0.113.9');
+  assert.equal(clientIp(undefined), 'unknown');
+});
+
+test('저장이 실패하면 근무 상태를 되돌려 다시 누를 수 있음', async () => {
+  const s = setup(at('2026-10-30T09:00:00'));
+  const first = await s.h.punch({ key: KEY, action: 'in', agree: true, ...ME }, ctx);
+  const wid = workerId(CID, '01012345678');
+  s.clock.now = at('2026-10-30T18:00:00');
+  const before = s.db.get('qra/open/' + CID + '/' + wid);
+  s.db.state.failUpdate = true;
+  await assert.rejects(s.h.punch({ key: KEY, action: 'out', token: first.token }, ctx));
+  assert.deepEqual(s.db.get('qra/open/' + CID + '/' + wid), before);
+  s.db.state.failUpdate = false;
+  const r = await s.h.punch({ key: KEY, action: 'out', token: first.token }, ctx);
+  assert.equal(r.kind, 'out');
+  assert.equal(logsOf(s.db, '2026-10')[0].status, 'done');
+});

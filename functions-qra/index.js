@@ -5,7 +5,7 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 if (!admin.apps.length) admin.initializeApp();
 
-const { makeHandlers } = require('./public');
+const { makeHandlers, clientIp } = require('./public');
 const { makeAdmin } = require('./admin');
 const { makeTransport } = require('./mail');
 
@@ -23,7 +23,7 @@ const adm = makeAdmin(db, now, () => {
   const user = GMAIL_USER.value();
   return { transport: makeTransport(user, GMAIL_APP_PASSWORD.value()), from: { name: '메이크마인 출퇴근기록', address: user } };
 });
-const ipOf = (req) => (req.rawRequest && req.rawRequest.ip) || 'unknown';
+const ipOf = (req) => clientIp(req.rawRequest);
 
 exports.qraInfo = onCall(OPTS, (req) => pub.info(req.data, { ip: ipOf(req) }));
 exports.qraPunch = onCall(OPTS, (req) => pub.punch(req.data, { ip: ipOf(req) }));
