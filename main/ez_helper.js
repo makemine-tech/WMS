@@ -26,7 +26,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-31a';
+  var VER = '2026-10-31b';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -334,11 +334,12 @@
       if (g.jqGrid('getGridParam', 'selarrrow').length !== rows.length) problems.push('전체 체크가 되지 않았습니다');
       problems = problems.concat(pSettings(w).filter(function(b){ return !/프린터가 BIXOLON/.test(b) || hit.length === 1; }), pRowProblems(rows));
       var shops = {}, dates = rows.map(function(r){ shops[r.shop] = (shops[r.shop] || 0) + 1; return r.date; }).filter(Boolean).sort();
-      if (dates.length && (dates[0] < from || dates[dates.length - 1] > to)) problems.push('검색한 발주일 밖의 주문이 있습니다');
+      /* 합포 묶음은 다른 날 발주가 섞여 기간 밖 날짜가 나올 수 있음 (실제 10-24~31 검색에 10-23 3건) → 막지 않고 확인창에 알림 */
+      var outside = dates.filter(function(x){ return x < from || x > to; }).length;
       if (P.alerts.length) problems.push('이지어드민 알림: ' + P.alerts.join(' / '));
       P.count = rows.length;
       P.token = problems.length ? '' : 'T' + Date.now();
-      return { token: P.token, count: rows.length, dates: dates.length ? [dates[0], dates[dates.length - 1]] : [], shops: shops,
+      return { token: P.token, count: rows.length, outside: outside, dates: dates.length ? [dates[0], dates[dates.length - 1]] : [], shops: shops,
                printer: hit.length === 1 ? String(hit[0].text).trim() : '', template: P_TEMPLATE, problems: problems };
     });
   }
