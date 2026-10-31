@@ -280,13 +280,25 @@ test('verifyAfter: 박스 1 몫이 상품 1개(45입×2 → 1+1)면 묶음이 �
   assert.deepStrictEqual(v.gone, ['8']);      /* 원래 송장에 2개 남아야 하는데 안 보임 → 확인 필요 */
 });
 
-test('송장출력 진행 판정', () => {
-  const s = (o) => Object.assign({ waiting: 0, complete: 0, err: 0, cancel: 0, change: 0, errRows: 0, busy: false }, o);
-  assert.strictEqual(Z.printState(s({ waiting: 5, complete: 3 }), 8, 1000), 'run');
-  assert.strictEqual(Z.printState(s({ complete: 8 }), 8, 1000), 'run');      /* 20초는 더 지켜봄 */
-  assert.strictEqual(Z.printState(s({ complete: 8 }), 8, 25000), 'done');
-  assert.strictEqual(Z.printState(s({ complete: 7, err: 1 }), 8, 25000), 'check');
-  assert.strictEqual(Z.printState(s({ complete: 7 }), 8, 25000), 'check');
-  assert.strictEqual(Z.printState(s({ busy: true }), 8, 300000), 'stall');
-  assert.strictEqual(Z.printState(s({}), 8, 300000), 'stall');               /* 숫자가 안 움직이면 멈춤으로 */
+test('송장출력 완료는 print_end + 대기 화면 꺼짐일 때만', () => {
+  const s = (o) => Object.assign({ sent: 0, done: 0, end: false, spoolErr: false, err: 0, cancel: 0, change: 0, errRows: 0, busy: true }, o);
+  assert.strictEqual(Z.printState(s({ sent: 3, done: 2 }), 1000), 'run');
+  assert.strictEqual(Z.printState(s({ sent: 3, done: 3 }), 60000), 'run');           /* 묶음이 다 끝나도 print_end 전에는 진행 중 */
+  assert.strictEqual(Z.printState(s({ end: true }), 0), 'run');                       /* 스풀 대기 화면이 남아 있으면 아직 */
+  assert.strictEqual(Z.printState(s({ end: true, busy: false }), 0), 'done');
+  assert.strictEqual(Z.printState(s({ end: true, busy: false, err: 1 }), 0), 'check');
+  assert.strictEqual(Z.printState(s({ end: true, busy: false, cancel: 1 }), 0), 'check');
+  assert.strictEqual(Z.printState(s({ busy: false }), 5000), 'run');                  /* 잠깐 꺼진 건 기다림 */
+  assert.strictEqual(Z.printState(s({ busy: false }), 30000), 'check');               /* 완료 신호 없이 꺼짐 */
+  assert.strictEqual(Z.printState(s({ busy: false, spoolErr: true }), 0), 'check');
+  assert.strictEqual(Z.printState(s({}), 600000), 'stall');
+});
+test('막대 % 는 묶음 기준, 100 은 print_end 때만', () => {
+  const s = (o) => Object.assign({ done: 0, end: false }, o);
+  assert.strictEqual(Z.printPct(s({ done: 0 }), 90), 0);
+  assert.strictEqual(Z.printPct(s({ done: 1 }), 90), 33);
+  assert.strictEqual(Z.printPct(s({ done: 3 }), 90), 99);
+  assert.strictEqual(Z.printPct(s({ done: 5 }), 90), 99);
+  assert.strictEqual(Z.printPct(s({ done: 1, end: true }), 90), 100);
+  assert.strictEqual(Z.printPct(s({}), 0), 0);
 });

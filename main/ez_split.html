@@ -92,6 +92,15 @@
   .jump button:hover { border-color:var(--accent); background:#0b2b1d; }
   @media print { .jump { display:none; } }
   @media (max-width:640px){ .stats { grid-template-columns:repeat(2, minmax(0, 1fr)); } h1 { font-size:1.3rem; } }
+.pr-row{margin-top:.55rem}
+.pr-top{display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;margin-bottom:.2rem}
+.pr-txt{color:var(--mut,#8b92a5);text-align:right}
+.pr-txt.ok{color:var(--accent)}.pr-txt.bad{color:var(--red)}
+.pr-track{height:14px;border-radius:7px;background:rgba(127,127,127,.2);overflow:hidden}
+.pr-fill{height:100%;border-radius:7px;background:#4a9df0;transition:width .6s}
+.pr-fill.ok{background:var(--accent)}.pr-fill.bad{background:var(--red)}
+.pr-fill.ind{background-image:linear-gradient(45deg,rgba(255,255,255,.3) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.3) 50%,rgba(255,255,255,.3) 75%,transparent 75%);background-size:28px 28px;animation:prMove 1s linear infinite}
+@keyframes prMove{to{background-position:28px 0}}
 </style>
 </head>
 <body>
@@ -218,17 +227,21 @@
   <!-- ⑧ 송장출력 -->
   <div class="card" id="printCard">
     <div class="card-h">이지어드민 송장출력</div>
-    <div class="sm dim" style="line-height:1.7">우체국택배_곡물도감/셀시오스 · BIXOLON SLP · 즉시출력(선발번) · 공급처 곡물도감 · 위 발주일 기간 · 접수 상태만</div>
-    <div class="row" style="margin-top:.5rem">
+    <div class="sm dim" style="line-height:1.7">우체국택배_곡물도감/셀시오스 · BIXOLON SLP · 즉시출력(선발번) · 위 발주일 기간 · 접수 상태만</div>
+    <div class="row" style="margin-top:.5rem;gap:1rem">
+      <label class="sm" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" id="prSup0" checked onchange="savePrintSup()"> <b>곡물도감</b></label>
+      <label class="sm" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" id="prSup1" checked onchange="savePrintSup()"> <b>오리진케어</b></label>
+      <label class="sm" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" id="prSup2" checked onchange="savePrintSup()"> <b>셀시어스</b></label>
+      <span style="flex:1"></span>
       <label class="sm" style="display:flex;gap:.35rem;align-items:center" title="일괄합포제외가 「정상 완료」일 때만 이어서 진행. 출력 직전 건수를 한 번 묻습니다">
         <input type="checkbox" id="printAfter"> <b>일괄합포제외 후 송장출력까지</b></label>
-      <span style="flex:1"></span>
-      <button class="btn w" id="printBtn" onclick="runPrint()">🖨 지금 송장출력</button>
+      <button class="btn w" id="printBtn" onclick="runPrint()">🖨 체크한 공급처 송장출력</button>
     </div>
-    <div class="sm" style="margin-top:.6rem;line-height:1.7" id="printResult"></div>
+    <div id="printBars" style="margin-top:.7rem"></div>
+    <div class="sm" style="margin-top:.5rem;line-height:1.7" id="printResult"></div>
   </div>
 
-  <a class="wz-next" id="nextUpload" href="picking_ez.html?step=2">다음 : STEP 2 송장 업로드 →<small id="nextUploadSub">합포 분할이 필요 없는 날은 바로 넘어가도 됩니다</small></a>
+  <a class="wz-next" id="nextUpload" href="picking_ez.html?step=2" onclick="if(PR.run){toast('송장출력이 끝난 뒤에 넘어가 주세요');return false;}">다음 : STEP 2 송장 업로드 →<small id="nextUploadSub">합포 분할이 필요 없는 날은 바로 넘어가도 됩니다</small></a>
 </div>
 <div class="jump">
   <button title="맨 위로" onclick="mkwJump(0)">▲</button>
@@ -331,7 +344,7 @@ function loadState(kind, msg){
 }
 var LOAD_ERR = { NOHELPER: '이지어드민 탭이 닫혔거나 연결이 끊겼습니다 — 이지어드민 탭에서 북마크 「📦 이지어드민 합포 도우미」를 다시 눌러 주세요',
                  TIMEOUT: '이지어드민이 제때 답하지 않았습니다 — 이지어드민 탭이 「일괄합포제외」 화면인지, 오른쪽 아래 도우미 상자가 떠 있는지 확인해 주세요' };
-var HELPER_SEARCH = '2026-10-27e', HELPER_COMMIT = '2026-10-27f', HELPER_PRINT = '2026-10-31b';   /* 발주일 기간 검색이 있는 도우미 최소 버전 */
+var HELPER_SEARCH = '2026-10-27e', HELPER_COMMIT = '2026-10-27f', HELPER_PRINT = '2026-10-31c';   /* 발주일 기간 검색이 있는 도우미 최소 버전 */
 /* 시작일은 이 PC 에 기억 (처음엔 7일 전), 끝일은 늘 오늘로 시작 */
 function saveFrom(){ try { localStorage.setItem('ezSplitFrom', $('ezFrom').value); } catch(e){} }
 function initDates(){
@@ -601,60 +614,141 @@ function runCommit(auto){
   }).then(function(){ pushLog(log); LAST_LOG = null; render(); if (printNext) return runPrint(); });
 }
 /* ── ③ 송장출력 ──
-   도우미가 S700 을 맞추고 검색·전체 체크(출력 전) → 문제 있으면 멈춤 → 건수 확인 → 「송장출력」 한 번 → 진행 숫자 지켜봄. 실패해도 다시 누르지 않음 */
+   체크한 공급처를 차례로: 전부 미리 검색해 건수 확인 → 한 번 묻고 → 공급처마다 준비·출력 → 이지에이전트 「print_end」 가 와야 다음 공급처.
+   문제가 생기면 그 자리에서 멈춤. 실패해도 다시 누르지 않음 */
+var PRINT_SUP = ['곡물도감', '오리진케어', '셀시어스'];
+var PR = { run: false, items: [], t0: 0 };
+function printPicked(){ return PRINT_SUP.filter(function(n, i){ return $('prSup' + i).checked; }); }
+function savePrintSup(){ try { localStorage.setItem('ezPrintSup', JSON.stringify(printPicked())); } catch(e){} }
+function initPrintSup(){
+  var v = null; try { v = JSON.parse(localStorage.getItem('ezPrintSup')); } catch(e){}
+  if (Array.isArray(v)) PRINT_SUP.forEach(function(n, i){ $('prSup' + i).checked = v.indexOf(n) >= 0; });
+}
+function fmtMin(ms){ var s = Math.round(ms / 1000); return s < 60 ? s + '초' : Math.floor(s / 60) + '분 ' + (s % 60) + '초'; }
+/* 막대: pct=null 이면 줄무늬로 움직임 (건수를 아직 모르는 단계) */
+function prBar(label, pct, text, tone){
+  var ind = pct == null;
+  return '<div class="pr-row"><div class="pr-top"><b>' + esc(label) + '</b><span class="pr-txt ' + (tone || '') + '">' + esc(text) + '</span></div>'
+    + '<div class="pr-track"><div class="pr-fill ' + (tone || '') + (ind ? ' ind' : '') + '" style="width:' + (ind ? 100 : pct) + '%"></div></div></div>';
+}
+function prPaint(msg, tone){
+  var tot = 0, got = 0, rows = PR.items.map(function(it){
+    tot += it.count || 0; got += Math.round((it.count || 0) * (it.pct || 0) / 100);
+    return prBar(it.name, it.ind ? null : (it.pct || 0), it.text || '대기', it.tone);
+  }).join('');
+  var all = tot ? Math.round(got / tot * 100) : 0;
+  var head = prBar('전체' + (tot ? ' ' + tot + '건' : ''), PR.items.some(function(i){ return i.count; }) ? all : null, (tot ? all + '%' : '건수 확인 중') + (PR.t0 ? ' · 경과 ' + fmtMin(Date.now() - PR.t0) : ''), tone === 'bad' ? 'bad' : (all === 100 ? 'ok' : ''));
+  $('printBars').innerHTML = head + rows;
+  if (msg != null) $('printResult').innerHTML = msg;
+}
+function prLock(on){
+  PR.run = on;
+  $('printBtn').disabled = on;
+  PRINT_SUP.forEach(function(n, i){ $('prSup' + i).disabled = on; });
+  window.onbeforeunload = on ? function(){ return '송장출력이 진행 중입니다'; } : null;
+}
+function prStop(msg, log){ if (log) pushLog(log); prPaint(msg, 'bad'); prLock(false); }
 function runPrint(){
-  var box = $('printResult'), btn = $('printBtn');
-  function stopAt(html){ box.innerHTML = html; btn.disabled = false; }
+  if (PR.run) return Promise.resolve();
+  var box = $('printResult'), names = printPicked();
+  if (!names.length){ box.innerHTML = '<span style="color:var(--red)">출력할 공급처를 체크해 주세요</span>'; return Promise.resolve(); }
   if (!H.ok){ box.innerHTML = '<span style="color:var(--red)">이지어드민 도우미가 연결되어 있지 않습니다</span>'; return Promise.resolve(); }
   if (!H.ver || H.ver < HELPER_PRINT){ box.innerHTML = '<span style="color:var(--red)">이지어드민 도우미가 옛 버전입니다 — 이지어드민 탭 새로고침(F5) 후 북마크를 다시 눌러 주세요</span>'; return Promise.resolve(); }
-  var from = LAST_QUERY && LAST_QUERY.search ? LAST_QUERY.args.from : $('ezFrom').value, to = LAST_QUERY && LAST_QUERY.search ? LAST_QUERY.args.to : ($('ezTo').value || today());
+  var byQuery = LAST_QUERY && LAST_QUERY.search, from = byQuery ? LAST_QUERY.args.from : $('ezFrom').value, to = byQuery ? LAST_QUERY.args.to : ($('ezTo').value || today());
   if (!from || from > to){ box.innerHTML = '<span style="color:var(--red)">발주일 시작일을 끝일보다 앞이거나 같게 넣어 주세요</span>'; return Promise.resolve(); }
-  btn.disabled = true;
-  box.innerHTML = '<span class="spin"></span> 송장출력 화면 맞추는 중… (곡물도감 · 발주일 ' + esc(from) + ' ~ ' + esc(to) + ', 출력은 아직 안 함)';
-  var log = { type: 'print', at: firebase.database.ServerValue.TIMESTAMP, by: me ? (me.email || '').split('@')[0] : '', from: from, to: to };
-  return hcall('printPrep', { from: from, to: to }, 170000).then(function(p){
-    log.count = p.count; log.problems = p.problems;
-    if (p.problems.length){
-      pushLog(log);
-      return stopAt('<div style="color:var(--red);font-weight:900">⚠️ 출력하지 않았습니다 — 확인 필요</div>' + p.problems.map(function(x){ return '<div>· ' + esc(x) + '</div>'; }).join('') + '<div class="dim">발견 ' + p.count + '건</div>');
+  prLock(true);
+  PR.t0 = Date.now();
+  PR.items = names.map(function(n){ return { name: n, count: 0, pct: 0, text: '건수 확인 대기', tone: '' }; });
+  var log = { type: 'print', at: firebase.database.ServerValue.TIMESTAMP, by: me ? (me.email || '').split('@')[0] : '', from: from, to: to, suppliers: {} };
+  var iv = setInterval(function(){ if (PR.run) prPaint(); else clearInterval(iv); }, 1000);
+  prPaint('<span class="spin"></span> 공급처별 건수 확인 중… (발주일 ' + esc(from) + ' ~ ' + esc(to) + ', 출력은 아직 안 함)');
+  /* 1) 미리 보기 — 공급처마다 검색만 */
+  var seen = [];
+  return names.reduce(function(p, n, i){
+    return p.then(function(){
+      var it = PR.items[i]; it.ind = true; it.text = '건수 확인 중…'; prPaint();
+      return hcall('printPrep', { supplier: n, from: from, to: to }, 170000).then(function(r){
+        it.ind = false; it.count = r.count;
+        var other = r.problems.filter(function(x){ return !/0건/.test(x); });
+        if (other.length){ it.tone = 'bad'; it.text = '확인 필요'; var e = new Error(''); e.problems = other; e.supplier = n; throw e; }
+        it.text = r.count ? r.count + '건 대기' : '0건 — 건너뜀';
+        if (!r.count) it.pct = 100;
+        seen.push(r); prPaint();
+      });
+    });
+  }, Promise.resolve()).then(function(){
+    var todo = seen.filter(function(r){ return r.count; });
+    if (!todo.length){ hcall('printClose', {}, 15000).catch(function(){}); prPaint('출력할 주문이 없습니다 (' + names.join('·') + ' 모두 0건)'); prLock(false); return; }
+    var lines = todo.map(function(r){ return '· ' + r.supplier + ' ' + r.count + '건' + (r.outside ? ' (기간 밖 발주일 ' + r.outside + '건 포함)' : ''); }).join('\n');
+    var total = todo.reduce(function(a, r){ return a + r.count; }, 0);
+    if (!confirm('송장 ' + total + '건을 차례로 출력합니다.\n\n' + lines + '\n\n양식: ' + todo[0].template + '\n프린터: ' + todo[0].printer + '\n발주일: ' + from + ' ~ ' + to + '\n\n송장번호가 부여되며 되돌리기 어렵습니다. 진행할까요?')){
+      log.cancelled = true; pushLog(log); hcall('printClose', {}, 15000).catch(function(){});
+      PR.items.forEach(function(it){ if (it.count) it.text = '취소 — 출력 안 함'; });
+      prPaint('취소했습니다 — 출력하지 않았습니다'); prLock(false); return;
     }
-    var shops = Object.keys(p.shops).map(function(k){ return k + ' ' + p.shops[k] + '건'; }).slice(0, 6).join(', ');
-    var ask = '곡물도감 송장 ' + p.count + '건을 지금 출력합니다.\n\n양식: ' + p.template + '\n프린터: ' + p.printer + '\n발주일: ' + (p.dates[0] || '') + ' ~ ' + (p.dates[1] || '') + (p.outside ? '\n⚠ 검색 기간(' + from + ' ~ ' + to + ') 밖 발주일 ' + p.outside + '건 포함 (합포 묶음일 수 있음)' : '') + '\n판매처: ' + shops + '\n\n송장번호가 부여되며 되돌리기 어렵습니다. 진행할까요?';
-    if (!confirm(ask)){ log.cancelled = true; pushLog(log); return stopAt('취소했습니다 — 출력하지 않았습니다 (' + p.count + '건)'); }
-    return hcall('printGo', { confirm: true, token: p.token, count: p.count }, 60000).then(function(){
-      log.started = true;
-      return watchPrint(p.count, log, box, btn);
+    /* 2) 차례로 출력 — 앞 공급처가 완전히 끝나야 다음 */
+    return todo.reduce(function(p, r){ return p.then(function(){ return printOne(r, from, to, log); }); }, Promise.resolve()).then(function(){
+      log.result = 'done'; pushLog(log);
+      hcall('printClose', {}, 15000).catch(function(){});
+      prPaint('<div style="color:var(--accent);font-weight:900">✔ 전부 완료 — 프린터 스풀까지 끝났습니다 (' + fmtMin(Date.now() - PR.t0) + ')</div>');
+      prLock(false);
+      $('nextUpload').className = 'wz-next go';
+      $('nextUploadSub').textContent = '✔ 송장출력 완료 — 이제 자동수집하세요';
+      try { $('nextUpload').scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
     });
   }).catch(function(e){
-    log.error = e.message; pushLog(log);
-    stopAt('<div style="color:var(--red);font-weight:900">⚠️ 송장출력 중단</div><div>' + esc(LOAD_ERR[e.message] || e.message) + '</div><div class="dim">이지어드민 송장출력 화면에서 상태를 확인한 뒤 다시 해 주세요 (자동으로 다시 누르지 않습니다)</div>');
+    log.error = e.supplier ? e.supplier + ': ' + (e.problems || []).join(' / ') : e.message;
+    var at = e.supplier ? '<b>' + esc(e.supplier) + '</b> — ' : '';
+    prStop('<div style="color:var(--red);font-weight:900">⚠️ 여기서 멈췄습니다 — 뒤 공급처는 진행하지 않았습니다</div>'
+      + (e.problems ? e.problems.map(function(x){ return '<div>· ' + at + esc(x) + '</div>'; }).join('') : '<div>' + at + esc(LOAD_ERR[e.message] || e.message) + '</div>')
+      + '<div class="dim">이지어드민 화면의 출력목록·오류목록을 확인한 뒤 다시 해 주세요 (자동으로 다시 누르지 않습니다)</div>', log);
   });
 }
-function watchPrint(count, log, box, btn){
-  var key = '', changed = Date.now();
-  return new Promise(function(res){
+function printOne(seen, from, to, log){
+  var it = PR.items.filter(function(x){ return x.name === seen.supplier; })[0], n = seen.supplier;
+  function fail(msg, problems){ it.tone = 'bad'; it.ind = false; it.text = '확인 필요'; var e = new Error(msg); e.supplier = n; if (problems) e.problems = problems; throw e; }
+  it.ind = true; it.text = '출력 준비 중…'; prPaint('<span class="spin"></span> ' + esc(n) + ' 준비 중…');
+  return hcall('printPrep', { supplier: n, from: from, to: to }, 170000).then(function(p){
+    if (p.problems.length) fail('', p.problems);
+    if (p.count !== seen.count && !confirm(n + ' 건수가 바뀌었습니다: ' + seen.count + '건 → ' + p.count + '건\n\n새 건수로 출력할까요?')) fail('건수가 바뀌어 멈췄습니다');
+    it.count = p.count;
+    log.suppliers[n] = { count: p.count };
+    return hcall('printGo', { confirm: true, token: p.token, count: p.count }, 60000).then(function(){
+      log.suppliers[n].started = true;
+      return watchOne(it, log.suppliers[n]);
+    });
+  });
+}
+function watchOne(it, lg){
+  var key = '', changed = Date.now(), t0 = Date.now(), count = it.count;
+  return new Promise(function(res, rej){
     (function tick(){
       hcall('printStatus', {}, 15000).then(function(s){
-        var k = [s.waiting, s.complete, s.err, s.cancel, s.change, s.busy ? 1 : 0].join('/');
+        var k = [s.sent, s.done, s.end ? 1 : 0, s.busy ? 1 : 0, s.issued].join('/');
         if (k !== key){ key = k; changed = Date.now(); }
-        var state = Z.printState(s, count, Date.now() - changed), nums = '대기 ' + s.waiting + ' · 완료 ' + s.complete + ' · 오류 ' + s.err + ' · 취소 ' + s.cancel + ' · 상태변경 ' + s.change;
-        var notes = s.alerts.filter(function(a){ return !/^확인: /.test(a); }).map(function(a){ return '<div class="dim">이지어드민: ' + esc(a) + '</div>'; }).join('');
-        if (state === 'run'){ box.innerHTML = '<span class="spin"></span> 송장출력 진행 중 (' + count + '건) — ' + nums + ' <span class="dim">이지어드민 탭을 닫지 마세요</span>' + notes; setTimeout(tick, 3000); return; }
-        log.result = state; log.status = s; pushLog(log);
-        hcall('printEnd', {}, 15000).catch(function(){});
-        btn.disabled = false;
-        if (state === 'done'){
-          box.innerHTML = '<div style="color:var(--accent);font-weight:900">✔ 이지어드민 처리 완료 — ' + nums + '</div><div class="dim">PDF 는 이지에이전트가 차례로 만듭니다. 출력이 다 끝난 뒤 다음 단계 자동수집을 눌러 주세요</div>' + notes;
-          $('nextUpload').className = 'wz-next go';
-          $('nextUploadSub').textContent = '✔ 송장출력 완료 — PDF 가 다 생기면 자동수집하세요';
-          try { $('nextUpload').scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
-        } else {
-          box.innerHTML = '<div style="color:var(--red);font-weight:900">⚠️ 확인 필요 — ' + (state === 'stall' ? '5분째 변화가 없습니다' : '일부가 정상 완료되지 않았습니다') + '</div><div>' + nums + '</div><div class="dim">이지어드민 화면의 출력목록·오류목록을 확인해 주세요 (자동으로 다시 누르지 않습니다)</div>' + notes;
+        var state = Z.printState(s, Date.now() - changed);
+        it.pct = Z.printPct(s, count);
+        var left = s.done ? (Date.now() - t0) / s.done * Math.max(0, Math.ceil(count / 30) - s.done) : 0;
+        it.ind = !s.done && !s.end;
+        it.text = s.done ? it.pct + '% · 묶음 ' + s.done + ' / ' + Math.ceil(count / 30) + ' 완료' + (left ? ' · 남은 약 ' + fmtMin(left) : '') : (s.issued ? '송장번호 부여 ' + s.issued + ' / ' + count + '건' : '이지어드민 처리 중… (시간이 걸립니다)');
+        if (state === 'run'){
+          var notes = (s.alerts || []).filter(function(a){ return !/^확인: /.test(a); }).map(function(a){ return '<div class="dim">이지어드민: ' + esc(a) + '</div>'; }).join('');
+          prPaint('<span class="spin"></span> <b>' + esc(it.name) + '</b> 출력 중 — 끝날 때까지 이지어드민 탭과 이 페이지를 닫거나 옮기지 마세요' + notes);
+          setTimeout(tick, 2000); return;
         }
-        res();
+        lg.result = state; lg.status = s;
+        if (state === 'done'){
+          it.pct = 100; it.ind = false; it.tone = 'ok'; it.text = '✔ 완료 · ' + count + '건 · ' + fmtMin(Date.now() - t0);
+          prPaint();
+          hcall('printEnd', {}, 15000).then(function(){ res(); }, function(e){ rej(e); });
+          return;
+        }
+        it.tone = 'bad'; it.ind = false; it.text = '확인 필요';
+        var e = new Error(state === 'stall' ? '10분째 변화가 없습니다' : '정상 완료 신호 없이 끝났습니다 — 묶음 ' + s.done + ' / ' + s.sent + ', 오류 ' + s.err + ', 취소 ' + s.cancel + ', 상태변경 ' + s.change + ((s.alerts || []).length ? ' · ' + s.alerts.join(' / ') : ''));
+        e.supplier = it.name; rej(e);
       }, function(e){
-        box.innerHTML = '<div style="color:var(--red);font-weight:900">⚠️ 진행 상황을 읽지 못했습니다</div><div>' + esc(LOAD_ERR[e.message] || e.message) + '</div><div class="dim">출력은 진행 중일 수 있습니다 — 이지어드민 화면에서 확인해 주세요. 다시 누르지 마세요</div>';
-        log.watchError = e.message; pushLog(log); btn.disabled = false; res();
+        it.tone = 'bad'; it.ind = false; it.text = '진행 상황을 못 읽음';
+        var x = new Error('진행 상황을 읽지 못했습니다(' + (LOAD_ERR[e.message] || e.message) + ') — 출력은 진행 중일 수 있으니 다시 누르지 마세요'); x.supplier = it.name; rej(x);
       });
     })();
   });
@@ -668,6 +762,7 @@ function doReset(){
 /* ── 시작 ── */
 paintSettings();
 initDates();
+initPrintSup();
 try { if (localStorage.getItem('ezLock') === '0') $('lockUnpack').checked = false; } catch(e){}
 WMSync.init('ez_split', { requireAuth: true });
 WMSync.onAuth(function(st){

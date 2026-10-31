@@ -18,15 +18,16 @@
      reset { packs: [pack_seq] } → { done }      묶음별 「초기화」 (채운 것 되돌리기)
      commit { auto: true } → { error, fail_list }  「일괄합포제외」 실행 — 자동 확정 스위치를 켠 페이지만 보낸다.
              「제외실행」 버튼은 묶음마다 바로 저장되므로 절대 누르지 않는다.
-     printPrep { from, to } → { token, count, dates, shops, printer, template, problems }
-             송장출력(S700)을 이 탭 안 보이는 창틀로 열어 양식·즉시출력·공급처·발주일·프린터를 맞추고 검색 + 전체 체크. 출력은 안 누른다.
+     printPrep { supplier, from, to } → { supplier, token, count, outside, dates, shops, printer, template, problems }
+             송장출력(S700)을 이 탭 안 창틀로 열어 양식·즉시출력·공급처(곡물도감·오리진케어·셀시어스)·발주일·프린터를 맞추고 검색 + 전체 체크. 출력은 안 누른다.
      printGo { confirm: true, token, count } → { started }  준비한 그대로일 때만 「송장출력」을 한 번 누름. token 은 한 번만 쓴다.
-     printStatus → { waiting, complete, err, cancel, change, errRows, busy, alerts }
+     printStatus → { sent, done, end, spoolErr, issued, err, cancel, change, errRows, busy, alerts }
+             완료 = 이지에이전트 print_end 수신 + 대기 화면 꺼짐. printEnd 뒤에야 다음 공급처 준비 가능. printClose = 창틀 닫기
 ============================================================ */
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-31b';
+  var VER = '2026-10-31c';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -197,18 +198,20 @@
 
   /* ── 송장출력 (S700) ── 일괄합포제외 탭을 떠나면 도우미가 꺼지므로 같은 탭 안 창틀로 열어 조종한다 (2026-10-31)
      출력은 printGo 한 번뿐 · 그 안의 확인창은 「송장을 출력하시겠습니까?」 그대로일 때만 통과 (재출력 문구가 붙으면 거절) */
-  var P_TEMPLATE = '우체국택배_곡물도감/셀시오스', P_SUPPLIER = '곡물도감', P_PRINTER = /BIXOLON\s*SLP/i;
-  var P = { panel: null, win: null, token: '', count: 0, started: false, alerts: [], arm: false };
+  var P_TEMPLATE = '우체국택배_곡물도감/셀시오스', P_SUPPLIERS = ['곡물도감', '오리진케어', '셀시어스'], P_PRINTER = /BIXOLON\s*SLP/i;
+  var P = { panel: null, win: null, token: '', count: 0, started: false, alerts: [], arm: false, supplier: '', sock: null };
+  window.addEventListener('beforeunload', function(ev){ if (P.started){ ev.preventDefault(); ev.returnValue = '송장출력이 진행 중입니다'; } });
   function printAsk(msg){ return String(msg || '').trim() === '송장을 출력하시겠습니까?'; }
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
   function pGone(){ if (P.panel) P.panel.remove(); P.panel = null; P.win = null; P.token = ''; }
   function pOpen(){
     if (P.started) return Promise.reject(new Error('이미 출력 중입니다 — 끝난 뒤 다시 해 주세요'));
     pGone();
-    P.alerts = []; P.arm = false;
+    P.alerts = []; P.arm = false; P.sock = null;
     var panel = document.createElement('div');
     panel.style.cssText = 'position:fixed;left:2%;top:2%;width:96%;height:86%;z-index:2147483646;background:#fff;border:2px solid #4af0a8;border-radius:10px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.5)';
-    panel.innerHTML = '<div style="height:30px;line-height:30px;padding:0 12px;background:#0d0f14;color:#4af0a8;font:700 13px \'Noto Sans KR\',sans-serif">🖨 도우미가 조종하는 송장출력 화면 — 끝날 때까지 이 탭을 닫지 마세요</div>';
+    panel.innerHTML = '<div style="height:30px;line-height:30px;padding:0 12px;background:#0d0f14;color:#4af0a8;font:700 13px \'Noto Sans KR\',sans-serif">🖨 도우미가 조종하는 송장출력 화면 — 끝날 때까지 이 탭을 닫지 마세요<span id="mkwPrClose" style="float:right;cursor:pointer;color:#e8eaf0">✕ 닫기</span></div>';
+    panel.querySelector('#mkwPrClose').onclick = function(){ if (P.started){ alert('출력이 진행 중이라 닫을 수 없습니다'); return; } pGone(); };
     var fr = document.createElement('iframe');
     fr.style.cssText = 'width:100%;height:calc(100% - 30px);border:0';
     P.panel = panel;
@@ -255,7 +258,8 @@
     function picked(s){ return s && s.selectedIndex >= 0 ? String(s.options[s.selectedIndex].text).trim() : ''; }
     if (picked(d.getElementById('template_type')) !== P_TEMPLATE) bad.push('송장 양식이 ' + P_TEMPLATE + ' 가 아닙니다');
     if (!d.getElementById('pre_print') || !d.getElementById('pre_print').checked) bad.push('즉시출력(선발번)이 체크되지 않았습니다');
-    if (picked(d.getElementById('str_supply_code')) !== P_SUPPLIER) bad.push('공급처가 ' + P_SUPPLIER + ' 가 아닙니다');
+    if (picked(d.getElementById('str_supply_code')) !== P.supplier) bad.push('공급처가 ' + P.supplier + ' 가 아닙니다');
+    if (!w.ez_socket || w.ez_socket.readyState !== 1) bad.push('이지에이전트 연결이 안 되어 있습니다');
     if (!d.getElementById('use_single_print') || !d.getElementById('use_single_print').checked) bad.push('다중 프린터 출력이 켜져 있습니다');
     if (d.getElementById('new_number') && d.getElementById('new_number').checked) bad.push('새 송장번호 발급이 켜져 있습니다');
     if (d.getElementById('use_range') && d.getElementById('use_range').checked) bad.push('범위 출력이 켜져 있습니다');
@@ -292,13 +296,14 @@
     return bad;
   }
   function cmdPrintPrep(args){
-    var ymd = /^\d{4}-\d{2}-\d{2}$/, from = String(args.from || ''), to = String(args.to || ''), w;
+    var ymd = /^\d{4}-\d{2}-\d{2}$/, from = String(args.from || ''), to = String(args.to || ''), supplier = String(args.supplier || ''), w;
+    if (P_SUPPLIERS.indexOf(supplier) < 0) return Promise.reject(new Error('공급처가 올바르지 않습니다: ' + supplier));
     if (!ymd.test(from) || !ymd.test(to) || from > to) return Promise.reject(new Error('발주일이 올바르지 않습니다'));
-    return pOpen().then(function(win){ w = win; return pWaitReady(w); }).then(function(){
+    return pOpen().then(function(win){ w = win; P.supplier = supplier; return pWaitReady(w); }).then(function(){
       var d = w.document, $w = w.jQuery, form = d.querySelector('form[section="0"]');
       if (!form) throw new Error('검색 칸을 찾지 못했습니다');
       pSelect(w, d.getElementById('template_type'), P_TEMPLATE);
-      pSelect(w, d.getElementById('str_supply_code'), P_SUPPLIER);
+      pSelect(w, d.getElementById('str_supply_code'), supplier);
       $w(d.getElementById('pre_print')).prop('checked', true).trigger('change');
       form.querySelector('[name=start_date]').value = from;
       form.querySelector('[name=end_date]').value = to;
@@ -339,7 +344,7 @@
       if (P.alerts.length) problems.push('이지어드민 알림: ' + P.alerts.join(' / '));
       P.count = rows.length;
       P.token = problems.length ? '' : 'T' + Date.now();
-      return { token: P.token, count: rows.length, outside: outside, dates: dates.length ? [dates[0], dates[dates.length - 1]] : [], shops: shops,
+      return { supplier: supplier, token: P.token, count: rows.length, outside: outside, dates: dates.length ? [dates[0], dates[dates.length - 1]] : [], shops: shops,
                printer: hit.length === 1 ? String(hit[0].text).trim() : '', template: P_TEMPLATE, problems: problems };
     });
   }
@@ -350,6 +355,16 @@
     var rows = pRows(w), bad = pSettings(w).concat(pRowProblems(rows)), sel = w.jQuery('#grid1').jqGrid('getGridParam', 'selarrrow');
     if (rows.length !== Number(args.count) || sel.length !== rows.length) bad.push('확인한 건수와 지금 화면의 건수가 다릅니다');
     if (bad.length) throw new Error('출력하지 않았습니다 — ' + bad.join(' / '));
+    /* 이지에이전트 신호 듣기 — 묶음 완료(print_result)·전부 끝(print_end) */
+    var sock = w.ez_socket, so = { sent: 0, done: 0, end: false, spoolErr: false };
+    P.sock = so;
+    sock.addEventListener('message', function(ev){
+      var m; try { m = JSON.parse(ev.data); } catch(x){ return; }
+      if (m.hasOwnProperty('print_result')){ if (Number(m.print_result) === 2) so.done++; else so.spoolErr = true; }
+      if (m.hasOwnProperty('print_end')) so.end = true;
+    });
+    var send = sock.send;
+    sock.send = function(x){ if (/"action":"print_start"/.test(String(x))) so.sent++; return send.apply(sock, arguments); };
     P.arm = true;
     P.started = true;
     try { w.document.getElementById('print_btn').click(); } catch(e){ P.arm = false; P.started = false; throw e; }
@@ -361,17 +376,20 @@
   function cmdPrintStatus(){
     var w = P.win;
     if (!w) throw new Error('송장출력 화면이 닫혔습니다');
-    var d = w.document;
+    var d = w.document, so = P.sock || { sent: 0, done: 0, end: false, spoolErr: false };
     function num(id){ var e = d.getElementById(id); return e ? Number(String(e.textContent).replace(/[^\d]/g, '')) || 0 : 0; }
-    var wait = d.getElementById('zb_waiting'), st = { waiting: num('waiting'), complete: num('complete'), err: num('err'), cancel: num('cancel'), change: num('state_change'),
+    var wait = d.getElementById('zb_waiting');
+    return { sent: so.sent, done: so.done, end: so.end, spoolErr: so.spoolErr,
+      issued: pRows(w).filter(function(r){ return r.status === '송장'; }).length,
+      err: num('err'), cancel: num('cancel'), change: num('state_change'),
       errRows: w.jQuery('#grid2').getDataIDs ? w.jQuery('#grid2').getDataIDs().length : 0,
       busy: !!wait && w.getComputedStyle(wait).visibility !== 'hidden', alerts: P.alerts.slice(-5) };
-    return st;
   }
   function cmdPrintEnd(){ P.started = false; return { ok: true }; }
+  function cmdPrintClose(){ if (P.started) throw new Error('출력이 진행 중입니다'); pGone(); return { ok: true }; }
 
   var CMDS = { ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
-               printPrep: cmdPrintPrep, printGo: cmdPrintGo, printStatus: cmdPrintStatus, printEnd: cmdPrintEnd };
+               printPrep: cmdPrintPrep, printGo: cmdPrintGo, printStatus: cmdPrintStatus, printEnd: cmdPrintEnd, printClose: cmdPrintClose };
   var SAYS = { search: '곡물도감 검색 중… (이지어드민 화면이 잠깐 바뀝니다)', read: '주문 줄 읽는 중…', fill: '분할 채우는 중… (저장 안 함)', reset: '되돌리는 중…', commit: '일괄합포제외 실행 중…',
                printPrep: '송장출력 준비 중… (출력은 아직 안 함)', printGo: '송장출력 실행 중…' };
   function onMsg(e){

@@ -298,16 +298,22 @@
     return v;
   }
 
-  /* 송장출력 진행 판정 — st = 도우미 printStatus, count = 출력한 건수, idleMs = 숫자가 마지막으로 바뀐 뒤 지난 시간
-     'run' 진행 중 · 'done' 전부 완료 · 'check' 끝났는데 오류·취소·모자람 · 'stall' 5분째 변화 없음 */
-  function printState(st, count, idleMs){
-    var handled = st.complete + st.err + st.cancel + st.change;
-    var active = st.busy || st.waiting > 0 || handled === 0 || idleMs < 20000;
-    if (active) return idleMs >= 300000 ? 'stall' : 'run';
-    return (st.err || st.cancel || st.change || st.errRows || st.complete < count) ? 'check' : 'done';
+  /* 송장출력 진행 판정 — st = 도우미 printStatus, idleMs = 숫자가 마지막으로 바뀐 뒤 지난 시간
+     완료 기준 = 이지에이전트 「print_end」 + 이지어드민 대기 화면 꺼짐 (이지어드민 자기 코드와 같은 기준)
+     'run' 진행 중 · 'done' 완료 · 'check' 완료 신호 없이 멈춤이나 오류 · 'stall' 10분째 변화 없음 */
+  function printState(st, idleMs){
+    if (st.end && !st.busy) return (st.spoolErr || st.err || st.cancel || st.change || st.errRows) ? 'check' : 'done';
+    if (!st.busy && (st.spoolErr || idleMs >= 30000)) return 'check';
+    return idleMs >= 600000 ? 'stall' : 'run';
+  }
+  /* 막대 % — 이지에이전트가 끝낸 묶음(30건씩) 기준. 100 은 print_end 때만 */
+  function printPct(st, count){
+    if (st.end) return 100;
+    if (!count) return 0;
+    return Math.min(99, Math.round(Math.min(count, st.done * 30) / count * 100));
   }
 
-  var api = { printState: printState, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  var api = { printPct: printPct, printState: printState, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;
