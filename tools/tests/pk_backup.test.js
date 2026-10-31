@@ -19,3 +19,9 @@ test('캐시 키에서 등록 시각 읽기', () => {
   assert.strictEqual(B.jobKeyTs('J1761234567890_자동수집 2026-10-29'), 1761234567890);
   assert.strictEqual(B.jobKeyTs('엉뚱한키'), 0);
 });
+
+test('하루가 지나면 지움, 하루 안은 남김', () => {
+  assert.strictEqual(B.KEEP_DAYS, 1);
+  const metas = [{ id: 'a', ts: NOW - 23 * 3600000 }, { id: 'b', ts: NOW - 25 * 3600000 }];
+  assert.deepStrictEqual(B.pruneIds(metas, NOW), ['b']);
+});

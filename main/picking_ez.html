@@ -61,6 +61,7 @@ h1 em{color:var(--g);font-style:normal}
 .col-box{border-color:rgba(74,240,168,.45);background:rgba(74,240,168,.05)}
 .col-box .dz-m{color:var(--g)}
 .col-box.busy{opacity:.6;pointer-events:none}
+.bak-top{display:flex;justify-content:flex-end;margin-bottom:.4rem}
 .col-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;margin-top:.6rem;font-size:.78rem}
 .col-tools label{display:flex;align-items:center;gap:.35rem;color:var(--y);font-weight:700;cursor:pointer}
 .bak-ov{position:fixed;inset:0;z-index:9995;background:rgba(0,0,0,.7);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow:auto}
@@ -305,6 +306,9 @@ h1 em{color:var(--g);font-style:normal}
   <div class="pg-t">전체 송장 PDF 업로드</div>
   <div class="pg-s">📥 자동수집 = 이지어드민 출력 폴더의 오늘 PDF 를 합칠 필요 없이 그대로 · 또는 PDF 직접 올리기(여러 개 가능)</div>
   <div class="cur-job" id="curJob" style="display:none"></div>
+  <div class="bak-top">
+    <button class="btn btn-s" onclick="pkBakOpen()" title="자동수집 원본·초기화 전 작업·밀려난 캐시를 이 PC 에서 다시 꺼냄 · 하루 지나면 자동 삭제">🛟 백업함</button>
+  </div>
   <div class="up-row">
     <div class="dz col-box" id="colBox" onclick="pkCollectRun()" title="설정한 폴더 안의 오늘 날짜 폴더(YYYY-MM-DD)에서 새 PDF 만 가져옴">
       <span class="dz-i">📥</span>
@@ -320,7 +324,6 @@ h1 em{color:var(--g);font-style:normal}
   </div>
   <div class="col-tools">
     <label title="체크하면 이미 수집한 파일·이미 출력한 송장번호도 다시 받아들입니다 (한 번 쓰고 끄세요)"><input type="checkbox" id="colNoDup"> 🔁 재등록 — 중복 확인 안 함</label>
-    <button class="btn btn-s" onclick="pkBakOpen()" title="자동수집 원본·초기화 전 작업·밀려난 캐시를 이 PC 에서 다시 꺼냄">🛟 백업함 (직전 송장 살리기)</button>
   </div>
   <details class="col-set" id="colSet">
     <summary>⚙ 자동수집 설정</summary>
@@ -843,6 +846,7 @@ function pkCollectRun(){
   }).catch(function(err){ stop('er', '❌ 자동수집 실패: ' + (err && err.message || err)); });
 }
 document.addEventListener('DOMContentLoaded', pkCollectRefresh);
+document.addEventListener('DOMContentLoaded', function(){ if (window.PK_BACKUP) PK_BACKUP.prune(); });
 
 /* ─────────────── 🔁 재등록 · 🛟 백업함 (pk_backup.js) ───────────────
    재등록 체크 = 수집 기록(이미 가져온 파일)·인쇄완료·인쇄이력 검사를 건너뜀
@@ -872,7 +876,7 @@ function pkBakOpen(){
   }
   ov.innerHTML = '<div class="bak-box"><div class="bak-h">🛟 백업함 <span style="color:var(--mu);font-weight:400;font-size:.75rem">이 PC 에서 찾는 중…</span></div></div>';
   /* 이 PC 캐시에 남은 다른 작업 원본(다른 PC 가 초기화·교체한 것)도 먼저 백업함으로 */
-  pkIdbStash(pkJobKey).then(PK_BACKUP.list).then(pkBakRender);
+  pkIdbStash(pkJobKey).then(PK_BACKUP.prune).then(PK_BACKUP.list).then(pkBakRender);
 }
 function pkBakRender(list){
   var ov = document.getElementById('bakOv'); if (!ov) return;
@@ -888,7 +892,7 @@ function pkBakRender(list){
       + '<button class="btn btn-s" style="margin-left:auto;color:var(--mu)" onclick="pkBakDel(\'' + m.id + '\')">지우기</button>'
       + '</div></div>';
   }).join('');
-  ov.innerHTML = '<div class="bak-box"><div class="bak-h">🛟 백업함 <span style="color:var(--mu);font-weight:400;font-size:.72rem">이 PC 에만 · 최근 ' + PK_BACKUP.KEEP + '개 · ' + PK_BACKUP.KEEP_DAYS + '일</span>'
+  ov.innerHTML = '<div class="bak-box"><div class="bak-h">🛟 백업함 <span style="color:var(--mu);font-weight:400;font-size:.72rem">이 PC 에만 · 최근 ' + PK_BACKUP.KEEP + '개 · 하루 지나면 자동 삭제</span>'
     + '<button class="btn btn-s" style="margin-left:auto" onclick="document.getElementById(\'bakOv\').remove()">닫기</button></div>'
     + '<div class="sm" style="color:var(--mu);font-size:.72rem;line-height:1.5">🧩 되살리기 = 송장 목록·인쇄완료 기록까지 그때 상태로 (모든 PC 에 다시 공유)<br>'
     + '🔁 다시 등록 = PDF 만 새로 등록 · 이미 출력한 송장도 다시 들어오니 <b style="color:var(--y)">인쇄 전 확인</b><br>'
@@ -2793,6 +2797,7 @@ function pkIdbStash(exceptKey){
   }).then(function(list){
     return list.reduce(function(p, it){
       var t = PK_BACKUP.jobKeyTs(it.key), name = String(it.key).replace(/^J\d+_?/, '');
+      if (t && Date.now() - t > PK_BACKUP.KEEP_DAYS * 86400000) return p;   /* 하루 넘은 옛 캐시는 안 옮김 */
       return p.then(function(){ return PK_BACKUP.add({ kind: 'cache', src: String(it.key), buf: it.buf,
         label: '💾 이 PC 에 남아 있던 작업 원본' + (t ? ' (' + new Date(t).toLocaleString('ko-KR') + ' 등록)' : '') + (name ? ' · ' + name : '') }); });
     }, Promise.resolve());
