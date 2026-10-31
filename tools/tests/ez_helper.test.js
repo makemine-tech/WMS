@@ -128,3 +128,23 @@ test('확정: 자동합포금지 칸이 없으면 실행하지 않음', async ()
   const win = fakePage(() => { throw new Error('눌리면 안 됨'); });
   await assert.rejects(async () => win.__mkwEzHelper.commit({ confirm: true, lockUnpack: true }), /자동합포금지/);
 });
+
+/* 송장출력 안전장치 */
+test('출력 확인창은 정확히 그 문구만 통과 — 재출력 경고가 붙으면 거절', () => {
+  const H = fakePage(() => {}).__mkwEzHelper;
+  assert.strictEqual(H.printAsk('송장을 출력하시겠습니까?'), true);
+  assert.strictEqual(H.printAsk('[주의]송장상태의 주문은 동일 송장 번호로 재출력됩니다.\n기존 송장은 반드시 파기하시기 바랍니다.\n\n송장을 출력하시겠습니까?'), false);
+  assert.strictEqual(H.printAsk(''), false);
+});
+test('접수가 아니거나 송장번호가 있거나 0건이면 출력 금지', () => {
+  const H = fakePage(() => {}).__mkwEzHelper;
+  assert.deepStrictEqual(Array.from(H.printRowProblems([{ status: '접수', no: '' }])), []);
+  assert.strictEqual(H.printRowProblems([]).length, 1);
+  assert.strictEqual(H.printRowProblems([{ status: '송장', no: '' }]).length, 1);
+  assert.strictEqual(H.printRowProblems([{ status: '접수', no: '123' }]).length, 1);
+});
+test('준비 없이는 printGo 가 누르지 않음', () => {
+  const H = fakePage(() => {}).__mkwEzHelper;
+  assert.throws(() => H.printGo({ confirm: true, token: 'x', count: 1 }), /준비가 끝나지/);
+  assert.throws(() => H.printGo({ token: 'x' }), /준비가 끝나지/);
+});

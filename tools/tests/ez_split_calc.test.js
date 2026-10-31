@@ -279,3 +279,14 @@ test('verifyAfter: 박스 1 몫이 상품 1개(45입×2 → 1+1)면 묶음이 �
   assert.deepStrictEqual(v.ok, ['7']);        /* 원래 송장에 45입 1개만 남음 → 화면에서 빠지는 게 정상 */
   assert.deepStrictEqual(v.gone, ['8']);      /* 원래 송장에 2개 남아야 하는데 안 보임 → 확인 필요 */
 });
+
+test('송장출력 진행 판정', () => {
+  const s = (o) => Object.assign({ waiting: 0, complete: 0, err: 0, cancel: 0, change: 0, errRows: 0, busy: false }, o);
+  assert.strictEqual(Z.printState(s({ waiting: 5, complete: 3 }), 8, 1000), 'run');
+  assert.strictEqual(Z.printState(s({ complete: 8 }), 8, 1000), 'run');      /* 20초는 더 지켜봄 */
+  assert.strictEqual(Z.printState(s({ complete: 8 }), 8, 25000), 'done');
+  assert.strictEqual(Z.printState(s({ complete: 7, err: 1 }), 8, 25000), 'check');
+  assert.strictEqual(Z.printState(s({ complete: 7 }), 8, 25000), 'check');
+  assert.strictEqual(Z.printState(s({ busy: true }), 8, 300000), 'stall');
+  assert.strictEqual(Z.printState(s({}), 8, 300000), 'stall');               /* 숫자가 안 움직이면 멈춤으로 */
+});

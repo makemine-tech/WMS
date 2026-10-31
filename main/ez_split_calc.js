@@ -298,7 +298,16 @@
     return v;
   }
 
-  var api = { verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  /* 송장출력 진행 판정 — st = 도우미 printStatus, count = 출력한 건수, idleMs = 숫자가 마지막으로 바뀐 뒤 지난 시간
+     'run' 진행 중 · 'done' 전부 완료 · 'check' 끝났는데 오류·취소·모자람 · 'stall' 5분째 변화 없음 */
+  function printState(st, count, idleMs){
+    var handled = st.complete + st.err + st.cancel + st.change;
+    var active = st.busy || st.waiting > 0 || handled === 0 || idleMs < 20000;
+    if (active) return idleMs >= 300000 ? 'stall' : 'run';
+    return (st.err || st.cancel || st.change || st.errRows || st.complete < count) ? 'check' : 'done';
+  }
+
+  var api = { printState: printState, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;
