@@ -33,7 +33,7 @@
     return open().then(function(db){
       return new Promise(function(res, rej){
         var t = db.transaction(stores, mode), out = fn(t);
-        t.oncomplete = function(){ res(out && out.result !== undefined ? out.result : out); };
+        t.oncomplete = function(){ res(out instanceof IDBRequest ? out.result : out); };
         t.onerror = function(){ rej(t.error); };
         t.onabort = function(){ rej(t.error); };
       });
@@ -51,7 +51,6 @@
   PKB.del = function(id){
     return tx(['meta', 'buf'], 'readwrite', function(t){ t.objectStore('meta').delete(id); t.objectStore('buf').delete(id); }).catch(function(){});
   };
-  /* item: { kind, label, buf, invCount?, snap?, src? } — src 가 같은 백업이 이미 있으면 건너뜀 */
   /* 기한 지난 백업 지우기 — 페이지를 열 때마다 (백업을 새로 안 만드는 날에도 비워지게) */
   PKB.prune = function(){
     return PKB.list().then(function(metas){
@@ -62,6 +61,7 @@
       }).then(function(){ return gone.length; });
     }).catch(function(){ return 0; });
   };
+  /* item: { kind, label, buf, invCount?, snap?, src? } — src 가 같은 백업이 이미 있으면 건너뜀 */
   PKB.add = function(item){
     if (!item || !item.buf || !item.buf.byteLength) return Promise.resolve(null);
     return PKB.list().then(function(metas){
