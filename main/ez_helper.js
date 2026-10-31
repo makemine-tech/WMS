@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-31c';
+  var VER = '2026-10-31d';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -202,6 +202,8 @@
   var P = { panel: null, win: null, token: '', count: 0, started: false, alerts: [], arm: false, supplier: '', sock: null };
   window.addEventListener('beforeunload', function(ev){ if (P.started){ ev.preventDefault(); ev.returnValue = '송장출력이 진행 중입니다'; } });
   function printAsk(msg){ return String(msg || '').trim() === '송장을 출력하시겠습니까?'; }
+  /* 이지어드민이 ez_socket 을 창 속성이 아닌 전역 변수로 둠 → 창틀 안에서 eval 로만 보임 */
+  function pSock(w){ try { return w.eval('typeof ez_socket !== "undefined" ? ez_socket : null'); } catch(e){ return null; } }
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
   function pGone(){ if (P.panel) P.panel.remove(); P.panel = null; P.win = null; P.token = ''; }
   function pOpen(){
@@ -259,7 +261,8 @@
     if (picked(d.getElementById('template_type')) !== P_TEMPLATE) bad.push('송장 양식이 ' + P_TEMPLATE + ' 가 아닙니다');
     if (!d.getElementById('pre_print') || !d.getElementById('pre_print').checked) bad.push('즉시출력(선발번)이 체크되지 않았습니다');
     if (picked(d.getElementById('str_supply_code')) !== P.supplier) bad.push('공급처가 ' + P.supplier + ' 가 아닙니다');
-    if (!w.ez_socket || w.ez_socket.readyState !== 1) bad.push('이지에이전트 연결이 안 되어 있습니다');
+    var sk = pSock(w);
+    if (!sk || sk.readyState !== 1) bad.push('이지에이전트 연결이 안 되어 있습니다');
     if (!d.getElementById('use_single_print') || !d.getElementById('use_single_print').checked) bad.push('다중 프린터 출력이 켜져 있습니다');
     if (d.getElementById('new_number') && d.getElementById('new_number').checked) bad.push('새 송장번호 발급이 켜져 있습니다');
     if (d.getElementById('use_range') && d.getElementById('use_range').checked) bad.push('범위 출력이 켜져 있습니다');
@@ -356,7 +359,7 @@
     if (rows.length !== Number(args.count) || sel.length !== rows.length) bad.push('확인한 건수와 지금 화면의 건수가 다릅니다');
     if (bad.length) throw new Error('출력하지 않았습니다 — ' + bad.join(' / '));
     /* 이지에이전트 신호 듣기 — 묶음 완료(print_result)·전부 끝(print_end) */
-    var sock = w.ez_socket, so = { sent: 0, done: 0, end: false, spoolErr: false };
+    var sock = pSock(w), so = { sent: 0, done: 0, end: false, spoolErr: false };
     P.sock = so;
     sock.addEventListener('message', function(ev){
       var m; try { m = JSON.parse(ev.data); } catch(x){ return; }
