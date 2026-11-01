@@ -67,6 +67,17 @@ test('draftReady: 상품과 정수 수량이 있어야 함', () => {
   assert.strictEqual(M.draftReady(plain, { picks: [{ code: '1', qty: 2 }] }), true);
 });
 
+test('splitItems: 확정한 상품은 남은 목록에서 빠짐', () => {
+  const a = { name: 'A', opt: '', qty: 1 }, b = { name: 'B', opt: '', qty: 1 };
+  const k = M.itemKey('A', '', 1);
+  let r = M.splitItems([a, b], { [k]: { status: 'confirmed', picks: [{ code: '1', qty: 1 }] } });
+  assert.deepStrictEqual(r.open, [b]);
+  assert.deepStrictEqual(r.confirmed, [a]);
+  r = M.splitItems([a, b], { [k]: { picks: [{ code: '1', qty: 1 }] } });
+  assert.strictEqual(r.open.length, 2);
+  assert.deepStrictEqual(M.splitItems(null, null), { open: [], confirmed: [] });
+});
+
 test('marks: 2Pack·1+1·용량·개수를 강조, 글자는 그대로', () => {
   const hits = (s) => M.marks(s).filter((x) => x.hit).map((x) => x.t);
   assert.deepStrictEqual(hits('[2Pack] 약산성 클렌저 125ml, 3개'), ['2Pack', '125ml', '3개']);

@@ -74,7 +74,17 @@
     return picks.length > 0 && picks.every(function(p){ return p.code && Number(p.qty) >= 1 && Number.isInteger(Number(p.qty)); });
   }
 
-  var API = { warnings: warnings, marks: marks, tokens: tokens, candidates: candidates, itemKey: itemKey, draftReady: draftReady, countIn: countIn };
+  /* 확정한 상품은 목록에서 사라짐. open = 남은 일, confirmed = 확정한 것 */
+  function splitItems(items, drafts){
+    var out = { open: [], confirmed: [] };
+    (items || []).forEach(function(it){
+      var d = (drafts || {})[itemKey(it.name, it.opt, it.qty)];
+      (d && d.status === 'confirmed' ? out.confirmed : out.open).push(it);
+    });
+    return out;
+  }
+
+  var API = { warnings: warnings, marks: marks, splitItems: splitItems, tokens: tokens, candidates: candidates, itemKey: itemKey, draftReady: draftReady, countIn: countIn };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_MATCH = API;
 })(typeof window !== 'undefined' ? window : this);
