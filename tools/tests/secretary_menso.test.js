@@ -17,6 +17,7 @@ test('대상 브랜드가 있으면 주문 전체 금액으로 가장 높은 구
   assert.strictEqual(tier(p, 20000).need, 1);
   assert.strictEqual(tier(p, 15000).need, 0);
   assert.strictEqual(p.need, 1);
+  assert.deepStrictEqual(p.needList, [{ no: 'A', amt: 20000, min: 20000 }]);
 });
 
 test('경계값: 정확히 구간 금액이면 그 구간, 바로 아래는 아래 구간', () => {

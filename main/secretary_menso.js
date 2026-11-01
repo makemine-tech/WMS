@@ -35,7 +35,7 @@
     });
 
     var out = { name: c.name, brand: c.brand, basis: c.basis, from: c.from, to: c.to, orders: 0, under: 0, need: 0, outside: 0,
-                tiers: tiers.map(function(t){ return { min: t.min, label: t.label || '', need: 0, done: 0, wrong: 0 }; }).reverse(), wrong: [], names: [] };
+                tiers: tiers.map(function(t){ return { min: t.min, label: t.label || '', need: 0, done: 0, wrong: 0 }; }).reverse(), wrong: [], needList: [], names: [] };
     var seen = {};
     Object.keys(orders).forEach(function(k){
       var o = orders[k];
@@ -52,7 +52,7 @@
       }
       var st = giftStatus(tier, have), row = out.tiers.find(function(t){ return t.min === tier.min; });
       row[st]++;
-      if (st === 'need') out.need++;
+      if (st === 'need') { out.need++; if (out.needList.length < LIST) out.needList.push({ no: k, amt: o.sum, min: tier.min }); }
       if (st === 'wrong' && out.wrong.length < LIST) out.wrong.push({ no: k, amt: o.sum, have: have, why: tier.min.toLocaleString('en-US') + '원 구간과 다름' });
     });
     out.names = Object.keys(seen).sort(function(a, b){ return seen[b] - seen[a]; }).slice(0, LIST).map(function(n){ return { name: n, rows: seen[n] }; });
