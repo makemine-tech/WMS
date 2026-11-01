@@ -84,8 +84,8 @@
     { id: 'match', name: '주문 매칭', who: '직접' },
     { id: 'confirm', name: '묶음 출력확정', who: '직접' },
     { id: 'gift', name: '사은품', who: '직접' },
-    { id: 'invoice', name: '송장번호', who: '작업자' },
-    { id: 'ship', name: '출고처리', who: '작업자' }
+    { id: 'invoice', name: '송장번호', who: '직접' },
+    { id: 'ship', name: '출고처리', who: '직접' }
   ];
   function flow(read, campaigns){
     var waiting = {}, all = {};
@@ -109,7 +109,7 @@
       else state = 'done';
       return { id: s.id, name: s.name, who: s.who, state: state, count: Math.max(n, 0) };
     });
-    steps.push({ id: 'send', name: '이벗 송장전송', who: '작업자', state: 'later', count: 0 });
+    steps.push({ id: 'send', name: '이벗 송장전송', who: '직접', state: 'later', count: 0 });
     steps.push({ id: 'bizem', name: '비젬 송장전송', who: '연결 전', state: 'later', count: 0 });
     return { orders: Object.keys(all).length, waiting: nos.length, steps: steps };
   }
