@@ -4,7 +4,8 @@
    명령을 받아 정해진 작업만 한다. Firebase 와 탭은 deps 로 받는다.
      deps.store    claimRunner·getRunner·claimCommand·setCommand·getJobs·setJob·getControl·setSite
      deps.openSite 사이트 탭을 열어 도우미 ping 응답을 돌려줌. 안 되면 throw
-   1단계 작업은 연결·로그인 점검(check) 하나. 송장·합포를 건드리는 경로가 없다.
+     deps.ezPreview({ from, to }) 곡물도감 검색 후 secretary_ez.preview 결과를 돌려줌
+   지금 작업은 연결·로그인 점검 + 읽기 전용 미리 보기(ez_daily A 단계). 송장·합포를 저장하는 경로가 없다.
 ============================================================ */
 (function(root){
   'use strict';
@@ -53,18 +54,33 @@
       if (block) { await store.setCommand(id, { status: 'refused', why: block, doneAt: now }); return; }
 
       var date = C.kstDate(now);
-      var key = C.jobKey('check', date, C.nextRound(jobs, 'check', date));
-      await store.setJob(key, { state: 'running', recipe: 'check', trigger: 'start', by: cmd.by || '', at: now, cmd: id });
+      var key = C.jobKey('ez_daily', date, C.nextRound(jobs, 'ez_daily', date));
+      var range = C.dateRange(cmd.from, now);
+      await store.setJob(key, { state: 'running', recipe: 'ez_daily', trigger: 'start', by: cmd.by || '', at: now, cmd: id, from: range.from, to: range.to });
       try {
         await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
         var results = await checkSites();
         var bad = results.filter(function(r){ return r.state !== 'ok'; });
         var sites = {};
         results.forEach(function(r){ sites[r.id] = { state: r.state, msg: r.msg }; });
-        await store.setJob(key, {
-          state: bad.length ? 'stopped' : 'done', endedAt: deps.now(), sites: sites,
-          notes: bad.map(function(r){ return r.name + ': ' + r.msg; }).join(' / ')
-        });
+        var notes = bad.map(function(r){ return r.name + ': ' + r.msg; });
+        var ez = results.find(function(r){ return r.id === 'ezadmin'; });
+        var stop = !ez || ez.state !== 'ok';   /* 이벗 문제는 이지어드민 비서를 막지 않고 알리기만 함 */
+        var patch = { endedAt: 0, sites: sites };
+        if (!stop) {
+          await store.setCommand(id, { status: 'reading', jobKey: key });
+          try {
+            patch.preview = await deps.ezPreview(range);
+            if (patch.preview.blockers.length) { stop = true; notes = notes.concat(patch.preview.blockers); }
+          } catch (e) {
+            stop = true;
+            notes.push('주문 읽기 실패: ' + String((e && e.message) || e));
+          }
+        }
+        patch.state = stop ? 'stopped' : 'done';
+        patch.notes = notes.join(' / ');
+        patch.endedAt = deps.now();
+        await store.setJob(key, patch);
         await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
       } catch (e) {
         /* 진행 중으로 남으면 다음 시동이 계속 막힌다 */

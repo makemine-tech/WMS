@@ -27,7 +27,10 @@ function setup(opts) {
     opened.push(site.id);
     return site.id === 'ezadmin' ? { ver: 'v1', page: 'DG00' } : { ver: 'v2', login: true };
   });
-  const runner = createRunner({ store, openSite, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
+  const asked = [];
+  const ezPreview = opts.ezPreview || (async (range) => { asked.push(range); return { orders: 2, invoices: 3, blockers: [] }; });
+  db.asked = asked;
+  const runner = createRunner({ store, openSite, ezPreview, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
   return { runner, db, opened, store };
 }
 const start = (at) => ({ type: 'start', at: at === undefined ? NOW : at, by: 'x' });
@@ -36,13 +39,55 @@ test('start runs check and reports done', async () => {
   const { runner, db, opened } = setup();
   await runner.handleCommand('c1', start());
   assert.deepStrictEqual(opened, ['ezadmin', 'ebut']);
-  const key = 'check:2026-11-01:1';
+  const key = 'ez_daily:2026-11-01:1';
   assert.strictEqual(db.commands.c1.status, 'done');
   assert.strictEqual(db.commands.c1.jobKey, key);
   assert.strictEqual(db.jobs[key].state, 'done');
   assert.strictEqual(db.jobs[key].by, 'x');
   assert.strictEqual(db.sites.ezadmin.state, 'ok');
   assert.strictEqual(db.sites.ebut.state, 'ok');
+});
+
+test('미리 보기 결과를 작업에 남기고, 시작일은 명령에서 받음', async () => {
+  const { runner, db } = setup();
+  await runner.handleCommand('c1', Object.assign(start(), { from: '2026-10-30' }));
+  const j = db.jobs['ez_daily:2026-11-01:1'];
+  assert.deepStrictEqual(db.asked, [{ from: '2026-10-30', to: '2026-11-01' }]);
+  assert.strictEqual(j.preview.invoices, 3);
+  assert.strictEqual(j.state, 'done');
+  assert.strictEqual(j.from, '2026-10-30');
+});
+
+test('멈출 이유가 있으면 멈춤으로 기록', async () => {
+  const { runner, db } = setup({ ezPreview: async () => ({ orders: 1, blockers: ['처음 보는 구성 1건'] }) });
+  await runner.handleCommand('c1', start());
+  const j = db.jobs['ez_daily:2026-11-01:1'];
+  assert.strictEqual(j.state, 'stopped');
+  assert.match(j.notes, /처음 보는 구성 1건/);
+});
+
+test('주문 읽기 실패는 이유를 남기고 멈춤', async () => {
+  const { runner, db } = setup({ ezPreview: async () => { throw new Error('검색 시간 초과'); } });
+  await runner.handleCommand('c1', start());
+  const j = db.jobs['ez_daily:2026-11-01:1'];
+  assert.strictEqual(j.state, 'stopped');
+  assert.match(j.notes, /검색 시간 초과/);
+  assert.strictEqual(db.commands.c1.status, 'done');
+});
+
+test('이지어드민 로그인이 풀리면 주문을 읽지 않음', async () => {
+  const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: '' } : { login: true }) });
+  await runner.handleCommand('c1', start());
+  assert.deepStrictEqual(db.asked, []);
+});
+
+test('이벗만 문제면 미리 보기는 진행하고 알림', async () => {
+  const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login: false }) });
+  await runner.handleCommand('c1', start());
+  const j = db.jobs['ez_daily:2026-11-01:1'];
+  assert.strictEqual(j.state, 'done');
+  assert.match(j.notes, /이벗/);
+  assert.strictEqual(db.asked.length, 1);
 });
 
 test('expired command: 만료 표시만 하고 실행 안 함', async () => {
@@ -63,7 +108,7 @@ test('handles a command once: 두 번 받아도 한 번만', async () => {
 test('명령은 차례로 처리, 둘째 시동은 새 회차', async () => {
   const { runner, db } = setup();
   await Promise.all([runner.handleCommand('c1', start()), runner.handleCommand('c2', start())]);
-  assert.deepStrictEqual(Object.keys(db.jobs).sort(), ['check:2026-11-01:1', 'check:2026-11-01:2']);
+  assert.deepStrictEqual(Object.keys(db.jobs).sort(), ['ez_daily:2026-11-01:1', 'ez_daily:2026-11-01:2']);
 });
 
 test('refuses other runner: 다른 PC 는 실행 안 함', async () => {
@@ -73,12 +118,12 @@ test('refuses other runner: 다른 PC 는 실행 안 함', async () => {
 });
 
 test('claim: 빈 자리를 잡고, 끊긴 작업은 중단 처리', async () => {
-  const { runner, db } = setup({ runner: null, jobs: { 'check:2026-11-01:1': { state: 'running' }, 'check:2026-10-31:1': { state: 'done' } } });
+  const { runner, db } = setup({ runner: null, jobs: { 'ez_daily:2026-11-01:1': { state: 'running' }, 'ez_daily:2026-10-31:1': { state: 'done' } } });
   assert.strictEqual(await runner.claim(), true);
   assert.strictEqual(db.runner.id, 'me');
   assert.strictEqual(db.runner.ext, '1.0.0');
-  assert.strictEqual(db.jobs['check:2026-11-01:1'].state, 'interrupted');
-  assert.strictEqual(db.jobs['check:2026-10-31:1'].state, 'done');
+  assert.strictEqual(db.jobs['ez_daily:2026-11-01:1'].state, 'interrupted');
+  assert.strictEqual(db.jobs['ez_daily:2026-10-31:1'].state, 'done');
 });
 
 test('reports site failures: 한 사이트가 실패해도 다음 사이트 점검', async () => {
@@ -95,9 +140,9 @@ test('reports site failures: 한 사이트가 실패해도 다음 사이트 점�
   assert.strictEqual(db.sites.ezadmin.state, 'error');
   assert.match(db.sites.ezadmin.msg, /도우미 응답 없음/);
   assert.strictEqual(db.sites.ebut.state, 'login');
-  assert.strictEqual(db.jobs['check:2026-11-01:1'].state, 'stopped');
-  assert.match(db.jobs['check:2026-11-01:1'].notes, /이지어드민/);
-  assert.match(db.jobs['check:2026-11-01:1'].notes, /이벗/);
+  assert.strictEqual(db.jobs['ez_daily:2026-11-01:1'].state, 'stopped');
+  assert.match(db.jobs['ez_daily:2026-11-01:1'].notes, /이지어드민/);
+  assert.match(db.jobs['ez_daily:2026-11-01:1'].notes, /이벗/);
   assert.strictEqual(db.commands.c1.status, 'done');
 });
 
@@ -105,7 +150,7 @@ test('이지어드민: 일괄합포제외 화면이 아니면 로그인 필요',
   const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: '' } : { login: true }) });
   await runner.handleCommand('c1', start());
   assert.strictEqual(db.sites.ezadmin.state, 'login');
-  assert.strictEqual(db.jobs['check:2026-11-01:1'].state, 'stopped');
+  assert.strictEqual(db.jobs['ez_daily:2026-11-01:1'].state, 'stopped');
 });
 
 test('pause blocks start', async () => {
@@ -126,14 +171,14 @@ test('quiet hours blocks start', async () => {
 });
 
 test('진행 중 작업이 있으면 거절', async () => {
-  const { runner, db } = setup({ jobs: { 'check:2026-11-01:1': { state: 'running' } } });
+  const { runner, db } = setup({ jobs: { 'ez_daily:2026-11-01:1': { state: 'running' } } });
   await runner.handleCommand('c1', start());
   assert.strictEqual(db.commands.c1.status, 'refused');
   assert.match(db.commands.c1.why, /진행 중/);
 });
 
 test('claim: 끊긴 작업의 명령도 닫아 폰이 멈춰 있지 않게 함', async () => {
-  const { runner, db } = setup({ jobs: { 'check:2026-11-01:1': { state: 'running', cmd: 'c9' } } });
+  const { runner, db } = setup({ jobs: { 'ez_daily:2026-11-01:1': { state: 'running', cmd: 'c9' } } });
   await runner.claim();
   assert.strictEqual(db.commands.c9.status, 'interrupted');
 });
@@ -144,12 +189,12 @@ test('점검 중 쓰기 실패: 작업이 진행 중으로 남지 않고 다음 
   const real = store.setSite;
   store.setSite = async (id, p) => { if (fail) throw new Error('쓰기 거부'); return real(id, p); };
   await assert.rejects(runner.handleCommand('c1', start()), /쓰기 거부/);
-  assert.strictEqual(db.jobs['check:2026-11-01:1'].state, 'interrupted');
-  assert.match(db.jobs['check:2026-11-01:1'].notes, /쓰기 거부/);
+  assert.strictEqual(db.jobs['ez_daily:2026-11-01:1'].state, 'interrupted');
+  assert.match(db.jobs['ez_daily:2026-11-01:1'].notes, /쓰기 거부/);
   fail = false;
   await runner.handleCommand('c2', start());
   assert.strictEqual(db.commands.c2.status, 'done');
-  assert.strictEqual(db.jobs['check:2026-11-01:2'].state, 'done');
+  assert.strictEqual(db.jobs['ez_daily:2026-11-01:2'].state, 'done');
 });
 
 test('pause 명령은 받지 않음: 멈춤은 페이지가 control 에 직접 씀', async () => {

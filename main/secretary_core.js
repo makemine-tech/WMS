@@ -2,16 +2,16 @@
    메이크창고 전담비서 — 판단 모듈 (secretary.html 짝꿍, 브라우저·Node 공용, 2026-11-01)
 
    화면과 Firebase 를 모르는 순수 함수만 둔다. 설계서 docs/superpowers/specs/2026-10-31-secretary-phase1-pc-design.md
-   1단계 헤드비서는 도우미에 ping·read 만 보낸다. 저장·출력 명령은 여기서 막는다.
+   이 단계의 헤드비서는 도우미에 ping·read·search 만 보낸다. 저장·채우기·출력 명령은 여기서 막는다.
 ============================================================ */
 (function(root){
   'use strict';
   var MIN = 60 * 1000;
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
-  var HELPER_CMDS = ['ping', 'read'];
+  var HELPER_CMDS = ['ping', 'read', 'search'];   /* search = 이지어드민 검색 버튼, 저장 없음 */
   var COMMAND_TYPES = ['start'];
-  var PAGE_VER = '2026-11-01a';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-01b';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -19,7 +19,8 @@
     { id: 'ebut', name: '이벗', url: 'https://ebut3pl.co.kr/main', tab: 'mkw_sec_ebut', from: 'ebut-helper', to: 'ebut-helper',
       origin: /^https:\/\/([a-z0-9-]+\.)?ebut3pl\.co\.kr$/ }
   ];
-  var RECIPES = { check: { id: 'check', name: '연결·로그인 점검' } };
+  var RECIPES = { ez_daily: { id: 'ez_daily', name: '이지어드민 비서 미리 보기 (읽기 전용)', supplier: '곡물도감' } };
+  var DEFAULT_RANGE_DAYS = 7;     /* ez_split 첫 기본값과 같음 */
 
   function assertSafeCmd(cmd){
     if (HELPER_CMDS.indexOf(cmd) < 0) throw new Error('허용되지 않은 명령: ' + cmd);
@@ -42,6 +43,12 @@
   function kstDate(now){
     var p = kstParts(now);
     return p.y + '-' + String(p.mo).padStart(2, '0') + '-' + String(p.d).padStart(2, '0');
+  }
+  /* 발주일 기간: 잘못된 시작일은 끝일(오늘) 기준 7일 전으로 */
+  function dateRange(from, now){
+    var to = kstDate(now);
+    var ok = /^\d{4}-\d{2}-\d{2}$/.test(String(from || '')) && String(from) <= to;
+    return { from: ok ? String(from) : kstDate(Number(now) - DEFAULT_RANGE_DAYS * 24 * 60 * MIN), to: to };
   }
   function startBlock(s){
     if (runnerState(s.runner, s.now) !== 'on') return '상시 컴퓨터가 꺼져 있습니다';
@@ -66,7 +73,7 @@
   }
 
   var API = { HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
-              commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
+              commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;
 })(typeof window !== 'undefined' ? window : this);

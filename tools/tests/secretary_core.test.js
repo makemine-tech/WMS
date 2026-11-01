@@ -7,10 +7,10 @@ const C = require('../../main/secretary_core.js');
 const kst = (s) => new Date(s + '+09:00');
 const MIN = 60 * 1000;
 
-test('도우미 명령은 ping·read 만 통과', () => {
-  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read']);
-  C.assertSafeCmd('ping'); C.assertSafeCmd('read');
-  for (const bad of ['commit', 'printGo', 'printPrep', 'printStatus', 'printEnd', 'fill', 'reset', 'search', 'save', 'find', '', undefined, 'constructor']) {
+test('도우미 명령은 ping·read·search 만 통과', () => {
+  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read', 'search']);
+  C.assertSafeCmd('ping'); C.assertSafeCmd('read'); C.assertSafeCmd('search');
+  for (const bad of ['commit', 'printGo', 'printPrep', 'printStatus', 'printEnd', 'printClose', 'fill', 'reset', 'save', 'find', '', undefined, 'constructor']) {
     assert.throws(() => C.assertSafeCmd(bad), /허용되지 않은 명령/, String(bad));
   }
 });
@@ -62,6 +62,14 @@ test('siteState: 이벗 조회 실패는 로그인 유지가 아님', () => {
 test('kstDate 는 한국 날짜', () => {
   assert.strictEqual(C.kstDate(new Date('2026-11-01T15:30:00Z').getTime()), '2026-11-02');
   assert.strictEqual(C.kstDate(new Date('2026-11-01T14:30:00Z').getTime()), '2026-11-01');
+});
+
+test('dateRange: 시작일 검사, 기본 7일 전', () => {
+  const now = kst('2026-11-01T12:00:00').getTime();
+  assert.deepStrictEqual(C.dateRange('2026-10-30', now), { from: '2026-10-30', to: '2026-11-01' });
+  assert.deepStrictEqual(C.dateRange('', now), { from: '2026-10-25', to: '2026-11-01' });
+  assert.deepStrictEqual(C.dateRange('2026-11-02', now), { from: '2026-10-25', to: '2026-11-01' });
+  assert.deepStrictEqual(C.dateRange('아무말', now), { from: '2026-10-25', to: '2026-11-01' });
 });
 
 test('jobKey 와 회차', () => {
