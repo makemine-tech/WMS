@@ -4,7 +4,8 @@ $script:TaskName     = 'MAKEWON 비서 크롬 지킴이'
 $script:ShortcutName = '메이크창고 비서 크롬.lnk'
 $script:StoreTask    = 'MAKEWON 스토어 매출'
 $script:DevPc        = 'TOOZ-GRAM'   # 대표님 개발 노트북: 점검만, 설정 변경 금지
-$script:SiteUrls     = @('https://makewon.com/', 'https://ga89.ezadmin.co.kr/', 'https://ebut3pl.co.kr/')
+# 이지어드민 로그인은 www 첫 화면에서 함. ga89 주소 첫 화면은 403(아파치 안내 화면)이라 쓰지 않음
+$script:SiteUrls     = @('https://makewon.com/', 'https://www.ezadmin.co.kr/index.html', 'https://ebut3pl.co.kr/')
 
 function Get-SetupPaths([string]$Sandbox) {
   if ($Sandbox) {
