@@ -72,6 +72,56 @@ test('dateRange: 시작일 검사, 기본 7일 전', () => {
   assert.deepStrictEqual(C.dateRange('아무말', now), { from: '2026-10-25', to: '2026-11-01' });
 });
 
+test('officeRooms: 켜짐·꺼짐·일함·문제가 왼쪽 화면 상태와 같음', () => {
+  const now = 1000 * MIN;
+  const byId = (rooms) => Object.fromEntries(rooms.map((x) => [x.id, x]));
+  const on = { ts: now };
+  const okSites = { ezadmin: { state: 'ok', msg: '' }, ebut: { state: 'ok', msg: '' } };
+
+  /* 실제 있는 비서만 방이 있음 */
+  assert.deepStrictEqual(C.officeRooms({ now }).map((x) => x.id), ['ceo', 'head', 'ezadmin', 'ebut']);
+
+  /* 상시 컴퓨터가 꺼지면 대표실 빼고 퇴근 */
+  let r = byId(C.officeRooms({ runner: { ts: now - 4 * MIN }, sites: okSites, now }));
+  assert.strictEqual(r.head.mode, 'off');
+  assert.strictEqual(r.ezadmin.mode, 'off');
+  assert.strictEqual(r.ebut.mode, 'off');
+  assert.strictEqual(r.ceo.mode, 'idle');
+
+  /* 대기 */
+  r = byId(C.officeRooms({ runner: on, sites: okSites, now }));
+  assert.strictEqual(r.ezadmin.mode, 'idle');
+  assert.strictEqual(r.head.count, 3);
+
+  /* 작업 중 */
+  r = byId(C.officeRooms({ runner: on, sites: okSites, jobs: { a: { state: 'running', at: now } }, now }));
+  assert.strictEqual(r.head.mode, 'work');
+  assert.strictEqual(r.ezadmin.mode, 'work');
+
+  /* 끝난 미리 보기는 건수와 일감으로 보임 */
+  r = byId(C.officeRooms({ runner: on, sites: okSites, jobs: { a: { state: 'done', at: now, preview: { invoices: 60, orders: 40 } } }, now }));
+  assert.match(r.ezadmin.say, /송장 60장/);
+  assert.strictEqual(r.ezadmin.count, 3);
+
+  /* 멈춘 작업이 가장 최근이면 빨간 방, 예전 멈춤은 무시 */
+  r = byId(C.officeRooms({ runner: on, sites: okSites, jobs: { a: { state: 'stopped', at: now } }, now }));
+  assert.strictEqual(r.ezadmin.mode, 'alert');
+  r = byId(C.officeRooms({ runner: on, sites: okSites, jobs: { a: { state: 'stopped', at: now - MIN }, b: { state: 'done', at: now } }, now }));
+  assert.strictEqual(r.ezadmin.mode, 'idle');
+
+  /* 로그인이 풀린 사이트만 빨간 방 */
+  r = byId(C.officeRooms({ runner: on, sites: { ezadmin: { state: 'ok' }, ebut: { state: 'login', msg: '로그인이 필요합니다' } }, now }));
+  assert.strictEqual(r.ebut.mode, 'alert');
+  assert.match(r.ebut.say, /로그인/);
+  assert.strictEqual(r.ezadmin.mode, 'idle');
+
+  /* 전체 멈춤과 대표실 특이사항 */
+  r = byId(C.officeRooms({ runner: on, sites: okSites, control: { pause: true }, noteCount: 2, now }));
+  assert.strictEqual(r.head.mode, 'alert');
+  assert.strictEqual(r.ceo.mode, 'alert');
+  assert.match(r.ceo.say, /2건/);
+});
+
 test('jobKey 와 회차', () => {
   assert.strictEqual(C.jobKey('check', '2026-11-01', 2), 'check:2026-11-01:2');
   assert.strictEqual(C.nextRound({}, 'check', '2026-11-01'), 1);

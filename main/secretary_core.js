@@ -11,7 +11,7 @@
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
   var HELPER_CMDS = ['ping', 'read', 'search'];   /* search = 이지어드민 검색 버튼, 저장 없음 */
   var COMMAND_TYPES = ['start'];
-  var PAGE_VER = '2026-11-01c';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-01d';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -72,7 +72,36 @@
     return r && r.login ? { state: 'ok', msg: '로그인 유지' } : { state: 'login', msg: '로그인이 필요합니다' };
   }
 
-  var API = { HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  /* 픽셀 사무실에 보여 줄 방 목록. 왼쪽 화면과 같은 실제 상태만 쓰고, 아직 없는 비서의 방은 만들지 않는다 */
+  function officeRooms(s){
+    var keys = Object.keys(s.jobs || {}).sort(function(a, b){ return (s.jobs[b].at || 0) - (s.jobs[a].at || 0); });
+    var job = keys.length ? s.jobs[keys[0]] : null, running = !!job && job.state === 'running';
+    var on = runnerState(s.runner, s.now) === 'on', sites = s.sites || {}, ok = 0;
+    SITES.forEach(function(x){ if (sites[x.id] && sites[x.id].state === 'ok') ok++; });
+    function siteRoom(id, name, idleSay, workSay){
+      var v = sites[id];
+      if (!on) return { id: id, name: name, mode: 'off', say: '퇴근', count: 0 };
+      if (running) return { id: id, name: name, mode: 'work', say: workSay, count: 0 };
+      if (v && v.state !== 'ok') return { id: id, name: name, mode: 'alert', say: v.msg, count: 0 };
+      return { id: id, name: name, mode: 'idle', say: idleSay, count: 0 };
+    }
+    var head = !on ? { id: 'head', name: '헤드비서', mode: 'off', say: '상시 컴퓨터 꺼짐', count: 0 }
+      : running ? { id: 'head', name: '헤드비서', mode: 'work', say: '지시 전달 중', count: ok + 1 }
+      : s.control && s.control.pause ? { id: 'head', name: '헤드비서', mode: 'alert', say: '전체 멈춤', count: ok + 1 }
+      : { id: 'head', name: '헤드비서', mode: 'idle', say: '대기 중', count: ok + 1 };
+
+    var preview = job && job.preview, ez = siteRoom('ezadmin', '이지어드민 비서', preview ? '송장 ' + (preview.invoices || 0) + '장 · 주문 ' + (preview.orders || 0) + '건' : '대기 중', '주문 읽는 중');
+    if (ez.mode === 'idle' && job && job.state === 'stopped') { ez.mode = 'alert'; ez.say = '확인 필요'; }
+    if (preview && ez.mode !== 'off') ez.count = Math.ceil((preview.invoices || 0) / 25);   /* 송장 25장마다 묶음 하나 */
+
+    var notes = Number(s.noteCount) || 0;
+    return [
+      { id: 'ceo', name: '대표실', mode: notes ? 'alert' : 'idle', say: notes ? '확인할 일 ' + notes + '건' : '보고 없음', count: 0 },
+      head, ez, siteRoom('ebut', '이벗 비서', '대기 중', '접속 확인 중')
+    ];
+  }
+
+  var API = { officeRooms: officeRooms, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;
