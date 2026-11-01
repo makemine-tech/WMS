@@ -9,10 +9,11 @@
   var MIN = 60 * 1000;
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
-  var HELPER_CMDS = ['ping', 'read', 'search', 'orders'];   /* search = 이지어드민 검색 버튼, orders = 이벗 주문서목록 읽기. 저장 없음 */
-  var COMMAND_TYPES = ['start', 'menso'];
+  var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch'];   /* search = 이지어드민 검색 버튼, 나머지 = 이벗 읽기. 저장 없음 */
+  var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search'];
+  var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
-  var PAGE_VER = '2026-11-01g';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-01h';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -110,7 +111,7 @@
     ];
   }
 
-  var API = { officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;

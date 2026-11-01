@@ -127,12 +127,34 @@
       }
     }
 
+    /* 매칭 화면 자료: 이벗에서 읽어 secretary/match 에 둔다. 이벗에 쓰지 않음 */
+    async function runMatch(id, cmd){
+      var now = deps.now();
+      if (C.runnerState(await store.getRunner(), now) !== 'on') { await store.setCommand(id, { status: 'refused', why: '상시 컴퓨터가 꺼져 있습니다', doneAt: now }); return; }
+      await store.setCommand(id, { status: 'reading' });
+      try {
+        var ebut = C.SITES.find(function(s){ return s.id === 'ebut'; }), r = C.siteState('ebut', await deps.openSite(ebut));
+        if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '이벗: ' + r.msg, doneAt: deps.now() }); return; }
+        if (cmd.type === 'match_search') {
+          await store.setMatch('search/' + id, { text: cmd.text || '', rows: await deps.matchSearch(cmd.text || ''), at: deps.now() });
+        } else {
+          var data = await deps.matchRead(C.dateRange(cmd.from, now));
+          data.readAt = deps.now();
+          await store.setMatch('data', data);
+        }
+        await store.setCommand(id, { status: 'done', doneAt: deps.now() });
+      } catch (e) {
+        await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
+      }
+    }
+
     async function process(id, cmd){
       if (!(await store.claimCommand(id))) return;
       var now = deps.now();
       if (C.commandExpired(cmd, now)) { await store.setCommand(id, { status: 'expired', doneAt: now }); return; }
       if (cmd.type === 'start') return runStart(id, cmd);
       if (cmd.type === 'menso') return runMenso(id, cmd);
+      if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 

@@ -9,6 +9,7 @@
    명령
      ping            → { ok, login }
      orders { cust, from, to } → { rows:[{no,name,qty,amt,siteName,fnsh,regDate,orderDate}], gifts:{주문번호:[매칭상품명]}, unmatched:[주문번호], total }  주문서목록 읽기(저장 없음)
+     matchRead { cust, from, to, terms } → { items, masters, history }  미매칭 줄·마스터 상품·과거 매칭 읽기 / matchSearch { cust, text } → 마스터 상품 검색 (저장 없음)
      find  { orig, origDate }
            원송장으로 상담전용창 검색(/cs/cs200main_jdata, 발송일 기준, 이벗은 기간 최대 약 90일)
            → { orders:[{code,cust,custName,site,ret,rman,odate,ddate}], items:[{bopt,ordlist,name,nicn,opt,qty}], locas:{in,bad} }
@@ -22,7 +23,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-01b';
+  var VER = '2026-11-01c';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -300,16 +301,66 @@
     });
   }
 
+  /* ── 매칭 화면 자료 읽기 (AI 물류비서, 저장 없음) ── 미매칭 주문 줄 + 마스터 상품 + 비슷한 과거 매칭 */
+  function masterSearch(cust, text){
+    var q = new URLSearchParams({ GBN: '1', SEARCH_VALUE: text, GBN2: '', SEARCH_VALUE_OPT: '', SEARCH_VALUE_OPT2: '', CUST_CODE: String(cust), ORDER_TYPE: '', BOPTCODE_TRUE: '', BOPTCODE_NAME_MULTI: '', autogbn: '1', ORDLIST_CUST: '', ORDLIST_MAT: '', rows: '1000', page: '1', sidx: 'basic_name', sord: 'asc', _search: 'false', nd: String(Date.now()) });
+    return fetch('/site/site217edit_right_jdata?' + q.toString(), { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function(r){ return r.text(); }).then(function(t){
+        if (!t) throw new Error('LOGIN');
+        return (JSON.parse(t).rows || []).map(function(x){ return { code: String(x.boptcode_code), seq: String(x.basic_seq), name: plain(x.basic_name), nick: plain(x.basic_nicn), opt: plain(x.boptcode_name) }; });
+      });
+  }
+  function matchHistory(cust, name){
+    var q = new URLSearchParams({ SITE_CUST: String(cust), BMAT_NAME: name, BMAT_TRUE: 'Y', page: '1' });
+    return fetch('/jsp/base/base106edit.jsp?' + q.toString(), { credentials: 'include' }).then(function(r){ return r.text(); }).then(function(h){
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      return Array.prototype.filter.call(d.querySelectorAll('tr'), function(t){ return t.querySelector('input[name=bmat_delete_check]'); }).slice(0, 5).map(function(t){
+        var c = Array.prototype.map.call(t.children, function(x){ return String(x.textContent || '').replace(/\s+/g, ' ').trim(); });
+        return { name: c[4], opt: c[5], qty: Number(c[6]) || 0, master: c[8] };
+      });
+    });
+  }
+  function cmdMatchSearch(a){
+    if (!/^\d+$/.test(String(a.cust)) || !String(a.text || '').trim()) throw new Error('검색어가 없습니다');
+    return masterSearch(a.cust, String(a.text).trim());
+  }
+  function cmdMatchRead(a){
+    var terms = (a.terms || []).slice(0, 12), masters = {}, i = 0;
+    return orderAll('4', a).then(function(miss){
+      var items = {};
+      miss.rows.forEach(function(x){
+        if (String(x.ordlist_fnsh_ori) === '2') return;
+        var name = plain(x.ordlist_name), opt = plain(x.ordlist_opt1), qty = Number(x.ordlist_qty) || 0, k = name + '|' + opt + '|' + qty;
+        var it = items[k] || (items[k] = { name: name, opt: opt, qty: qty, site: plain(x.site_name), orders: 0 });
+        it.orders++;
+      });
+      var list = Object.keys(items).map(function(k){ return items[k]; });
+      function nextTerm(){
+        if (i >= terms.length) return Promise.resolve();
+        return masterSearch(a.cust, terms[i++]).then(function(rows){ rows.forEach(function(m){ masters[m.code] = m; }); return nextTerm(); });
+      }
+      return nextTerm().then(function(){
+        var names = list.map(function(x){ return x.name; }).filter(function(n, p, s){ return s.indexOf(n) === p; }).slice(0, 30), hist = {}, j = 0;
+        function nextHist(){
+          if (j >= names.length) return Promise.resolve();
+          var n = names[j++];
+          return matchHistory(a.cust, n).then(function(r){ hist[n] = r; return nextHist(); });
+        }
+        return nextHist().then(function(){ return { items: list, masters: Object.keys(masters).map(function(c){ return masters[c]; }), history: hist, ver: VER }; });
+      });
+    });
+  }
+
   var busy = 0;
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
-    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : null;
+    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
     /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
     if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
-    busy++; if (m.cmd === 'orders') say('주문서목록 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
+    busy++; if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
       if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');

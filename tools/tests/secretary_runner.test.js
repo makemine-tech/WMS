@@ -22,6 +22,7 @@ function setup(opts) {
     setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); },
     getControl: async () => db.control,
     setSite: async (id, p) => { db.sites[id] = p; },
+    setMatch: async (path, p) => { db.match = db.match || {}; db.match[path] = p; },
   };
   const openSite = opts.openSite || (async (site) => {
     opened.push(site.id);
@@ -31,7 +32,9 @@ function setup(opts) {
   const ezPreview = opts.ezPreview || (async (range) => { asked.push(range); return { orders: 2, invoices: 3, blockers: [] }; });
   db.asked = asked;
   const mensoPreview = opts.mensoPreview || (async (range) => { asked.push(range); return { rows: 10, campaigns: [{ need: 2 }], blockers: [] }; });
-  const runner = createRunner({ store, openSite, ezPreview, mensoPreview, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
+  const matchRead = opts.matchRead || (async () => ({ items: [{ name: 'A' }], masters: [], history: {} }));
+  const matchSearch = async (text) => [{ code: '1', name: text }];
+  const runner = createRunner({ store, openSite, ezPreview, mensoPreview, matchRead, matchSearch, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
   return { runner, db, opened, store };
 }
 const start = (at) => ({ type: 'start', at: at === undefined ? NOW : at, by: 'x' });
@@ -126,6 +129,30 @@ test('맨소래담: 멈춤 상태·진행 중이면 거절', async () => {
   const { runner, db } = setup({ control: { pause: true } });
   await runner.handleCommand('c1', menso());
   assert.strictEqual(db.commands.c1.status, 'refused');
+});
+
+test('매칭 자료 읽기: 결과를 match 에 두고 작업 기록은 만들지 않음', async () => {
+  const { runner, db } = setup();
+  await runner.handleCommand('c1', { type: 'match_read', at: NOW, from: '2026-10-30' });
+  assert.strictEqual(db.commands.c1.status, 'done');
+  assert.strictEqual(db.match.data.items[0].name, 'A');
+  assert.deepStrictEqual(db.jobs, {});
+});
+
+test('매칭 검색: 명령별로 결과를 둠', async () => {
+  const { runner, db } = setup();
+  await runner.handleCommand('c2', { type: 'match_search', at: NOW, text: '클렌저' });
+  assert.strictEqual(db.match['search/c2'].rows[0].name, '클렌저');
+});
+
+test('매칭 자료: 이벗 로그인이 풀리거나 읽기 실패면 이유를 돌려줌', async () => {
+  let t = setup({ openSite: async () => ({ login: false }) });
+  await t.runner.handleCommand('c1', { type: 'match_read', at: NOW });
+  assert.strictEqual(t.db.commands.c1.status, 'refused');
+  assert.match(t.db.commands.c1.why, /이벗/);
+  t = setup({ matchRead: async () => { throw new Error('시간 초과'); } });
+  await t.runner.handleCommand('c1', { type: 'match_read', at: NOW });
+  assert.match(t.db.commands.c1.why, /시간 초과/);
 });
 
 test('expired command: 만료 표시만 하고 실행 안 함', async () => {
