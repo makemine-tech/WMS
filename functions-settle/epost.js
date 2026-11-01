@@ -13,6 +13,7 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 if (!admin.apps.length) admin.initializeApp();
+const { createRelay } = require('./epost_relay');
 
 const MAX = 15;   /* 한 번 호출에 15건 — 화면이 나눠서 여러 번 부름 */
 const URL = 'https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm?displayHeader=N&sid1=';
@@ -27,15 +28,39 @@ function text(html) {
 
 async function get(url) {   /* 첫 연결이 가끔 끊김(2026-10-05 서울 첫 호출 fetch failed) → 2번까지 다시 */
   let last;
-  for (let k = 0; k < 3; k++) { try { return await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0 (makewon WMS settlement)', 'Accept-Language': 'ko' } }); } catch (e) { last = e; await new Promise((r) => setTimeout(r, 800 * (k + 1))); } }
+  for (let k = 0; k < 3; k++) { try { return await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0 (makewon WMS settlement)', 'Accept-Language': 'ko' } }); } catch (e) { last = e; if (e && e.cause && e.cause.code === 'UND_ERR_CONNECT_TIMEOUT') break; await new Promise((r) => setTimeout(r, 800 * (k + 1))); } }   /* 연결 시간 초과는 다시 해도 안 됨 → 바로 상시 컴퓨터로 */
   throw last;
 }
+async function direct(no) {
+  const r = await get(URL + encodeURIComponent(no));
+  if (!r.ok) throw new Error('http ' + r.status);
+  return text(await r.text());
+}
+/* 서버→우체국이 막히면 상시 컴퓨터 헤드비서 탭(secretary.html?run=1)이 대신 조회: secretary/epost/req/{번호} → res/{번호} {text|err, at} */
+const far = () => admin.database().ref('secretary/epost');
+function ask(no) {
+  const start = Date.now(), res = far().child('res/' + no);
+  logger.info('epost 상시 컴퓨터로 조회', { no });
+  return new Promise((done) => {
+    let timer;
+    const on = (s) => { const v = s.val(); if (v && v.at >= (v.err ? start : start - 60000)) stop(v); };
+    const stop = (v) => { clearTimeout(timer); res.off('value', on); done(v); };
+    timer = setTimeout(() => stop(null), 20000);
+    res.on('value', on);
+    far().child('req/' + no).set({ at: start }).catch(() => stop(null));
+  });
+}
+const relay = createRelay({
+  now: Date.now, ask,
+  getDown: async () => (await far().child('downUntil').once('value')).val(),
+  setDown: (t) => far().child('downUntil').set(t),
+  getRunner: async () => (await admin.database().ref('secretary/runner').once('value')).val()
+});
+const page = (no) => relay.fetch(no, direct);
 async function lookup(no) {
   const out = { no };
   try {
-    const r = await get(URL + encodeURIComponent(no));
-    if (!r.ok) { out.err = 'http ' + r.status; return out; }
-    const t = text(await r.text());
+    const t = await page(no);
     const m = t.match(/반품\s*원\s*등기번호\s*[:：]?\s*(\d{10,15})(?:\s*\(?\s*(\d{4}-\d{2}-\d{2})\s*\)?)?/);
     if (m) { out.orig = m[1]; if (m[2]) out.origDate = m[2]; }
     /* 기본정보 줄: 등기번호 보내는분 접수일 받는분 수령인 배달일 … 배달결과 */
@@ -60,15 +85,11 @@ function events(t) {
 async function stage(orig) {
   const out = { orig };
   try {
-    const r = await get(URL + encodeURIComponent(orig));
-    if (!r.ok) { out.err = 'http ' + r.status; return out; }
-    const t = text(await r.text());
+    const t = await page(orig);
     const m = t.match(/반품\s*등기번호\s*[:：]?\s*(\d{10,15})(?:\s*\(?\s*(\d{4}-\d{2}-\d{2})\s*\)?)?/);
     if (!m) { out.stage = events(t).length ? 'none' : 'nodata'; return out; }   /* nodata = 원송장 자체가 조회 안 됨 */
     out.rno = m[1]; if (m[2]) out.rdate = m[2];
-    const r2 = await get(URL + encodeURIComponent(out.rno));
-    if (!r2.ok) { out.err = 'http ' + r2.status; return out; }
-    const ev = events(text(await r2.text())).filter((e) => e.ev !== '운송장출력');
+    const ev = events(await page(out.rno)).filter((e) => e.ev !== '운송장출력');
     const last = ev[ev.length - 1];
     out.stage = !last ? 'wait' : /배달완료/.test(last.ev) ? 'done' : 'move';
     if (last) out.last = { d: last.d, t: last.t, at: last.at, ev: last.ev };
@@ -85,6 +106,7 @@ exports.epostReturnStage = onCall({ region: 'asia-northeast3', timeoutSeconds: 3
   if (!uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다');
   if (!(await allowed(uid))) throw new HttpsError('permission-denied', '작업 그룹원만 쓸 수 있습니다');
   const nos = [...new Set(((req.data && req.data.nos) || []).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 10 && x.length <= 15))].slice(0, MAX);
+  await relay.load();
   const rows = [];
   for (let i = 0; i < nos.length; i += 5) rows.push(...(await Promise.all(nos.slice(i, i + 5).map(stage))));
   logger.info('epostReturnStage', { n: nos.length, ret: rows.filter((r) => r.rno).length });
@@ -102,6 +124,7 @@ exports.epostReturnOrigin = onCall({ region: 'asia-northeast3', timeoutSeconds: 
     if (!ks || !(await require('./kiosk').liveKey(ks.key))) throw new HttpsError('permission-denied', '작업 그룹원만 쓸 수 있습니다');
   }
   const nos = [...new Set(((req.data && req.data.nos) || []).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 10 && x.length <= 15))].slice(0, MAX);
+  await relay.load();
   const rows = [];
   for (let i = 0; i < nos.length; i += 5) {
     const part = await Promise.all(nos.slice(i, i + 5).map(lookup));
