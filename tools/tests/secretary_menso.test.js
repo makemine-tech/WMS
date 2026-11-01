@@ -1,7 +1,7 @@
 /* 맨소래담 사은품 미리 보기 (main/secretary_menso.js) */
 const test = require('node:test');
 const assert = require('node:assert');
-const { preview, previewCampaign, giftStatus } = require('../../main/secretary_menso.js');
+const { preview, previewCampaign, giftStatus, flow } = require('../../main/secretary_menso.js');
 
 const CAMP = { name: '아크네스', brand: '아크네스', site: '맨소레담공식스마트스토어', basis: 'reg', from: '2026-10-27', to: '2026-11-01', confirmed: true,
   tiers: [{ min: 15000, gifts: ['플루이드 20ml'] }, { min: 20000, gifts: ['플루이드 20ml', '포하'] }, { min: 30000, gifts: ['플루이드 20ml', '포하', '모공클리어'] }] };
@@ -78,6 +78,55 @@ test('preview: 확인 안 한 행사표는 계산 안 함, 멈출 이유를 모�
   assert.match(b, /새판매처/);
   assert.match(b, /매칭 안 된 줄 1건/);
   assert.match(b, /구간과 다른 사은품 1건/);
+});
+
+test('이미 나간 주문의 다른 사은품은 할 일이 아니라 수만 남김', () => {
+  const r = [row('A', '아크네스', 30000, { fnsh: '1' }), row('B', '아크네스', 30000, { fnsh: '1' })];
+  const p = run(r, { A: ['플루이드 20ml'] });
+  assert.strictEqual(p.past, 2);
+  assert.strictEqual(p.need, 0);
+  assert.strictEqual(p.wrong.length, 0);
+  assert.strictEqual(preview({ rows: r, total: 2, gifts: { A: ['플루이드 20ml'] } }, [CAMP]).blockers.length, 0);
+});
+
+const flowRow = (no, extra) => row(no, '아크네스', 15000, Object.assign({ ivDate: '2026-11-02', dno: '123' }, extra));
+const states = (f) => Object.fromEntries(f.steps.map((s) => [s.id, s.state]));
+
+test('흐름도: 주문이 없으면 전부 대기', () => {
+  const s = states(flow({ rows: [] }, []));
+  assert.strictEqual(s.collect, 'wait');
+  assert.strictEqual(s.ship, 'wait');
+  assert.strictEqual(s.bizem, 'later');
+});
+
+test('흐름도: 앞 단계가 막히면 거기만 빨강, 뒤는 회색', () => {
+  const f = flow({ rows: [flowRow('A', { ivDate: '', dno: '' })], unmatched: ['A', 'A'] }, []);
+  const s = states(f);
+  assert.strictEqual(s.collect, 'done');
+  assert.strictEqual(s.match, 'todo');
+  assert.strictEqual(f.steps.find((x) => x.id === 'match').count, 2);
+  assert.strictEqual(s.confirm, 'wait');
+  assert.strictEqual(s.gift, 'wait');
+});
+
+test('흐름도: 단계가 끝날수록 파랑이 앞으로', () => {
+  assert.strictEqual(states(flow({ rows: [flowRow('A', { ivDate: '', dno: '' })] }, [])).confirm, 'todo');
+  let s = states(flow({ rows: [flowRow('A', { dno: '' })] }, [{ need: 2, wrong: [] }]));
+  assert.strictEqual(s.confirm, 'done');
+  assert.strictEqual(s.gift, 'todo');
+  s = states(flow({ rows: [flowRow('A', { dno: '' })] }, [{ need: 0, wrong: [] }]));
+  assert.strictEqual(s.gift, 'done');
+  assert.strictEqual(s.invoice, 'todo');
+  s = states(flow({ rows: [flowRow('A')] }, []));
+  assert.strictEqual(s.invoice, 'done');
+  assert.strictEqual(s.ship, 'todo');
+});
+
+test('흐름도: 모두 출고되면 출고처리까지 파랑, 취소·사은품 줄은 세지 않음', () => {
+  const f = flow({ rows: [flowRow('A', { fnsh: '1' }), row('A', '사은품', 0, { fnsh: '1' }), flowRow('B', { fnsh: '2', ivDate: '', dno: '' })] }, []);
+  assert.strictEqual(f.orders, 1);
+  assert.strictEqual(f.waiting, 0);
+  assert.strictEqual(states(f).ship, 'done');
 });
 
 test('결과에 수령자 정보 칸이 없음', () => {

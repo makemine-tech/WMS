@@ -23,7 +23,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-01c';
+  var VER = '2026-11-01d';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -295,7 +295,7 @@
           withMatch.rows.forEach(function(x){ if (plain(x.ordlist_name) === '사은품') (gifts[x.ordlist_no1] = gifts[x.ordlist_no1] || []).push(plain(x.basic_name)); });
           return { total: main.total, gifts: gifts, unmatched: miss.rows.map(function(x){ return x.ordlist_no1; }), ver: VER,
                    rows: main.rows.map(function(x){ return { no: x.ordlist_no1, name: plain(x.ordlist_name), qty: Number(x.ordlist_qty) || 0, amt: Number(x.ordlist_amt1) || 0,
-                     siteName: plain(x.site_name), fnsh: String(x.ordlist_fnsh_ori), regDate: x.ordlist_date, orderDate: x.ordlist_cdate }; }) };
+                     siteName: plain(x.site_name), fnsh: String(x.ordlist_fnsh_ori), regDate: x.ordlist_date, orderDate: x.ordlist_cdate, ivDate: plain(x.ordlist_ivdate), dno: plain(x.ordlist_dno) ? 'Y' : '' }; }) };
         });
       });
     });
