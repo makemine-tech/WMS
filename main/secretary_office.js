@@ -19,17 +19,17 @@
   /* 비서별 자리와 상태별 동작. 새 비서는 여기에 한 줄 + secretary_core.officeRooms 에 한 줄 */
   var CAST = {
     ceo: { seat: 86, desk: 102, script: {
-      idle: [{ a: 'sit', t: 3.5, type: 1 }, { a: 'sit', t: 2.4, sip: 1 }, { a: 'walk', x: 262 }, { a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 86 }],
+      idle: [{ a: 'sit', t: 3.5, type: 1 }, { a: 'sit', t: 2.4, sip: 1 }, { a: 'walk', x: 200 }, { a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 86 }],
       alert: [{ a: 'stand', t: 2, dir: 1, sheet: 1 }] } },
-    head: { seat: 86, desk: 102, script: {
+    head: { short: '헤드비서', seat: 86, desk: 102, script: {
       idle: [{ a: 'sit', t: 4, type: 1 }, { a: 'walk', x: 208 }, { a: 'stand', t: 2.6, dir: 1, point: 1 }, { a: 'walk', x: 86 }],
       work: [{ a: 'sit', t: 2, type: 1 }, { a: 'walk', x: 208 }, { a: 'stand', t: 1.2, dir: 1, point: 1 }, { a: 'walk', x: 86 }],
       alert: [{ a: 'stand', t: 2, dir: 1, point: 1 }] } },
-    ezadmin: { seat: 106, desk: 122, script: {
+    ezadmin: { short: '이지어드민', seat: 106, desk: 122, script: {
       idle: [{ a: 'sit', t: 4, sip: 1 }, { a: 'sit', t: 3, type: 1 }],
       work: [{ a: 'sit', t: 2.4, type: 1 }, { a: 'walk', x: 256, sheet: 1 }, { a: 'stand', t: .7, dir: 1 }, { a: 'walk', x: 106 }],
       alert: [{ a: 'stand', t: 2, dir: 1, sheet: 1 }] } },
-    ebut: { seat: 60, script: {
+    ebut: { short: '이벗', seat: 60, script: {
       idle: [{ a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 130 }, { a: 'stand', t: 2.4, dir: -1 }, { a: 'walk', x: 60 }],
       work: [{ a: 'walk', x: 60 }, { a: 'stand', t: .5, dir: -1 }, { a: 'walk', x: 214, box: 1 }, { a: 'stand', t: .5, dir: 1, box: 1 }],
       alert: [{ a: 'stand', t: 2, dir: 1 }] } }
@@ -147,6 +147,21 @@
       [R.x + R.w / 3, R.x + R.w * 2 / 3].forEach(function(v){ r(v, R.y, 1, R.floor - R.y, '#b9c6c9'); });
       g.globalAlpha = 1;
     }
+    /* 대표실 벽 출근 현황판: 파랑 = 출근(접속), 빨강 = 퇴근(미접속) */
+    function attendance(x, y){
+      var staff = P.filter(function(o){ return o.id !== 'ceo'; }), h = 12 + staff.length * 15;
+      sprite([[x, y, 92, h, '#2e3138']]);
+      g.font = '12px "Do Hyeon","Malgun Gothic",sans-serif';
+      g.textBaseline = 'middle';
+      staff.forEach(function(o, i){
+        var ly = y + 7 + i * 15, on = o.mode !== 'off';
+        g.fillStyle = '#e8ecf0';
+        g.fillText(CAST[o.id].short, x + 7, ly + 6);
+        r(x + 70, ly + 1, 12, 10, '#1b1e24');
+        r(x + 71, ly + 2, 10, 8, on ? '#3b82f6' : '#e5483b');
+        r(x + 72, ly + 3, 3, 2, on ? '#b9d4ff' : '#ffc4bd');
+      });
+    }
     /* 퇴근: 커튼을 친 방 */
     function curtain(R){
       r(R.x, R.y + 3, R.w, R.floor - R.y - 3, '#59606f');
@@ -190,6 +205,7 @@
       roomShell(R); shine(R);
       if (o.mode === 'off') { curtain(R); band(o, t); glass(R); return; }
       var list = scriptOf(o), s = list[o.i % list.length] || { a: 'stand', t: 1 }, seated = s.a === 'sit', X = R.x + o.x;
+      if (o.id === 'ceo') attendance(R.x + 232, R.y + 14);
       if (o.id === 'head') lamps(R.x + 226, R.y + 22, o.count);
       if (o.id === 'ezadmin') { labels(R.x + 16, F, Math.min(14, o.count)); labels(R.x + 46, F, Math.min(14, Math.max(0, o.count - 14))); }
       if (o.id === 'ebut') { shelf(R.x + 238, F, 3); boxAt(R.x + 10, F - 16); boxAt(R.x + 10, F - 32); }
