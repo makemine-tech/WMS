@@ -7,9 +7,23 @@ const C = require('../../main/secretary_core.js');
 const kst = (s) => new Date(s + '+09:00');
 const MIN = 60 * 1000;
 
-test('도우미 명령은 ping·read·search 만 통과', () => {
-  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read', 'search']);
-  C.assertSafeCmd('ping'); C.assertSafeCmd('read'); C.assertSafeCmd('search');
+test('맨소래담 작업은 이벗 방만 바꾸고, 이지어드민 미리 보기 결과와 섞이지 않음', () => {
+  const now = 1000 * MIN, on = { ts: now }, sites = { ezadmin: { state: 'ok' }, ebut: { state: 'ok' } };
+  const byId = (rooms) => Object.fromEntries(rooms.map((x) => [x.id, x]));
+  let r = byId(C.officeRooms({ runner: on, sites, jobs: { a: { recipe: 'menso_read', state: 'running', at: now } }, now }));
+  assert.strictEqual(r.ebut.mode, 'work');
+  assert.strictEqual(r.ezadmin.mode, 'idle');
+  r = byId(C.officeRooms({ runner: on, sites, jobs: { a: { recipe: 'menso_read', state: 'done', at: now, menso: { campaigns: [{ need: 3 }, { need: 2 }] } }, b: { recipe: 'ez_daily', state: 'done', at: now - MIN, preview: { invoices: 25, orders: 10 } } }, now }));
+  assert.match(r.ebut.say, /5건/);
+  assert.match(r.ezadmin.say, /송장 25장/);
+  r = byId(C.officeRooms({ runner: on, sites, jobs: { a: { recipe: 'menso_read', state: 'stopped', at: now } }, now }));
+  assert.strictEqual(r.ebut.mode, 'alert');
+  assert.strictEqual(r.ezadmin.mode, 'idle');
+});
+
+test('도우미 명령은 읽기 네 가지만 통과', () => {
+  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read', 'search', 'orders']);
+  C.assertSafeCmd('ping'); C.assertSafeCmd('read'); C.assertSafeCmd('search'); C.assertSafeCmd('orders');
   for (const bad of ['commit', 'printGo', 'printPrep', 'printStatus', 'printEnd', 'printClose', 'fill', 'reset', 'save', 'find', '', undefined, 'constructor']) {
     assert.throws(() => C.assertSafeCmd(bad), /허용되지 않은 명령/, String(bad));
   }

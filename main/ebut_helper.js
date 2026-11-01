@@ -8,6 +8,7 @@
 
    명령
      ping            → { ok, login }
+     orders { cust, from, to } → { rows:[{no,name,qty,amt,siteName,fnsh,regDate,orderDate}], gifts:{주문번호:[매칭상품명]}, unmatched:[주문번호], total }  주문서목록 읽기(저장 없음)
      find  { orig, origDate }
            원송장으로 상담전용창 검색(/cs/cs200main_jdata, 발송일 기준, 이벗은 기간 최대 약 90일)
            → { orders:[{code,cust,custName,site,ret,rman,odate,ddate}], items:[{bopt,ordlist,name,nicn,opt,qty}], locas:{in,bad} }
@@ -21,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-01a';
+  var VER = '2026-11-01b';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -259,16 +260,56 @@
       function(e){ var isLogin = e.message === 'LOGIN'; return { ok: true, login: !isLogin, checked: isLogin, err: isLogin ? '' : e.message, ver: VER }; });
   }
 
+  /* ── 주문서목록 읽기 (AI 물류비서 미리 보기, 저장 없음) ──
+     화면의 조회와 같은 요청. VIEW_TYPE 1 = 주문 줄, 2 = 매칭 상품 포함(사은품 내용), 4 = 미매칭만.
+     돌려주는 칸은 주문번호·상품명·금액 등이고 수령자·전화·주소는 담지 않는다 */
+  var ORDER_PARAMS = 'site_code basic_prov basic_prov_name ORDLIST_BRAND ORDLIST_IVLEVEL ORDLIST_NO1 ORDLIST_OMAN ORDLIST_RMAN ORDLIST_TEL ORDLIST_FNSH ORDLIST_IVTRUE ORDLIST_GBN ORDLIST_MIYN ORDLIST_UPTYPE ORDLIST_NAME ORDLIST_MAT ORDLIST_DNO ORDLIST_SEQ ORDLIST_DOFC ORDLIST_IVAFYN BASIC_NAME_GBN BASIC_NAME_VAL BASIC_BRAND ORDADD_REYN ORDLIST_NAME_NOT ORDLIST_OPT1_NOT'.split(' ');
+  function orderPage(view, a, page){
+    var q = new URLSearchParams();
+    ORDER_PARAMS.forEach(function(n){ q.set(n, ''); });
+    var set = { VIEW_TYPE: view, ORDLIST_CUST: String(a.cust), DATE_GBN: 'ord_date', DATE1: a.from, DATE2: a.to, GROUP_VIEW_TYPE: '1', gridReload: 'true', rows: '2000', page: String(page), sidx: 'ordlist_code', sord: 'asc', _search: 'false', nd: String(Date.now()) };
+    Object.keys(set).forEach(function(k){ q.set(k, set[k]); });
+    return fetch('/site/site210main_jdata?' + q.toString(), { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function(r){ return r.text(); }).then(function(t){
+        if (!t) throw new Error('LOGIN');
+        return JSON.parse(t);
+      });
+  }
+  function orderAll(view, a){
+    var all = [];
+    return (function next(page){
+      return orderPage(view, a, page).then(function(o){
+        all = all.concat(o.rows || []);
+        return page < Number(o.totalpages || 1) ? next(page + 1) : { rows: all, total: Number(o.totalrecords) || 0 };
+      });
+    })(1);
+  }
+  function plain(s){ return String(s == null ? '' : s).replace(/<[^>]+>/g, '').trim(); }
+  function cmdOrders(a){
+    if (!/^\d+$/.test(String(a.cust)) || !/^\d{4}-\d{2}-\d{2}$/.test(a.from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(a.to || '')) throw new Error('조회 조건이 올바르지 않습니다');
+    return orderAll('1', a).then(function(main){
+      return orderAll('2', a).then(function(withMatch){
+        return orderAll('4', a).then(function(miss){
+          var gifts = {};
+          withMatch.rows.forEach(function(x){ if (plain(x.ordlist_name) === '사은품') (gifts[x.ordlist_no1] = gifts[x.ordlist_no1] || []).push(plain(x.basic_name)); });
+          return { total: main.total, gifts: gifts, unmatched: miss.rows.map(function(x){ return x.ordlist_no1; }), ver: VER,
+                   rows: main.rows.map(function(x){ return { no: x.ordlist_no1, name: plain(x.ordlist_name), qty: Number(x.ordlist_qty) || 0, amt: Number(x.ordlist_amt1) || 0,
+                     siteName: plain(x.site_name), fnsh: String(x.ordlist_fnsh_ori), regDate: x.ordlist_date, orderDate: x.ordlist_cdate }; }) };
+        });
+      });
+    });
+  }
+
   var busy = 0;
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
-    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : null;
+    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
     /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
     if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
-    busy++; if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
+    busy++; if (m.cmd === 'orders') say('주문서목록 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
       if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');

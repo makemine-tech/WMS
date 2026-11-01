@@ -89,11 +89,50 @@
       }
     }
 
+    /* 맨소래담: 이벗 로그인 점검 → 주문서목록 읽기 → 행사표로 사은품 대상 계산. 이벗에 쓰지 않음 */
+    async function runMenso(id, cmd){
+      var now = deps.now();
+      var jobs = (await store.getJobs()) || {};
+      var running = Object.keys(jobs).map(function(k){ return jobs[k]; }).find(function(j){ return j && j.state === 'running'; });
+      var block = C.startBlock({ runner: await store.getRunner(), control: await store.getControl(), job: running, now: now });
+      if (block) { await store.setCommand(id, { status: 'refused', why: block, doneAt: now }); return; }
+
+      var date = C.kstDate(now);
+      var key = C.jobKey('menso_read', date, C.nextRound(jobs, 'menso_read', date));
+      var range = C.dateRange(cmd.from, now);
+      await store.setJob(key, { state: 'running', recipe: 'menso_read', trigger: 'menso', by: cmd.by || '', at: now, cmd: id, from: range.from, to: range.to });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        var ebut = C.SITES.find(function(s){ return s.id === 'ebut'; }), r;
+        try { var reply = await deps.openSite(ebut); r = C.siteState('ebut', reply); r.ver = (reply && reply.ver) || ''; }
+        catch (e) { r = { state: 'error', msg: String((e && e.message) || e), ver: '' }; }
+        r.checkedAt = deps.now();
+        await store.setSite('ebut', r);
+        var patch = { state: 'stopped', endedAt: 0, notes: '' };
+        if (r.state !== 'ok') patch.notes = '이벗: ' + r.msg;
+        else {
+          await store.setCommand(id, { status: 'reading', jobKey: key });
+          try {
+            patch.menso = await deps.mensoPreview(range);
+            patch.notes = patch.menso.blockers.join(' / ');
+            if (!patch.menso.blockers.length) patch.state = 'done';
+          } catch (e) { patch.notes = '주문 읽기 실패: ' + String((e && e.message) || e); }
+        }
+        patch.endedAt = deps.now();
+        await store.setJob(key, patch);
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) }).catch(function(){});
+        throw e;
+      }
+    }
+
     async function process(id, cmd){
       if (!(await store.claimCommand(id))) return;
       var now = deps.now();
       if (C.commandExpired(cmd, now)) { await store.setCommand(id, { status: 'expired', doneAt: now }); return; }
       if (cmd.type === 'start') return runStart(id, cmd);
+      if (cmd.type === 'menso') return runMenso(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 

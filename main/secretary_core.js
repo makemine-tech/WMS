@@ -9,9 +9,10 @@
   var MIN = 60 * 1000;
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
-  var HELPER_CMDS = ['ping', 'read', 'search'];   /* search = 이지어드민 검색 버튼, 저장 없음 */
-  var COMMAND_TYPES = ['start'];
-  var PAGE_VER = '2026-11-01e';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var HELPER_CMDS = ['ping', 'read', 'search', 'orders'];   /* search = 이지어드민 검색 버튼, orders = 이벗 주문서목록 읽기. 저장 없음 */
+  var COMMAND_TYPES = ['start', 'menso'];
+  var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
+  var PAGE_VER = '2026-11-01f';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -19,7 +20,8 @@
     { id: 'ebut', name: '이벗', url: 'https://ebut3pl.co.kr/main', tab: 'mkw_sec_ebut', from: 'ebut-helper', to: 'ebut-helper',
       origin: /^https:\/\/([a-z0-9-]+\.)?ebut3pl\.co\.kr$/ }
   ];
-  var RECIPES = { ez_daily: { id: 'ez_daily', name: '이지어드민 비서 미리 보기 (읽기 전용)', supplier: '곡물도감' } };
+  var RECIPES = { ez_daily: { id: 'ez_daily', name: '이지어드민 비서 미리 보기 (읽기 전용)', supplier: '곡물도감' },
+                  menso_read: { id: 'menso_read', name: '맨소래담 사은품 미리 보기 (읽기 전용)' } };
   var DEFAULT_RANGE_DAYS = 7;     /* ez_split 첫 기본값과 같음 */
 
   function assertSafeCmd(cmd){
@@ -75,13 +77,15 @@
   /* 픽셀 사무실에 보여 줄 방 목록. 왼쪽 화면과 같은 실제 상태만 쓰고, 아직 없는 비서의 방은 만들지 않는다 */
   function officeRooms(s){
     var keys = Object.keys(s.jobs || {}).sort(function(a, b){ return (s.jobs[b].at || 0) - (s.jobs[a].at || 0); });
-    var job = keys.length ? s.jobs[keys[0]] : null, running = !!job && job.state === 'running';
+    function latest(recipe){ var k = keys.find(function(x){ return (s.jobs[x].recipe || 'ez_daily') === recipe; }); return k ? s.jobs[k] : null; }
+    var job = latest('ez_daily'), menso = latest('menso_read');
+    var running = keys.length > 0 && s.jobs[keys[0]].state === 'running', runRecipe = running ? (s.jobs[keys[0]].recipe || 'ez_daily') : '';
     var on = runnerState(s.runner, s.now) === 'on', sites = s.sites || {}, ok = 0;
     SITES.forEach(function(x){ if (sites[x.id] && sites[x.id].state === 'ok') ok++; });
     function siteRoom(id, name, idleSay, workSay){
       var v = sites[id];
       if (!on) return { id: id, name: name, mode: 'off', say: '퇴근', count: 0 };
-      if (running) return { id: id, name: name, mode: 'work', say: workSay, count: 0 };
+      if (running && (runRecipe === 'ez_daily' || id === 'ebut')) return { id: id, name: name, mode: 'work', say: runRecipe === 'menso_read' ? '주문 읽는 중' : workSay, count: 0 };
       if (v && v.state !== 'ok') return { id: id, name: name, mode: 'alert', say: v.msg, count: 0 };
       return { id: id, name: name, mode: 'idle', say: idleSay, count: 0 };
     }
@@ -94,14 +98,19 @@
     if (ez.mode === 'idle' && job && job.state === 'stopped') { ez.mode = 'alert'; ez.say = '확인 필요'; }
     if (preview && ez.mode !== 'off') ez.count = Math.ceil((preview.invoices || 0) / 25);   /* 송장 25장마다 묶음 하나 */
 
+    var need = 0, mp = menso && menso.menso;
+    if (mp) (mp.campaigns || []).forEach(function(c){ need += Number(c.need) || 0; });
+    var eb = siteRoom('ebut', '이벗 비서', mp ? '사은품 넣을 주문 ' + need + '건' : '대기 중', '접속 확인 중');
+    if (eb.mode === 'idle' && menso && menso.state === 'stopped') { eb.mode = 'alert'; eb.say = '확인 필요'; }
+
     var notes = Number(s.noteCount) || 0;
     return [
       { id: 'ceo', name: '대표실', mode: notes ? 'alert' : 'idle', say: notes ? '확인할 일 ' + notes + '건' : '보고 없음', count: 0 },
-      head, ez, siteRoom('ebut', '이벗 비서', '대기 중', '접속 확인 중')
+      head, ez, eb
     ];
   }
 
-  var API = { officeRooms: officeRooms, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;

@@ -30,7 +30,8 @@ function setup(opts) {
   const asked = [];
   const ezPreview = opts.ezPreview || (async (range) => { asked.push(range); return { orders: 2, invoices: 3, blockers: [] }; });
   db.asked = asked;
-  const runner = createRunner({ store, openSite, ezPreview, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
+  const mensoPreview = opts.mensoPreview || (async (range) => { asked.push(range); return { rows: 10, campaigns: [{ need: 2 }], blockers: [] }; });
+  const runner = createRunner({ store, openSite, ezPreview, mensoPreview, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
   return { runner, db, opened, store };
 }
 const start = (at) => ({ type: 'start', at: at === undefined ? NOW : at, by: 'x' });
@@ -88,6 +89,43 @@ test('이벗만 문제면 미리 보기는 진행하고 알림', async () => {
   assert.strictEqual(j.state, 'done');
   assert.match(j.notes, /이벗/);
   assert.strictEqual(db.asked.length, 1);
+});
+
+const menso = (o) => Object.assign({ type: 'menso', at: NOW, by: 'x', from: '2026-10-30' }, o);
+
+test('맨소래담: 이벗만 열어 읽고 결과를 작업에 남김', async () => {
+  const { runner, db, opened } = setup();
+  await runner.handleCommand('c1', menso());
+  const j = db.jobs['menso_read:2026-11-01:1'];
+  assert.deepStrictEqual(opened, ['ebut']);
+  assert.deepStrictEqual(db.asked, [{ from: '2026-10-30', to: '2026-11-01' }]);
+  assert.strictEqual(j.state, 'done');
+  assert.strictEqual(j.menso.campaigns[0].need, 2);
+  assert.strictEqual(db.commands.c1.status, 'done');
+});
+
+test('맨소래담: 멈출 이유가 있으면 멈춤, 읽기 실패도 멈춤', async () => {
+  let t = setup({ mensoPreview: async () => ({ campaigns: [], blockers: ['매칭 안 된 줄 2건'] }) });
+  await t.runner.handleCommand('c1', menso());
+  assert.strictEqual(t.db.jobs['menso_read:2026-11-01:1'].state, 'stopped');
+  assert.match(t.db.jobs['menso_read:2026-11-01:1'].notes, /매칭 안 된 줄/);
+  t = setup({ mensoPreview: async () => { throw new Error('시간 초과'); } });
+  await t.runner.handleCommand('c1', menso());
+  assert.match(t.db.jobs['menso_read:2026-11-01:1'].notes, /시간 초과/);
+});
+
+test('맨소래담: 이벗 로그인이 풀리면 읽지 않음', async () => {
+  const { runner, db } = setup({ openSite: async () => ({ login: false }) });
+  await runner.handleCommand('c1', menso());
+  assert.deepStrictEqual(db.asked, []);
+  assert.strictEqual(db.jobs['menso_read:2026-11-01:1'].state, 'stopped');
+  assert.strictEqual(db.sites.ebut.state, 'login');
+});
+
+test('맨소래담: 멈춤 상태·진행 중이면 거절', async () => {
+  const { runner, db } = setup({ control: { pause: true } });
+  await runner.handleCommand('c1', menso());
+  assert.strictEqual(db.commands.c1.status, 'refused');
 });
 
 test('expired command: 만료 표시만 하고 실행 안 함', async () => {
