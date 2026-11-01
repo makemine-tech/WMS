@@ -29,12 +29,21 @@ if (Test-Path $paths.State) {
   }
 } else { Write-Host '전원 설정: 설치 기록이 없어 그대로 둠' }
 
+# 전용 크롬을 꺼야 프로필을 지울 수 있고 헤드비서 신호도 멈춘다. 대표님이 쓰는 다른 크롬은 프로필 경로가 달라 그대로
+$needle = $paths.Profile.ToLowerInvariant()
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+  Where-Object { $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($needle) } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+
 if (Test-Path $paths.Shortcut) { Remove-Item -LiteralPath $paths.Shortcut -Force; Write-Host '바로가기 삭제' }
 
 foreach ($name in 'guard.ps1', 'guard_hidden.vbs', 'config.json', 'state.json', 'guard.log') {
   $f = Join-Path $paths.Root $name
   if (Test-Path $f) { Remove-Item -LiteralPath $f -Force }
 }
+
+if (Test-Path $paths.Extension) { Remove-Item -LiteralPath $paths.Extension -Recurse -Force }
 
 if (Test-Path $paths.Profile) {
   $a = ''
@@ -51,3 +60,4 @@ if (Test-Path $paths.Profile) {
 
 Write-Host ''
 Write-Host '되돌리기 끝' -ForegroundColor Green
+Write-Host '다른 컴퓨터로 옮기는 경우 전담비서 페이지에서 「실행 PC 해제」를 눌러 주세요.'

@@ -83,7 +83,14 @@ function Install-Power {
 function Install-Files([string]$Chrome) {
   # 드롭박스 파일이 온라인 전용으로 바뀌어도 돌도록 이 컴퓨터로 복사해서 실행
   Copy-Item (Join-Path $PSScriptRoot 'guard.ps1'), (Join-Path $PSScriptRoot 'guard_hidden.vbs') $paths.Root -Force
-  [pscustomobject]@{ chrome = $Chrome; profile = $paths.Profile; urls = $script:SiteUrls } |
+  $extSource = Join-Path $PSScriptRoot 'extension'
+  if (Test-Path (Join-Path $extSource 'manifest.json')) {
+    New-Item -ItemType Directory -Force $paths.Extension | Out-Null
+    Copy-Item (Join-Path $extSource '*') $paths.Extension -Recurse -Force
+    Add-Result '통과' '확장 프로그램 파일' $paths.Extension
+  } else { Add-Result '필요' '확장 프로그램 파일' "설치 폴더에 extension 이 없음: $extSource" }
+  # 지킴이가 source 의 새 판을 extension 으로 옮기고, 확장이 스스로 다시 불러온다
+  [pscustomobject]@{ chrome = $Chrome; profile = $paths.Profile; urls = $script:SiteUrls; source = $extSource; extension = $paths.Extension } |
     ConvertTo-Json | Set-Content -LiteralPath $paths.Config -Encoding UTF8
   Add-Result '통과' '파일 복사' $paths.Root
 }
@@ -115,6 +122,7 @@ function Invoke-Checklist([string]$Chrome) {
     @('WMS 로그인', 'makewon.com 탭에서 구글 로그인'),
     @('이지어드민 로그인', '이지어드민 탭에서 「로그인」 버튼을 눌러 로그인, 비밀번호 저장 물으면 「저장」. 캡차·추가 인증이 나오면 아래 답에 n'),
     @('이벗 로그인', '이벗 탭에서 로그인, 비밀번호 저장 물으면 「저장」. 캡차·추가 인증이 나오면 아래 답에 n'),
+    @('확장 프로그램 설치', "새 탭 주소창에 chrome://extensions 입력 → 오른쪽 위 「개발자 모드」 켜기 → 「압축해제된 확장 프로그램 로드」 → 이 폴더 선택: $($paths.Extension) (이미 설치했으면 엔터)"),
     @('팝업 허용', '크롬 설정 → 개인 정보 보호 및 보안 → 사이트 설정 → 팝업 → 허용에 makewon.com 추가'),
     @('메모리 절약 제외', '크롬 설정 → 성능 → 항상 활성 사이트에 makewon.com, ezadmin.co.kr, ebut3pl.co.kr 추가'),
     @('정전 후 자동 켜짐', 'BIOS 의 AC Power Recovery(이름은 기종마다 다름)를 Power On 으로. 지금 못 하면 n')

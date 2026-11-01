@@ -19,6 +19,7 @@ function Get-SetupPaths([string]$Sandbox) {
     Root     = $root
     Desktop  = $desk
     Profile  = Join-Path $root 'ChromeProfile'
+    Extension = Join-Path $root 'extension'
     Config   = Join-Path $root 'config.json'
     State    = Join-Path $root 'state.json'
     Shortcut = Join-Path $desk $script:ShortcutName

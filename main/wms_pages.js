@@ -21,6 +21,8 @@ var WMS_PAGES=[
       locked:'슈퍼관리자 고정', self:'1차 슈퍼관리자 + 2차 비밀번호(데이터 암호화) — 등급을 낮춰도 DB 규칙이 슈퍼관리자만 허용'},
     {key:'site_stats',   file:'site_stats.html',   label:'사이트 통계 · 로그분석 (숨김 메뉴)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + DB 규칙 stats 읽기는 슈퍼관리자만'},
+    {key:'secretary',    file:'secretary.html',    label:'메이크창고 전담비서 (숨김 메뉴 · 시동·헤드비서)', floor:3, gate:true,
+      locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + DB 규칙 secretary 읽기·쓰기는 슈퍼관리자만'},
     {key:'ad_control',   file:'ad_control.html',   label:'광고 관제 (숨김 메뉴 · 2차 비밀번호 · 네이버 검색광고 수집·입찰)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + 2차 비밀번호 + DB 규칙 adctl 읽기는 슈퍼관리자만 · 입찰 변경은 서버 함수가 슈퍼관리자 확인'},
     {key:'ad_help',      file:'ad_help.html',      label:'└ 광고 관제 도움말 (연결 점검 · 설치 마법사 · 스토어 수집기)', floor:3, gate:true,
@@ -141,6 +143,7 @@ var WMS_MENU=[
       subs:[{key:'qr_attend', subs:[{key:'qr_in'}]}]},
     {key:'settlement',     name:'정산관리', eng:'SETTLEMENT', hidden:true},
     {key:'site_stats',     name:'사이트 통계', eng:'ANALYTICS', hidden:true},
+    {key:'secretary',      name:'전담비서', eng:'SECRETARY', hidden:true},
     {key:'ad_control',     name:'광고 관제', eng:'AD CONTROL', hidden:true},
   ]},
   {section:'EXTRA · OTHER SERVICES', kind:'tile', cols:4, tiles:[

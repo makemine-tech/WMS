@@ -1,0 +1,84 @@
+/* 전담비서 판단 모듈 (main/secretary_core.js) */
+const test = require('node:test');
+const assert = require('node:assert');
+const C = require('../../main/secretary_core.js');
+
+/* KST 시각으로 Date 만들기 */
+const kst = (s) => new Date(s + '+09:00');
+const MIN = 60 * 1000;
+
+test('도우미 명령은 ping·read 만 통과', () => {
+  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read']);
+  C.assertSafeCmd('ping'); C.assertSafeCmd('read');
+  for (const bad of ['commit', 'printGo', 'printPrep', 'printStatus', 'printEnd', 'fill', 'reset', 'search', 'save', 'find', '', undefined, 'constructor']) {
+    assert.throws(() => C.assertSafeCmd(bad), /허용되지 않은 명령/, String(bad));
+  }
+});
+
+test('runnerState: 3분 이내만 켜짐', () => {
+  const now = 1000 * MIN;
+  assert.strictEqual(C.runnerState({ ts: now - 3 * MIN }, now), 'on');
+  assert.strictEqual(C.runnerState({ ts: now - 3 * MIN - 1 }, now), 'off');
+  assert.strictEqual(C.runnerState(null, now), 'off');
+  assert.strictEqual(C.runnerState({}, now), 'off');
+});
+
+test('commandExpired: 10분 초과나 시각 없음은 만료', () => {
+  const now = 1000 * MIN;
+  assert.strictEqual(C.commandExpired({ at: now - 10 * MIN }, now), false);
+  assert.strictEqual(C.commandExpired({ at: now - 10 * MIN - 1 }, now), true);
+  assert.strictEqual(C.commandExpired({}, now), true);
+  assert.strictEqual(C.commandExpired(null, now), true);
+});
+
+test('quietHours: 23:30~00:30', () => {
+  assert.strictEqual(C.quietHours(kst('2026-11-01T23:29:59')), false);
+  assert.strictEqual(C.quietHours(kst('2026-11-01T23:30:00')), true);
+  assert.strictEqual(C.quietHours(kst('2026-11-02T00:29:59')), true);
+  assert.strictEqual(C.quietHours(kst('2026-11-02T00:30:00')), false);
+  assert.strictEqual(C.quietHours(kst('2026-11-02T12:00:00')), false);
+});
+
+test('startBlock: 막는 이유', () => {
+  const now = kst('2026-11-01T12:00:00').getTime();
+  const runner = { ts: now };
+  assert.strictEqual(C.startBlock({ runner, now }), '');
+  assert.match(C.startBlock({ runner: null, now }), /상시 컴퓨터/);
+  assert.match(C.startBlock({ runner, control: { pause: true }, now }), /멈춤/);
+  assert.match(C.startBlock({ runner, job: { state: 'running' }, now }), /진행 중/);
+  const night = kst('2026-11-01T23:40:00').getTime();
+  assert.match(C.startBlock({ runner: { ts: night }, now: night }), /23:30/);
+});
+
+test('siteState: 이벗 조회 실패는 로그인 유지가 아님', () => {
+  assert.strictEqual(C.siteState('ebut', { login: true, checked: true }).state, 'ok');
+  assert.strictEqual(C.siteState('ebut', { login: true }).state, 'ok');
+  assert.strictEqual(C.siteState('ebut', { login: false }).state, 'login');
+  const r = C.siteState('ebut', { login: true, checked: false, err: '네트워크' });
+  assert.strictEqual(r.state, 'error');
+  assert.match(r.msg, /네트워크/);
+});
+
+test('kstDate 는 한국 날짜', () => {
+  assert.strictEqual(C.kstDate(new Date('2026-11-01T15:30:00Z').getTime()), '2026-11-02');
+  assert.strictEqual(C.kstDate(new Date('2026-11-01T14:30:00Z').getTime()), '2026-11-01');
+});
+
+test('jobKey 와 회차', () => {
+  assert.strictEqual(C.jobKey('check', '2026-11-01', 2), 'check:2026-11-01:2');
+  assert.strictEqual(C.nextRound({}, 'check', '2026-11-01'), 1);
+  assert.strictEqual(C.nextRound(null, 'check', '2026-11-01'), 1);
+  assert.strictEqual(C.nextRound({
+    'check:2026-11-01:1': {}, 'check:2026-11-01:3': {}, 'check:2026-10-31:9': {}, 'other:2026-11-01:7': {},
+  }, 'check', '2026-11-01'), 4);
+});
+
+test('사이트 정의: 도우미 탭 이름과 주소', () => {
+  const ez = C.SITES.find((s) => s.id === 'ezadmin');
+  const eb = C.SITES.find((s) => s.id === 'ebut');
+  /* 기존 페이지(ez_split·star_return)의 탭 이름과 겹치면 안 됨 */
+  assert.strictEqual(ez.tab, 'mkw_sec_ez');
+  assert.strictEqual(eb.tab, 'mkw_sec_ebut');
+  assert.match(ez.url, /template=DG00/);
+  assert.match(eb.url, /^https:\/\/ebut3pl\.co\.kr/);
+});

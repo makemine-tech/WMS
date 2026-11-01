@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-26b';
+  var VER = '2026-11-01a';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -254,8 +254,9 @@
 
   function cmdPing(){
     /* 없는 송장으로 정식 검색 — 칸이 빠지면 이벗이 빈 응답을 줘서 로그인 여부를 못 가림 */
-    return search('0000000000', ymd(new Date()), ymd(new Date())).then(function(){ return { ok: true, login: true, ver: VER }; },
-      function(e){ return { ok: true, login: e.message !== 'LOGIN', ver: VER }; });
+    /* checked=false: 조회 자체가 실패해 로그인 여부를 모름 (전담비서가 구분, 기존 페이지는 login 만 봄) */
+    return search('0000000000', ymd(new Date()), ymd(new Date())).then(function(){ return { ok: true, login: true, checked: true, ver: VER }; },
+      function(e){ var isLogin = e.message === 'LOGIN'; return { ok: true, login: !isLogin, checked: isLogin, err: isLogin ? '' : e.message, ver: VER }; });
   }
 
   var busy = 0;
