@@ -41,10 +41,15 @@ function Test-Environment {
     Add-Result $(if ($running) { '통과' } else { '주의' }) '이지에이전트' "$($agent.DisplayVersion) 설치됨, $(if ($running) { '실행 중' } else { '실행 안 됨' })"
   } else { Add-Result '필요' '이지에이전트' '없음: 이지어드민에서 받아 설치' }
 
-  $printer = Get-CimInstance Win32_Printer -Filter "Name='BIXOLON SLP-D 420'" -ErrorAction SilentlyContinue
+  # 도우미는 이름에 BIXOLON SLP 가 있는지 본다. 이름이 조금 달라도 찾아서 그대로 보여 줌
+  $allPrinters = @(Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue)
+  Add-Result '안내' '프린터 목록' (($allPrinters | ForEach-Object { "$($_.Name) [$($_.DriverName) / $($_.PortName)]" }) -join ' ; ')
+  $printer = $allPrinters | Where-Object { $_.Name -eq 'BIXOLON SLP-D 420' } | Select-Object -First 1
+  $similar = @($allPrinters | Where-Object { $_.Name -match 'BIXOLON|SLP' })
+  if (-not $printer -and $similar.Count) { $printer = $similar[0]; Add-Result '주의' '가상 프린터 이름' "정확히 「BIXOLON SLP-D 420」 이 아니라 「$($printer.Name)」" }
   if (-not $printer) { Add-Result '필요' '가상 프린터' '「BIXOLON SLP-D 420」 없음: ezPDF Builder 와 함께 설치' }
-  elseif ($printer.DriverName -match 'ezPDF') { Add-Result '통과' '가상 프린터' "BIXOLON SLP-D 420 ($($printer.DriverName))" }
-  else { Add-Result '주의' '가상 프린터' "같은 이름이 실제 프린터일 수 있음 (드라이버 $($printer.DriverName))" }
+  elseif ($printer.DriverName -match 'ezPDF') { Add-Result '통과' '가상 프린터' "$($printer.Name) ($($printer.DriverName))" }
+  else { Add-Result '주의' '가상 프린터' "「$($printer.Name)」 이 PDF 가 아니라 실제 프린터일 수 있음 (드라이버 $($printer.DriverName), 포트 $($printer.PortName))" }
 
   $sb = Get-AcSeconds 'STANDBYIDLE'
   $hb = Get-AcSeconds 'HIBERNATEIDLE'
