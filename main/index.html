@@ -196,7 +196,9 @@ body{
 .wms-split{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
 .wms-split .wms-btn{padding:1.8rem 1.4rem;gap:.8rem}
 .wms-split .wms-title{font-size:clamp(1.15rem,3.2vw,1.6rem)}
-@media(max-width:560px){ .wms-split{grid-template-columns:1fr} }
+.wms-split.has-ai{grid-template-columns:repeat(3,1fr)}
+@media(max-width:860px){ .wms-split.has-ai .wms-btn{padding:1.3rem 1rem} .wms-split.has-ai .wms-right{display:none} }
+@media(max-width:560px){ .wms-split,.wms-split.has-ai{grid-template-columns:1fr} }
 
 /* ─── SECTION HEADER ─── */
 .pick-header{
@@ -571,7 +573,7 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
   <div class="board" id="board">
   <div class="face front" id="faceF">
 
-  <!-- ── WMS PRIMARY — 왼쪽 창고관리 / 오른쪽 입출고반품관리 (임시 배치) ── -->
+  <!-- ── WMS PRIMARY — 창고관리 / 입출고반품관리 / AI 물류비서(슈퍼관리자에게만 보임) ── -->
   <div class="wms-wrap wms-split">
     <a class="wms-btn" href="https://makewon.com/wms_login.html" target="_blank" rel="noopener">
       <div class="wms-left">
@@ -588,6 +590,16 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
         <span class="wms-badge">CARGO · IN / OUT LOG</span>
         <div class="wms-title">입출고반품관리</div>
         <div class="wms-sub">택배출고 · 입고 · 출고 기록 · 파렛트 통계<br>DAILY CARGO · PALLET STATS</div>
+      </div>
+      <div class="wms-right">
+        <span class="wms-arrow">→</span>
+      </div>
+    </a>
+    <a class="wms-btn" id="tileSecretary" style="display:none" href="secretary.html" target="_blank" rel="noopener">
+      <div class="wms-left">
+        <span class="wms-badge">AI · LOGISTICS SECRETARY</span>
+        <div class="wms-title">AI 물류비서</div>
+        <div class="wms-sub">시동 · 사이트 점검 · 주문 미리 보기 · 보고<br>START · CHECK · PREVIEW · REPORT</div>
       </div>
       <div class="wms-right">
         <span class="wms-arrow">→</span>
@@ -1059,7 +1071,9 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
       firebase.auth().onAuthStateChanged(function(u){
         if (!u) return;
         firebase.database().ref('superadmins/' + u.uid).get().then(function(s){
-          if (s.exists()) ['tilePayroll','tileSettlement','tileStats','tileAds'].forEach(function(id){ document.getElementById(id).style.display = ''; });
+          if (!s.exists()) return;
+          ['tilePayroll','tileSettlement','tileStats','tileAds','tileSecretary'].forEach(function(id){ document.getElementById(id).style.display = ''; });
+          document.getElementById('tileSecretary').parentNode.classList.add('has-ai');
         }).catch(function(){});
       });
     }).catch(function(){});
@@ -1189,7 +1203,7 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
   var board = document.getElementById('board'), F = document.getElementById('faceF'), B = document.getElementById('faceB');
   var btn = document.getElementById('flipBtn'), lbl = document.getElementById('flipLbl'), busy = false;
   var ITEM = '.wms-btn, .card, .app-tile';
-  var NO_MOTION = /site_stats\.html/;   /* 프리젠테이션 뒷면에서 빼는 메뉴 (대표님 2026-10-25: 사이트 통계) */
+  var NO_MOTION = /site_stats\.html|secretary\.html/;   /* 프리젠테이션 뒷면에서 빼는 메뉴 (대표님 2026-10-25: 사이트 통계, AI 물류비서는 대본 없음) */
   var PLAY = '<span class="bk-play"><svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span>';
 
   function txt(el, sel){ var n = el.querySelector(sel); return n ? n.innerHTML.replace(/🔒/g, '').trim() : ''; }
@@ -1197,6 +1211,7 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
   function buildBack(){
     var c = F.cloneNode(true);
     c.querySelectorAll('[id]').forEach(function(n){ n.removeAttribute('id'); });
+    c.querySelectorAll('.has-ai').forEach(function(n){ n.classList.remove('has-ai'); });   /* 뒷면엔 AI 물류비서 칸이 없어 두 칸으로 */
     var src = F.querySelectorAll(ITEM), dst = c.querySelectorAll(ITEM);
     dst.forEach(function(el, i){
       var big = el.classList.contains('wms-btn');

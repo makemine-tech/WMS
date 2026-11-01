@@ -21,7 +21,7 @@ var WMS_PAGES=[
       locked:'슈퍼관리자 고정', self:'1차 슈퍼관리자 + 2차 비밀번호(데이터 암호화) — 등급을 낮춰도 DB 규칙이 슈퍼관리자만 허용'},
     {key:'site_stats',   file:'site_stats.html',   label:'사이트 통계 · 로그분석 (숨김 메뉴)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + DB 규칙 stats 읽기는 슈퍼관리자만'},
-    {key:'secretary',    file:'secretary.html',    label:'메이크창고 전담비서 (숨김 메뉴 · 시동·헤드비서)', floor:3, gate:true,
+    {key:'secretary',    file:'secretary.html',    label:'AI 물류비서 (슈퍼관리자 메뉴 · 시동·헤드비서)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + DB 규칙 secretary 읽기·쓰기는 슈퍼관리자만'},
     {key:'ad_control',   file:'ad_control.html',   label:'광고 관제 (숨김 메뉴 · 2차 비밀번호 · 네이버 검색광고 수집·입찰)', floor:3, gate:true,
       locked:'슈퍼관리자 고정', self:'슈퍼관리자 게이트(floor 3) + 2차 비밀번호 + DB 규칙 adctl 읽기는 슈퍼관리자만 · 입찰 변경은 서버 함수가 슈퍼관리자 확인'},
@@ -107,10 +107,11 @@ var WMS_MENU=[
   {section:'MAKE CHANGO · 홈', kind:'big', cols:1, tiles:[
     {key:'index', name:'홈 / 랜딩 (메인 메뉴 화면)', eng:'WMS & PICKING HUB'},
   ]},
-  {section:'WMS PRIMARY', kind:'big', cols:2, tiles:[
+  {section:'WMS PRIMARY', kind:'big', cols:3, tiles:[
     {key:'wms', name:'창고 관리 시스템', eng:'CORE · WAREHOUSE MANAGEMENT', note:'버튼은 로그인 화면을 거쳐 열림',
       subs:[{key:'wms_login'},{key:'wms_vendors'},{key:'vendor_list'},{key:'vendor_status'}]},
     {key:'cargo_log', name:'입출고반품관리', eng:'CARGO · IN / OUT LOG'},
+    {key:'secretary', name:'AI 물류비서', eng:'AI · LOGISTICS SECRETARY', hidden:true},
   ]},
   {section:'PICKING ENGINE · SELECT', kind:'card', cols:3, tiles:[
     {key:'picking_ebut', name:'이벗 피킹 시스템', eng:'UNIT · 01',
@@ -143,7 +144,6 @@ var WMS_MENU=[
       subs:[{key:'qr_attend', subs:[{key:'qr_in'}]}]},
     {key:'settlement',     name:'정산관리', eng:'SETTLEMENT', hidden:true},
     {key:'site_stats',     name:'사이트 통계', eng:'ANALYTICS', hidden:true},
-    {key:'secretary',      name:'전담비서', eng:'SECRETARY', hidden:true},
     {key:'ad_control',     name:'광고 관제', eng:'AD CONTROL', hidden:true},
   ]},
   {section:'EXTRA · OTHER SERVICES', kind:'tile', cols:4, tiles:[
