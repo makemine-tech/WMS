@@ -7,7 +7,7 @@ const kinds = (n, o) => M.warnings(n, o).map((w) => w.kind);
 test('대표님 예: 상품명 2개, 옵션 3개면 옵션 우선 안내', () => {
   const w = M.warnings('[추가10%적립] 아크네스 데일리 딥 클렌저 120g, 2개', '수량: 3개');
   assert.strictEqual(w[0].kind, 'option');
-  assert.match(w[0].text, /옵션이 우선/);
+  assert.match(w[0].text, /옵션 3개 우선/);
 });
 
 test('대표님 예: 롤온+쿨온 이름에 옵션 핫 롤온 2개', () => {
@@ -58,14 +58,23 @@ test('itemKey: 같은 줄은 같은 키, 다르면 다른 키, Firebase 키에 �
   assert.doesNotMatch(M.itemKey('[1+1] 상품.이름/$#', '옵션', 3), /[.$#[\]/]/);
 });
 
-test('draftReady: 상품과 정수 수량이 있어야 하고, 주의 상품은 확인 표시 필요', () => {
+test('draftReady: 상품과 정수 수량이 있어야 함', () => {
   const plain = { name: '스팟 패치 120매', opt: '' };
-  const tricky = { name: '폼클렌저, 2개', opt: '' };
   assert.strictEqual(M.draftReady(plain, null), false);
   assert.strictEqual(M.draftReady(plain, { picks: [] }), false);
   assert.strictEqual(M.draftReady(plain, { picks: [{ code: '1', qty: 0 }] }), false);
   assert.strictEqual(M.draftReady(plain, { picks: [{ code: '1', qty: 1.5 }] }), false);
   assert.strictEqual(M.draftReady(plain, { picks: [{ code: '1', qty: 2 }] }), true);
-  assert.strictEqual(M.draftReady(tricky, { picks: [{ code: '1', qty: 2 }] }), false);
-  assert.strictEqual(M.draftReady(tricky, { picks: [{ code: '1', qty: 2 }], checked: true }), true);
+});
+
+test('marks: 2Pack·1+1·용량·개수를 강조, 글자는 그대로', () => {
+  const hits = (s) => M.marks(s).filter((x) => x.hit).map((x) => x.t);
+  assert.deepStrictEqual(hits('[2Pack] 약산성 클렌저 125ml, 3개'), ['2Pack', '125ml', '3개']);
+  assert.deepStrictEqual(hits('수량: 1+1+1'), ['1+1+1']);
+  assert.deepStrictEqual(hits('포밍워시 180ml x2개'), ['180ml', 'x2개']);
+  assert.deepStrictEqual(hits('스팟 패치 240매'), ['240매']);
+  assert.deepStrictEqual(hits('옵션 없음'), []);
+  for (const s of ['[2Pack] 클렌저 125ml, 3개', '수량: 1+1', '', null]) {
+    assert.strictEqual(M.marks(s).map((x) => x.t).join(''), String(s == null ? '' : s));
+  }
 });

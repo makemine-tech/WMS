@@ -16,12 +16,26 @@
 
   function warnings(name, opt){
     var n = String(name || ''), o = String(opt || ''), out = [], a = countIn(n), b = countIn(o);
-    if (b != null && a != null && a !== b) out.push({ kind: 'option', text: '상품명은 ' + a + '개, 옵션은 ' + b + '개입니다. 옵션이 우선입니다.' });
-    else if (b != null && a == null) out.push({ kind: 'option', text: '옵션에 수량 ' + b + '개가 있습니다. 주문수량과 곱해서 넣어 주세요.' });
-    else if (a != null && a > 1 && !o) out.push({ kind: 'count', text: '상품명에 ' + a + '개가 있습니다. 주문수량과 곱해서 넣어 주세요.' });
-    if (/1\s*\+\s*1|\d\s*pack/i.test(n + ' ' + o)) out.push({ kind: 'pack', text: '1+1 또는 묶음 상품입니다. 실제 나가는 수량을 확인해 주세요.' });
-    if (/\s\+\s|세트|\bset\b|\d종/i.test(n)) out.push({ kind: 'set', text: o ? '세트 이름이어도 옵션에 고른 내용대로 매칭합니다. 옵션을 확인해 주세요.' : '세트 상품입니다. 구성품마다 따로 넣어 주세요.' });
-    if (/증정/.test(n + ' ' + o)) out.push({ kind: 'gift', text: '증정품이 있습니다. 본품 외에 증정 상품도 넣어 주세요.' });
+    if (b != null && a != null && a !== b) out.push({ kind: 'option', text: '옵션 ' + b + '개 우선 (상품명 ' + a + '개)' });
+    else if (b != null && a == null) out.push({ kind: 'option', text: '옵션 ' + b + '개' });
+    else if (a != null && a > 1 && !o) out.push({ kind: 'count', text: '상품명 ' + a + '개' });
+    if (/1\s*\+\s*1|\d\s*pack/i.test(n + ' ' + o)) out.push({ kind: 'pack', text: '묶음 상품' });
+    if (/\s\+\s|세트|\bset\b|\d종/i.test(n)) out.push({ kind: 'set', text: o ? '세트 이름, 옵션대로' : '세트 구성 확인' });
+    if (/증정/.test(n + ' ' + o)) out.push({ kind: 'gift', text: '증정품 포함' });
+    return out;
+  }
+
+  /* 화면 강조: 2Pack·1+1·용량·개수를 글자 그대로 나눠 돌려줌 */
+  var MARK = /(\d+\s*\+\s*\d+(?:\s*\+\s*\d+)*|\d+\s*pack|\d+\s*(?:ml|g|매|개|입|팩|종|세트)|x\s*\d+\s*개?|\d+\s*x(?=\s|$))/ig;
+  function marks(text){
+    var s = String(text == null ? '' : text), out = [], last = 0, m;
+    MARK.lastIndex = 0;
+    while ((m = MARK.exec(s))) {
+      if (m.index > last) out.push({ t: s.slice(last, m.index), hit: false });
+      out.push({ t: m[0], hit: true });
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) out.push({ t: s.slice(last), hit: false });
     return out;
   }
 
@@ -57,11 +71,10 @@
   /* 입력이 끝났는지. 수량을 비서가 판단하지 않고 빠진 것만 본다 */
   function draftReady(item, draft){
     var picks = (draft && draft.picks) || [];
-    if (!picks.length || !picks.every(function(p){ return p.code && Number(p.qty) >= 1 && Number.isInteger(Number(p.qty)); })) return false;
-    return !warnings(item.name, item.opt).length || !!(draft && draft.checked);
+    return picks.length > 0 && picks.every(function(p){ return p.code && Number(p.qty) >= 1 && Number.isInteger(Number(p.qty)); });
   }
 
-  var API = { warnings: warnings, tokens: tokens, candidates: candidates, itemKey: itemKey, draftReady: draftReady, countIn: countIn };
+  var API = { warnings: warnings, marks: marks, tokens: tokens, candidates: candidates, itemKey: itemKey, draftReady: draftReady, countIn: countIn };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_MATCH = API;
 })(typeof window !== 'undefined' ? window : this);
