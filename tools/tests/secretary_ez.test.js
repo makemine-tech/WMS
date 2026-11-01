@@ -3,13 +3,27 @@ const test = require('node:test');
 const assert = require('node:assert');
 const Z = require('../../main/ez_split_calc.js');
 const FEE = require('../../main/p9_fee.js');
-const { preview, MAX_ORDERS } = require('../../main/secretary_ez.js');
+const { preview, searchSettled, MAX_ORDERS, RECHECK_MS } = require('../../main/secretary_ez.js');
 
 const NAME = '서리태 가득콩물 15입';
 function row(pack, qty, extra) {
   return Object.assign({ recv: '홍길동', seq: '1', pack_seq: String(pack), product_seq: String(pack) + '1', product_id: 'P1', name: NAME, options: '', qty, divided: false }, extra);
 }
 const go = (rows, total, boxes) => preview({ rows, total: total === undefined ? rows.length : total }, boxes || {}, Z, FEE);
+
+test('검색 결과가 비면 기다렸다 다시 읽어 늦게 뜬 주문을 놓치지 않음', async () => {
+  const slept = [];
+  const r = await searchSettled(async () => ({ rows: [], total: 0 }), async () => ({ rows: [row(1, 1)], total: 1 }), async (ms) => { slept.push(ms); });
+  assert.deepStrictEqual(slept, [RECHECK_MS]);
+  assert.strictEqual(r.rows.length, 1);
+});
+
+test('검색 결과가 있으면 다시 읽지 않음', async () => {
+  let reads = 0;
+  const r = await searchSettled(async () => ({ rows: [row(1, 1)], total: 1 }), async () => { reads++; return { rows: [], total: 0 }; }, async () => {});
+  assert.strictEqual(reads, 0);
+  assert.strictEqual(r.rows.length, 1);
+});
 
 test('주문이 없으면 0건으로 정상', () => {
   const p = go([]);

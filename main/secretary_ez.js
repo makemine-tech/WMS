@@ -46,7 +46,17 @@
     };
   }
 
-  var API = { preview: preview, MAX_ORDERS: MAX_ORDERS };
+  /* 도우미는 로딩 표시가 안 보이면 1.5초 뒤 표를 읽는다. 뒤에 깔린 탭에서는 결과가 늦게 뜰 수 있어,
+     빈 결과면 기다렸다 한 번 더 읽고 나서 0건으로 믿는다 */
+  var RECHECK_MS = 5000;
+  function searchSettled(search, read, sleep){
+    return search().then(function(r){
+      if ((r.rows || []).length) return r;
+      return sleep(RECHECK_MS).then(read);
+    });
+  }
+
+  var API = { preview: preview, searchSettled: searchSettled, MAX_ORDERS: MAX_ORDERS, RECHECK_MS: RECHECK_MS };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_EZ = API;
 })(typeof window !== 'undefined' ? window : this);
