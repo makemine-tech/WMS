@@ -49,6 +49,7 @@ AI 물류비서(`main/secretary*`)를 고치거나 늘릴 때 먼저 읽는다. 
 | 호스팅 | Firebase Hosting (makewon.com), main 푸시 → CI 배포 |
 | 시험 | `node --test` (`tools/tests/`), 외부 프레임워크 없음 |
 | 상시 컴퓨터 | DMZOOT, 비서 전용 크롬, 이지에이전트 `C:\ez_PrintAgent` |
+| 실행 PC | 한 번에 하나. 시작 버튼을 누른 컴퓨터가 맡을 수 있음(확장 필요), 그 탭을 닫으면 상시 컴퓨터가 다시 맡음 |
 
 React·Phaser·TypeScript·Zustand·Tailwind·GSAP 를 넣지 않는다. 11장의 조건이 되면 그때 사람이 정한다.
 

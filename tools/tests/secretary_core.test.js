@@ -185,3 +185,22 @@ test('사이트 정의: 도우미 탭 이름과 주소', () => {
   assert.match(ez.url, /template=DG00/);
   assert.match(eb.url, /^https:\/\/ebut3pl\.co\.kr/);
 });
+
+test('시작 버튼: 확장이 있으면 이 컴퓨터가 맡고, 폰은 상시 컴퓨터에 맡김', () => {
+  const now = 1000 * MIN, on = { id: 'dmzoot', ts: now }, off = { id: 'dmzoot', ts: now - 4 * MIN };
+  const go = (o) => C.startChoice(Object.assign({ myId: 'me', hasExt: true, isHead: false, jobRunning: false, now }, o));
+  assert.strictEqual(go({ runner: on }), 'ask');
+  assert.strictEqual(go({ runner: off }), 'take');
+  assert.strictEqual(go({ runner: null }), 'take');
+  assert.strictEqual(go({ runner: on, hasExt: false }), 'send');
+  assert.strictEqual(go({ runner: off, hasExt: false }), 'need_ext');
+  assert.strictEqual(go({ runner: on, isHead: true }), 'send');
+  assert.strictEqual(go({ runner: { id: 'me', ts: now } }), 'send');
+  assert.strictEqual(go({ runner: { id: 'me', ts: now - 4 * MIN } }), 'take');
+});
+
+test('시작 버튼: 작업·출력·채운 내용이 있으면 가져오지 않고 맡김', () => {
+  const now = 1000 * MIN, on = { id: 'dmzoot', ts: now };
+  assert.strictEqual(C.startChoice({ runner: on, myId: 'me', hasExt: true, jobRunning: true, now }), 'send');
+  assert.strictEqual(C.startChoice({ runner: { id: 'dmzoot', ts: now, busy: true }, myId: 'me', hasExt: true, now }), 'send');
+});

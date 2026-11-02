@@ -23,7 +23,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-02l';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-02m';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -69,6 +69,15 @@
     if (s.job && s.job.state === 'running') return '진행 중인 작업이 있습니다';
     if (quietHours(s.now)) return '23:30~00:30 에는 시작하지 않습니다';
     return '';
+  }
+  /* 시작 버튼을 어디서 처리할지.
+     send = 지금 실행 PC 에 맡김 · ask = 이 컴퓨터로 가져올지 물음 · take = 이 컴퓨터가 맡음 · need_ext = 확장이 없어 못 함 */
+  function startChoice(s){
+    var on = runnerState(s.runner, s.now) === 'on', mine = !!s.runner && s.runner.id === s.myId;
+    if (s.isHead || (on && mine)) return 'send';
+    if (!s.hasExt) return on ? 'send' : 'need_ext';
+    if (!on) return 'take';
+    return s.jobRunning || s.runner.busy ? 'send' : 'ask';
   }
   function jobKey(recipe, date, round){ return recipe + ':' + date + ':' + round; }
   function nextRound(jobs, recipe, date){
@@ -152,7 +161,7 @@
     return comps && prods && ((p.flags || {}).unknown || 0) <= ((a.flags || {}).unknown || 0) ? prev.ack : null;
   }
 
-  var API = { LOGIN_TTL: LOGIN_TTL, RELAY_PRINT: RELAY_PRINT, PRINT_IDLE: PRINT_IDLE, EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_ON: KEEP_ALIVE_ON, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { startChoice: startChoice, LOGIN_TTL: LOGIN_TTL, RELAY_PRINT: RELAY_PRINT, PRINT_IDLE: PRINT_IDLE, EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_ON: KEEP_ALIVE_ON, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;

@@ -203,7 +203,7 @@
         c.jobKey = key;
         return c;
       } catch (e) {
-        await store.setJob(key, { state: 'stopped', step: '', endedAt: deps.now(), notes: '일괄합포제외 실패: ' + String((e && e.message) || e) + '. 저장됐을 수 있으니 시동으로 확인해 주세요' });
+        await store.setJob(key, { state: 'stopped', step: '', endedAt: deps.now(), notes: '일괄합포제외 실패: ' + String((e && e.message) || e) + '. 저장됐을 수 있으니 시작 버튼으로 확인해 주세요' });
         throw e;
       }
     }

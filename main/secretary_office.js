@@ -49,7 +49,9 @@
       alert: [{ a: 'stand', t: 2, dir: 1 }] } }
   };
 
-  function mount(sc){
+  /* opts.fps: 사람이 안 보는 상시 컴퓨터는 그리는 횟수를 줄여 부담을 덜음 */
+  function mount(sc, opts){
+    var minGap = opts && opts.fps ? 1000 / opts.fps : 0;
     var cv = sc.querySelector('canvas'), g = cv.getContext('2d');
     var reduce = root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var P = [], H = 0, T = 0;
@@ -331,7 +333,8 @@
 
     var last = 0;
     function frame(n){
-      var dt = Math.min(.1, (n - last) / 1000);
+      if (minGap && n - last < minGap) { requestAnimationFrame(frame); return; }
+      var dt = Math.min(minGap ? .5 : .1, (n - last) / 1000);
       last = n;
       if (P.length) {
         if (!reduce) { T += dt; P.forEach(function(o){ if (o.mode !== 'off') step(o, dt); }); }
