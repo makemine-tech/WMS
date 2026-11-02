@@ -16,7 +16,7 @@
     short: ['...KKKKKKKKK....', '..KKKKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKKKKK..', '.KKKKSSSSSSSKK..', '.KKDSSSSSSSSSK..'],
     swept: ['......KKKKKK....', '..KKKKKKKKKKKK..', '.KKKKKKKKKKKKKK.', '.KKKKKKKKKKKKKK.', '.KKKKKSSSSSSKK..', '.KKDKSSSSSSSSK..'],
     bob: ['...KKKKKKKKK....', '..KKKKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKSSKK..', '.KKKKKKSSSSSSK..', '.KKKKSSSSSSSSK..'],
-    bun: ['......KKKK......', '.....KKKKKK.....', '.....KKKKKK.....', '....KKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKKKKK..', '.KKKKSSSSSSSKK..', '.KDSSSSSSSSSSK..', '.KSSSSSSSSSSSK..']
+    cap: ['...KKKKKKKKK....', '..KCCCCCCCCCK...', '.KCCCCCCCCCCCK..', '.KCCCCCCCCCCCKKK', '.KEEEEEEEEEEEEEK', '.KKDSSSSSSSSSKKK']
   };
   var FACE = ['.KKSSSSSKSSSKK..', '.KSSSSSSKSSSKK..', '.KSSSSSSKSSSKK..', '..KSSSSSSSSSSK..', '..KKSSSSKKKKKK..', '...KSSSSSSSSK...', '...KKKKKKKKKK...'];
   var FACE_BOB = ['.KKKSSSSKSSSKK..', '.KKKSSSSKSSSKK..', '.KKKSSSSKSSSKK..', '.KKKSSSSSSSSSK..', '.KKKKSSSKKKKKK..', '.KKKKSSSSSSSK...', '..KKKKKKKKKKK...'];
@@ -28,7 +28,7 @@
     ceo: { hair: 'swept', suit: 1, S: '#f6b8a6', D: '#d9937f', T: '#3f4149', U: '#2c2e33', B: '#7f8189', W: '#ffffff' },
     head: { hair: 'bob', S: '#f6c0a8', D: '#d9937f', T: '#3f7fd0', U: '#2d5fa3', B: '#e8e8ec' },
     ezadmin: { hair: 'short', S: '#a8623a', D: '#7f4827', T: '#f0b83f', U: '#c58f22', B: '#2d3a66' },
-    ebut: { hair: 'bun', S: '#f6b8a6', D: '#d9937f', T: '#3fa877', U: '#2e8259', B: '#6a5a4a' }
+    ebut: { hair: 'cap', S: '#f6b8a6', D: '#d9937f', T: '#3fa877', U: '#2e8259', B: '#6a5a4a', C: '#e88a2c', E: '#b8691f' }
   };
   /* 비서별 자리와 상태별 동작. 새 비서는 여기에 한 줄 + secretary_core.officeRooms 에 한 줄 */
   var CAST = {

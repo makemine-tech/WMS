@@ -76,7 +76,7 @@ test('그림판: 줄 길이가 같고 정해진 글자만 씀', () => {
   const sets = [...Object.values(S.HEADS), S.FACE, S.FACE_BOB, S.BODY, S.SUIT, ...S.LEGS, S.SIT];
   sets.forEach((rows) => rows.forEach((row) => {
     assert.strictEqual(row.length, 16, row);
-    assert.match(row, /^[.KSDTUBW]+$/, row);
+    assert.match(row, /^[.KSDTUBWCE]+$/, row);
   }));
 });
 
