@@ -189,11 +189,15 @@
     function scriptOf(o){ var s = CAST[o.id].script; return s[o.mode] || s.idle || []; }
     function step(o, dt){
       var list = scriptOf(o); if (!list.length) return;
-      var s = list[o.i % list.length];
-      if (s.a === 'walk') {
-        var d = s.x - o.x, st = (o.mode === 'work' ? 66 : 44) * dt;
+      var s = list[o.i % list.length], seat = CAST[o.id].seat;
+      /* 걷던 중 상태가 바뀌면 앉는 동작이 자리 밖에서 시작됨. 자리까지 걸어간 뒤 앉음 */
+      if (s.a === 'walk' || (s.a === 'sit' && o.x !== seat)) {
+        var to = s.a === 'walk' ? s.x : seat, d = to - o.x, st = (o.mode === 'work' ? 66 : 44) * dt;
         o.dir = d >= 0 ? 1 : -1;
-        if (Math.abs(d) <= st) { o.x = s.x; o.i = (o.i + 1) % list.length; o.t0 = 0; } else o.x += (d > 0 ? 1 : -1) * st;
+        if (Math.abs(d) <= st) {
+          o.x = to;
+          if (s.a === 'walk') { o.i = (o.i + 1) % list.length; o.t0 = 0; }
+        } else o.x += (d > 0 ? 1 : -1) * st;
       } else {
         o.t0 += dt;
         if (s.dir) o.dir = s.dir;
@@ -204,7 +208,7 @@
       var R = o.R, F = R.floor, c = CAST[o.id];
       roomShell(R); shine(R);
       if (o.mode === 'off') { curtain(R); band(o, t); glass(R); return; }
-      var list = scriptOf(o), s = list[o.i % list.length] || { a: 'stand', t: 1 }, seated = s.a === 'sit', X = R.x + o.x;
+      var list = scriptOf(o), s = list[o.i % list.length] || { a: 'stand', t: 1 }, seated = s.a === 'sit' && o.x === c.seat, X = R.x + Math.round(o.x);
       if (o.id === 'ceo') attendance(R.x + 232, R.y + 14);
       if (o.id === 'head') lamps(R.x + 226, R.y + 22, o.count);
       if (o.id === 'ezadmin') { labels(R.x + 16, F, Math.min(14, o.count)); labels(R.x + 46, F, Math.min(14, Math.max(0, o.count - 14))); }
@@ -212,7 +216,7 @@
       if (c.desk) chair(R.x + c.seat, F);
       if (c.desk && !seated) desk(R.x + c.desk, F, true, t);
       if (seated) sitting(X, F, 1, PAL[o.id], { t: t + c.seat, type: s.type, sip: s.sip, smile: s.sip });
-      else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, walk: s.a === 'walk' && !reduce, box: s.box, sheet: s.sheet, point: s.point, smile: o.mode !== 'alert' });
+      else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, walk: (s.a === 'walk' || s.a === 'sit') && !reduce, box: s.box, sheet: s.sheet, point: s.point, smile: o.mode !== 'alert' });
       if (c.desk && seated) desk(R.x + c.desk, F, true, t);
       if (o.mode === 'alert') { g.globalAlpha = .16; r(R.x, R.y, R.w, F - R.y, '#d8543f'); g.globalAlpha = 1; }
       band(o, t);
