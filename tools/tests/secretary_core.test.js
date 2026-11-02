@@ -136,6 +136,22 @@ test('officeRooms: 켜짐·꺼짐·일함·문제가 왼쪽 화면 상태와 같
   assert.match(r.ceo.say, /2건/);
 });
 
+test('ezFlow: 읽은 자료대로 차례가 넘어감', () => {
+  const st = (site, job) => Object.fromEntries(C.ezFlow(site, job).map((x) => [x.id, x.state]));
+  const ok = { state: 'ok' };
+  assert.strictEqual(st(null, null).ez_login, 'wait');
+  assert.strictEqual(st({ state: 'login' }, null).ez_login, 'todo');
+  let s = st(ok, { preview: { orders: 10, splitPacks: 3, blockers: [] } });
+  assert.deepStrictEqual([s.ez_preview, s.ez_split, s.ez_print], ['done', 'todo', 'wait']);
+  s = st(ok, { preview: { orders: 10, splitPacks: 0, blockers: [] } });
+  assert.deepStrictEqual([s.ez_split, s.ez_print], ['done', 'todo']);
+  s = st(ok, { preview: { orders: 10, splitPacks: 3, blockers: ['처음 보는 구성 1건'] } });
+  assert.deepStrictEqual([s.ez_preview, s.ez_split, s.ez_print], ['todo', 'wait', 'wait']);
+  s = st(ok, { preview: { orders: 0, splitPacks: 0 } });
+  assert.deepStrictEqual([s.ez_preview, s.ez_split, s.ez_print], ['done', 'wait', 'wait']);
+  assert.strictEqual(C.ezFlow(ok, { preview: { orders: 10, splitPacks: 3 } }).find((x) => x.id === 'ez_split').count, 3);
+});
+
 test('jobKey 와 회차', () => {
   assert.strictEqual(C.jobKey('check', '2026-11-01', 2), 'check:2026-11-01:2');
   assert.strictEqual(C.nextRound({}, 'check', '2026-11-01'), 1);
