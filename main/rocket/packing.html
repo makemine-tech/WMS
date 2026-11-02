@@ -17,6 +17,7 @@
 
 <!-- SheetJS (엑셀 파싱용) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="pallet_split.js"></script>
 
 <!-- PDF.js (PDF 텍스트 추출 + 라벨 캔버스 렌더링용) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -100,6 +101,24 @@
     background: var(--accent); color: #fff; font-size: 11px;
     border-radius: 50%; margin-right: 8px;
   }
+
+  .panel-title .step.step-wide { width: auto; padding: 0 8px; border-radius: 11px; }
+
+  /* 2-1 파렛트 분할 — 왼쪽 업로드, 오른쪽 결과 */
+  .ps-grid { display: grid; grid-template-columns: minmax(260px, 1fr) 2fr; gap: 16px; align-items: start; }
+  @media (max-width: 800px) { .ps-grid { grid-template-columns: 1fr; } }
+  .ps-empty { padding: 28px 12px; text-align: center; font-size: 13px; color: var(--text-sub); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
+  .ps-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+  .ps-warn { margin-bottom: 10px; padding: 8px 12px; font-size: 12px; line-height: 1.6; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-sm); }
+  .ps-table-wrap { max-height: 340px; overflow: auto; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+  .ps-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ps-table th, .ps-table td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; text-align: left; white-space: nowrap; }
+  .ps-table th { position: sticky; top: 0; background: #f1f5f9; }
+  .ps-table .num { text-align: right; }
+  .ps-table td.ps-merged { white-space: normal; min-width: 160px; color: var(--text-sub); }
+  .ps-table tr.ps-total td { position: sticky; bottom: 0; background: #f1f5f9; font-weight: 700; }
+  .ps-tag { display: inline-block; margin-left: 4px; padding: 0 5px; font-size: 10px; border-radius: 4px; color: #92400e; background: #fef3c7; }
+  .ps-tag.bad { color: #991b1b; background: #fee2e2; }
 
   .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
   .field { flex: 1 1 180px; min-width: 140px; }
@@ -713,10 +732,31 @@
     <div class="vendor-chips" id="vendorChips"></div>
   </section>
 
-  <!-- ===================== 2) 엑셀 업로드 ===================== -->
+  <!-- ===================== 2-1) 파렛트 분할 ===================== -->
   <section class="panel">
     <div class="panel-head">
-      <div class="panel-title"><span class="step">2</span>엑셀 업로드</div>
+      <div class="panel-title"><span class="step step-wide">2-1</span>파렛트 분할</div>
+      <span style="font-size:11px; color:var(--text-sub);">파렛트번호 매기기 전 원본 엑셀 → 분할 엑셀 내려받아 검수 후 2-2에 업로드</span>
+    </div>
+    <div class="ps-grid">
+      <div class="field">
+        <label>원본 발주 엑셀 파일</label>
+        <div class="dropzone" id="psDropzone">
+          <div class="dz-icon">⬆</div>
+          <div class="dz-title">클릭하여 선택하거나, 파일을 여기로 끌어다 놓으세요</div>
+          <div class="dz-sub">1파렛트 기준: 제품15 125 · 제품30 72 · 제품45 54 · 당쉼·검은콩·결명자 72</div>
+          <div class="dz-file" id="psFile"></div>
+          <input type="file" id="psFileInput" accept=".xlsx,.xls" />
+        </div>
+      </div>
+      <div id="psResult"><div class="ps-empty">원본 엑셀을 올리면 여기에 계산 결과와 다운로드 버튼이 나옵니다.</div></div>
+    </div>
+  </section>
+
+  <!-- ===================== 2-2) 엑셀 업로드 ===================== -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><span class="step step-wide">2-2</span>엑셀 업로드</div>
       <span style="font-size:11px; color:var(--text-sub);">쿠팡 발주 엑셀(.xlsx) 그대로 사용</span>
     </div>
     <div class="row">
@@ -1169,6 +1209,8 @@ function parseExcel(file) {
           }))
           .filter(r => r.center && r.palletT && r.palletN);
 
+        /* 2-1 에서 만든 파일 표시 — 번호가 묶음마다 하나뿐이라 출고건 겹침 의심이 필요 없다 */
+        rows.fromPalletSplit = wb.SheetNames.includes(PalletSplit.SUMMARY_SHEET);
         resolve(rows);
       } catch (err) { reject(err); }
     };
@@ -1589,7 +1631,13 @@ async function handleFile(f) {
     /* 출고건 자동 태깅 후, 같은 센터·파렛트수가 2건+ 겹친 묶음은 작업자에게 분리 여부 확인 */
     const info = tagBookings(RAW_ROWS, null);
     const suspicious = info.filter(x => x.count >= 2);
-    if (suspicious.length) {
+    if (RAW_ROWS.fromPalletSplit) {
+      /* 합친 파렛트만 있는 센터(1번에 2줄)를 '2건'으로 잘못 나누지 않게 전부 1건으로 */
+      const merged = {};
+      info.forEach(x => { merged[x.key] = 1; });
+      tagBookings(RAW_ROWS, merged);
+      suspicious.length = 0;
+    } else if (suspicious.length) {
       const overrides = await askBookingSplit(suspicious);
       if (overrides === null) {        // 취소 → 업로드 무효화
         GROUPS = []; RAW_ROWS = [];
@@ -1647,6 +1695,71 @@ dz.addEventListener("drop", e => {
 ["dragover","drop"].forEach(ev => {
   window.addEventListener(ev, e => { e.preventDefault(); }, false);
 });
+
+/* ---------- 2-1 파렛트 분할 ---------- */
+let PS_RESULT = null;
+
+function renderPalletSplit(fileName) {
+  const box = document.getElementById("psResult");
+  const { summary, warnings, totals } = PS_RESULT;
+  const rows = summary.map(s => `<tr>
+      <td>${escapeHtml(s.eta)}</td>
+      <td>${escapeHtml(s.origin) || '<span class="ps-tag bad">출고지 없음</span>'}</td>
+      <td>${escapeHtml(s.center)}${s.oneSku ? '<span class="ps-tag">1SKU</span>' : ''}${s.unknown ? '<span class="ps-tag bad">확인</span>' : ''}</td>
+      <td class="num">${fmt(s.pallets)}</td>
+      <td class="num">${fmt(s.boxes)}</td>
+      <td class="num">${fmt(s.qty)}</td>
+      <td class="ps-merged">${s.merged.map(escapeHtml).join('<br>')}</td>
+    </tr>`).join('');
+  box.innerHTML = `
+    <div class="ps-head">
+      <span>센터 <b>${summary.length}</b>곳 · 총 <b>${fmt(totals.pallets)}</b>파렛트 · 납품수량 <b>${fmt(totals.qty)}</b>개</span>
+      <button class="btn btn-primary" id="psDownload">⬇ 분할 엑셀 다운로드</button>
+    </div>
+    ${warnings.length ? `<div class="ps-warn"><b>확인 필요 ${warnings.length}건</b><br>${warnings.map(escapeHtml).join('<br>')}</div>` : ''}
+    <div class="ps-table-wrap"><table class="ps-table">
+      <thead><tr><th>입고예정일</th><th>출고지</th><th>물류센터</th><th class="num">파렛트수</th><th class="num">박스수</th><th class="num">납품수량</th><th>합친 파렛트</th></tr></thead>
+      <tbody>${rows}<tr class="ps-total"><td colspan="3">합계</td><td class="num">${fmt(totals.pallets)}</td><td class="num">${fmt(totals.qty)}</td><td class="num">${fmt(totals.qty)}</td><td></td></tr></tbody>
+    </table></div>`;
+  const outName = fileName.replace(/\.(xlsx|xls)$/i, '') + '_파렛트분할.xlsx';
+  document.getElementById("psDownload").addEventListener("click", () => XLSX.writeFile(PS_RESULT.workbook, outName));
+}
+
+async function handlePalletSplitFile(f) {
+  if (!f) return;
+  const box = document.getElementById("psResult");
+  document.getElementById("psFile").textContent = "📄 " + f.name;
+  PS_RESULT = null;
+  if (!/\.(xlsx|xls)$/i.test(f.name)) {
+    box.innerHTML = '<div class="ps-warn">지원하지 않는 형식입니다. .xlsx 또는 .xls 파일을 올려주세요.</div>';
+    return;
+  }
+  try {
+    PS_RESULT = PalletSplit.splitWorkbook(XLSX, await f.arrayBuffer());
+    renderPalletSplit(f.name);
+  } catch (err) {
+    box.innerHTML = `<div class="ps-warn">오류: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+document.getElementById("psFileInput").addEventListener("change", (e) => {
+  handlePalletSplitFile(e.target.files[0]);
+  e.target.value = "";   // 같은 파일을 고쳐서 다시 올려도 계산되게
+});
+const psDz = document.getElementById("psDropzone");
+["dragenter","dragover"].forEach(ev => {
+  psDz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    psDz.classList.add("is-drag");
+  });
+});
+["dragleave","drop"].forEach(ev => {
+  psDz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    psDz.classList.remove("is-drag");
+  });
+});
+psDz.addEventListener("drop", e => handlePalletSplitFile(e.dataTransfer?.files?.[0]));
 
 document.getElementById("btnReset").addEventListener("click", () => {
   document.getElementById("fileInput").value = "";
