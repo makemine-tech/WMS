@@ -194,6 +194,11 @@
     });
   }
 
+  /* 엑셀 칸 너비 기준 글자 수 — 한글은 2칸 */
+  function textWidth(v) {
+    return [...String(v == null ? '' : v)].reduce((t, ch) => t + (ch.charCodeAt(0) > 255 ? 2 : 1), 0);
+  }
+
   function buildSheet(XLSX, ws, parsed, groups) {
     const { col, range } = parsed;
     const out = { '!ref': ws['!ref'] };
@@ -233,12 +238,15 @@
       }
     }
     out['!ref'] = XLSX.utils.encode_range({ s: range.s, e: { r: r - 1, c: lastCol } });
-    /* 날짜·바코드 칸이 ##### 로 보이지 않을 만큼 넓힌다 */
-    const cols = (ws['!cols'] || []).map(c => ({ ...c }));
+    /* 내용에 맞춰 모든 열 너비를 정한다 — 너비 없는 열은 엑셀에서 숨김으로 보이고, 좁으면 ##### 가 된다 */
+    const cols = [];
     for (let c = range.s.c; c <= lastCol; c++) {
-      if (!cols[c]) cols[c] = {};
-      const need = dateCols.has(c) ? 17 : (parsed.headers[c] === 'SKU Barcode' ? 16 : 0);
-      if (need && !(cols[c].wch >= need)) { cols[c] = { wch: need }; }
+      let w = 6;
+      for (let y = range.s.r; y < r; y++) {
+        const cell = out[XLSX.utils.encode_cell({ r: y, c })];
+        if (cell) w = Math.max(w, textWidth(cell.v));
+      }
+      cols[c] = { wch: dateCols.has(c) ? 17 : Math.min(w + 2, 70) };
     }
     out['!cols'] = cols;
     return out;
