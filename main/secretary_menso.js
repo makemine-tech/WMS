@@ -87,6 +87,15 @@
     { id: 'invoice', name: '송장번호', who: '직접' },
     { id: 'ship', name: '출고처리', who: '직접' }
   ];
+  /* 비젬은 주문 수집 바로 뒤. 아직 연결 전이라 사람이 하는 칸. 이 칸이 없이 저장된 예전 결과에도 끼워 넣음 */
+  function withBizem(steps){
+    if (steps.some(function(s){ return s.id === 'bizem_collect'; })) return steps;
+    var at = steps.findIndex(function(s){ return s.id === 'collect'; }) + 1;
+    return steps.slice(0, at).concat([
+      { id: 'bizem_collect', name: '비젬 주문수집', who: '연결 전', state: 'later', count: 0 },
+      { id: 'bizem_import', name: '비젬 주문가져오기', who: '연결 전', state: 'later', count: 0 }
+    ], steps.slice(at));
+  }
   function flow(read, campaigns){
     var waiting = {}, all = {};
     (read.rows || []).forEach(function(r){
@@ -111,10 +120,10 @@
     });
     steps.push({ id: 'send', name: '이벗 송장전송', who: '직접', state: 'later', count: 0 });
     steps.push({ id: 'bizem', name: '비젬 송장전송', who: '연결 전', state: 'later', count: 0 });
-    return { orders: Object.keys(all).length, waiting: nos.length, steps: steps };
+    return { orders: Object.keys(all).length, waiting: nos.length, steps: withBizem(steps) };
   }
 
-  var API = { preview: preview, previewCampaign: previewCampaign, giftStatus: giftStatus, flow: flow };
+  var API = { withBizem: withBizem, preview: preview, previewCampaign: previewCampaign, giftStatus: giftStatus, flow: flow };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_MENSO = API;
 })(typeof window !== 'undefined' ? window : this);

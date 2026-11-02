@@ -134,3 +134,19 @@ test('결과에 수령자 정보 칸이 없음', () => {
   assert.strictEqual(JSON.stringify(p).includes('홍길동'), false);
   assert.strictEqual(JSON.stringify(p).includes('서울'), false);
 });
+
+test('흐름 순서: 주문수집 → 비젬 주문수집 → 비젬 주문가져오기 → 매칭 … 비젬 송장전송', () => {
+  const ids = flow({ rows: [] }, []).steps.map((s) => s.id);
+  assert.deepStrictEqual(ids, ['collect', 'bizem_collect', 'bizem_import', 'match', 'confirm', 'gift', 'invoice', 'ship', 'send', 'bizem']);
+  const s = states(flow({ rows: [flowRow('A', { ivDate: '', dno: '' })] }, []));
+  assert.strictEqual(s.bizem_collect, 'later');
+  assert.strictEqual(s.bizem_import, 'later');
+});
+
+test('비젬 칸이 없이 저장된 예전 결과에도 제자리에 끼워 넣고, 두 번 넣지 않음', () => {
+  const { withBizem } = require('../../main/secretary_menso.js');
+  const old = [{ id: 'collect' }, { id: 'match' }];
+  const a = withBizem(old);
+  assert.deepStrictEqual(a.map((x) => x.id), ['collect', 'bizem_collect', 'bizem_import', 'match']);
+  assert.strictEqual(withBizem(a).length, 4);
+});
