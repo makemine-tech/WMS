@@ -287,3 +287,25 @@ test('(끝) 코드 안의 송장출력 경로를 다시 끔', () => {
   C.RELAY_CMDS.length = 4;
   assert.deepStrictEqual(C.RELAY_CMDS, ['search', 'fill', 'reset', 'commit']);
 });
+
+test('이벗 등록: 로그인돼 있으면 한 번 보내고, 기록에는 건수만 남김', async () => {
+  const sent = [], ups = [], { createRunner: make } = require('../../main/secretary_runner.js');
+  const mk = (o) => make({ store: { claimRunner: async () => true, getRunner: async () => ({ id: 'me', ts: NOW }), claimCommand: async () => true, setCommand: async () => {}, getJobs: async () => o.jobs || {}, setJob: async () => {}, getControl: async () => null, setSite: async () => {}, setMatch: async () => {}, setUpload: async (p) => ups.push(p) },
+    now: () => NOW, runnerId: 'me', info: {}, openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login: o.login !== false }),
+    ebutUpload: async (f) => { sent.push(f.name); if (o.fail) throw new Error('끊김'); return { status: 200, alerts: ['등록 완료'], text: '' }; } });
+  const file = { buffer: new ArrayBuffer(4), name: '맨소래담_2026-11-02.xlsx', lines: 6, orders: 5, by: 'x', 수취인: '홍길동' };
+  let r = await mk({}).uploadMenso(file);
+  assert.strictEqual(r.ok, true);
+  assert.deepStrictEqual(sent, [file.name]);
+  assert.deepStrictEqual(ups[0], { day: '2026-11-02', lines: 6, orders: 5, at: NOW, by: 'x', status: 200 });
+  sent.length = 0;
+  r = await mk({ login: false }).uploadMenso(file);
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(sent, []);
+  r = await mk({ jobs: { a: { state: 'running' } } }).uploadMenso(file);
+  assert.match(r.why, /진행 중/);
+  assert.deepStrictEqual(sent, []);
+  r = await mk({ fail: true }).uploadMenso(file);
+  assert.match(r.why, /등록됐을 수 있으니/);
+  assert.strictEqual(sent.length, 1, '실패해도 다시 보내지 않음');
+});

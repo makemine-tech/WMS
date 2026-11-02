@@ -10,7 +10,7 @@
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
   var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin', 'counts'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
-  var HELPER_WRITE = ['login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
+  var HELPER_WRITE = ['uploadMenso', 'login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
   var RELAY_CMDS = ['search', 'fill', 'reset', 'commit'];
   /* 송장출력은 불안정해 AI 물류비서에서 뺌 (대표님 2026-11-02). 곡물도감은 일괄합포제외까지, 출력은 합포 분할 화면에서 직접. 다시 켜려면 이 목록을 RELAY_CMDS 에 더하고 흐름도 칸을 되살림 */
   var RELAY_PRINT = ['printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* secretary/ezcall 로 받는 합포 분할 화면 요청 */
@@ -23,7 +23,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-03c';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-03d';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',

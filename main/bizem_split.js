@@ -19,7 +19,8 @@
     }
     if (col < 0) throw new Error('「' + COLUMN + '」 칸을 찾지 못했습니다. 비젬 양식 파일이 맞는지 확인해 주세요.');
     var head = rows[at], addr = head.map(text).indexOf(ADDRESS);
-    var out = { head: head, menso: [], boxncan: [], bySite: {}, emptySite: 0, noAddress: { menso: 0, boxncan: 0 } };
+    var noCol = head.map(text).indexOf('주문번호'), seen = {};
+    var out = { head: head, menso: [], boxncan: [], bySite: {}, emptySite: 0, noAddress: { menso: 0, boxncan: 0 }, mensoOrders: 0 };
     rows.slice(at + 1).forEach(function(r){
       if (!(r || []).some(function(v){ return text(v) !== ''; })) return;   /* 빈 줄 */
       var site = text(r[col]), to = MENSO_SITES.indexOf(site) >= 0 ? 'menso' : 'boxncan';
@@ -27,6 +28,7 @@
       var key = site || '(비어 있음)', s = out.bySite[key] || (out.bySite[key] = { name: key, count: 0, to: to });
       s.count++;
       out[to].push(r);
+      if (to === 'menso' && noCol >= 0 && !seen[text(r[noCol])]) { seen[text(r[noCol])] = 1; out.mensoOrders++; }
       if (addr >= 0 && !text(r[addr])) out.noAddress[to]++;
     });
     out.sites = Object.keys(out.bySite).map(function(k){ return out.bySite[k]; }).sort(function(a, b){

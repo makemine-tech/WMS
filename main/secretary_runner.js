@@ -7,6 +7,7 @@
      deps.relogin  로그인 화면에서 크롬이 채운 값으로 로그인 버튼을 한 번 누름. { tried, why }. 비밀번호는 다루지 않음
      deps.ezPreview({ from, to }) 곡물도감 검색 후 secretary_ez.preview 결과를 돌려줌
      deps.unseal(sealed)·deps.login(site, creds) 비서 화면에서 입력한 로그인 값을 풀어 한 번 쓰고 버림. 저장·기록 금지
+     deps.ebutUpload(file) 맨소래담 파일을 이벗 연동몰에 등록. 파일은 이 컴퓨터 메모리에만 있고 Firebase 로 가지 않음
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
    저장은 합포 분할 화면에서 사람이 누른 요청(relay)으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
@@ -274,6 +275,23 @@
       chain = run.catch(function(){});
       return run;
     }
+    /* 사람이 확인창에서 누른 등록 한 번. 다시 시도하지 않음. 기록에는 건수만 남김 */
+    function uploadMenso(file){
+      var run = chain.then(async function(){
+        if (mustStay()) return { ok: false, why: '출력이나 저장이 진행 중입니다. 끝난 뒤 다시 해 주세요' };
+        var jobs = (await store.getJobs()) || {};
+        if (Object.keys(jobs).some(function(k){ return jobs[k] && jobs[k].state === 'running'; })) return { ok: false, why: '진행 중인 작업이 있습니다. 끝난 뒤 다시 해 주세요' };
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
+        if (r.state !== 'ok') return { ok: false, why: '이벗: ' + r.msg };
+        var res;
+        try { res = await deps.ebutUpload(file); }
+        catch (e) { return { ok: false, why: '등록 중 끊겼습니다. 등록됐을 수 있으니 이벗에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')' }; }
+        await store.setUpload({ day: C.kstDate(deps.now()), lines: file.lines, orders: file.orders, at: deps.now(), by: file.by || '', status: res.status });
+        return { ok: true, status: res.status, alerts: res.alerts, text: res.text };
+      });
+      chain = run.catch(function(){});
+      return run;
+    }
     function handleCall(id, call){
       var run = chain.then(async function(){
         if (!(await store.claimCall(id))) return;
@@ -361,7 +379,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleLogin: handleLogin, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleLogin: handleLogin, uploadMenso: uploadMenso, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

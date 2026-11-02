@@ -56,3 +56,9 @@ test('파일 이름: 종류와 날짜', () => {
   assert.strictEqual(fileName('menso', '2026-11-03'), '맨소래담_2026-11-03.xlsx');
   assert.strictEqual(fileName('boxncan', '2026-11-03'), '박스앤캔_2026-11-03.xlsx');
 });
+
+test('맨소래담 주문 수: 같은 주문번호는 한 건', () => {
+  const r = split([HEAD, row('A', '맨소래담-무신사'), row('A', '맨소래담-무신사'), row('B', '멘소래담_에이블리'), row('C', '오너클랜')]);
+  assert.strictEqual(r.menso.length, 3);
+  assert.strictEqual(r.mensoOrders, 2);
+});

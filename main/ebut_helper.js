@@ -23,7 +23,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-02b';
+  var VER = '2026-11-03a';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -339,6 +339,33 @@
     return { tried: true };
   }
 
+  /* 맨소래담 파일을 연동몰 엑셀등록 창과 같은 방식으로 한 번 보냄. 창의 기본 설정(중복 체크 주문번호 등)을 그대로 씀. 파일은 보관하지 않음 */
+  var MENSO_UPLOAD = 'ORDLIST_CUST=2237&ORDLIST_SITE=16747&site_mcode=19&ORDLIST_BRAND=3023&site_name=' + encodeURIComponent('맨소래담_연동몰') + '&brand_name=' + encodeURIComponent('맨소레담아시아퍼시픽');
+  function cmdUploadMenso(a){
+    if (!a || !a.buffer || !a.name) throw new Error('파일이 없습니다');
+    if (a.buffer.byteLength > 5 * 1024 * 1024) throw new Error('파일이 5MB 를 넘습니다');
+    return fetch('/jsp/site/site213edit.jsp?' + MENSO_UPLOAD, { credentials: 'include' }).then(function(r){ return r.text(); }).then(function(html){
+      var d = new DOMParser().parseFromString(html, 'text/html');
+      var site = d.querySelector('input[name=ORDLIST_SITE]'), file = d.querySelector('input[name=xls_file]');
+      if (!file || !site || site.value !== '16747') throw new Error('LOGIN');
+      var fd = new FormData();
+      Array.prototype.forEach.call(d.querySelectorAll('input,select,textarea'), function(e){
+        if (!e.name) return;
+        if (e.name === 'xls_file') { fd.append('xls_file', new File([a.buffer], a.name)); return; }
+        if ((e.type === 'radio' || e.type === 'checkbox') && !e.checked) return;
+        fd.append(e.name, e.value);
+      });
+      return fetch('/site/site212save?', { method: 'POST', body: fd, credentials: 'include' });
+    }).then(function(r){
+      return r.text().then(function(t){
+        var alerts = [], m, re = /alert\(\s*["'`]([^"'`]{1,300})["'`]/g;
+        while ((m = re.exec(t))) alerts.push(m[1]);
+        var plain = t.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        return { status: r.status, alerts: alerts.slice(0, 5), text: plain.slice(0, 400) };
+      });
+    });
+  }
+
   /* ── 매칭 화면 자료 읽기 (AI 물류비서, 저장 없음) ── 미매칭 주문 줄 + 마스터 상품 + 비슷한 과거 매칭 */
   function masterSearch(cust, text){
     var q = new URLSearchParams({ GBN: '1', SEARCH_VALUE: text, GBN2: '', SEARCH_VALUE_OPT: '', SEARCH_VALUE_OPT2: '', CUST_CODE: String(cust), ORDER_TYPE: '', BOPTCODE_TRUE: '', BOPTCODE_NAME_MULTI: '', autogbn: '1', ORDLIST_CUST: '', ORDLIST_MAT: '', rows: '1000', page: '1', sidx: 'basic_name', sord: 'asc', _search: 'false', nd: String(Date.now()) });
@@ -393,12 +420,12 @@
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
-    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : m.cmd === 'login' ? cmdLogin : null;
+    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : m.cmd === 'login' ? cmdLogin : m.cmd === 'uploadMenso' ? cmdUploadMenso : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
     /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
     if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
-    busy++; if (m.cmd === 'relogin' || m.cmd === 'login') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
+    busy++; if (m.cmd === 'uploadMenso') say('맨소래담 주문 등록 중… 창을 닫지 마세요'); else if (m.cmd === 'relogin' || m.cmd === 'login') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
       if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');
