@@ -23,7 +23,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-03d';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-03e';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -140,14 +140,13 @@
     var list = (job && job.preview && job.preview.blockers) || [];
     return job && job.ack ? list.filter(function(b){ return !EZ_ACKABLE.test(b); }) : list;
   }
-  /* 이지어드민 흐름도. 칸 상태는 시동 때 읽은 곡물도감 자료로만 판단: 나눌 묶음이 있으면 합포제외 차례, 없으면 끝 */
+  /* 이지어드민 흐름도. 로그인이 풀리면 칸이 아니라 「로그인 필요」 버튼으로 알림. 칸 상태는 시동 때 읽은 곡물도감 자료로만 판단: 나눌 묶음이 있으면 합포제외 차례, 없으면 끝 */
   function ezFlow(site, job, split){
     var loginOk = !!site && site.state === 'ok', p = job && job.preview, open = ezOpenBlockers(job);
     var blocked = !!p && open.length > 0, orders = p ? Number(p.orders) || 0 : 0, packs = p ? Number(p.splitPacks) || 0 : 0;
     var previewOk = loginOk && !!p && !blocked, splitTodo = previewOk && packs > 0, doneSplit = previewOk && !packs && orders > 0;
     var splitRun = !!split && split.state === 'running';
     return [
-      { id: 'ez_login', name: '접속·로그인', who: '비서', state: site ? (loginOk ? 'done' : 'todo') : 'wait', count: 0 },
       { id: 'ez_preview', name: '주문 미리 보기', who: '비서', state: !loginOk || !p ? 'wait' : blocked ? 'todo' : 'done', count: blocked ? open.length : 0 },
       { id: 'ez_split', name: '일괄합포제외', who: '직접', state: splitRun ? 'run' : splitTodo ? 'todo' : doneSplit ? 'done' : 'wait', count: packs }
     ];
