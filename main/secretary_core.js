@@ -10,16 +10,17 @@
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
   var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
-  var HELPER_WRITE = ['fill', 'reset', 'commit'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
-  var RELAY_CMDS = ['search', 'fill', 'reset', 'commit'];   /* secretary/ezcall 로 받는 합포 분할 화면 요청 */
+  var HELPER_WRITE = ['fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
+  var RELAY_CMDS = ['search', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* secretary/ezcall 로 받는 합포 분할 화면 요청 */
   var RELAY_TTL = 2 * MIN;        /* 늦게 처리된 요청이 저절로 저장되지 않게 */
+  var PRINT_IDLE = 3 * MIN;       /* 출력 중 화면 요청이 이만큼 끊기면 화면이 닫힌 것으로 보고 헤드비서가 마무리 */
   var RELAY_HOLD = 30 * MIN;      /* 불러오기·채우기 뒤 사람이 화면을 보는 동안 이지어드민 탭을 새로 열지 않음 */
   var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search'];
   var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-02g';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-02h';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -126,16 +127,16 @@
     return job && job.ack ? list.filter(function(b){ return !EZ_ACKABLE.test(b); }) : list;
   }
   /* 이지어드민 흐름도. 칸 상태는 시동 때 읽은 곡물도감 자료로만 판단: 나눌 묶음이 있으면 합포제외 차례, 없고 주문이 있으면 송장출력 차례 */
-  function ezFlow(site, job, split){
+  function ezFlow(site, job, split, print){
     var loginOk = !!site && site.state === 'ok', p = job && job.preview, open = ezOpenBlockers(job);
     var blocked = !!p && open.length > 0, orders = p ? Number(p.orders) || 0 : 0, packs = p ? Number(p.splitPacks) || 0 : 0;
     var previewOk = loginOk && !!p && !blocked, splitTodo = previewOk && packs > 0, printTodo = previewOk && !packs && orders > 0;
-    var splitRun = !!split && split.state === 'running';
+    var splitRun = !!split && split.state === 'running', printRun = !!print && print.state === 'printing';
     return [
       { id: 'ez_login', name: '접속·로그인', who: '비서', state: site ? (loginOk ? 'done' : 'todo') : 'wait', count: 0 },
       { id: 'ez_preview', name: '주문 미리 보기', who: '비서', state: !loginOk || !p ? 'wait' : blocked ? 'todo' : 'done', count: blocked ? open.length : 0 },
       { id: 'ez_split', name: '일괄합포제외', who: '직접', state: splitRun ? 'run' : splitTodo ? 'todo' : printTodo ? 'done' : 'wait', count: packs },
-      { id: 'ez_print', name: '송장출력', who: '직접', state: printTodo && !splitRun ? 'todo' : 'wait', count: orders }
+      { id: 'ez_print', name: '송장출력', who: '직접', state: printRun ? 'run' : printTodo && !splitRun ? 'todo' : 'wait', count: orders }
     ];
   }
 
@@ -149,7 +150,7 @@
     return comps && prods && ((p.flags || {}).unknown || 0) <= ((a.flags || {}).unknown || 0) ? prev.ack : null;
   }
 
-  var API = { EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_ON: KEEP_ALIVE_ON, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { PRINT_IDLE: PRINT_IDLE, EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_ON: KEEP_ALIVE_ON, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;

@@ -18,7 +18,9 @@
     var chain = Promise.resolve();
     /* 이지어드민 탭을 새로 열 때마다 gen 이 올라감. 채운 내용은 같은 탭에만 있으므로 gen 이 다르면 저장하지 않음 */
     var gen = 0, searchedGen = -1, filledGen = -1, holdUntil = 0;
-    function holding(){ return deps.now() < holdUntil; }
+    /* 출력 중에는 이지어드민 탭을 절대 새로 열지 않음. printSeen = 화면의 마지막 요청 */
+    var printing = false, printSeen = 0, printJob = '';
+    function holding(){ return printing || deps.now() < holdUntil; }
 
     async function claim(){
       var ok = await store.claimRunner(deps.runnerId, deps.info || {});
@@ -26,7 +28,7 @@
       /* 앞 탭이 작업 중에 꺼졌으면 진행 중으로 남아 있음. 시동을 막지 않게 정리 */
       var jobs = (await store.getJobs()) || {};
       for (var k of Object.keys(jobs)) {
-        if (!jobs[k] || jobs[k].state !== 'running') continue;
+        if (!jobs[k] || (jobs[k].state !== 'running' && jobs[k].state !== 'printing')) continue;
         await store.setJob(k, { state: 'interrupted', endedAt: deps.now(), notes: '헤드비서 탭이 다시 켜져 중단 처리' });
         if (jobs[k].cmd) await store.setCommand(jobs[k].cmd, { status: 'interrupted', doneAt: deps.now() });
       }
@@ -137,10 +139,33 @@
       var cmd = call.cmd, args = JSON.parse(call.args || '{}'), site = C.SITES.find(function(s){ return s.id === 'ezadmin'; });
       var GONE = '이지어드민 화면이 새로 열려 채운 내용이 사라졌습니다. 불러오기부터 다시 해 주세요';
       if (C.RELAY_CMDS.indexOf(cmd) < 0) throw new Error('허용되지 않은 요청: ' + cmd);
+      if (cmd === 'printStatus' || cmd === 'printEnd' || cmd === 'printClose') return relayPrintAfter(cmd, args);
       var control = await store.getControl();
       if (control && control.pause) throw new Error('전체 멈춤 상태입니다');
       var jobs = (await store.getJobs()) || {};
       if (Object.keys(jobs).some(function(k){ return jobs[k] && jobs[k].state === 'running'; })) throw new Error('진행 중인 작업이 있습니다. 끝난 뒤 다시 해 주세요');
+      if (printing && cmd !== 'printPrep' && cmd !== 'printGo') throw new Error('송장출력 중입니다. 끝난 뒤 다시 해 주세요');
+      if (cmd === 'printPrep') {
+        /* 준비 내용은 탭 안에 있어 연결돼 있으면 새로 열지 않음. 공급처 사이에도 탭을 유지 */
+        if (!(await deps.ezPing())) {
+          var rs = await checkOne(site);
+          if (rs.state !== 'ok') throw new Error('이지어드민: ' + rs.msg);
+        }
+        var prep = await deps.ezWrite('printPrep', args);
+        holdUntil = deps.now() + C.RELAY_HOLD;
+        return prep;
+      }
+      if (cmd === 'printGo') {
+        var started = await deps.ezWrite('printGo', args);
+        printing = true; printSeen = deps.now();
+        if (!printJob) {
+          var d = C.kstDate(printSeen);
+          printJob = C.jobKey('ez_print', d, C.nextRound(jobs, 'ez_print', d));
+          await store.setJob(printJob, { state: 'printing', recipe: 'ez_print', trigger: 'relay', by: call.by || '', at: printSeen });
+        }
+        started.jobKey = printJob;
+        return started;
+      }
       if (cmd === 'search') {
         var r = await checkOne(site);
         if (r.state !== 'ok') throw new Error('이지어드민: ' + r.msg);
@@ -176,6 +201,33 @@
         await store.setJob(key, { state: 'stopped', step: '', endedAt: deps.now(), notes: '일괄합포제외 실패: ' + String((e && e.message) || e) + '. 저장됐을 수 있으니 시동으로 확인해 주세요' });
         throw e;
       }
+    }
+    /* 출력 진행 확인과 마무리는 멈춤·다른 작업과 상관없이 받음 */
+    async function relayPrintAfter(cmd, args){
+      printSeen = deps.now();
+      var r = await deps.ezWrite(cmd, args);
+      if (cmd === 'printEnd') { printing = false; holdUntil = deps.now() + C.RELAY_HOLD; }
+      if (cmd === 'printClose' && !printing) { holdUntil = 0; printJob = ''; }
+      return r;
+    }
+    /* 화면이 닫혀 요청이 끊겼을 때: 지금 공급처가 끝나면 마무리해서 다음 작업을 막지 않음. 남은 공급처는 출력하지 않음 */
+    function printWatch(){
+      var run = chain.then(async function(){
+        if (!printing || deps.now() - printSeen < C.PRINT_IDLE) return false;
+        var s;
+        try { s = await deps.ezWrite('printStatus', {}); } catch (e) { s = null; }
+        if (s && s.busy) return false;
+        if (s) {
+          await deps.ezWrite('printEnd', {}).catch(function(){});
+          await deps.ezWrite('printClose', {}).catch(function(){});
+        }
+        printing = false; holdUntil = 0;
+        if (printJob) await store.setJob(printJob, { state: 'stopped', endedAt: deps.now(), notes: '출력 화면이 닫혀 헤드비서가 마무리함. 남은 공급처는 출력 안 함. 이지어드민에서 확인 필요' });
+        printJob = '';
+        return true;
+      });
+      chain = run.catch(function(){});
+      return run;
     }
     function handleCall(id, call){
       var run = chain.then(async function(){
@@ -250,6 +302,7 @@
       if (!(await store.claimCommand(id))) return;
       var now = deps.now();
       if (C.commandExpired(cmd, now)) { await store.setCommand(id, { status: 'expired', doneAt: now }); return; }
+      if (printing) { await store.setCommand(id, { status: 'refused', why: '송장출력 중입니다', doneAt: now }); return; }
       if (cmd.type === 'start') return runStart(id, cmd);
       if (cmd.type === 'menso') return runMenso(id, cmd);
       if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
@@ -263,7 +316,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, holding: holding, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, holding: holding, printWatch: printWatch, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

@@ -23,11 +23,16 @@ function setup(o) {
     store, now: () => clock, runnerId: 'me', info: {},
     openSite: async (s) => { log.push('open'); return s.id === 'ezadmin' ? { page: 'DG00' } : { login: true }; },
     ezPreview: async () => ({ orders: 0, blockers: [] }), mensoPreview: async () => ({ blockers: [] }),
+    ezPing: async () => { log.push('ping'); return o.ping !== false; },
     ezSearch: async (a) => { log.push('search'); return { total: 1, rows: [{ recv: '홍길동', pack_seq: '1', name: 'A' }], args: a }; },
     ezWrite: async (cmd) => {
       log.push(cmd);
       if (cmd === 'fill') return o.fill || { done: ['1'], skipped: [] };
       if (cmd === 'reset') return { done: ['1'] };
+      if (cmd === 'printPrep') return { supplier: '곡물도감', token: 'T', count: 3, problems: [] };
+      if (cmd === 'printGo') { if (o.goErr) throw new Error(o.goErr); return { started: true }; }
+      if (cmd === 'printStatus') return o.status || { busy: true, sent: 1, done: 0 };
+      if (cmd === 'printEnd' || cmd === 'printClose') return { ok: true };
       if (o.commitErr) throw new Error(o.commitErr);
       return o.commit || { error: 0, fail_list: [], lock: 1 };
     },
@@ -60,9 +65,9 @@ test('수령자 이름은 Firebase 로 나가지 않음', async () => {
   assert.ok(!db.calls.c1.out.includes('홍길동'));
 });
 
-test('허용되지 않은 요청은 거절, 송장출력 명령도 아직 안 됨', async () => {
+test('허용되지 않은 요청은 거절', async () => {
   const { call, log } = setup();
-  for (const bad of ['printGo', 'printPrep', 'read', 'relogin', 'constructor']) {
+  for (const bad of ['read', 'relogin', 'ping', 'constructor']) {
     const r = await call(bad);
     assert.strictEqual(r.ok, false);
     assert.match(r.err, /허용되지 않은 요청/);
@@ -172,4 +177,91 @@ test('흐름도: 저장 중 칸, 저장 명령은 읽기 명령 목록에 없음
   const room = C.officeRooms({ runner: { ts: NOW }, sites: { ezadmin: ok, ebut: ok }, jobs: { a: { recipe: 'ez_split', state: 'running', at: NOW, step: '저장 중' } }, now: NOW });
   assert.strictEqual(room.find((x) => x.id === 'ezadmin').say, '저장 중');
   assert.strictEqual(room.find((x) => x.id === 'ebut').mode, 'idle');
+});
+
+const printFlow = async (s) => {
+  await s.call('printPrep', { supplier: '곡물도감', from: '2026-10-26', to: '2026-11-02' });
+  return s.call('printGo', { confirm: true, token: 'T', count: 3 });
+};
+
+test('송장출력: 연결돼 있으면 탭을 새로 열지 않고 준비→출력→확인→끝을 전달, 기록을 남김', async () => {
+  const s = setup();
+  const g = await printFlow(s);
+  assert.ok(g.ok);
+  assert.strictEqual(g.data.jobKey, 'ez_print:2026-11-02:1');
+  assert.strictEqual(s.db.jobs[g.data.jobKey].state, 'printing');
+  assert.ok((await s.call('printStatus')).ok);
+  assert.ok((await s.call('printEnd')).ok);
+  assert.ok((await s.call('printClose')).ok);
+  assert.deepStrictEqual(s.log, ['ping', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose']);
+  assert.strictEqual(s.runner.holding(), false);
+});
+
+test('송장출력: 연결이 끊겨 있으면 그때만 탭을 염', async () => {
+  const s = setup({ ping: false });
+  await s.call('printPrep', { supplier: '곡물도감' });
+  assert.deepStrictEqual(s.log, ['ping', 'open', 'printPrep']);
+});
+
+test('출력 중에는 시동·불러오기·채우기·저장이 탭을 건드리지 못함', async () => {
+  const s = setup();
+  await printFlow(s);
+  const before = s.log.length;
+  await s.runner.handleCommand('st', { type: 'start', at: NOW, by: 'x' });
+  assert.strictEqual(s.db.commands.st.status, 'refused');
+  assert.match((await s.call('search')).err, /송장출력 중/);
+  assert.match((await s.call('fill')).err, /송장출력 중/);
+  assert.match((await s.call('commit', { confirm: true })).err, /송장출력 중/);
+  assert.strictEqual(s.log.length, before);
+  assert.ok(s.runner.holding());
+  assert.strictEqual(await s.runner.keepAlive(), false);
+});
+
+test('공급처가 여러 개면 기록은 하나, 공급처 사이에도 탭을 안 염', async () => {
+  const s = setup();
+  const a = await printFlow(s);
+  await s.call('printEnd');
+  const b = await printFlow(s);
+  assert.strictEqual(a.data.jobKey, b.data.jobKey);
+  assert.ok(!s.log.includes('open'));
+  assert.ok(s.runner.holding());
+});
+
+test('전체 멈춤이면 새 출력은 막고, 진행 확인은 받음', async () => {
+  const s = setup();
+  await printFlow(s);
+  s.db.control = { pause: true };
+  assert.ok((await s.call('printStatus')).ok);
+  assert.match((await s.call('printPrep', {})).err, /전체 멈춤/);
+});
+
+test('화면이 닫혀도 출력 중이면 기다리고, 끝나면 헤드비서가 마무리', async () => {
+  const s = setup();
+  await printFlow(s);
+  assert.strictEqual(await s.runner.printWatch(), false);
+  s.tick(C.PRINT_IDLE + 1);
+  assert.strictEqual(await s.runner.printWatch(), false);
+  assert.ok(s.runner.holding());
+  const t = setup({ status: { busy: false, end: true } });
+  await printFlow(t);
+  t.tick(C.PRINT_IDLE + 1);
+  assert.strictEqual(await t.runner.printWatch(), true);
+  assert.ok(t.log.includes('printEnd') && t.log.includes('printClose'));
+  assert.strictEqual(t.db.jobs['ez_print:2026-11-02:1'].state, 'stopped');
+  t.tick(C.RELAY_TTL);
+  assert.ok((await t.call('printPrep', {})).ok);
+});
+
+test('헤드비서가 다시 켜지면 출력 중으로 남은 기록을 정리', async () => {
+  const s = setup({ jobs: { 'ez_print:2026-11-02:1': { recipe: 'ez_print', state: 'printing', at: NOW } } });
+  await s.runner.claim();
+  assert.strictEqual(s.db.jobs['ez_print:2026-11-02:1'].state, 'interrupted');
+});
+
+test('흐름도: 출력 중 칸', () => {
+  const ok = { state: 'ok' }, job = { preview: { orders: 5, splitPacks: 0, blockers: [] } };
+  const st = (p) => C.ezFlow(ok, job, null, p).find((x) => x.id === 'ez_print').state;
+  assert.strictEqual(st({ state: 'printing' }), 'run');
+  assert.strictEqual(st({ state: 'done' }), 'todo');
+  assert.strictEqual(st(null), 'todo');
 });
