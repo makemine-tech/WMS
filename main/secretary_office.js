@@ -10,11 +10,25 @@
   'use strict';
   var W = 720, FH = 100, TOPY = 30, RW = 336, COL = [16, 368];
   var LINE = '#2a2430';
+  /* 인물 그림판 (대표님 2026-11-02: 큰 머리·짧은 몸·굵은 픽셀). 한 칸 = 화면 2픽셀, 글자는 PAL 색. 머리 + 얼굴 + 몸 + 다리를 이어 붙임 */
+  var CELL = 2, INK = '#0e0d10';
+  var HEADS = {
+    short: ['...KKKKKKKKK....', '..KKKKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKKKKK..', '.KKKKSSSSSSSKK..', '.KKDSSSSSSSSSK..'],
+    swept: ['......KKKKKK....', '..KKKKKKKKKKKK..', '.KKKKKKKKKKKKKK.', '.KKKKKKKKKKKKKK.', '.KKKKKSSSSSSKK..', '.KKDKSSSSSSSSK..'],
+    bob: ['...KKKKKKKKK....', '..KKKKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKSSKK..', '.KKKKKKSSSSSSK..', '.KKKKSSSSSSSSK..'],
+    bun: ['......KKKK......', '.....KKKKKK.....', '.....KKKKKK.....', '....KKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKKKKK..', '.KKKKSSSSSSSKK..', '.KDSSSSSSSSSSK..', '.KSSSSSSSSSSSK..']
+  };
+  var FACE = ['.KKSSSSSKSSSKK..', '.KSSSSSSKSSSKK..', '.KSSSSSSKSSSKK..', '..KSSSSSSSSSSK..', '..KKSSSSKKKKKK..', '...KSSSSSSSSK...', '...KKKKKKKKKK...'];
+  var FACE_BOB = ['.KKKSSSSKSSSKK..', '.KKKSSSSKSSSKK..', '.KKKSSSSKSSSKK..', '.KKKSSSSSSSSSK..', '.KKKKSSSKKKKKK..', '.KKKKSSSSSSSK...', '..KKKKKKKKKKK...'];
+  var BODY = ['..KKTTTTTTTTKK..', '.KTKTTTTTTTTKTK.', '.KTTKTTTTTTKTTK.', '.KSSKTTTTTTKSSK.', '.KSSKUUUUUUKSSK.', '..KKKBBBBBBKKK..'];
+  var SUIT = ['..KKTTWKKWTTKK..', '.KTKTTWKKWTTKTK.', '.KTTKTTWWTTKTTK.', '.KSSKTTTTTTKSSK.', '.KSSKUUUUUUKSSK.', '..KKKBBBBBBKKK..'];
+  var LEGS = [['....KBBKKBBK....', '...KKKKKKKKKK...', '...KKKKKKKKKK...'], ['...KBBK..KBBK...', '..KKKKK..KKKKK..', '..KKKKK..KKKKK..']];
+  var SIT = ['..KKTTTTTTTTK...', '.KTKTTTTTTTTK...', '.KTTKTTTTTTTK...', '.KSSKUUUUUUUK...', '..KKKBBBBBBBBBK.', '....KBBBBBBBBBK.', '....KKKKKKKBBBK.', '..........KBBK..', '..........KBBK..', '.........KKKKKK.', '.........KKKKKK.'];
   var PAL = {
-    ceo: { style: 'beard', skin: '#f0c29a', skinD: '#d59c74', hair: '#2a2430', hairH: '#4a4552', top: '#3f4656', topD: '#2b303d', bot: '#59606f', botD: '#474d5a', shoe: '#2a2430', collar: '#e8e4da' },
-    head: { style: 'bob', skin: '#f5cda8', skinD: '#dca67e', hair: '#3a2a33', hairH: '#60495a', top: '#4e8ad4', topD: '#3a6aa8', bot: '#2e3a5c', botD: '#242d49', shoe: '#fff' },
-    ezadmin: { style: 'short', skin: '#e8b58c', skinD: '#c8926a', hair: '#5a3a26', hairH: '#7f5b41', top: '#f0b83f', topD: '#c9922a', bot: '#3a4057', botD: '#2d3245', shoe: '#c9553f' },
-    ebut: { style: 'bun', skin: '#f0c29a', skinD: '#d59c74', hair: '#1f2a3a', hairH: '#3a4a60', top: '#54b98b', topD: '#3e9570', bot: '#6a5a4a', botD: '#54473a', shoe: '#2a2430' }
+    ceo: { hair: 'swept', suit: 1, S: '#f6b8a6', D: '#d9937f', T: '#3f4149', U: '#2c2e33', B: '#7f8189', W: '#ffffff' },
+    head: { hair: 'bob', S: '#f6c0a8', D: '#d9937f', T: '#3f7fd0', U: '#2d5fa3', B: '#e8e8ec' },
+    ezadmin: { hair: 'short', S: '#a8623a', D: '#7f4827', T: '#f0b83f', U: '#c58f22', B: '#2d3a66' },
+    ebut: { hair: 'bun', S: '#f6b8a6', D: '#d9937f', T: '#3fa877', U: '#2e8259', B: '#6a5a4a' }
   };
   /* 비서별 자리와 상태별 동작. 새 비서는 여기에 한 줄 + secretary_core.officeRooms 에 한 줄 */
   var CAST = {
@@ -46,67 +60,68 @@
       parts.forEach(function(p){ if (!p[5]) r(p[0] - 1, p[1] - 1, p[2] + 2, p[3] + 2, LINE); });
       parts.forEach(function(p){ r(p[0], p[1], p[2], p[3], p[4]); });
     }
-    /* 사람 — 머리가 큰 픽셀 인물. feet = 바닥선, 전체 높이 약 52 */
-    function hairOf(x, y, dir, p){
-      var hs = p.style, back = dir > 0 ? x - 10 : x + 7, px = [[x - 9, y - 4, 18, 8, p.hair]];
-      if (hs === 'short') px.push([back, y, 3, 8, p.hair]);
-      if (hs === 'beard') px.push([back, y, 3, 10, p.hair]);
-      if (hs === 'bob') px.push([x - 11, y - 3, 5, 20, p.hair], [x + 6, y - 3, 5, 20, p.hair]);
-      if (hs === 'bun') px.push([x - 4, y - 11, 8, 8, p.hair], [back, y, 3, 7, p.hair]);
-      return px;
+    /* 그림판을 그림. x = 가운데, feet = 바닥선, dir < 0 이면 좌우 반전. 같은 글자가 이어지면 한 번에 칠함 */
+    function paint(rows, x, feet, dir, p, lift){
+      var top = feet - rows.length * CELL - (lift || 0);
+      rows.forEach(function(row, ry){
+        for (var c = 0; c < row.length;) {
+          var ch = row[c], e = c + 1;
+          while (e < row.length && row[e] === ch) e++;
+          if (ch !== '.') {
+            var left = dir > 0 ? c * CELL - row.length : row.length - e * CELL;
+            r(x + left, top + ry * CELL, (e - c) * CELL, CELL, ch === 'K' ? INK : p[ch]);
+          }
+          c = e;
+        }
+      });
     }
-    function head(x, y, dir, p, o){
-      sprite(hairOf(x, y, dir, p).filter(function(a){ return a[2] < 18; }).concat([[x - 8, y, 16, 16, p.skin], [x - 9, y - 4, 18, 8, p.hair]]));
-      r(x - 8, y + 13, 16, 3, p.skinD);
-      r(x - 7, y - 3, 11, 1, p.hairH);
-      r(dir > 0 ? x + 4 : x - 8, y + 1, 4, 1, p.hair);
-      if (p.style === 'beard') { r(x - 8, y + 10, 16, 6, p.hair); r(x + dir * 2 - 2, y + 11, 4, 2, p.skinD); }
-      var ex = x + dir * 3, blink = o.t % 3.7 < .13;
-      if (blink) { r(ex - 3, y + 8, 3, 1, LINE); r(ex + 2, y + 8, 3, 1, LINE); }
-      else { r(ex - 3, y + 6, 2, 4, LINE); r(ex + 2, y + 6, 2, 4, LINE); r(ex - 3, y + 6, 1, 1, '#ffffff'); r(ex + 2, y + 6, 1, 1, '#ffffff'); }
-      if (p.style !== 'beard') r(x + dir * 3 - 1, y + 12, o.smile ? 4 : 3, 1, o.smile ? '#b44c3c' : p.skinD);
-      r(x + dir * 7 - (dir > 0 ? 2 : 0), y + 10, 2, 2, '#f3a18f');
+    /* 머리 + 얼굴. 눈 깜빡임은 앞쪽 눈 위 두 칸을 살색으로 덮음 */
+    function headRows(p, blink){
+      var face = (p.hair === 'bob' ? FACE_BOB : FACE).map(function(row, i){ return blink && i < 2 ? row.slice(0, 8) + 'S' + row.slice(9) : row; });
+      return HEADS[p.hair].concat(face);
     }
     function shadow(x, feet, w){ g.globalAlpha = .18; r(x - w / 2, feet - 1, w, 2, LINE); g.globalAlpha = 1; }
+    /* 윤곽선 있는 네모 */
+    function boxed(x, y, w, h, c){ r(x - 1, y - 1, w + 2, h + 2, INK); r(x, y, w, h, c); }
     function standing(x, feet, dir, p, o){
-      var t = o.t, mv = o.walk, sw = mv ? Math.sin(t * 10) * 4 : 0, by = mv ? (Math.abs(Math.cos(t * 10)) > .7 ? -1 : 0) : (reduce ? 0 : (Math.sin(t * 2) > .75 ? -1 : 0)), y = feet - 49 + by;
-      shadow(x, feet, 22);
-      sprite([[x - 5 - sw, y + 33, 6, 13 + (by ? 1 : 0), p.botD], [x - 6 - sw + (dir > 0 ? 1 : 0), y + 45 + (by ? 1 : 0), 9, 3, p.shoe]]);
-      sprite([[x - 1 + sw, y + 33, 6, 13 + (by ? 1 : 0), p.bot], [x - 2 + sw + (dir > 0 ? 1 : 0), y + 45 + (by ? 1 : 0), 9, 3, p.shoe]]);
-      var a = mv ? Math.sin(t * 10) * 3 : 0;
-      if (!o.box && !o.sheet && !o.point) sprite([[x - dir * 8 - 2 - (a * dir), y + 18, 4, 12, p.topD], [x - dir * 8 - 2 - (a * dir), y + 29, 4, 3, p.skin]]);
-      sprite([[x - 8, y + 16, 16, 18, p.top]]); r(x - 8, y + 30, 16, 4, p.topD); r(x - 3, y + 16, 6, 2, p.skinD);
-      r(dir > 0 ? x - 8 : x + 6, y + 16, 2, 14, p.topD);
-      if (p.collar) r(x - 3, y + 16, 6, 1, p.collar);
-      head(x, y, dir, p, o);
+      var t = o.t, frame = o.walk && Math.sin(t * 10) > 0 ? 1 : 0, lift = o.walk ? (frame ? 2 : 0) : 0, y = feet - lift, blink = t % 3.7 < .13;
+      shadow(x, feet, 26);
+      paint(headRows(p, blink).concat(p.suit ? SUIT : BODY, LEGS[frame]), x, feet, dir, p, lift);
       if (o.box) {
-        var bx = dir > 0 ? x + 4 : x - 22;
-        sprite([[bx, y + 14, 18, 17, '#d1a26c']]); r(bx + 7, y + 14, 4, 17, '#efddb4'); r(bx, y + 14, 18, 2, '#e6bd88'); r(bx, y + 28, 18, 3, '#b98a55');
-        sprite([[dir > 0 ? x : x - 10, y + 24, 10, 4, p.topD]]); r(dir > 0 ? x + 9 : x - 11, y + 25, 3, 3, p.skin);
+        var bx = dir > 0 ? x + 4 : x - 26;
+        boxed(bx, y - 26, 22, 18, '#d1a26c'); r(bx + 9, y - 26, 4, 18, '#efddb4');
+        r(dir > 0 ? bx - 2 : bx + 20, y - 18, 4, 4, p.S);
       } else if (o.sheet) {
-        var sx = dir > 0 ? x + 7 : x - 16;
-        sprite([[sx, y + 14, 10, 13, '#ffffff']]);
-        for (var i = 0; i < 3; i++) r(sx + 2, y + 17 + i * 3, 6, 1, '#9aa2b3');
-        sprite([[dir > 0 ? x : x - 8, y + 22, 9, 4, p.topD]]); r(dir > 0 ? x + 8 : x - 9, y + 22, 3, 3, p.skin);
+        var sx = dir > 0 ? x + 12 : x - 24;
+        boxed(sx, y - 28, 12, 15, '#ffffff');
+        for (var i = 0; i < 3; i++) r(sx + 2, y - 25 + i * 4, 8, 1, '#9aa2b3');
+        r(dir > 0 ? sx - 2 : sx + 10, y - 18, 4, 4, p.S);
       } else if (o.point) {
-        sprite([[dir > 0 ? x : x - 12, y + 19, 13, 4, p.topD]]); r(dir > 0 ? x + 12 : x - 14, y + 19, 3, 3, p.skin);
-      } else sprite([[x + dir * 6 - 2 + (a * dir), y + 18, 4, 12, p.topD], [x + dir * 6 - 2 + (a * dir), y + 29, 4, 3, p.skin]]);
+        var ax = dir > 0 ? x + 12 : x - 26;
+        boxed(ax, y - 22, 14, 4, p.U);
+        r(dir > 0 ? ax + 14 : ax - 4, y - 23, 4, 6, p.S);
+      }
     }
     function chair(x, feet){
       r(x - 13, feet - 30, 5, 20, '#3b404b'); r(x - 13, feet - 30, 5, 2, '#59606f'); r(x - 13, feet - 13, 20, 4, '#3b404b');
       r(x - 3, feet - 9, 3, 7, '#7a8190'); r(x - 11, feet - 3, 20, 2, '#7a8190'); r(x - 11, feet - 2, 2, 2, '#3b404b'); r(x + 7, feet - 2, 2, 2, '#3b404b');
     }
     function sitting(x, feet, dir, p, o){
-      var t = o.t, nod = o.type && !reduce && Math.sin(t * 3) > .85 ? 1 : 0, y = feet - 44 + nod;
-      shadow(x + 6, feet, 28);
-      sprite([[x - 5, feet - 17, 22, 6, p.bot]]); r(x - 5, feet - 13, 22, 2, p.botD);
-      sprite([[x + 13, feet - 13, 6, 11, p.botD]]); sprite([[x + 13, feet - 3, 10, 3, p.shoe]]);
-      sprite([[x - 8, y + 15, 15, 17, p.top]]); r(x - 8, y + 27, 15, 5, p.topD); r(x - 8, y + 15, 2, 12, p.topD); r(x - 3, y + 15, 6, 2, p.skinD);
-      if (p.collar) r(x - 3, y + 15, 6, 1, p.collar);
-      head(x, y, dir, p, o);
-      if (o.type) { var a = reduce ? 0 : (Math.sin(t * 17) > 0 ? 0 : 1); sprite([[x - 1, y + 20 + a, 22, 4, p.topD]]); r(x + 20, y + 21 + a, 3, 3, p.skin); }
-      else if (o.sip) { sprite([[x - 1, y + 17, 11, 4, p.topD]]); r(x + 9, y + 15, 3, 3, p.skin); sprite([[x + 8, y + 8, 8, 9, '#ffffff']]); r(x + 9, y + 9, 6, 2, '#6b472d'); r(x + 16, y + 11, 2, 3, '#ffffff'); }
-      else sprite([[x - 1, y + 20, 18, 4, p.topD]]);
+      var t = o.t, blink = t % 3.7 < .13;
+      paint(headRows(p, blink).concat(SIT), x, feet, dir, p);
+    }
+    /* 앉은 인물의 팔은 책상 위에 올라오므로 책상 다음에 그림 */
+    function seatedArm(x, feet, p, o){
+      var t = o.t;
+      if (o.type) {
+        var up = !reduce && Math.sin(t * 17) > 0 ? 2 : 0;
+        boxed(x + 12, feet - 25 - up, 14, 4, p.U);
+        r(x + 26, feet - 26 - up, 4, 5, p.S);
+      } else if (o.sip) {
+        boxed(x + 12, feet - 25, 8, 4, p.U);
+        boxed(x + 18, feet - 37, 8, 12, '#ffffff'); r(x + 19, feet - 36, 6, 2, '#6b472d');
+        r(x + 16, feet - 29, 4, 4, p.S);
+      }
     }
     function desk(x, feet, on, t){
       r(x, feet - 22, 64, 4, '#c98a52'); r(x, feet - 18, 64, 2, '#9a6638'); r(x + 3, feet - 16, 3, 16, '#555b68'); r(x + 58, feet - 16, 3, 16, '#555b68');
@@ -215,9 +230,9 @@
       if (o.id === 'ebut') { shelf(R.x + 238, F, 3); boxAt(R.x + 10, F - 16); boxAt(R.x + 10, F - 32); }
       if (c.desk) chair(R.x + c.seat, F);
       if (c.desk && !seated) desk(R.x + c.desk, F, true, t);
-      if (seated) sitting(X, F, 1, PAL[o.id], { t: t + c.seat, type: s.type, sip: s.sip, smile: s.sip });
-      else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, walk: (s.a === 'walk' || s.a === 'sit') && !reduce, box: s.box, sheet: s.sheet, point: s.point, smile: o.mode !== 'alert' });
-      if (c.desk && seated) desk(R.x + c.desk, F, true, t);
+      if (seated) sitting(X, F, 1, PAL[o.id], { t: t + c.seat });
+      else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, walk: (s.a === 'walk' || s.a === 'sit') && !reduce, box: s.box, sheet: s.sheet, point: s.point });
+      if (c.desk && seated) { desk(R.x + c.desk, F, true, t); seatedArm(X, F, PAL[o.id], { t: t + c.seat, type: s.type, sip: s.sip }); }
       if (o.mode === 'alert') { g.globalAlpha = .16; r(R.x, R.y, R.w, F - R.y, '#d8543f'); g.globalAlpha = 1; }
       band(o, t);
       glass(R);
@@ -267,8 +282,15 @@
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(function(n){ last = n; frame(n); });
-    return { update: update };
+    /* 지금 위치와 자세 (시험용) */
+    function peek(){
+      return P.map(function(o){
+        var list = scriptOf(o), st = list[o.i % list.length] || {};
+        return { id: o.id, x: o.x, seated: o.mode !== 'off' && st.a === 'sit' && o.x === CAST[o.id].seat };
+      });
+    }
+    return { update: update, peek: peek };
   }
 
-  root.SECRETARY_OFFICE = { mount: mount };
+  root.SECRETARY_OFFICE = { mount: mount, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
 })(window);

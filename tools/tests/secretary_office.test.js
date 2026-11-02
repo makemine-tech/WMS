@@ -5,8 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const TOP = '#f0b83f';   /* 이지어드민 비서 윗옷 색 */
-const SEAT = 16 + 106 - 8;   /* 방 왼쪽 16 + 자리 106 - 윗옷 왼쪽 여백 8 */
+const SEAT = 106;   /* 이지어드민 비서 자리 */
 
 function setup() {
   let cb = null, rects = [], now = 0;
@@ -21,11 +20,11 @@ function setup() {
   const office = win.SECRETARY_OFFICE.mount(sc);
   const rooms = (m) => ['ceo', 'head', 'ezadmin', 'ebut'].map((id) => ({ id, name: id, mode: id === 'ceo' ? 'idle' : m, say: '', count: 0 }));
   const run = (sec) => { for (let i = 0; i < sec * 10; i++) { rects = []; now += 100; const f = cb; f(now); } };
-  /* 윗옷 몸통 칸: 서 있으면 폭 16, 앉아 있으면 폭 15 */
-  const top = () => { const r = rects.filter((x) => x.c === TOP && (x.w === 16 || x.w === 15))[0]; return { x: r.x, seated: r.w === 15 }; };
+  const top = () => { const r = office.peek().find((x) => x.id === 'ezadmin'); return { x: r.x, seated: r.seated }; };
+  const painted = () => rects;
   run(0);
   const f0 = cb; now = 100; f0(now);
-  return { office, rooms, run, top };
+  return { office, rooms, run, top, painted, win };
 }
 
 test('걷던 중 대기로 바뀌면 그 자리에서 앉지 않고 자리까지 걸어가서 앉음 (순간 이동 없음)', () => {
@@ -69,5 +68,23 @@ test('걷기는 목적지를 지나치지 않음: 프레임이 튀어도 자리�
   s.office.update(s.rooms('work'));
   let max = 0;
   for (let i = 0; i < 200; i++) { s.run(0.1); max = Math.max(max, s.top().x); }
-  assert.ok(max <= 16 + 256 - 8, '목적지 256 을 넘지 않음: ' + max);
+  assert.ok(max <= 256, '목적지 256 을 넘지 않음: ' + max);
+});
+
+test('그림판: 줄 길이가 같고 정해진 글자만 씀', () => {
+  const S = setup().win.SECRETARY_OFFICE.SPRITES;
+  const sets = [...Object.values(S.HEADS), S.FACE, S.FACE_BOB, S.BODY, S.SUIT, ...S.LEGS, S.SIT];
+  sets.forEach((rows) => rows.forEach((row) => {
+    assert.strictEqual(row.length, 16, row);
+    assert.match(row, /^[.KSDTUBW]+$/, row);
+  }));
+});
+
+test('대기 상태 그림에 크기나 색이 잘못된 칸이 없음', () => {
+  const s = setup();
+  s.office.update(s.rooms('idle'));
+  s.run(1);
+  const bad = s.painted().filter((x) => x.h <= 0 || x.w <= 0 || Number.isNaN(x.x) || Number.isNaN(x.y));
+  assert.deepStrictEqual(bad, []);
+  assert.ok(!s.painted().some((x) => x.c === undefined), '색이 없는 칸 없음');
 });
