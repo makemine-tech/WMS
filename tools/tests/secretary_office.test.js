@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const SEAT = 106;   /* 이지어드민 비서 자리 */
+const SEAT = 112;   /* 이지어드민 비서 자리 */
 
 function setup() {
   let cb = null, rects = [], now = 0;
@@ -102,4 +102,30 @@ test('눈 깜빡임: 양쪽 눈이 감겼다 뜨고, 비서마다 때가 다름'
   assert.strictEqual(S.FACE[0][12], 'K');
   assert.strictEqual(S.FACE_BOB[0][8], 'K');
   assert.strictEqual(S.FACE_BOB[0][12], 'K');
+});
+
+test('컨베이어: 대기 중에는 멈추고 일할 때만 움직임', () => {
+  const belt = (s) => s.painted().filter((x) => x.c === '#d1a26c' && x.w === 30).map((x) => x.x).join();
+  const s = setup();
+  s.office.update(s.rooms('idle'));
+  s.run(0.1); const a = belt(s);
+  s.run(1); assert.strictEqual(belt(s), a, '대기 중 멈춤');
+  s.office.update(s.rooms('work'));
+  s.run(0.1); const b = belt(s);
+  s.run(1); assert.notStrictEqual(belt(s), b, '작업 중 움직임');
+});
+
+test('로그인 말풍선: 로그인이 풀린 방에만 뜨고 다른 문제에는 안 뜸', () => {
+  const s = setup();
+  const room = s.rooms('idle');
+  room[2].mode = 'alert'; room[2].say = '로그인이 필요합니다';
+  s.office.update(room);
+  s.run(0.5);
+  assert.ok(s.painted().some((x) => x.c === '#3f7fd0' && x.w === 12 && x.h === 12), '말풍선 표시');
+  const s2 = setup();
+  const room2 = s2.rooms('idle');
+  room2[2].mode = 'alert'; room2[2].say = '확인 필요';
+  s2.office.update(room2);
+  s2.run(0.5);
+  assert.ok(!s2.painted().some((x) => x.c === '#3f7fd0' && x.w === 12 && x.h === 12), '로그인이 아니면 안 뜸');
 });

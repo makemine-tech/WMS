@@ -8,7 +8,7 @@
 ============================================================ */
 (function(root){
   'use strict';
-  var W = 720, FH = 100, TOPY = 30, RW = 336, COL = [16, 368];
+  var W = 720, FH = 144, TOPY = 30, BASE_H = 62, RW = 336, COL = [16, 368];
   var LINE = '#2a2430';
   /* 인물 그림판 (대표님 2026-11-02: 큰 머리·짧은 몸·굵은 픽셀). 한 칸 = 화면 2픽셀, 글자는 PAL 색. 머리 + 얼굴 + 몸 + 다리를 이어 붙임 */
   var CELL = 2, INK = '#0e0d10', BLINK_SEC = .16;
@@ -32,20 +32,20 @@
   };
   /* 비서별 자리와 상태별 동작. 새 비서는 여기에 한 줄 + secretary_core.officeRooms 에 한 줄 */
   var CAST = {
-    ceo: { seat: 86, desk: 102, script: {
-      idle: [{ a: 'sit', t: 3.5, type: 1 }, { a: 'sit', t: 2.4, sip: 1 }, { a: 'walk', x: 200 }, { a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 86 }],
+    ceo: { seat: 112, desk: 128, script: {
+      idle: [{ a: 'sit', t: 3.5, type: 1 }, { a: 'sit', t: 2.4, sip: 1 }, { a: 'walk', x: 240 }, { a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 112 }],
       alert: [{ a: 'stand', t: 2, dir: 1, sheet: 1 }] } },
-    head: { short: '헤드비서', seat: 86, desk: 102, script: {
-      idle: [{ a: 'sit', t: 4, type: 1 }, { a: 'walk', x: 208 }, { a: 'stand', t: 2.6, dir: 1, point: 1 }, { a: 'walk', x: 86 }],
-      work: [{ a: 'sit', t: 2, type: 1 }, { a: 'walk', x: 208 }, { a: 'stand', t: 1.2, dir: 1, point: 1 }, { a: 'walk', x: 86 }],
+    head: { short: '헤드비서', seat: 106, desk: 122, script: {
+      idle: [{ a: 'sit', t: 4, type: 1 }, { a: 'walk', x: 228 }, { a: 'stand', t: 2.6, dir: 1, point: 1 }, { a: 'walk', x: 106 }],
+      work: [{ a: 'sit', t: 2, type: 1 }, { a: 'walk', x: 228 }, { a: 'stand', t: 1.2, dir: 1, point: 1 }, { a: 'walk', x: 106 }],
       alert: [{ a: 'stand', t: 2, dir: 1, point: 1 }] } },
-    ezadmin: { short: '이지어드민', seat: 106, desk: 122, script: {
+    ezadmin: { short: '이지어드민', seat: 112, desk: 128, script: {
       idle: [{ a: 'sit', t: 4, sip: 1 }, { a: 'sit', t: 3, type: 1 }],
-      work: [{ a: 'sit', t: 2.4, type: 1 }, { a: 'walk', x: 256, sheet: 1 }, { a: 'stand', t: .7, dir: 1 }, { a: 'walk', x: 106 }],
+      work: [{ a: 'sit', t: 2.4, type: 1 }, { a: 'walk', x: 256, sheet: 1 }, { a: 'stand', t: .7, dir: 1 }, { a: 'walk', x: 112 }],
       alert: [{ a: 'stand', t: 2, dir: 1, sheet: 1 }] } },
-    ebut: { short: '이벗', seat: 60, script: {
-      idle: [{ a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 130 }, { a: 'stand', t: 2.4, dir: -1 }, { a: 'walk', x: 60 }],
-      work: [{ a: 'walk', x: 60 }, { a: 'stand', t: .5, dir: -1 }, { a: 'walk', x: 214, box: 1 }, { a: 'stand', t: .5, dir: 1, box: 1 }],
+    ebut: { short: '이벗', seat: 100, script: {
+      idle: [{ a: 'stand', t: 3, dir: 1 }, { a: 'walk', x: 170 }, { a: 'stand', t: 2.4, dir: -1 }, { a: 'walk', x: 100 }],
+      work: [{ a: 'walk', x: 100 }, { a: 'stand', t: .5, dir: -1 }, { a: 'walk', x: 236, box: 1 }, { a: 'stand', t: .5, dir: 1, box: 1 }],
       alert: [{ a: 'stand', t: 2, dir: 1 }] } }
   };
 
@@ -131,11 +131,11 @@
       }
     }
     function desk(x, feet, on, t){
-      r(x, feet - 22, 64, 4, '#c98a52'); r(x, feet - 18, 64, 2, '#9a6638'); r(x + 3, feet - 16, 3, 16, '#555b68'); r(x + 58, feet - 16, 3, 16, '#555b68');
-      r(x + 6, feet - 25, 20, 3, '#3b404b');
-      sprite([[x + 30, feet - 48, 28, 20, '#2e3138']]); r(x + 32, feet - 46, 24, 16, on ? '#bfe6f3' : '#59606f');
-      if (on) { var f = Math.floor(t * 5) % 4; for (var i = 0; i < 3; i++) r(x + 34, feet - 44 + i * 4, 8 + ((f + i * 3) % 10), 1, '#4d6b82'); }
-      r(x + 42, feet - 28, 4, 6, '#2e3138'); r(x + 37, feet - 23, 14, 1, '#2e3138');
+      r(x, feet - 24, 92, 5, '#a56a3a'); r(x, feet - 19, 92, 3, '#6e4526'); r(x + 3, feet - 16, 4, 16, '#4a3424'); r(x + 85, feet - 16, 4, 16, '#4a3424');
+      r(x + 8, feet - 27, 22, 3, '#2c2f3a');
+      boxed(x + 36, feet - 52, 30, 22, '#23262e'); r(x + 38, feet - 50, 26, 18, on ? '#6fc6e8' : '#59606f');
+      if (on) { var f = Math.floor(t * 5) % 4; for (var i = 0; i < 3; i++) r(x + 41, feet - 47 + i * 5, 8 + ((f + i * 3) % 10), 2, '#2d6c8c'); }
+      r(x + 48, feet - 30, 6, 6, '#23262e');
     }
     function labels(x, feet, n){
       if (!n) return;
@@ -143,31 +143,64 @@
       sprite([[x, feet - h, 26, h, '#fff']]);
       for (i = 0; i < n; i++) { r(x, feet - 3 - i * 3, 26, 1, '#cfd3da'); r(x + 2, feet - 2 - i * 3, 7, 2, '#f39a3d'); }
     }
-    function boxAt(x, y){ sprite([[x, y, 20, 16, '#d1a26c']]); r(x + 8, y, 4, 16, '#efddb4'); r(x, y, 20, 2, '#e6bd88'); }
-    function shelf(x, feet, n){
-      r(x, feet - 70, 3, 70, '#555b68'); r(x + 70, feet - 70, 3, 70, '#555b68'); r(x, feet - 36, 73, 3, '#555b68'); r(x, feet - 3, 73, 3, '#555b68');
-      for (var i = 0; i < n; i++) { var row = i < 3 ? 0 : 1, c = i < 3 ? i : i - 3; boxAt(x + 5 + c * 22, feet - 3 - (row ? 36 : 0) - 16); }
+    /* 소품. 자리에 고정된 장식이고 데이터와 상관없음 */
+    function cardBox(x, y, w, h){ boxed(x, y, w, h, '#d1a26c'); r(x + w / 2 - 2, y, 4, h, '#efddb4'); r(x + w - 9, y + h - 5, 6, 3, '#ffffff'); }
+    function rack(x, feet){
+      r(x, feet - 76, 3, 76, '#2d5fa3'); r(x + 58, feet - 76, 3, 76, '#2d5fa3');
+      [-52, -26, -2].forEach(function(d, i){ r(x, feet + d, 61, 3, '#e88a2c'); cardBox(x + 5, feet + d - 14, 18, 14); if (i !== 1) cardBox(x + 28, feet + d - 18, 22, 18); });
+    }
+    function plant(x, feet){
+      boxed(x, feet - 14, 14, 14, '#e8e4da');
+      [[2, -26, 10, 12], [-3, -22, 8, 8], [10, -22, 8, 8], [3, -34, 8, 8]].forEach(function(l){ r(x + l[0], feet + l[1], l[2], l[3], '#5fae4a'); r(x + l[0], feet + l[1], l[2], 2, '#7fce62'); });
+    }
+    function bookshelf(x, feet){
+      boxed(x, feet - 62, 44, 62, '#6e4526');
+      [-50, -30, -10].forEach(function(d, i){
+        r(x + 2, feet + d + 8, 40, 2, '#4a3424');
+        ['#d05a3f', '#3f7fd0', '#3fa877', '#f0b83f'].forEach(function(c, j){ if ((i + j) % 3) r(x + 5 + j * 7, feet + d - 5, 5, 13, c); });
+      });
+    }
+    function cabinet(x, feet){
+      boxed(x, feet - 44, 26, 44, '#9aa0ad');
+      [-40, -20].forEach(function(d){ r(x + 3, feet + d, 20, 18, '#b5bac5'); r(x + 10, feet + d + 8, 6, 2, '#3a3f4e'); });
+    }
+    function copier(x, feet){
+      boxed(x, feet - 36, 34, 36, '#d9dce3'); r(x + 3, feet - 30, 28, 4, '#3a3f4e'); r(x + 3, feet - 22, 28, 8, '#b5bac5'); r(x + 3, feet - 11, 28, 8, '#b5bac5'); r(x + 26, feet - 36, 4, 3, '#4ad07a');
+    }
+    function stripes(x, feet){
+      for (var i = 0; i < 4; i++) { r(x, feet - 32 + i * 8, 22, 4, i % 2 ? '#23262e' : '#f0c23f'); r(x, feet - 28 + i * 8, 22, 4, i % 2 ? '#f0c23f' : '#23262e'); }
+    }
+    /* 창밖 야경 */
+    function nightWindow(x, y, w, h){
+      boxed(x, y, w, h, '#24417e');
+      var tall = [10, 24, 14, 30, 18, 26, 12, 22];
+      for (var i = 0, cx = x; cx < x + w - 2; i++) {
+        var bw = Math.min(18, x + w - cx), bh = tall[i % 8] + h / 3;
+        r(cx, y + h - bh, bw - 2, bh, '#1a2c5c');
+        for (var a = 3; a < bw - 4; a += 5) for (var b = 4; b < bh - 3; b += 7) if ((a * 7 + b * 3 + i) % 4 === 0) r(cx + a, y + h - bh + b, 2, 3, '#ffd76b');
+        cx += bw;
+      }
+      r(x, y, w, 3, '#c9d0dc');
+      for (var k = x + w / 3; k < x + w - 2; k += w / 3) r(k, y, 2, h, '#3a3f4e');
+    }
+    /* 로그인이 풀리면 비서 옆에 뜨는 말풍선. 비밀번호는 모양만 그림 */
+    function loginBubble(x, y, c){
+      boxed(x, y, 62, 20, '#ffffff'); r(x + 6, y + 4, 12, 12, c); r(x + 8, y + 20, 6, 4, '#ffffff');
+      g.font = '12px "Malgun Gothic",sans-serif'; g.textBaseline = 'middle'; g.fillStyle = '#3a3f4e'; g.fillText('****', x + 24, y + 11);
     }
     function lamps(x, y, n){
       sprite([[x, y, 76, 34, '#2e3138']]);
       for (var i = 0; i < 3; i++) r(x + 8 + i * 22, y + 11, 16, 12, i < n ? '#6fdc9b' : '#59606f');
     }
     function roomShell(R){
-      r(R.x, R.y, R.w, R.h, '#fbfcfb');
-      r(R.x, R.y, R.w, 6, '#eef2f1');
-      r(R.x, R.floor, R.w, R.h - (R.floor - R.y), '#c9553f'); r(R.x, R.floor, R.w, 2, '#e27a60');
-      r(R.x, R.floor - 4, R.w, 4, '#e7ecec');
-    }
-    function shine(R){
-      g.globalAlpha = .3;
-      for (var k = 0; k < 3; k++) { var bx = R.x + 30 + k * 110; for (var i = 0; i < R.floor - 4 - R.y; i += 1) r(bx + (R.floor - R.y - i) * .45, R.y + i, k === 1 ? 26 : 12, 1, '#cfe7ee'); }
-      g.globalAlpha = 1;
+      r(R.x, R.y, R.w, R.h, '#7b8296');
+      for (var i = 0; i < R.w; i += 48) r(R.x + i, R.y + 10, 1, R.floor - R.y - 10, '#6f7689');
+      r(R.x, R.y, R.w, 8, '#50566a');
+      for (var j = 0; j < 2; j++) { r(R.x + 70 + j * 150, R.y + 8, 46, 3, '#3a3f4e'); r(R.x + 72 + j * 150, R.y + 11, 42, 4, '#ffeaa8'); }
+      r(R.x, R.floor, R.w, R.h - (R.floor - R.y), '#a3a7b3'); r(R.x, R.floor, R.w, 2, '#c9ccd6');
     }
     function glass(R){
       r(R.x - 2, R.y, 3, R.h, '#2e3138'); r(R.x + R.w - 1, R.y, 3, R.h, '#2e3138'); r(R.x, R.y, R.w, 3, '#2e3138');
-      g.globalAlpha = .55;
-      [R.x + R.w / 3, R.x + R.w * 2 / 3].forEach(function(v){ r(v, R.y, 1, R.floor - R.y, '#b9c6c9'); });
-      g.globalAlpha = 1;
     }
     /* 대표실 벽 출근 현황판: 파랑 = 출근(접속), 빨강 = 퇴근(미접속) */
     function attendance(x, y){
@@ -199,14 +232,27 @@
         if (b > a) r(R.x + a, R.y + 3, b - a, 4, '#34b37e');
       } else if (o.mode === 'alert') r(R.x, R.y + 3, R.w, 4, '#d8543f');
     }
+    /* 건물 아래 컨베이어: 실제로 일하는 비서가 있을 때만 움직임 */
+    function conveyor(y){
+      var on = !reduce && P.some(function(o){ return o.mode === 'work'; });
+      r(30, y + 34, W - 60, 18, '#23262e'); r(30, y + 34, W - 60, 3, '#7b8296');
+      for (var i = 0; i < 33; i++) r(34 + i * 20 + (on ? T * 30 % 20 : 0), y + 44, 6, 6, '#555b68');
+      for (var b = 0; b < 4; b++) cardBox(on ? (T * 30 + b * 170) % 640 + 40 : 90 + b * 160, y + 12, 30, 22);
+    }
+    /* 맨 윗줄: 지금 상태를 글자로. 실제 rooms 로만 계산 */
+    function topBar(){
+      r(0, 0, W, TOPY - 4, '#23262e');
+      var bad = P.filter(function(o){ return o.mode === 'alert'; }).length, busy = P.some(function(o){ return o.mode === 'work'; }), off = P.some(function(o){ return o.mode === 'off'; });
+      g.font = '15px "Do Hyeon","Malgun Gothic",sans-serif'; g.textBaseline = 'middle'; g.fillStyle = '#ffffff'; g.fillText('AI 물류비서', 14, 14);
+      r(104, 9, 8, 8, off || bad ? '#e5483b' : busy ? '#34b37e' : '#4ad07a');
+      g.fillStyle = '#c9d0dc'; g.fillText(off ? '상시 컴퓨터 꺼짐' : bad ? '확인 필요 ' + bad + '건' : busy ? '작업 중' : '대기 중', 118, 14);
+    }
     function building(){
-      r(0, 0, W, H, '#e4ecea');
-      var floors = Math.ceil(P.length / 2), by = TOPY + floors * FH - 4, bh = H - by, y, x;
-      r(6, 16, W - 12, TOPY + floors * FH - 10, '#2e3138');
-      r(0, TOPY - 20, W, 6, '#2e3138');
-      r(0, by, W, bh, '#332f37');
-      for (y = 0; y < bh; y += 8) { r(0, by + y, W, 1, '#201d24'); for (x = (y % 16 ? 0 : 14); x < W; x += 28) r(x, by + y, 1, 8, '#201d24'); }
-      r(0, by, W, 3, '#7a2f25');
+      r(0, 0, W, H, '#2c2f3a');
+      topBar();
+      var floors = Math.ceil(P.length / 2), by = TOPY + floors * FH - 4;
+      r(0, by, W, H - by, '#3a3f4e');
+      conveyor(by);
     }
     function scriptOf(o){ var s = CAST[o.id].script; return s[o.mode] || s.idle || []; }
     function step(o, dt){
@@ -228,20 +274,23 @@
     }
     function drawRoom(o, t){
       var R = o.R, F = R.floor, c = CAST[o.id];
-      roomShell(R); shine(R);
+      roomShell(R);
       if (o.mode === 'off') { curtain(R); band(o, t); glass(R); return; }
       var list = scriptOf(o), s = list[o.i % list.length] || { a: 'stand', t: 1 }, seated = s.a === 'sit' && o.x === c.seat, X = R.x + Math.round(o.x);
-      if (o.id === 'ceo') attendance(R.x + 232, R.y + 14);
-      if (o.id === 'head') lamps(R.x + 226, R.y + 22, o.count);
-      if (o.id === 'ezadmin') { labels(R.x + 16, F, Math.min(14, o.count)); labels(R.x + 46, F, Math.min(14, Math.max(0, o.count - 14))); }
-      if (o.id === 'ebut') { shelf(R.x + 238, F, 3); boxAt(R.x + 10, F - 16); boxAt(R.x + 10, F - 32); }
+      if (o.id === 'ceo') { nightWindow(R.x + 60, R.y + 36, 120, 56); attendance(R.x + 236, R.y + 36); bookshelf(R.x + 8, F); plant(R.x + 62, F); }
+      if (o.id === 'head') { nightWindow(R.x + 56, R.y + 36, 130, 56); lamps(R.x + 240, R.y + 36, o.count); cabinet(R.x + 8, F); plant(R.x + 40, F); copier(R.x + 246, F); plant(R.x + 296, F); }
+      if (o.id === 'ezadmin') { nightWindow(R.x + 62, R.y + 36, 80, 50); plant(R.x + 10, F); cabinet(R.x + 302, F); labels(R.x + 40, F, Math.min(14, o.count)); labels(R.x + 68, F, Math.min(14, Math.max(0, o.count - 14))); }
+      if (o.id === 'ebut') { stripes(R.x + 8, F); cardBox(R.x + 34, F - 20, 28, 20); cardBox(R.x + 38, F - 36, 22, 16); rack(R.x + 266, F); }
       if (c.desk) chair(R.x + c.seat, F);
       if (c.desk && !seated) desk(R.x + c.desk, F, true, t);
       var blink = blinking(t, c.seat);
       if (seated) sitting(X, F, 1, PAL[o.id], { blink: blink });
       else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, blink: blink, walk: (s.a === 'walk' || s.a === 'sit') && !reduce, box: s.box, sheet: s.sheet, point: s.point });
       if (c.desk && seated) { desk(R.x + c.desk, F, true, t); seatedArm(X, F, PAL[o.id], { t: t + c.seat, type: s.type, sip: s.sip }); }
-      if (o.mode === 'alert') { g.globalAlpha = .16; r(R.x, R.y, R.w, F - R.y, '#d8543f'); g.globalAlpha = 1; }
+      if (o.mode === 'alert') {
+        g.globalAlpha = .16; r(R.x, R.y, R.w, F - R.y, '#d8543f'); g.globalAlpha = 1;
+        if (/로그인/.test(o.say)) loginBubble(X + 20, F - 76, o.id === 'ebut' ? '#e88a2c' : '#3f7fd0');
+      }
       band(o, t);
       glass(R);
     }
@@ -249,7 +298,7 @@
 
     function layout(rooms){
       var floors = Math.ceil(rooms.length / 2);
-      H = TOPY + floors * FH + 56;
+      H = TOPY + floors * FH + BASE_H;
       cv.width = W; cv.height = H;
       g.imageSmoothingEnabled = false;
       Array.prototype.slice.call(sc.querySelectorAll('.plate')).forEach(function(n){ n.remove(); });
@@ -271,6 +320,7 @@
         var o = P[i];
         if (o.mode !== m.mode) { o.mode = m.mode; o.i = 0; o.t0 = 0; }
         o.count = m.count || 0;
+        o.say = m.say || '';
         o.el.className = 'plate ' + m.mode;
         o.el.textContent = '';
         o.el.appendChild(document.createTextNode(m.name));
