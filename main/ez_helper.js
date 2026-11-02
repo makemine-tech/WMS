@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-02a';
+  var VER = '2026-11-02b';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -165,9 +165,11 @@
     }
     var sentLock = null;
     return new Promise(function(res, rej){
-      var post = $.post, conf = window.confirm, t;
-      function restore(){ $.post = post; window.confirm = conf; clearTimeout(t); }
+      var post = $.post, conf = window.confirm, oldAlert = window.alert, t, posted = false;
+      function restore(){ $.post = post; window.confirm = conf; window.alert = oldAlert; clearTimeout(t); }
       window.confirm = function(){ window.confirm = conf; return true; };
+      /* 알림창은 무인 탭을 멈추므로 띄우지 않음. 저장 요청 전에 뜬 알림 = 이지어드민이 거절한 것 */
+      window.alert = function(m){ if (!posted){ restore(); rej(new Error('이지어드민: ' + String(m).slice(0, 200))); } };
       /* 보내는 값이 객체든 serialize 문자열이든, 응답이 문자열이든 이미 객체(json)든 읽음.
          결과를 먼저 돌려준 뒤 이지어드민 콜백을 부름 — 콜백이 화면을 새로 그리거나 옮겨도 페이지는 「저장됨」을 받음 */
       function isDrop(d){ return d && (typeof d === 'string' ? /(^|&)action=drop_pack_all(&|$)/.test(d) : d.action === 'drop_pack_all'); }
@@ -178,6 +180,7 @@
       }
       $.post = function(url, data, cb){
         if (isDrop(data)){
+          posted = true;
           var rest = Array.prototype.slice.call(arguments, 3);
           var m = typeof data === 'string' ? data.match(/(?:^|&)auto_lock_unpack=(\d)/) : null;
           sentLock = m ? Number(m[1]) : (data.auto_lock_unpack != null ? Number(data.auto_lock_unpack) : null);
@@ -186,7 +189,10 @@
             var r = parse(resp);
             if (r) res({ error: r.error, fail_list: r.fail_list || [], lock: sentLock, raw: String(typeof resp === 'string' ? resp : JSON.stringify(resp)).slice(0, 500) });
             else rej(new Error('이지어드민 응답을 읽지 못했습니다 (저장됐을 수 있음 — 이지어드민 화면 확인): ' + String(resp).slice(0, 200)));
+            var keep = window.alert;
+            window.alert = function(){};
             try { if (typeof cb === 'function') cb.apply(this, arguments); } catch(e){}
+            window.alert = keep;
           }].concat(rest));
         }
         return post.apply($, arguments);
