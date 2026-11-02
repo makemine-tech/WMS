@@ -6,9 +6,8 @@
      deps.openSite 사이트 탭을 열어 도우미 ping 응답을 돌려줌. 안 되면 throw
      deps.relogin  로그인 화면에서 크롬이 채운 값으로 로그인 버튼을 한 번 누름. { tried, why }. 비밀번호는 다루지 않음
      deps.ezPreview({ from, to }) 곡물도감 검색 후 secretary_ez.preview 결과를 돌려줌
-     deps.ezPlan({ from, to })    같은 검색 후 { preview, pay, rows } 를 돌려줌. rows 에는 수령자가 있어 저장하지 않음
-     deps.ezFill(pay)·deps.ezCommit()·deps.ezVerify(pay, rows) 일괄합포제외 채우기·저장·대조
-   저장은 사람이 확인을 누른 ez_split 명령(runEzSplit)에서만 한다. 그 밖의 작업은 읽기 전용.
+     deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
+   저장은 합포 분할 화면에서 사람이 누른 요청(relay)으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
 (function(root){
   'use strict';
@@ -17,6 +16,9 @@
   function createRunner(deps){
     var store = deps.store;
     var chain = Promise.resolve();
+    /* 이지어드민 탭을 새로 열 때마다 gen 이 올라감. 채운 내용은 같은 탭에만 있으므로 gen 이 다르면 저장하지 않음 */
+    var gen = 0, searchedGen = -1, filledGen = -1, holdUntil = 0;
+    function holding(){ return deps.now() < holdUntil; }
 
     async function claim(){
       var ok = await store.claimRunner(deps.runnerId, deps.info || {});
@@ -32,6 +34,7 @@
     }
 
     async function readSite(site){
+      if (site.id === 'ezadmin') gen++;
       try {
         var reply = await deps.openSite(site), r = C.siteState(site.id, reply);
         r.ver = (reply && reply.ver) || '';
@@ -72,7 +75,7 @@
     function keepAlive(){
       var run = chain.then(async function(){
         var control = await store.getControl();
-        if (control && control.pause) return false;
+        if ((control && control.pause) || holding()) return false;
         var jobs = (await store.getJobs()) || {};
         if (Object.keys(jobs).some(function(k){ return jobs[k] && jobs[k].state === 'running'; })) return false;
         await checkSites();
@@ -108,6 +111,9 @@
           try {
             patch.preview = await deps.ezPreview(range);
             if (patch.preview.blockers.length) { stop = true; notes = notes.concat(patch.preview.blockers); }
+            var prevKey = Object.keys(jobs).filter(function(k){ return k !== key && jobs[k] && (jobs[k].recipe || 'ez_daily') === 'ez_daily' && jobs[k].preview; }).sort(function(a, b){ return (jobs[b].at || 0) - (jobs[a].at || 0); })[0];
+            var carried = prevKey ? C.ezAckCarry(jobs[prevKey], patch.preview) : null;
+            if (carried) patch.ack = carried;
           } catch (e) {
             stop = true;
             notes.push('주문 읽기 실패: ' + String((e && e.message) || e));
@@ -125,67 +131,63 @@
       }
     }
 
-    /* 일괄합포제외: 다시 읽어 확인한 자료와 같을 때만 채우고 저장한 뒤, 다시 검색해 대조. 자동 재시도 없음 */
-    async function runEzSplit(id, cmd){
-      var now = deps.now();
+    /* 합포 분할 화면의 요청 처리. 화면은 어느 컴퓨터에 있어도 되고, 이지어드민 조작은 여기(상시 컴퓨터)에서 함.
+       수령자 이름은 Firebase 에 올리지 않음 */
+    async function relayRun(call){
+      var cmd = call.cmd, args = JSON.parse(call.args || '{}'), site = C.SITES.find(function(s){ return s.id === 'ezadmin'; });
+      var GONE = '이지어드민 화면이 새로 열려 채운 내용이 사라졌습니다. 불러오기부터 다시 해 주세요';
+      if (C.RELAY_CMDS.indexOf(cmd) < 0) throw new Error('허용되지 않은 요청: ' + cmd);
+      var control = await store.getControl();
+      if (control && control.pause) throw new Error('전체 멈춤 상태입니다');
       var jobs = (await store.getJobs()) || {};
-      var running = Object.keys(jobs).map(function(k){ return jobs[k]; }).find(function(j){ return j && j.state === 'running'; });
-      var block = C.startBlock({ runner: await store.getRunner(), control: await store.getControl(), job: running, now: now }) || C.ezSplitRefuse(jobs, cmd.job);
-      if (block) { await store.setCommand(id, { status: 'refused', why: block, doneAt: now }); return; }
-
-      var src = jobs[cmd.job], date = C.kstDate(now), key = C.jobKey('ez_split', date, C.nextRound(jobs, 'ez_split', date));
-      var range = { from: src.from, to: src.to }, limit = Number(cmd.limit) || 0, site = C.SITES.find(function(s){ return s.id === 'ezadmin'; }), filled = false;
-      async function step(text){ await store.setJob(key, { step: text }); await store.setCommand(id, { status: 'started', jobKey: key, step: text }); }
-      async function end(state, notes, result){
-        var p = { state: state, notes: notes, step: '', endedAt: deps.now() };
-        if (result) p.result = result;
-        await store.setJob(key, p);
-        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
-      }
-      /* 저장 전에 멈추면 채운 것은 화면을 새로 열어 버림 */
-      async function discard(){ if (filled) { filled = false; await deps.openSite(site).catch(function(){}); } }
-      await store.setJob(key, { state: 'running', recipe: 'ez_split', trigger: 'ez_split', by: cmd.by || '', at: now, cmd: id, src: cmd.job, from: range.from, to: range.to, limit: limit });
-      try {
-        await step('이지어드민 여는 중');
+      if (Object.keys(jobs).some(function(k){ return jobs[k] && jobs[k].state === 'running'; })) throw new Error('진행 중인 작업이 있습니다. 끝난 뒤 다시 해 주세요');
+      if (cmd === 'search') {
         var r = await checkOne(site);
-        if (r.state !== 'ok') return await end('stopped', '이지어드민: ' + r.msg);
-        await step('주문 다시 읽는 중');
-        var plan = await deps.ezPlan(range), why = C.ezSplitBlock(src, plan.preview);
-        if (why) return await end('stopped', why);
-        var pay = limit ? plan.pay.slice(0, limit) : plan.pay;
-        await step('채우는 중 ' + pay.length + '건');
-        filled = true;
-        var f = await deps.ezFill(pay), result = { target: pay.length, total: plan.pay.length, filled: f.done.length, skipped: f.skipped.length, skipList: f.skipped.slice(0, 20) };
-        if (f.skipped.length || !f.done.length) { await discard(); return await end('stopped', '채우지 못한 묶음 ' + f.skipped.length + '건이 있어 저장하지 않았습니다', result); }
-        var control = await store.getControl();
-        if (control && control.pause) { await discard(); return await end('stopped', '전체 멈춤이라 저장하지 않았습니다', result); }
-
-        await step('일괄합포제외 저장 중');
-        filled = false;   /* 이제부터는 저장됐을 수 있어 버리지 않음 */
-        var c;
-        try { c = await deps.ezCommit(); }
-        catch (e) { return await end('stopped', '일괄합포제외 실패: ' + String((e && e.message) || e) + '. 저장됐을 수 있으니 시동으로 확인해 주세요', result); }
-        var bad = c.error != null && String(c.error) !== '0', failN = (c.fail_list || []).length;
-        result.error = bad ? String(c.error) : ''; result.failN = failN; result.lock = c.lock == null ? -1 : c.lock;
-
-        await step('결과 대조 중');
-        var after;
-        try { await deps.openSite(site); after = await deps.ezPlan(range); }
-        catch (e) { return await end('stopped', '저장 후 대조를 못 했습니다: ' + String((e && e.message) || e) + '. 시동으로 확인해 주세요', result); }
-        var v = deps.ezVerify(pay, after.rows);
-        result.ok = v.ok.length; result.notApplied = v.notApplied.slice(0, 40); result.notAppliedN = v.notApplied.length; result.gone = v.gone.slice(0, 20); result.goneN = v.gone.length;
-        if (bad || failN || v.notApplied.length) return await end('stopped', '확인 필요: 반영 ' + v.ok.length + '건 · 안 됨 ' + v.notApplied.length + '건' + (bad ? ' · 이지어드민 응답 ' + c.error : '') + (failN ? ' · 실패 목록 ' + failN + '건' : ''), result);
-        await end('done', '', result);
-        /* 다음 칸(남은 묶음 또는 송장출력)으로 넘어가게 새로 읽은 자료를 남김. 새로 생긴 확인거리가 없으면 확인을 이어 감 */
-        var still = !C.ezSplitBlock({ preview: { splitPacks: after.preview.splitPacks, unseen: src.preview.unseen, flags: src.preview.flags } }, after.preview);
-        var jobs2 = (await store.getJobs()) || {}, nextKey = C.jobKey('ez_daily', date, C.nextRound(jobs2, 'ez_daily', date));
-        var next = { state: after.preview.blockers.length ? 'stopped' : 'done', recipe: 'ez_daily', trigger: 'ez_split', by: cmd.by || '', at: deps.now(), endedAt: deps.now(), from: range.from, to: range.to, preview: after.preview, notes: after.preview.blockers.join(' / ') };
-        if (still && src.ack) next.ack = src.ack;
-        await store.setJob(nextKey, next);
-      } catch (e) {
-        await discard();
-        await end('stopped', '오류: ' + String((e && e.message) || e)).catch(function(){});
+        if (r.state !== 'ok') throw new Error('이지어드민: ' + r.msg);
+        var found = await deps.ezSearch(args);
+        searchedGen = gen; filledGen = -1; holdUntil = deps.now() + C.RELAY_HOLD;
+        return { total: found.total, rows: (found.rows || []).map(function(x){ var y = Object.assign({}, x); delete y.recv; return y; }) };
       }
+      if (cmd === 'fill') {
+        if (searchedGen !== gen) throw new Error(GONE);
+        var f = await deps.ezWrite('fill', args);
+        if (f.done.length) filledGen = gen;
+        holdUntil = deps.now() + C.RELAY_HOLD;
+        return f;
+      }
+      if (filledGen !== gen) throw new Error(GONE);
+      if (cmd === 'reset') {
+        var back = await deps.ezWrite('reset', args);
+        filledGen = -1;
+        holdUntil = deps.now() + C.RELAY_HOLD;
+        return back;
+      }
+      /* commit: 시도는 한 번뿐. 실패해도 채운 표시를 지워 다시 저장되지 않게 함 */
+      filledGen = -1; holdUntil = 0;
+      var now = deps.now(), date = C.kstDate(now), key = C.jobKey('ez_split', date, C.nextRound(jobs, 'ez_split', date));
+      await store.setJob(key, { state: 'running', recipe: 'ez_split', trigger: 'relay', by: call.by || '', at: now, step: '일괄합포제외 저장 중' });
+      try {
+        var c = await deps.ezWrite('commit', args), bad = c.error != null && String(c.error) !== '0', failN = (c.fail_list || []).length;
+        await store.setJob(key, { state: bad || failN ? 'stopped' : 'done', step: '', endedAt: deps.now(), notes: bad || failN ? '이지어드민 응답 ' + c.error + ' · 실패 목록 ' + failN + '건' : '', result: { error: bad ? String(c.error) : '', failN: failN, lock: c.lock == null ? -1 : c.lock } });
+        c.jobKey = key;
+        return c;
+      } catch (e) {
+        await store.setJob(key, { state: 'stopped', step: '', endedAt: deps.now(), notes: '일괄합포제외 실패: ' + String((e && e.message) || e) + '. 저장됐을 수 있으니 시동으로 확인해 주세요' });
+        throw e;
+      }
+    }
+    function handleCall(id, call){
+      var run = chain.then(async function(){
+        if (!(await store.claimCall(id))) return;
+        var out;
+        try {
+          if (!call.at || deps.now() - call.at > C.RELAY_TTL) throw new Error('요청이 만료됐습니다. 다시 눌러 주세요');
+          out = { ok: true, data: await relayRun(call) };
+        } catch (e) { out = { ok: false, err: String((e && e.message) || e) }; }
+        await store.setCall(id, { out: JSON.stringify(out) });
+      });
+      chain = run.catch(function(){});
+      return run;
     }
 
     /* 맨소래담: 이벗 로그인 점검 → 주문서목록 읽기 → 행사표로 사은품 대상 계산. 이벗에 쓰지 않음 */
@@ -249,7 +251,6 @@
       if (C.commandExpired(cmd, now)) { await store.setCommand(id, { status: 'expired', doneAt: now }); return; }
       if (cmd.type === 'start') return runStart(id, cmd);
       if (cmd.type === 'menso') return runMenso(id, cmd);
-      if (cmd.type === 'ez_split') return runEzSplit(id, cmd);
       if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
@@ -261,7 +262,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, holding: holding, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

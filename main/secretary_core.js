@@ -10,12 +10,15 @@
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
   var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
-  var HELPER_WRITE = ['fill', 'commit'];   /* 저장 명령. 헤드비서의 일괄합포제외 실행(사람이 확인 누른 명령)에서만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
-  var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search', 'ez_split'];
+  var HELPER_WRITE = ['fill', 'reset', 'commit'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
+  var RELAY_CMDS = ['search', 'fill', 'reset', 'commit'];   /* secretary/ezcall 로 받는 합포 분할 화면 요청 */
+  var RELAY_TTL = 2 * MIN;        /* 늦게 처리된 요청이 저절로 저장되지 않게 */
+  var RELAY_HOLD = 30 * MIN;      /* 불러오기·채우기 뒤 사람이 화면을 보는 동안 이지어드민 탭을 새로 열지 않음 */
+  var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search'];
   var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
-  var PAGE_VER = '2026-11-02d';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-02e';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -134,29 +137,17 @@
     ];
   }
 
-  /* 일괄합포제외 명령을 받아도 되는지. 가장 최근에 읽은 자료를 사람이 확인한 경우에만, 같은 자료로는 한 번만 */
-  function ezSplitRefuse(jobs, srcKey){
-    var keys = Object.keys(jobs || {}), src = srcKey && jobs ? jobs[srcKey] : null;
-    if (!src || !src.preview) return '읽은 자료가 없습니다. 시동을 다시 걸어 주세요';
-    var newest = keys.filter(function(k){ return jobs[k] && (jobs[k].recipe || 'ez_daily') === 'ez_daily' && jobs[k].state !== 'running'; })
-      .sort(function(a, b){ return (jobs[b].at || 0) - (jobs[a].at || 0); })[0];
-    if (newest !== srcKey) return '더 새로 읽은 자료가 있습니다. 다시 확인해 주세요';
-    if (keys.some(function(k){ return jobs[k] && jobs[k].recipe === 'ez_split' && jobs[k].src === srcKey; })) return '이미 실행한 자료입니다. 시동을 다시 걸어 주세요';
-    if (ezOpenBlockers(src).length) return '확인이 끝나지 않았습니다: ' + ezOpenBlockers(src).join(' / ');
-    if (!Number(src.preview.splitPacks)) return '나눌 묶음이 없습니다';
-    return '';
-  }
-  /* 실행 직전에 다시 읽은 결과가 사람이 확인한 자료와 같은지. 다르면 아무것도 채우지 않는다 */
-  function ezSplitBlock(src, p){
-    var hard = ezOpenBlockers({ preview: p, ack: { at: 1 } }), s = (src && src.preview) || {};
-    if (hard.length) return hard.join(' / ');
-    if (Number(p.splitPacks) !== Number(s.splitPacks)) return '나눌 묶음이 확인한 ' + s.splitPacks + '건에서 ' + p.splitPacks + '건으로 바뀌었습니다. 시동을 다시 걸어 주세요';
-    if ((p.unseen || 0) > (s.unseen || 0)) return '처음 보는 구성이 새로 생겼습니다. 시동을 다시 걸어 주세요';
-    if (((p.flags || {}).unknown || 0) > ((s.flags || {}).unknown || 0)) return '모르는 상품이 새로 생겼습니다. 시동을 다시 걸어 주세요';
-    return '';
+  /* 사람이 확인한 모르는 상품·처음 보는 구성이 그대로면 다음 읽기에도 확인을 이어 감 */
+  function ezAckCarry(prev, p){
+    var a = prev && prev.preview;
+    if (!prev || !prev.ack || !a) return null;
+    var has = function(list, key, v){ return (list || []).some(function(x){ return x[key] === v; }); };
+    var comps = (p.newComps || []).every(function(c){ return has(a.newComps, 'comp', c.comp); });
+    var prods = (p.unknownProds || []).every(function(c){ return has(a.unknownProds, 'prd', c.prd); });
+    return comps && prods && (p.unseen || 0) <= (a.unseen || 0) && ((p.flags || {}).unknown || 0) <= ((a.flags || {}).unknown || 0) ? prev.ack : null;
   }
 
-  var API = { ezSplitRefuse: ezSplitRefuse, ezSplitBlock: ezSplitBlock, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;

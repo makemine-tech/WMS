@@ -49,13 +49,6 @@
     };
   }
 
-  /* 일괄합포제외 채우기 자료. 합포 분할 화면의 「기존대로」와 같은 계산 */
-  function payload(read, boxes, Z, fee){
-    var orders = Z.buildOrders(read.rows || []);
-    orders.forEach(function(o){ o.warn = []; });
-    return Z.fillPayload(orders, Z.planExisting(orders, { boxes: boxes || {}, fee: fee, settings: SETTINGS, times: {} }).byPack);
-  }
-
   /* 도우미는 로딩 표시가 안 보이면 1.5초 뒤 표를 읽는다. 뒤에 깔린 탭에서는 결과가 늦게 뜰 수 있어,
      빈 결과면 기다렸다 한 번 더 읽고 나서 0건으로 믿는다 */
   var RECHECK_MS = 5000;
@@ -66,7 +59,7 @@
     });
   }
 
-  var API = { payload: payload, preview: preview, searchSettled: searchSettled, MAX_ORDERS: MAX_ORDERS, RECHECK_MS: RECHECK_MS };
+  var API = { preview: preview, searchSettled: searchSettled, MAX_ORDERS: MAX_ORDERS, RECHECK_MS: RECHECK_MS };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_EZ = API;
 })(typeof window !== 'undefined' ? window : this);

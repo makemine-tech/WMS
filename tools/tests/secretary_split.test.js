@@ -1,140 +1,158 @@
-/* 일괄합포제외 상시 컴퓨터 실행 (secretary_runner.runEzSplit) — 가짜 저장소와 가짜 탭으로 시험 */
+/* 합포 분할 화면 요청을 상시 컴퓨터에서 처리 (secretary_runner.handleCall) — 가짜 저장소와 가짜 탭으로 시험 */
 const test = require('node:test');
 const assert = require('node:assert');
 const C = require('../../main/secretary_core.js');
 const { createRunner } = require('../../main/secretary_runner.js');
 
 const NOW = new Date('2026-11-02T10:00:00+09:00').getTime();
-const SRC = 'ez_daily:2026-11-02:1';
-const pv = (over) => Object.assign({ orders: 5, invoices: 7, splitPacks: 3, unseen: 0, flags: { unknown: 0 }, blockers: [] }, over);
-const packs = (n) => Array.from({ length: n }, (_, i) => ({ pack_seq: 'P' + (i + 1) }));
 
 function setup(o) {
   o = o || {};
   const log = [];
-  let reads = 0;
-  const db = { commands: {}, sites: {}, control: o.control || null, jobs: Object.assign({ [SRC]: { recipe: 'ez_daily', state: 'done', at: NOW - 60000, from: '2026-10-26', to: '2026-11-02', preview: pv(o.src) } }, o.jobs) };
+  let clock = NOW;
+  const db = { calls: {}, commands: {}, sites: {}, control: o.control || null, jobs: Object.assign({}, o.jobs), taken: {} };
   const store = {
-    claimRunner: async () => true, getRunner: async () => ({ id: 'me', ts: NOW }), claimCommand: async () => true,
+    claimRunner: async () => true, getRunner: async () => ({ id: 'me', ts: clock }), claimCommand: async () => true,
     setCommand: async (id, p) => { db.commands[id] = Object.assign(db.commands[id] || {}, p); },
     getJobs: async () => db.jobs, setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); },
     getControl: async () => db.control, setSite: async (id, p) => { db.sites[id] = p; }, setMatch: async () => {},
+    claimCall: async (id) => { if (db.taken[id]) return false; db.taken[id] = true; return true; },
+    setCall: async (id, p) => { db.calls[id] = Object.assign(db.calls[id] || {}, p); },
   };
   const runner = createRunner({
-    store, now: () => NOW, runnerId: 'me', info: {},
-    openSite: async (s) => { log.push('open'); return s.id === 'ezadmin' ? { page: o.login === false ? '' : 'DG00' } : { login: true }; },
-    ezPlan: async () => { reads++; log.push('plan'); return reads === 1 ? { preview: pv(o.now), pay: packs(pv(o.now).splitPacks), rows: [] } : { preview: pv(o.after || { splitPacks: 0 }), pay: [], rows: [] }; },
-    ezFill: async (pay) => { log.push('fill:' + pay.length); if (o.pauseOnFill) db.control = { pause: true }; return o.fill || { done: pay.map((p) => p.pack_seq), skipped: [] }; },
-    ezCommit: async () => { log.push('commit'); if (o.commitErr) throw new Error(o.commitErr); return o.commit || { error: 0, fail_list: [], lock: 1 }; },
-    ezVerify: (pay) => { log.push('verify'); return o.verify || { ok: pay.map((p) => p.pack_seq), notApplied: [], gone: [] }; },
+    store, now: () => clock, runnerId: 'me', info: {},
+    openSite: async (s) => { log.push('open'); return s.id === 'ezadmin' ? { page: 'DG00' } : { login: true }; },
+    ezPreview: async () => ({ orders: 0, blockers: [] }), mensoPreview: async () => ({ blockers: [] }),
+    ezSearch: async (a) => { log.push('search'); return { total: 1, rows: [{ recv: '홍길동', pack_seq: '1', name: 'A' }], args: a }; },
+    ezWrite: async (cmd) => {
+      log.push(cmd);
+      if (cmd === 'fill') return o.fill || { done: ['1'], skipped: [] };
+      if (cmd === 'reset') return { done: ['1'] };
+      if (o.commitErr) throw new Error(o.commitErr);
+      return o.commit || { error: 0, fail_list: [], lock: 1 };
+    },
   });
-  return { runner, db, log };
+  let n = 0;
+  async function call(cmd, args, at) {
+    const id = 'c' + (++n);
+    await runner.handleCall(id, { cmd, args: JSON.stringify(args || {}), by: 'x', at: at === undefined ? clock : at });
+    return JSON.parse(db.calls[id].out);
+  }
+  return { runner, db, log, call, tick: (ms) => { clock += ms; } };
 }
-const cmd = (extra) => Object.assign({ type: 'ez_split', at: NOW, by: 'x', job: SRC }, extra);
-const JOB = 'ez_split:2026-11-02:1';
 
-test('확인한 자료와 같으면 채우기→저장→대조 후 다음 칸을 위한 자료를 남김', async () => {
-  const { runner, db, log } = setup();
-  await runner.handleCommand('c', cmd());
-  assert.deepStrictEqual(log, ['open', 'plan', 'fill:3', 'commit', 'open', 'plan', 'verify']);
-  assert.strictEqual(db.jobs[JOB].state, 'done');
-  assert.strictEqual(db.jobs[JOB].result.ok, 3);
-  assert.strictEqual(db.jobs['ez_daily:2026-11-02:2'].preview.splitPacks, 0);
-  assert.strictEqual(db.commands.c.status, 'done');
+test('불러오기→채우기→저장 순서로 전달하고 저장 기록을 남김', async () => {
+  const { call, log, db } = setup();
+  assert.ok((await call('search', { supplier: '곡물도감' })).ok);
+  assert.ok((await call('fill', { packs: [] })).ok);
+  const c = await call('commit', { confirm: true, lockUnpack: true });
+  assert.ok(c.ok);
+  assert.deepStrictEqual(log, ['open', 'search', 'fill', 'commit']);
+  assert.strictEqual(c.data.jobKey, 'ez_split:2026-11-02:1');
+  assert.strictEqual(db.jobs[c.data.jobKey].state, 'done');
 });
 
-test('10건 먼저: 앞 10건만 채움', async () => {
-  const { runner, log } = setup({ src: { splitPacks: 30 }, now: { splitPacks: 30 }, after: { splitPacks: 20 } });
-  await runner.handleCommand('c', cmd({ limit: 10 }));
-  assert.ok(log.includes('fill:10'));
+test('수령자 이름은 Firebase 로 나가지 않음', async () => {
+  const { call, db } = setup();
+  const r = await call('search', {});
+  assert.strictEqual(r.data.rows[0].recv, undefined);
+  assert.strictEqual(r.data.rows[0].pack_seq, '1');
+  assert.ok(!db.calls.c1.out.includes('홍길동'));
 });
 
-test('다시 읽으니 건수가 달라졌으면 채우지 않음', async () => {
-  const { runner, db, log } = setup({ now: { splitPacks: 4 } });
-  await runner.handleCommand('c', cmd());
-  assert.ok(!log.some((x) => x.startsWith('fill') || x === 'commit'));
-  assert.strictEqual(db.jobs[JOB].state, 'stopped');
-  assert.match(db.jobs[JOB].notes, /3건에서 4건/);
+test('허용되지 않은 요청은 거절, 송장출력 명령도 아직 안 됨', async () => {
+  const { call, log } = setup();
+  for (const bad of ['printGo', 'printPrep', 'read', 'relogin', 'constructor']) {
+    const r = await call(bad);
+    assert.strictEqual(r.ok, false);
+    assert.match(r.err, /허용되지 않은 요청/);
+  }
+  assert.deepStrictEqual(log, []);
 });
 
-test('줄 수가 안 맞으면 확인했어도 채우지 않음', async () => {
-  const { runner, log } = setup({ now: { blockers: ['이지어드민에는 2줄이 있는데 1줄만 읽혔습니다'] } });
-  await runner.handleCommand('c', cmd());
-  assert.ok(!log.some((x) => x.startsWith('fill')));
-});
-
-test('건너뛴 묶음이 있으면 저장하지 않고 채운 것을 버림', async () => {
-  const { runner, db, log } = setup({ fill: { done: ['P1'], skipped: [{ pack_seq: 'P2', why: '상품·수량이 바뀜' }] } });
-  await runner.handleCommand('c', cmd());
+test('늦게 처리된 요청은 저장하지 않음', async () => {
+  const { call, log, tick } = setup();
+  await call('search');
+  await call('fill');
+  tick(C.RELAY_TTL + 1);
+  const r = await call('commit', { confirm: true }, NOW);
+  assert.match(r.err, /만료/);
   assert.ok(!log.includes('commit'));
-  assert.strictEqual(log[log.length - 1], 'open');
-  assert.strictEqual(db.jobs[JOB].state, 'stopped');
-  assert.strictEqual(db.jobs[JOB].result.skipList[0].pack_seq, 'P2');
 });
 
-test('저장이 실패하면 다시 시도하지 않고 멈춤', async () => {
-  const { runner, db, log } = setup({ commitErr: 'TIMEOUT' });
-  await runner.handleCommand('c', cmd());
+test('불러오기 없이 채우기, 채우기 없이 저장은 거절', async () => {
+  const { call, log } = setup();
+  assert.match((await call('fill')).err, /불러오기부터/);
+  await call('search');
+  assert.match((await call('commit', { confirm: true })).err, /불러오기부터/);
+  assert.ok(!log.includes('commit'));
+});
+
+test('채운 뒤 탭이 새로 열렸으면(시동 등) 저장하지 않음', async () => {
+  const { call, log, runner } = setup();
+  await call('search');
+  await call('fill');
+  await runner.handleCommand('s', { type: 'start', at: NOW, by: 'x' });
+  const r = await call('commit', { confirm: true });
+  assert.match(r.err, /사라졌습니다/);
+  assert.ok(!log.includes('commit'));
+});
+
+test('저장은 한 번만: 실패 뒤 다시 눌러도 나가지 않고 기록을 남김', async () => {
+  const { call, log, db } = setup({ commitErr: 'TIMEOUT' });
+  await call('search');
+  await call('fill');
+  assert.strictEqual((await call('commit', { confirm: true })).err, 'TIMEOUT');
+  assert.match((await call('commit', { confirm: true })).err, /불러오기부터/);
   assert.strictEqual(log.filter((x) => x === 'commit').length, 1);
-  assert.strictEqual(db.jobs[JOB].state, 'stopped');
-  assert.match(db.jobs[JOB].notes, /저장됐을 수 있으니/);
-  assert.strictEqual(db.jobs['ez_daily:2026-11-02:2'], undefined);
+  assert.strictEqual(db.jobs['ez_split:2026-11-02:1'].state, 'stopped');
+  assert.match(db.jobs['ez_split:2026-11-02:1'].notes, /저장됐을 수 있으니/);
 });
 
-test('대조에서 안 된 묶음이 있으면 확인 필요로 멈춤', async () => {
-  const { runner, db } = setup({ verify: { ok: ['P1'], notApplied: ['P2', 'P3'], gone: [] } });
-  await runner.handleCommand('c', cmd());
-  assert.strictEqual(db.jobs[JOB].state, 'stopped');
-  assert.deepStrictEqual(db.jobs[JOB].result.notApplied, ['P2', 'P3']);
-  assert.strictEqual(db.jobs['ez_daily:2026-11-02:2'], undefined);
-});
-
-test('전체 멈춤: 시작 전이면 거절, 채우는 사이에 걸리면 저장하지 않고 버림', async () => {
-  const t = setup({ control: { pause: true } });
-  await t.runner.handleCommand('c', cmd());
-  assert.strictEqual(t.db.commands.c.status, 'refused');
-  assert.deepStrictEqual(t.log, []);
-  const s = setup({ pauseOnFill: true });
-  await s.runner.handleCommand('c', cmd());
-  assert.ok(s.log.includes('fill:3'));
-  assert.ok(!s.log.includes('commit'));
-  assert.strictEqual(s.log[s.log.length - 1], 'open');
-  assert.match(s.db.jobs[JOB].notes, /전체 멈춤/);
-});
-
-test('같은 자료로 두 번 실행 못 함, 더 새 자료가 있으면 거절, 확인 전이면 거절', async () => {
-  let s = setup({ jobs: { [JOB]: { recipe: 'ez_split', src: SRC, state: 'stopped', at: NOW - 1000 } } });
-  await s.runner.handleCommand('c', cmd());
-  assert.strictEqual(s.db.commands.c.status, 'refused');
-  assert.match(s.db.commands.c.why, /이미 실행/);
-  s = setup({ jobs: { 'ez_daily:2026-11-02:2': { recipe: 'ez_daily', state: 'done', at: NOW - 100, preview: pv() } } });
-  await s.runner.handleCommand('c', cmd());
-  assert.match(s.db.commands.c.why, /더 새로/);
-  s = setup({ src: { blockers: ['처음 보는 구성 1건'], unseen: 1 } });
-  await s.runner.handleCommand('c', cmd());
-  assert.match(s.db.commands.c.why, /확인이 끝나지/);
+test('전체 멈춤이나 진행 중 작업이 있으면 전달하지 않음', async () => {
+  let s = setup({ control: { pause: true } });
+  assert.match((await s.call('search')).err, /전체 멈춤/);
+  s = setup({ jobs: { a: { state: 'running', at: NOW } } });
+  assert.match((await s.call('search')).err, /진행 중/);
   assert.deepStrictEqual(s.log, []);
 });
 
-test('확인을 이어 가는 것은 새 확인거리가 없을 때만', async () => {
-  const ack = { at: 1 };
-  let s = setup({ src: { blockers: ['처음 보는 구성 1건'], unseen: 1 }, now: { unseen: 1 }, after: { splitPacks: 0, unseen: 1, blockers: ['처음 보는 구성 1건'] } });
-  s.db.jobs[SRC].ack = ack;
-  await s.runner.handleCommand('c', cmd());
-  assert.deepStrictEqual(s.db.jobs['ez_daily:2026-11-02:2'].ack, ack);
-  s = setup({ src: { blockers: ['처음 보는 구성 1건'], unseen: 1 }, now: { unseen: 1 }, after: { splitPacks: 0, unseen: 2, blockers: ['처음 보는 구성 2건'] } });
-  s.db.jobs[SRC].ack = ack;
-  await s.runner.handleCommand('c', cmd());
-  assert.strictEqual(s.db.jobs['ez_daily:2026-11-02:2'].ack, undefined);
+test('화면을 보는 동안에는 로그인 유지가 탭을 새로 열지 않고, 30분 지나면 다시 함', async () => {
+  const { call, runner, log, tick } = setup();
+  await call('search');
+  await call('fill');
+  const before = log.length;
+  assert.ok(runner.holding());
+  assert.strictEqual(await runner.keepAlive(), false);
+  assert.strictEqual(log.length, before);
+  tick(C.RELAY_HOLD + 1);
+  assert.ok(!runner.holding());
+  assert.strictEqual(await runner.keepAlive(), true);
 });
 
-test('흐름도: 진행 중 칸, 저장 명령은 읽기 명령 목록에 없음', () => {
-  const ok = { state: 'ok' }, job = { preview: pv() };
+test('같은 요청을 두 번 받아도 한 번만 처리', async () => {
+  const { runner, log } = setup();
+  const q = { cmd: 'search', args: '{}', at: NOW };
+  await runner.handleCall('x', q);
+  await runner.handleCall('x', q);
+  assert.strictEqual(log.filter((v) => v === 'search').length, 1);
+});
+
+test('확인은 같은 구성일 때만 이어 감', () => {
+  const ack = { at: 1 }, prev = { ack, preview: { unseen: 2, flags: { unknown: 1 }, newComps: [{ comp: 'A' }, { comp: 'B' }], unknownProds: [{ prd: 'X' }] } };
+  assert.strictEqual(C.ezAckCarry(prev, { unseen: 1, flags: { unknown: 1 }, newComps: [{ comp: 'A' }], unknownProds: [{ prd: 'X' }] }), ack);
+  assert.strictEqual(C.ezAckCarry(prev, { unseen: 1, flags: { unknown: 0 }, newComps: [{ comp: 'C' }], unknownProds: [] }), null);
+  assert.strictEqual(C.ezAckCarry(prev, { unseen: 0, flags: { unknown: 1 }, newComps: [], unknownProds: [{ prd: 'Y' }] }), null);
+  assert.strictEqual(C.ezAckCarry({ preview: prev.preview }, { unseen: 0, newComps: [] }), null);
+});
+
+test('흐름도: 저장 중 칸, 저장 명령은 읽기 명령 목록에 없음', () => {
+  const ok = { state: 'ok' }, job = { preview: { orders: 5, splitPacks: 3, blockers: [] } };
   const st = (s) => Object.fromEntries(C.ezFlow(ok, job, s).map((x) => [x.id, x.state]));
   assert.strictEqual(st({ state: 'running' }).ez_split, 'run');
   assert.strictEqual(st(null).ez_split, 'todo');
   C.HELPER_WRITE.forEach((c) => assert.throws(() => C.assertSafeCmd(c), /허용되지 않은 명령/));
-  const room = C.officeRooms({ runner: { ts: NOW }, sites: { ezadmin: ok, ebut: ok }, jobs: { a: { recipe: 'ez_split', state: 'running', at: NOW, step: '채우는 중' } }, now: NOW });
-  assert.strictEqual(room.find((x) => x.id === 'ezadmin').say, '채우는 중');
+  const room = C.officeRooms({ runner: { ts: NOW }, sites: { ezadmin: ok, ebut: ok }, jobs: { a: { recipe: 'ez_split', state: 'running', at: NOW, step: '저장 중' } }, now: NOW });
+  assert.strictEqual(room.find((x) => x.id === 'ezadmin').say, '저장 중');
   assert.strictEqual(room.find((x) => x.id === 'ebut').mode, 'idle');
 });

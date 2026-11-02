@@ -92,6 +92,8 @@
   .jump button:hover { border-color:var(--accent); background:#0b2b1d; }
   @media print { .jump { display:none; } }
   @media (max-width:640px){ .stats { grid-template-columns:repeat(2, minmax(0, 1fr)); } h1 { font-size:1.3rem; } }
+.remote .unified-hdr,.remote .ez-flow,.remote #printCard,.remote #nextUpload,.remote .local-only{display:none}
+.remote #nextUpload.show{display:block}
 .pr-row{margin-top:.55rem}
 .pr-top{display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;margin-bottom:.2rem}
 .pr-txt{color:var(--mut,#8b92a5);text-align:right}
@@ -106,11 +108,16 @@
 <body>
 <script src="ez_flow.js"></script>
 <script>EZ_FLOW.mount({ page: 'split', step: 1 });</script>
+<script>
+/* AI 물류비서 안에서 열면(?remote=1) 화면·계산은 그대로, 이지어드민 조작만 도우미 대신 상시 컴퓨터가 함 */
+var REMOTE = new URLSearchParams(location.search).get('remote') === '1';
+if (REMOTE) document.documentElement.classList.add('remote');
+</script>
 <div class="container">
   <span id="who" hidden></span>
   <div class="ezf-title">
     <h1>이지어드민 <em>일괄합포제외</em></h1>
-    <p>합포 분할 계산 → 이지어드민 도우미로 채우기 · 실행</p>
+    <p id="subTitle">합포 분할 계산 → 이지어드민 도우미로 채우기 · 실행</p>
   </div>
 
   <!-- ① 연결 -->
@@ -118,18 +125,18 @@
     <div class="card-h"><span class="dot" id="hDot"></span><span id="hTxt">이지어드민 도우미 연결 안 됨</span><span class="sp"></span>
       <span class="sm dim" id="loadInfo"></span></div>
     <div class="row">
-      <button class="btn o" onclick="openEz()">🔗 이지어드민 일괄합포제외 열기</button>
-      <a class="btn bm" id="bmLink" href="#" onclick="toast('이 버튼을 북마크바로 끌어다 놓으세요');return false;">📦 이지어드민 합포 도우미</a>
+      <button class="btn o local-only" onclick="openEz()">🔗 이지어드민 일괄합포제외 열기</button>
+      <a class="btn bm local-only" id="bmLink" href="#" onclick="toast('이 버튼을 북마크바로 끌어다 놓으세요');return false;">📦 이지어드민 합포 도우미</a>
       <span class="sp" style="flex:1"></span>
       <label class="sm dim">발주일 <input type="date" id="ezFrom" class="num" style="width:auto" onchange="saveFrom()"></label>
       <span class="sm dim">~</span>
       <input type="date" id="ezTo" class="num" style="width:auto">
       <button class="btn sm" onclick="$('ezTo').value=today()" title="끝일을 오늘로">오늘</button>
-      <label class="sm dim" title="켬: 도우미가 이지어드민에서 공급처 곡물도감 + 발주일(시작~끝)로 검색한 뒤 읽음 · 끔: 이지어드민 화면에 대표님이 직접 검색해 둔 그대로 읽음(다른 조건으로 볼 때)"><input type="checkbox" id="ezSearch" checked> 곡물도감 검색부터</label>
+      <label class="sm dim local-only" title="켬: 도우미가 이지어드민에서 공급처 곡물도감 + 발주일(시작~끝)로 검색한 뒤 읽음 · 끔: 이지어드민 화면에 대표님이 직접 검색해 둔 그대로 읽음(다른 조건으로 볼 때)"><input type="checkbox" id="ezSearch" checked> 곡물도감 검색부터</label>
       <button class="btn p" id="loadBtn" onclick="loadOrders()">불러오기</button>
     </div>
     <div class="load-state" id="loadState" style="display:none"></div>
-    <div class="sm dim" style="margin-top:.5rem;line-height:1.7">
+    <div class="sm dim local-only" style="margin-top:.5rem;line-height:1.7">
       ① 「이지어드민 일괄합포제외 열기」 → ② 그 탭에서 북마크 「📦 이지어드민 합포 도우미」 → ③ 여기서 「불러오기」 (도우미가 <b>공급처 곡물도감 · 발주일</b>로 검색까지 함)
     </div>
   </div>
@@ -299,7 +306,24 @@ window.addEventListener('message', function(e){
   delete H.pend[m.id]; clearTimeout(p.t);
   if (m.ok) p.res(m.data); else p.rej(new Error(m.err || '도우미 오류'));
 });
+/* 상시 컴퓨터 헤드비서에게 요청 (secretary/ezcall). 빈 배열이 사라지지 않게 글자로 주고받음 */
+function rcall(cmd, args, ms){
+  return new Promise(function(res, rej){
+    var ref = db.ref('secretary/ezcall').push();
+    var t = setTimeout(function(){ ref.off(); rej(new Error('TIMEOUT')); }, (ms || 30000) + 30000);
+    ref.on('value', function(s){
+      var v = s.val();
+      if (!v || v.out == null) return;
+      clearTimeout(t); ref.off(); ref.remove();
+      var o = JSON.parse(v.out);
+      if (o.ok) res(o.data); else rej(new Error(o.err || '상시 컴퓨터 오류'));
+    });
+    ref.set({ cmd: cmd, args: JSON.stringify(args || {}), by: me ? me.email || '' : '', at: firebase.database.ServerValue.TIMESTAMP })
+      .catch(function(e){ clearTimeout(t); ref.off(); rej(e); });
+  });
+}
 function hcall(cmd, args, ms){
+  if (REMOTE) return rcall(cmd, args, ms);
   return new Promise(function(res, rej){
     if (!H.win || H.win.closed){ setHelper(false); rej(new Error('NOHELPER')); return; }
     var id = ++H.seq;
@@ -310,11 +334,12 @@ function hcall(cmd, args, ms){
 function setHelper(ok, page){
   H.ok = !!ok; H.page = page || '';
   $('hDot').className = 'dot' + (ok ? (page === 'DG00' ? ' on' : ' warn') : '');
+  if (REMOTE){ $('hTxt').textContent = ok ? (page === 'DG00' ? '상시 컴퓨터 연결됨' : '상시 컴퓨터 이지어드민 로그인이 필요합니다') : '상시 컴퓨터 꺼짐'; return; }
   $('hTxt').textContent = ok ? (page === 'DG00' ? '이지어드민 도우미 연결됨' + (H.ver ? ' (' + H.ver + ')' : '') : '도우미 연결됨 — 이지어드민 일괄합포제외 화면으로 가 주세요') : '이지어드민 도우미 연결 안 됨';
   EZ_FLOW.putHelper(H.ok, '🔌 ' + $('hTxt').textContent);
 }
 /* 흐름 메뉴 — 피킹이지 창도 도우미 연결 상태를 보게 5초마다 남김 */
-setInterval(function(){ EZ_FLOW.putHelper(H.ok, '🔌 ' + $('hTxt').textContent); }, 5000);
+if (!REMOTE) setInterval(function(){ EZ_FLOW.putHelper(H.ok, '🔌 ' + $('hTxt').textContent); }, 5000);
 function ping(){ return hcall('ping', {}, 8000).then(function(r){ H.ver = r.ver || H.ver; setHelper(true, r.page); return r; }, function(){ setHelper(false); }); }
 setInterval(function(){ if (H.win) ping(); }, 30000);
 if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; ping(); setTimeout(knock, 1500); })(); }
@@ -355,6 +380,7 @@ function initDates(){
   $('ezFrom').value = f; $('ezTo').value = today();
 }
 function loadOrders(){
+  if (!H.ok && REMOTE){ loadState('err', $('hTxt').textContent); return; }
   if (!H.ok){ loadState('err', '도우미가 연결되지 않았습니다 — 이지어드민 일괄합포제외 탭에서 북마크 「📦 이지어드민 합포 도우미」를 누르고, 이 페이지 맨 위가 🟢 로 바뀐 뒤 다시 눌러 주세요'); return; }
   var doSearch = $('ezSearch').checked, from = $('ezFrom').value, to = $('ezTo').value || today();
   if (doSearch && (!from || from > to)){ loadState('err', '발주일 시작일을 끝일보다 앞이거나 같게 넣어 주세요'); return; }
@@ -574,7 +600,7 @@ function runCommit(auto){
   if (!H.ok){ toast('이지어드민 도우미가 연결되어 있지 않습니다'); return Promise.resolve(); }
   if (H.ver && H.ver < HELPER_COMMIT){ toast('이지어드민 도우미가 옛 버전입니다 — 이지어드민 탭 새로고침(F5) 후 북마크를 다시 눌러 주세요'); return Promise.resolve(); }
   var lockOn = $('lockUnpack').checked, printNext = false;
-  if (!auto && !confirm('이지어드민에 채운 ' + FILLED.length + '건을 「일괄합포제외」로 실제 저장합니다.\n자동합포금지: ' + (lockOn ? '켬' : '끔') + '\n\n진행할까요?')) return Promise.resolve();
+  if (!auto && !confirm((REMOTE ? '상시 컴퓨터에서 ' : '') + '이지어드민에 채운 ' + FILLED.length + '건을 「일괄합포제외」로 실제 저장합니다.\n자동합포금지: ' + (lockOn ? '켬' : '끔') + '\n\n진행할까요?')) return Promise.resolve();
   var log = LAST_LOG || { at: firebase.database.ServerValue.TIMESTAMP, by: me ? (me.email || '').split('@')[0] : '' };
   var pay = FILLED.map(function(p){ return FILLED_PAY[p]; }).filter(Boolean);
   $('commitBtn').disabled = true; $('fillBtn').disabled = true; $('resetBtn').disabled = true;
@@ -593,14 +619,15 @@ function runCommit(auto){
       var allOk = !bad && !v.notApplied.length && !(c.fail_list && c.fail_list.length);
       $('fillResult').innerHTML = head + srv
         + '<div style="margin-top:.3rem;font-size:.9rem;font-weight:900;color:' + (allOk ? 'var(--accent)' : 'var(--red)') + '">'
-        + (allOk ? '✔ 정상 완료 — ' + v.ok.length + '건 반영 확인' : '⚠️ 확인 필요 — 반영 ' + v.ok.length + '건 · 안 됨 ' + v.notApplied.length + '건') + '</div>'
+        + (allOk ? (REMOTE ? '✔ 합포제외 완료 — ' : '✔ 정상 완료 — ') + v.ok.length + '건 반영 확인' : '⚠️ 확인 필요 — 반영 ' + v.ok.length + '건 · 안 됨 ' + v.notApplied.length + '건') + '</div>'
         + (v.notApplied.length ? '<div class="dim">안 된 묶음: ' + v.notApplied.slice(0, 40).map(esc).join(', ') + '</div>' : '')
         + (v.gone.length ? '<div class="dim">다시 검색에 안 보이는 묶음 ' + v.gone.length + '건 (원래 송장에 2개 이상 남아야 하는데 안 보임 — 기간 밖·이미 출고인지 이지어드민에서 확인): ' + v.gone.slice(0, 20).map(esc).join(', ') + '</div>' : '');
       FILLED = []; FILLED_PAY = {}; FILL_HTML = '';
       applyRows(r, true);
+      if (REMOTE) remoteDone(c, v, allOk);
       printNext = allOk && $('printAfter').checked;
       if (!allOk && $('printAfter').checked) $('printResult').innerHTML = '<span style="color:var(--yellow)">⚠️ 일괄합포제외가 「정상 완료」가 아니라 송장출력으로 넘어가지 않았습니다</span>';
-      if (allOk) {
+      if (allOk && !REMOTE) {
         $('nextUpload').className = 'wz-next go';
         $('nextUploadSub').textContent = '✔ 일괄합포제외 정상 완료 — 이제 송장을 출력하고 수집·업로드하세요';
         try { $('nextUpload').scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
@@ -614,6 +641,19 @@ function runCommit(auto){
     log.commitError = e.message;
     $('fillResult').innerHTML = head + '<div style="color:var(--red)">⚠️ 일괄합포제외 실행 실패: ' + esc(LOAD_ERR[e.message] || e.message) + '</div><div class="dim">저장됐을 수도 있으니 「불러오기」로 다시 확인해 주세요</div>';
   }).then(function(){ pushLog(log); LAST_LOG = null; render(); if (printNext) return runPrint(); });
+}
+/* AI 물류비서 흐름에 결과를 남기고, 완료면 시동과 같은 읽기로 다음 칸(남은 묶음 또는 송장출력)을 켬 */
+function remoteDone(c, v, allOk){
+  var root = db.ref('secretary');
+  if (c.jobKey) root.child('jobs/' + c.jobKey).update({ state: allOk ? 'done' : 'stopped', notes: allOk ? '' : '확인 필요: 반영 ' + v.ok.length + '건 · 안 됨 ' + v.notApplied.length + '건', result: { ok: v.ok.length, notAppliedN: v.notApplied.length, goneN: v.gone.length, lock: c.lock == null ? -1 : c.lock } });
+  if (!allOk) return;
+  root.child('commands').push({ type: 'start', from: $('ezFrom').value, by: me ? me.email || '' : '', at: firebase.database.ServerValue.TIMESTAMP });
+  var next = $('nextUpload');
+  next.classList.add('show', 'go');
+  next.href = '#';
+  next.onclick = function(){ window.parent.postMessage({ to: 'secretary-page', cmd: 'ez_split_next' }, location.origin); return false; };
+  next.innerHTML = '✔ 합포제외 완료 · 다음 : 송장출력 →<small>나눌 묶음이 남았으면 불러오기로 이어서 하면 됩니다</small>';
+  try { next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
 }
 /* ── ③ 송장출력 ──
    체크한 공급처를 차례로: 전부 미리 검색해 건수 확인 → 한 번 묻고 → 공급처마다 준비·출력 → 이지에이전트 「print_end」 가 와야 다음 공급처.
@@ -761,6 +801,20 @@ function doReset(){
     function(e){ toast('되돌리기 실패: ' + e.message); });
 }
 
+/* 연결 표시 = 헤드비서 신호 + 이지어드민 로그인. 열리면 바로 불러옴 */
+function watchRemote(){
+  $('subTitle').textContent = '합포 분할 계산 → 상시 컴퓨터가 채우기 · 실행';
+  LOAD_ERR.TIMEOUT = '상시 컴퓨터가 제때 답하지 않았습니다 — 저장 단계였다면 저장됐을 수 있으니 불러오기로 확인해 주세요';
+  var run = null, site = null, loaded = false;
+  function paint(){
+    var on = !!run && Date.now() - (run.ts || 0) < 180000;
+    setHelper(on, site && site.state === 'ok' ? 'DG00' : '');
+    if (on && !loaded && !ORDERS.length){ loaded = true; loadOrders(); }
+  }
+  db.ref('secretary/runner').on('value', function(s){ run = s.val(); paint(); });
+  db.ref('secretary/sites/ezadmin').on('value', function(s){ site = s.val(); paint(); });
+  setInterval(paint, 30000);
+}
 /* ── 시작 ── */
 paintSettings();
 initDates();
@@ -777,6 +831,7 @@ WMSync.onAuth(function(st){
   base.child('settings').on('value', function(s){ var v = s.val(); SET = v ? { ship: Object.assign(defaults().ship, v.ship), sec: Object.assign(defaults().sec, v.sec), autoCommit: !!v.autoCommit } : defaults(); paintSettings(); rebuild(); });
   base.child('times').on('value', function(s){ TIMES = s.val() || {}; rebuild(); });
   db.ref('wms_sync/groups/' + gid + '/picking_ez/boxes').on('value', function(s){ BOXES = s.val() || {}; rebuild(); });
+  if (REMOTE) watchRemote();
 });
 </script>
 <script>
