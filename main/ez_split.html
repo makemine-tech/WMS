@@ -744,7 +744,8 @@ function runPrint(){
     if (!todo.length){ hcall('printClose', {}, 15000).catch(function(){}); prPaint('출력할 주문이 없습니다 (' + names.join('·') + ' 모두 0건)'); prLock(false); return; }
     var lines = todo.map(function(r){ return '· ' + r.supplier + ' ' + r.count + '건' + (r.outside ? ' (기간 밖 발주일 ' + r.outside + '건 포함)' : ''); }).join('\n');
     var total = todo.reduce(function(a, r){ return a + r.count; }, 0);
-    if (!confirm('송장 ' + total + '건을 차례로 출력합니다.\n\n' + lines + '\n\n양식: ' + todo[0].template + '\n프린터: ' + todo[0].printer + '\n발주일: ' + from + ' ~ ' + to + '\n\n송장번호가 부여되며 되돌리기 어렵습니다. 진행할까요?')){
+    return askPage('송장 ' + total + '건을 차례로 출력합니다.\n\n' + lines + '\n\n양식: ' + todo[0].template + '\n프린터: ' + todo[0].printer + '\n발주일: ' + from + ' ~ ' + to + '\n\n송장번호가 부여되며 되돌리기 어렵습니다. 진행할까요?').then(function(yes){
+    if (!yes){
       log.cancelled = true; pushLog(log); hcall('printClose', {}, 15000).catch(function(){});
       PR.items.forEach(function(it){ if (it.count) it.text = '취소 — 출력 안 함'; });
       prPaint('취소했습니다 — 출력하지 않았습니다'); prLock(false); return;
@@ -760,12 +761,34 @@ function runPrint(){
       $('nextUploadSub').textContent = '✔ 송장출력 완료 — 이제 자동수집하세요';
       try { $('nextUpload').scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
     });
+    });
   }).catch(function(e){
     log.error = e.supplier ? e.supplier + ': ' + (e.problems || []).join(' / ') : e.message;
     var at = e.supplier ? '<b>' + esc(e.supplier) + '</b> — ' : '';
     prStop('<div style="color:var(--red);font-weight:900">⚠️ 여기서 멈췄습니다 — 뒤 공급처는 진행하지 않았습니다</div>'
       + (e.problems ? e.problems.map(function(x){ return '<div>· ' + at + esc(x) + '</div>'; }).join('') : '<div>' + at + esc(LOAD_ERR[e.message] || e.message) + '</div>')
       + '<div class="dim">이지어드민 화면의 출력목록·오류목록을 확인한 뒤 다시 해 주세요 (자동으로 다시 누르지 않습니다)</div>', log);
+  });
+}
+/* 브라우저 확인창은 다른 탭을 보고 있으면 저절로 거절됨(건수 확인에 시간이 걸려 흔함). AI 물류비서 안에서는 화면 안 창으로 물음 (2026-11-02) */
+function askPage(text){
+  if (!REMOTE) return Promise.resolve(confirm(text));
+  return new Promise(function(res){
+    var box = document.createElement('div');
+    box.id = 'askPage';
+    box.style.cssText = 'position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+    box.innerHTML = '<div style="background:#fff;color:#000;border-radius:14px;padding:1.3rem;width:100%;max-width:520px;box-shadow:0 12px 40px rgba(0,0,0,.35)">'
+      + '<div style="white-space:pre-wrap;font-size:1.05rem;font-weight:700;line-height:1.6">' + esc(text) + '</div>'
+      + '<div style="display:flex;gap:.6rem;margin-top:1.1rem;justify-content:flex-end">'
+      + '<button type="button" class="btn" data-a="0" style="font-size:1rem;padding:.7rem 1.2rem">취소</button>'
+      + '<button type="button" class="btn p" data-a="1" style="font-size:1rem;padding:.7rem 1.4rem">진행</button></div></div>';
+    box.addEventListener('click', function(e){
+      var a = e.target.getAttribute && e.target.getAttribute('data-a');
+      if (a == null) return;
+      box.remove();
+      res(a === '1');
+    });
+    document.body.appendChild(box);
   });
 }
 var PRINT_JOB = '';
@@ -782,13 +805,15 @@ function printOne(seen, from, to, log){
   it.ind = true; it.text = '출력 준비 중…'; prPaint('<span class="spin"></span> ' + esc(n) + ' 준비 중…');
   return hcall('printPrep', { supplier: n, from: from, to: to }, 170000).then(function(p){
     if (p.problems.length) fail('', p.problems);
-    if (p.count !== seen.count && !confirm(n + ' 건수가 바뀌었습니다: ' + seen.count + '건 → ' + p.count + '건\n\n새 건수로 출력할까요?')) fail('건수가 바뀌어 멈췄습니다');
+    return (p.count !== seen.count ? askPage(n + ' 건수가 바뀌었습니다: ' + seen.count + '건 → ' + p.count + '건\n\n새 건수로 출력할까요?') : Promise.resolve(true)).then(function(yes){
+    if (!yes) fail('건수가 바뀌어 멈췄습니다');
     it.count = p.count;
     log.suppliers[n] = { count: p.count };
     return hcall('printGo', { confirm: true, token: p.token, count: p.count }, 60000).then(function(g){
       if (g && g.jobKey) PRINT_JOB = g.jobKey;
       log.suppliers[n].started = true;
       return watchOne(it, log.suppliers[n]);
+    });
     });
   });
 }
