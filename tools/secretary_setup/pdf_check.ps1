@@ -3,6 +3,9 @@ $out = New-Object System.Collections.ArrayList
 function Say($t) { [void]$out.Add([string]$t) }
 $today = Get-Date -Format 'yyyy-MM-dd'
 $root = 'C:\ez_PrintAgent'
+# 실제 도는 에이전트 위치 기준. DMZOOT 는 D:\ez_PrintAgent 에서 돎 (2026-11-02)
+$running = (Get-Process ez_printAgent -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+if ($running) { $root = Split-Path $running }
 Say "컴퓨터 $env:COMPUTERNAME / 사용자 $env:USERNAME / $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
 Say ''; Say '[이지에이전트]'
@@ -29,7 +32,7 @@ Get-PrintJob -PrinterName 'BIXOLON SLP-D420' -ErrorAction SilentlyContinue | Sel
 Get-PrintJob -PrinterName 'BIXOLON SLP-D 420' -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Say "대기열: $($_.DocumentName) $($_.JobStatus)" }
 
 Say ''; Say '[ezPDF 저장 위치]'
-Get-ChildItem 'HKCU:\Software\UNIDOCS\ezPDF Builder' -ErrorAction SilentlyContinue | ForEach-Object {
+Get-ChildItem 'HKCU:\Software\UNIDOCS' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'Builder' } | ForEach-Object {
   $k = $_; $k.Property | Where-Object { $_ -match 'path|folder|dir|save|auto|show|prompt|open|view' } | ForEach-Object { Say "$($k.PSChildName) | $_ = $($k.GetValue($_))" }
 }
 
@@ -41,6 +44,7 @@ $hits = @($hits | Sort-Object LastWriteTime -Descending)
 Say "찾은 PDF $($hits.Count)개"
 $hits | Group-Object DirectoryName | Sort-Object Count -Descending | Select-Object -First 15 | ForEach-Object { Say "$($_.Count)개 $($_.Name)" }
 $hits | Select-Object -First 5 | ForEach-Object { Say "  $($_.LastWriteTime.ToString('MM-dd HH:mm')) $($_.Name)" }
+if ($hits.Count) { $old = $hits[-1]; Say "  가장 이른 것 $($old.LastWriteTime.ToString('MM-dd HH:mm')) $($old.DirectoryName) $($old.Name)" }
 
 Say ''; Say "[에이전트 로그 $today 출력 흐름]"
 $log = "$root\Log\ezAgent_$today.log"
