@@ -258,7 +258,7 @@
       }
       await store.setSite(site.id, r);
       if (r.state === 'ok') return { ok: true, why: '' };
-      return { ok: false, why: tried && !tried.tried ? tried.why : '로그인되지 않았습니다. 아이디와 비밀번호를 확인해 주세요' };
+      return { ok: false, why: tried && !tried.tried ? tried.why : '로그인되지 않았습니다. 아이디와 비밀번호를 확인해 주세요. 맞다면 보안문자가 떴을 수 있으니 상시 컴퓨터에서 직접 로그인해 주세요' };
     }
     function handleLogin(id, req){
       var run = chain.then(async function(){
