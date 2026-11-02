@@ -6,6 +6,7 @@
      deps.openSite 사이트 탭을 열어 도우미 ping 응답을 돌려줌. 안 되면 throw
      deps.relogin  로그인 화면에서 크롬이 채운 값으로 로그인 버튼을 한 번 누름. { tried, why }. 비밀번호는 다루지 않음
      deps.ezPreview({ from, to }) 곡물도감 검색 후 secretary_ez.preview 결과를 돌려줌
+     deps.unseal(sealed)·deps.login(site, creds) 비서 화면에서 입력한 로그인 값을 풀어 한 번 쓰고 버림. 저장·기록 금지
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
    저장은 합포 분할 화면에서 사람이 누른 요청(relay)으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
@@ -233,6 +234,42 @@
       chain = run.catch(function(){});
       return run;
     }
+    /* 비서 화면의 로그인 입력. 받자마자 지우고, 값은 이 함수 밖으로 나가지 않음. 실패해도 다시 시도하지 않음 */
+    async function loginRun(req){
+      var site = C.SITES.find(function(s){ return s.id === req.site; });
+      if (!site) return { ok: false, why: '모르는 사이트' };
+      if (!req.at || deps.now() - req.at > C.LOGIN_TTL) return { ok: false, why: '시간이 지났습니다. 다시 입력해 주세요' };
+      if (mustStay()) return { ok: false, why: '출력이나 저장이 진행 중입니다. 끝난 뒤 다시 해 주세요' };
+      var jobs = (await store.getJobs()) || {};
+      if (Object.keys(jobs).some(function(k){ return jobs[k] && jobs[k].state === 'running'; })) return { ok: false, why: '진행 중인 작업이 있습니다. 끝난 뒤 다시 해 주세요' };
+      var creds, tried;
+      try { creds = await deps.unseal(req.sealed); }
+      catch (e) { return { ok: false, why: '상시 컴퓨터가 새로 켜졌습니다. 다시 입력해 주세요' }; }
+      try { tried = await deps.login(site, creds); }
+      catch (e) { tried = { tried: false, why: '로그인 화면을 열지 못했습니다' }; }
+      creds = null;
+      var r = await readSite(site);
+      r.checkedAt = deps.now();
+      if (r.state === 'ok') { triedLogin[site.id] = false; whyLogin[site.id] = ''; }
+      else {
+        triedLogin[site.id] = true;
+        whyLogin[site.id] = tried && !tried.tried ? tried.why : '입력한 값으로 로그인 실패';
+        if (r.state === 'login') r.msg = '로그인이 필요합니다 (' + whyLogin[site.id] + ')';
+      }
+      await store.setSite(site.id, r);
+      if (r.state === 'ok') return { ok: true, why: '' };
+      return { ok: false, why: tried && !tried.tried ? tried.why : '로그인되지 않았습니다. 아이디와 비밀번호를 확인해 주세요' };
+    }
+    function handleLogin(id, req){
+      var run = chain.then(async function(){
+        await store.clearLoginReq(id);
+        var out;
+        try { out = await loginRun(req); } catch (e) { out = { ok: false, why: '로그인 처리 중 오류가 났습니다' }; }
+        await store.setLoginResult(id, { ok: out.ok, why: out.why, at: deps.now() });
+      });
+      chain = run.catch(function(){});
+      return run;
+    }
     function handleCall(id, call){
       var run = chain.then(async function(){
         if (!(await store.claimCall(id))) return;
@@ -320,7 +357,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleLogin: handleLogin, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

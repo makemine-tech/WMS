@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-02c';
+  var VER = '2026-11-02d';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -412,9 +412,32 @@
     return { tried: true };
   }
 
-  var CMDS = { relogin: cmdRelogin, ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
+  /* 비서 화면에서 사람이 입력한 값으로 로그인 버튼을 한 번 누름. 값을 보관하거나 돌려주지 않음.
+     알림창은 무인 탭을 멈추므로 띄우지 않음. 성공 여부는 헤드비서가 다시 열어 확인 */
+  function setField(el, v){
+    var proto = window.HTMLInputElement && el instanceof window.HTMLInputElement ? Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') : null;
+    if (el.focus) el.focus();
+    if (proto && proto.set) proto.set.call(el, v); else el.value = v;
+    if (el.dispatchEvent && window.Event) ['input', 'change'].forEach(function(n){ el.dispatchEvent(new window.Event(n, { bubbles: true })); });
+    if (el.blur) el.blur();
+  }
+  function cmdLogin(args){
+    var pw = document.getElementById('login-pwd'), id = document.getElementById('login-id'), dom = document.getElementById('login-domain');
+    if (!pw || !id || !dom) return { tried: false, why: '로그인 칸을 찾지 못함' };
+    var cap = document.getElementById('captchaCode');
+    if (cap && window.getComputedStyle(cap).display !== 'none' && cap.offsetParent !== null) return { tried: false, why: '보안문자가 있어 상시 컴퓨터에서 직접 로그인해 주세요' };
+    var btn = document.querySelector('.login-btn');
+    if (!btn) return { tried: false, why: '로그인 버튼을 찾지 못함' };
+    setField(dom, args.domain); setField(id, args.id); setField(pw, args.pw);
+    if (dom.value !== args.domain) return { tried: false, why: '도메인을 넣지 못함' };
+    window.alert = function(){};
+    setTimeout(function(){ btn.click(); }, 300);
+    return { tried: true };
+  }
+
+  var CMDS = { login: cmdLogin, relogin: cmdRelogin, ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
                printPrep: cmdPrintPrep, printGo: cmdPrintGo, printStatus: cmdPrintStatus, printEnd: cmdPrintEnd, printClose: cmdPrintClose };
-  var SAYS = { search: '곡물도감 검색 중… (이지어드민 화면이 잠깐 바뀝니다)', read: '주문 줄 읽는 중…', fill: '분할 채우는 중… (저장 안 함)', reset: '되돌리는 중…', commit: '일괄합포제외 실행 중…',
+  var SAYS = { login: '로그인 시도 중…', search: '곡물도감 검색 중… (이지어드민 화면이 잠깐 바뀝니다)', read: '주문 줄 읽는 중…', fill: '분할 채우는 중… (저장 안 함)', reset: '되돌리는 중…', commit: '일괄합포제외 실행 중…',
                printPrep: '송장출력 준비 중… (출력은 아직 안 함)', printGo: '송장출력 실행 중…' };
   function onMsg(e){
     var m = e.data;
@@ -444,7 +467,7 @@
     else say('⚠️ 팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용 후 다시 눌러 주세요');
   }
   function stop(){ pGone(); window.removeEventListener('message', onMsg); box.remove(); }
-  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, relogin: cmdRelogin, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
+  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, login: cmdLogin, relogin: cmdRelogin, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
                            printAsk: printAsk, printRowProblems: pRowProblems, printPrep: cmdPrintPrep, printGo: cmdPrintGo, printStatus: cmdPrintStatus };
   hello();
 })();
