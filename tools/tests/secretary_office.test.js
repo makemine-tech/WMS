@@ -88,3 +88,18 @@ test('대기 상태 그림에 크기나 색이 잘못된 칸이 없음', () => {
   assert.deepStrictEqual(bad, []);
   assert.ok(!s.painted().some((x) => x.c === undefined), '색이 없는 칸 없음');
 });
+
+test('눈 깜빡임: 양쪽 눈이 감겼다 뜨고, 비서마다 때가 다름', () => {
+  const s = setup();
+  s.office.update(s.rooms('idle'));
+  const INK = '#0e0d10';
+  const sig = () => s.painted().filter((x) => x.c === INK).length;
+  const seen = new Set();
+  for (let i = 0; i < 80; i++) { s.run(0.1); seen.add(sig()); }
+  assert.ok(seen.size > 1, '검은 칸 수가 바뀌어야 함(눈 감김): ' + [...seen]);
+  const S = s.win.SECRETARY_OFFICE.SPRITES;
+  assert.strictEqual(S.FACE[0][8], 'K');
+  assert.strictEqual(S.FACE[0][12], 'K');
+  assert.strictEqual(S.FACE_BOB[0][8], 'K');
+  assert.strictEqual(S.FACE_BOB[0][12], 'K');
+});

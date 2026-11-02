@@ -11,7 +11,7 @@
   var W = 720, FH = 100, TOPY = 30, RW = 336, COL = [16, 368];
   var LINE = '#2a2430';
   /* 인물 그림판 (대표님 2026-11-02: 큰 머리·짧은 몸·굵은 픽셀). 한 칸 = 화면 2픽셀, 글자는 PAL 색. 머리 + 얼굴 + 몸 + 다리를 이어 붙임 */
-  var CELL = 2, INK = '#0e0d10';
+  var CELL = 2, INK = '#0e0d10', BLINK_SEC = .16;
   var HEADS = {
     short: ['...KKKKKKKKK....', '..KKKKKKKKKKK...', '.KKKKKKKKKKKKK..', '.KKKKKKKKKKKKK..', '.KKKKSSSSSSSKK..', '.KKDSSSSSSSSSK..'],
     swept: ['......KKKKKK....', '..KKKKKKKKKKKK..', '.KKKKKKKKKKKKKK.', '.KKKKKKKKKKKKKK.', '.KKKKKSSSSSSKK..', '.KKDKSSSSSSSSK..'],
@@ -75,18 +75,26 @@
         }
       });
     }
-    /* 머리 + 얼굴. 눈 깜빡임은 앞쪽 눈 위 두 칸을 살색으로 덮음 */
+    /* 눈 깜빡임: 비서마다 주기가 달라 함께 깜빡이지 않고, 가끔 두 번 연달아 깜빡임 */
+    function blinking(t, seat){
+      if (reduce) return false;
+      var period = 2.6 + (seat % 7) * .25, n = Math.floor(t / period), at = t - n * period;
+      return at < BLINK_SEC || (n % 3 === 2 && at >= BLINK_SEC * 2 && at < BLINK_SEC * 3);
+    }
+    /* 머리 + 얼굴. 감은 눈 = 양쪽 눈의 위 두 칸을 살색으로 덮어 아래 한 칸만 남김 */
     function headRows(p, blink){
-      var face = (p.hair === 'bob' ? FACE_BOB : FACE).map(function(row, i){ return blink && i < 2 ? row.slice(0, 8) + 'S' + row.slice(9) : row; });
+      var face = (p.hair === 'bob' ? FACE_BOB : FACE).map(function(row, i){
+        return blink && i < 2 ? row.slice(0, 8) + 'S' + row.slice(9, 12) + 'S' + row.slice(13) : row;
+      });
       return HEADS[p.hair].concat(face);
     }
     function shadow(x, feet, w){ g.globalAlpha = .18; r(x - w / 2, feet - 1, w, 2, LINE); g.globalAlpha = 1; }
     /* 윤곽선 있는 네모 */
     function boxed(x, y, w, h, c){ r(x - 1, y - 1, w + 2, h + 2, INK); r(x, y, w, h, c); }
     function standing(x, feet, dir, p, o){
-      var t = o.t, frame = o.walk && Math.sin(t * 10) > 0 ? 1 : 0, lift = o.walk ? (frame ? 2 : 0) : 0, y = feet - lift, blink = t % 3.7 < .13;
+      var t = o.t, frame = o.walk && Math.sin(t * 10) > 0 ? 1 : 0, lift = o.walk ? (frame ? 2 : 0) : 0, y = feet - lift;
       shadow(x, feet, 26);
-      paint(headRows(p, blink).concat(p.suit ? SUIT : BODY, LEGS[frame]), x, feet, dir, p, lift);
+      paint(headRows(p, o.blink).concat(p.suit ? SUIT : BODY, LEGS[frame]), x, feet, dir, p, lift);
       if (o.box) {
         var bx = dir > 0 ? x + 4 : x - 26;
         boxed(bx, y - 26, 22, 18, '#d1a26c'); r(bx + 9, y - 26, 4, 18, '#efddb4');
@@ -107,8 +115,7 @@
       r(x - 3, feet - 9, 3, 7, '#7a8190'); r(x - 11, feet - 3, 20, 2, '#7a8190'); r(x - 11, feet - 2, 2, 2, '#3b404b'); r(x + 7, feet - 2, 2, 2, '#3b404b');
     }
     function sitting(x, feet, dir, p, o){
-      var t = o.t, blink = t % 3.7 < .13;
-      paint(headRows(p, blink).concat(SIT), x, feet, dir, p);
+      paint(headRows(p, o.blink).concat(SIT), x, feet, dir, p);
     }
     /* 앉은 인물의 팔은 책상 위에 올라오므로 책상 다음에 그림 */
     function seatedArm(x, feet, p, o){
@@ -230,8 +237,9 @@
       if (o.id === 'ebut') { shelf(R.x + 238, F, 3); boxAt(R.x + 10, F - 16); boxAt(R.x + 10, F - 32); }
       if (c.desk) chair(R.x + c.seat, F);
       if (c.desk && !seated) desk(R.x + c.desk, F, true, t);
-      if (seated) sitting(X, F, 1, PAL[o.id], { t: t + c.seat });
-      else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, walk: (s.a === 'walk' || s.a === 'sit') && !reduce, box: s.box, sheet: s.sheet, point: s.point });
+      var blink = blinking(t, c.seat);
+      if (seated) sitting(X, F, 1, PAL[o.id], { blink: blink });
+      else standing(X, F, s.a === 'stand' && s.dir ? s.dir : o.dir, PAL[o.id], { t: t + c.seat, blink: blink, walk: (s.a === 'walk' || s.a === 'sit') && !reduce, box: s.box, sheet: s.sheet, point: s.point });
       if (c.desk && seated) { desk(R.x + c.desk, F, true, t); seatedArm(X, F, PAL[o.id], { t: t + c.seat, type: s.type, sip: s.sip }); }
       if (o.mode === 'alert') { g.globalAlpha = .16; r(R.x, R.y, R.w, F - R.y, '#d8543f'); g.globalAlpha = 1; }
       band(o, t);
