@@ -51,7 +51,7 @@ function Run-Test($s, [string]$printer) {
   $j = $r | ConvertFrom-Json
   $p = [Math]::Round(([datetime]$j.end - [datetime]$j.start).TotalSeconds, 0)
   $pdf = @(Get-ChildItem (Join-Path $root "PdfFile\$(Get-Date -Format 'yyyy-MM-dd')") -Filter 'agent_test*.pdf' -ErrorAction SilentlyContinue).Count
-  return "전체 $($total)초 · 프린터 단계 $($p)초 · PDF $pdf개"
+  return "전체 $($total)초 · 프린터 단계 $($p)초 · PDF ${pdf}개"
 }
 function Run-Rounds([string]$printer) {
   $s = Open-AgentSocket
