@@ -75,7 +75,7 @@ Write-Host ''
 Write-Host '이지에이전트를 끄고 C 의 1.1.9 로 바꿉니다. 그동안 송장출력을 하지 마세요.'
 if ((Read-Host '진행하려면 y') -ne 'y') { Finish '취소했습니다. 아무것도 바꾸지 않았습니다.' }
 
-if (-not (Test-Path $Backup)) { [IO.File]::WriteAllLines($Backup, [string[]]($hits | ForEach-Object { "$($_.Name)|$($_.Value)" }), (New-Object System.Text.UTF8Encoding($true))) }
+if (-not (Test-Path $Backup)) { [IO.File]::WriteAllLines($Backup, [string[]]@($hits | ForEach-Object { "$($_.Name)|$($_.Value)" }), (New-Object System.Text.UTF8Encoding($true))) }
 Stop-Agent
 if (Agent-Now) { Finish "주의: 끈 뒤에도 $((Agent-Now).Path) 가 다시 떴습니다. 다른 곳에서 켜 주는 것 같습니다. 시작 등록은 안 바꿨습니다." }
 $hits | ForEach-Object { Set-ItemProperty $RunKey -Name $_.Name -Value $exe; Say "시작 등록 변경: $($_.Name) = $exe" }
