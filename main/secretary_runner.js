@@ -20,7 +20,10 @@
     var gen = 0, searchedGen = -1, filledGen = -1, holdUntil = 0;
     /* 출력 중에는 이지어드민 탭을 절대 새로 열지 않음. printSeen = 화면의 마지막 요청 */
     var printing = false, printSeen = 0, printJob = '';
+    var prepared = false;
     function holding(){ return printing || deps.now() < holdUntil; }
+    /* 헤드비서 탭 새로고침을 미룰 때: 출력 중이거나, 채운 내용·출력 준비가 탭에 남아 있을 때만. 불러오기만 한 상태로는 새 판 반영을 막지 않음 (대표님 2026-11-02) */
+    function mustStay(){ return printing || (holding() && (filledGen === gen || prepared)); }
 
     async function claim(){
       var ok = await store.claimRunner(deps.runnerId, deps.info || {});
@@ -152,6 +155,7 @@
           if (rs.state !== 'ok') throw new Error('이지어드민: ' + rs.msg);
         }
         var prep = await deps.ezWrite('printPrep', args);
+        prepared = true;
         holdUntil = deps.now() + C.RELAY_HOLD;
         return prep;
       }
@@ -207,7 +211,7 @@
       printSeen = deps.now();
       var r = await deps.ezWrite(cmd, args);
       if (cmd === 'printEnd') { printing = false; holdUntil = deps.now() + C.RELAY_HOLD; }
-      if (cmd === 'printClose' && !printing) { holdUntil = 0; printJob = ''; }
+      if (cmd === 'printClose' && !printing) { holdUntil = 0; printJob = ''; prepared = false; }
       return r;
     }
     /* 화면이 닫혀 요청이 끊겼을 때: 지금 공급처가 끝나면 마무리해서 다음 작업을 막지 않음. 남은 공급처는 출력하지 않음 */
@@ -221,7 +225,7 @@
           await deps.ezWrite('printEnd', {}).catch(function(){});
           await deps.ezWrite('printClose', {}).catch(function(){});
         }
-        printing = false; holdUntil = 0;
+        printing = false; holdUntil = 0; prepared = false;
         if (printJob) await store.setJob(printJob, { state: 'stopped', endedAt: deps.now(), notes: '출력 화면이 닫혀 헤드비서가 마무리함. 남은 공급처는 출력 안 함. 이지어드민에서 확인 필요' });
         printJob = '';
         return true;
@@ -316,7 +320,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, holding: holding, printWatch: printWatch, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

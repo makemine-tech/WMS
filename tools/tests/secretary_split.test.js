@@ -265,3 +265,19 @@ test('흐름도: 출력 중 칸', () => {
   assert.strictEqual(st({ state: 'done' }), 'todo');
   assert.strictEqual(st(null), 'todo');
 });
+
+test('새 판 반영: 불러오기만 했으면 막지 않고, 채운 내용·출력 준비·출력 중이면 미룸', async () => {
+  const s = setup();
+  await s.call('search');
+  assert.ok(s.runner.holding());
+  assert.strictEqual(s.runner.mustStay(), false);
+  await s.call('fill');
+  assert.strictEqual(s.runner.mustStay(), true);
+  const t = setup();
+  await t.call('printPrep', {});
+  assert.strictEqual(t.runner.mustStay(), true);
+  await t.call('printClose');
+  assert.strictEqual(t.runner.mustStay(), false);
+  await printFlow(t);
+  assert.strictEqual(t.runner.mustStay(), true);
+});
