@@ -65,6 +65,10 @@
         }
       }
       if (r.state === 'login' && whyLogin[site.id]) r.msg = '로그인이 필요합니다 (' + whyLogin[site.id] + ')';
+      /* 비젬: 건수만 읽어 둠. 못 읽어도 다른 비서를 막지 않음 */
+      if (site.id === 'bizem' && r.state === 'ok' && deps.bizemCounts) {
+        try { r.counts = await deps.bizemCounts(); r.countsAt = deps.now(); } catch (e) { r.msg = '건수를 읽지 못했습니다'; }
+      }
       r.checkedAt = deps.now();
       await store.setSite(site.id, r);
       return r;

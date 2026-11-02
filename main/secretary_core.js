@@ -9,7 +9,7 @@
   var MIN = 60 * 1000;
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
-  var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
+  var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin', 'counts'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
   var HELPER_WRITE = ['login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
   var RELAY_CMDS = ['search', 'fill', 'reset', 'commit'];
   /* 송장출력은 불안정해 AI 물류비서에서 뺌 (대표님 2026-11-02). 곡물도감은 일괄합포제외까지, 출력은 합포 분할 화면에서 직접. 다시 켜려면 이 목록을 RELAY_CMDS 에 더하고 흐름도 칸을 되살림 */
@@ -23,13 +23,15 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-02n';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-03a';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
       origin: /^https:\/\/[a-z0-9-]+\.ezadmin\.co\.kr$/ },
     { id: 'ebut', name: '이벗', url: 'https://ebut3pl.co.kr/main', login: 'https://ebut3pl.co.kr/home/docs/login.html', tab: 'mkw_sec_ebut', from: 'ebut-helper', to: 'ebut-helper',
-      origin: /^https:\/\/([a-z0-9-]+\.)?ebut3pl\.co\.kr$/ }
+      origin: /^https:\/\/([a-z0-9-]+\.)?ebut3pl\.co\.kr$/ },
+    { id: 'bizem', name: '비젬', url: 'https://partner.bizesm.com/Home/MainPage', login: 'https://www.bizesm.com/Home/Login', tab: 'mkw_sec_bizem', from: 'bizem-helper', to: 'bizem-helper', minExt: '1.2.0',
+      origin: /^https:\/\/([a-z0-9-]+\.)?bizesm\.com$/ }
   ];
   var RECIPES = { ez_daily: { id: 'ez_daily', name: '이지어드민 비서 미리 보기 (읽기 전용)', supplier: '곡물도감' },
                   menso_read: { id: 'menso_read', name: '맨소래담 사은품 미리 보기 (읽기 전용)' } };
@@ -101,7 +103,7 @@
     var job = latest('ez_daily'), menso = latest('menso_read');
     var running = keys.length > 0 && s.jobs[keys[0]].state === 'running', runRecipe = running ? (s.jobs[keys[0]].recipe || 'ez_daily') : '', split = latest('ez_split');
     var on = runnerState(s.runner, s.now) === 'on', sites = s.sites || {}, ok = 0;
-    SITES.forEach(function(x){ if (sites[x.id] && sites[x.id].state === 'ok') ok++; });
+    SITES.forEach(function(x){ if (x.id !== 'bizem' && sites[x.id] && sites[x.id].state === 'ok') ok++; });   /* 램프는 방이 있는 비서만 */
     function siteRoom(id, name, idleSay, workSay){
       var v = sites[id];
       if (!on) return { id: id, name: name, mode: 'off', say: '퇴근', count: 0 };

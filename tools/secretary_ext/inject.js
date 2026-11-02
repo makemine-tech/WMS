@@ -3,7 +3,8 @@
 (function(){
   'use strict';
   var HELPERS = { mkw_sec_ez: { host: /(^|\.)ezadmin\.co\.kr$/, src: 'https://makewon.com/ez_helper.js' },
-                  mkw_sec_ebut: { host: /(^|\.)ebut3pl\.co\.kr$/, src: 'https://makewon.com/ebut_helper.js' } };
+                  mkw_sec_ebut: { host: /(^|\.)ebut3pl\.co\.kr$/, src: 'https://makewon.com/ebut_helper.js' },
+                  mkw_sec_bizem: { host: /(^|\.)bizesm\.com$/, src: 'https://makewon.com/bizem_helper.js' } };
   var h = Object.prototype.hasOwnProperty.call(HELPERS, window.name) ? HELPERS[window.name] : null;
   if (!h || !window.opener || !h.host.test(location.hostname)) return;
   var s = document.createElement('script');

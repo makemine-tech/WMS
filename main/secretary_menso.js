@@ -96,6 +96,15 @@
       { id: 'bizem_import', name: '비젬 주문가져오기', who: '연결 전', state: 'later', count: 0 }
     ], steps.slice(at));
   }
+  /* 비젬 건수로 칸 차례 표시. 주문확정이 남았으면 2번, 인쇄 대기만 남았으면 3번 */
+  function bizemSteps(steps, site){
+    var c = site && site.state === 'ok' ? site.counts : null;
+    return withBizem(steps).map(function(s){
+      if (s.id !== 'bizem_collect' && s.id !== 'bizem_import') return s;
+      var n = !c ? 0 : s.id === 'bizem_collect' ? c.unconfirmed : (c.unconfirmed ? 0 : c.printWait);
+      return { id: s.id, name: s.name, who: '직접', state: !c ? 'later' : n ? 'todo' : 'wait', count: n };
+    });
+  }
   function flow(read, campaigns){
     var waiting = {}, all = {};
     (read.rows || []).forEach(function(r){
@@ -123,7 +132,7 @@
     return { orders: Object.keys(all).length, waiting: nos.length, steps: withBizem(steps) };
   }
 
-  var API = { withBizem: withBizem, preview: preview, previewCampaign: previewCampaign, giftStatus: giftStatus, flow: flow };
+  var API = { withBizem: withBizem, bizemSteps: bizemSteps, preview: preview, previewCampaign: previewCampaign, giftStatus: giftStatus, flow: flow };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_MENSO = API;
 })(typeof window !== 'undefined' ? window : this);

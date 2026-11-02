@@ -150,3 +150,22 @@ test('비젬 칸이 없이 저장된 예전 결과에도 제자리에 끼워 넣
   assert.deepStrictEqual(a.map((x) => x.id), ['collect', 'bizem_collect', 'bizem_import', 'match']);
   assert.strictEqual(withBizem(a).length, 4);
 });
+
+test('비젬 칸: 주문확정이 남으면 2번, 인쇄 대기만 남으면 3번, 못 읽었으면 점선', () => {
+  const { bizemSteps } = require('../../main/secretary_menso.js');
+  const st = (site) => Object.fromEntries(bizemSteps(flow({ rows: [] }, []).steps, site).map((s) => [s.id, [s.state, s.count]]));
+  let s = st({ state: 'ok', counts: { unconfirmed: 5, printWait: 3 } });
+  assert.deepStrictEqual(s.bizem_collect, ['todo', 5]);
+  assert.deepStrictEqual(s.bizem_import, ['wait', 0]);
+  s = st({ state: 'ok', counts: { unconfirmed: 0, printWait: 3 } });
+  assert.deepStrictEqual(s.bizem_collect, ['wait', 0]);
+  assert.deepStrictEqual(s.bizem_import, ['todo', 3]);
+  s = st({ state: 'ok', counts: { unconfirmed: 0, printWait: 0 } });
+  assert.strictEqual(s.bizem_collect[0], 'wait');
+  assert.strictEqual(s.bizem_import[0], 'wait');
+  for (const site of [undefined, { state: 'login' }, { state: 'ok' }]) {
+    s = st(site);
+    assert.strictEqual(s.bizem_collect[0], 'later');
+    assert.strictEqual(s.bizem_import[0], 'later');
+  }
+});

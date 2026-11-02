@@ -42,7 +42,7 @@ const start = (at) => ({ type: 'start', at: at === undefined ? NOW : at, by: 'x'
 test('start runs check and reports done', async () => {
   const { runner, db, opened } = setup();
   await runner.handleCommand('c1', start());
-  assert.deepStrictEqual(opened, ['ezadmin', 'ebut']);
+  assert.deepStrictEqual(opened, ['ezadmin', 'ebut', 'bizem']);
   const key = 'ez_daily:2026-11-01:1';
   assert.strictEqual(db.commands.c1.status, 'done');
   assert.strictEqual(db.commands.c1.jobKey, key);
@@ -175,7 +175,7 @@ test('재로그인: 성공하면 로그인 유지로 표시', async () => {
 
 test('재로그인: 실패하면 한 번만 시도하고 이유를 남김', async () => {
   let calls = 0;
-  const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login: false }), relogin: async () => { calls++; return { tried: false, why: '비밀번호가 채워지지 않음' }; } });
+  const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : s.id === 'bizem' ? { login: true } : { login: false }), relogin: async () => { calls++; return { tried: false, why: '비밀번호가 채워지지 않음' }; } });
   await runner.keepAlive();
   await runner.keepAlive();
   await runner.handleCommand('c1', menso());
@@ -186,7 +186,7 @@ test('재로그인: 실패하면 한 번만 시도하고 이유를 남김', asyn
 
 test('재로그인: 로그인이 돌아왔다가 다시 끊기면 다시 한 번 시도', async () => {
   let login = false, calls = 0;
-  const { runner } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login }), relogin: async () => { calls++; return { tried: false }; } });
+  const { runner } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : s.id === 'bizem' ? { login: true } : { login }), relogin: async () => { calls++; return { tried: false }; } });
   await runner.keepAlive();
   login = true; await runner.keepAlive();
   login = false; await runner.keepAlive();
@@ -208,7 +208,7 @@ test('로그인 유지: 작업 중이나 멈춤이면 건너뜀', async () => {
   assert.strictEqual(await t.runner.keepAlive(), false);
   t = setup();
   assert.strictEqual(await t.runner.keepAlive(), true);
-  assert.deepStrictEqual(t.opened, ['ezadmin', 'ebut']);
+  assert.deepStrictEqual(t.opened, ['ezadmin', 'ebut', 'bizem']);
 });
 
 test('expired command: 만료 표시만 하고 실행 안 함', async () => {
@@ -222,7 +222,7 @@ test('expired command: 만료 표시만 하고 실행 안 함', async () => {
 test('handles a command once: 두 번 받아도 한 번만', async () => {
   const { runner, db, opened } = setup();
   await Promise.all([runner.handleCommand('c1', start()), runner.handleCommand('c1', start())]);
-  assert.strictEqual(opened.length, 2);
+  assert.strictEqual(opened.length, 3);
   assert.strictEqual(Object.keys(db.jobs).length, 1);
 });
 
@@ -257,7 +257,7 @@ test('reports site failures: 한 사이트가 실패해도 다음 사이트 점�
     },
   });
   await runner.handleCommand('c1', start());
-  assert.deepStrictEqual(seen, ['ezadmin', 'ebut']);
+  assert.deepStrictEqual(seen, ['ezadmin', 'ebut', 'bizem']);
   assert.strictEqual(db.sites.ezadmin.state, 'error');
   assert.match(db.sites.ezadmin.msg, /도우미 응답 없음/);
   assert.strictEqual(db.sites.ebut.state, 'login');
@@ -330,4 +330,29 @@ test('모르는 명령은 거절', async () => {
   await runner.handleCommand('c1', { type: 'commit', at: NOW });
   assert.strictEqual(db.commands.c1.status, 'refused');
   assert.deepStrictEqual(opened, []);
+});
+
+test('비젬: 로그인돼 있으면 건수를 사이트 기록에 남기고, 못 읽어도 다른 비서를 막지 않음', async () => {
+  const { createRunner: make } = require('../../main/secretary_runner.js');
+  const run = async (counts) => {
+    const sites = {}, jobs = {};
+    const store = { claimRunner: async () => true, getRunner: async () => ({ id: 'me', ts: NOW }), claimCommand: async () => true, setCommand: async () => {},
+      getJobs: async () => jobs, setJob: async (k, p) => { jobs[k] = Object.assign(jobs[k] || {}, p); }, getControl: async () => null, setSite: async (id, p) => { sites[id] = p; }, setMatch: async () => {} };
+    const r = make({ store, now: () => NOW, runnerId: 'me', info: {}, openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login: true }), ezPreview: async () => ({ orders: 2, blockers: [] }), mensoPreview: async () => ({ blockers: [] }), bizemCounts: counts });
+    await r.handleCommand('c', { type: 'start', at: NOW, by: 'x' });
+    return { sites, jobs };
+  };
+  let o = await run(async () => ({ unconfirmed: 5, printWait: 3 }));
+  assert.deepStrictEqual(o.sites.bizem.counts, { unconfirmed: 5, printWait: 3 });
+  assert.strictEqual(o.sites.bizem.countsAt, NOW);
+  o = await run(async () => { throw new Error('응답 없음'); });
+  assert.strictEqual(o.sites.bizem.counts, undefined);
+  assert.strictEqual(o.jobs['ez_daily:2026-11-01:1'].state, 'done');
+});
+
+test('비젬 로그인이 풀려도 이지어드민 작업은 진행', async () => {
+  const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : s.id === 'bizem' ? { login: false } : { login: true }) });
+  await runner.handleCommand('c1', start());
+  assert.strictEqual(db.sites.bizem.state, 'login');
+  assert.strictEqual(db.jobs['ez_daily:2026-11-01:1'].state, 'done');
 });
