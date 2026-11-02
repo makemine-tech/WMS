@@ -21,9 +21,10 @@
     orders.forEach(function(o){ o.warn = []; });
     var plan = Z.planExisting(orders, ctx);
     var sm = Z.summary(plan.byPack, ctx.boxes);
-    var flags = { divided: 0, unknown: 0, option: 0 }, comps = {}, unseen = 0;
+    var flags = { divided: 0, unknown: 0, option: 0 }, comps = {}, unseen = 0, unk = {};
     orders.forEach(function(o){
       o.flags.forEach(function(f){ flags[f] = (flags[f] || 0) + 1; });
+      o.lines.forEach(function(l){ if (l.cls.kind === 'unknown') unk[l.prd] = (unk[l.prd] || 0) + 1; });
       if (o.warn.indexOf('new') >= 0 || o.warn.indexOf('toomany') >= 0) {
         unseen++;
         var c = compOf(o);
@@ -32,6 +33,8 @@
     });
     var newComps = Object.keys(comps).sort(function(a, b){ return comps[b] - comps[a]; }).slice(0, NEW_LIST)
       .map(function(c){ return { comp: c, orders: comps[c] }; });
+    var unknownProds = Object.keys(unk).sort(function(a, b){ return unk[b] - unk[a]; }).slice(0, NEW_LIST)
+      .map(function(n){ return { prd: n, orders: unk[n] }; });
 
     if (rows.length !== Number(read.total)) blockers.push('이지어드민에는 ' + read.total + '줄이 있는데 ' + rows.length + '줄만 읽혔습니다');
     if (flags.unknown) blockers.push('모르는 상품 ' + flags.unknown + '건');
@@ -42,7 +45,7 @@
       rows: rows.length, orders: orders.length, invoices: sm.total, single: sm.single, multi: sm.multi,
       splitPacks: Z.fillPayload(orders, plan.byPack).length,
       sizes: Object.keys(sm.bySize).sort().map(function(s){ return { size: s, single: sm.bySize[s].single, multi: sm.bySize[s].multi }; }),
-      flags: flags, newComps: newComps, unseen: unseen, blockers: blockers
+      flags: flags, newComps: newComps, unknownProds: unknownProds, unseen: unseen, blockers: blockers
     };
   }
 

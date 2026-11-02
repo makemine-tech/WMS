@@ -14,7 +14,7 @@
   var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
-  var PAGE_VER = '2026-11-02b';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-02c';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -97,7 +97,7 @@
       : { id: 'head', name: '헤드비서', mode: 'idle', say: '대기 중', count: ok + 1 };
 
     var preview = job && job.preview, ez = siteRoom('ezadmin', '이지어드민 비서', preview ? '송장 ' + (preview.invoices || 0) + '장 · 주문 ' + (preview.orders || 0) + '건' : '대기 중', '주문 읽는 중');
-    if (ez.mode === 'idle' && job && job.state === 'stopped') { ez.mode = 'alert'; ez.say = '확인 필요'; }
+    if (ez.mode === 'idle' && job && job.state === 'stopped' && (!preview || ezOpenBlockers(job).length)) { ez.mode = 'alert'; ez.say = '확인 필요'; }
     if (preview && ez.mode !== 'off') ez.count = Math.ceil((preview.invoices || 0) / 25);   /* 송장 25장마다 묶음 하나 */
 
     var need = 0, mp = menso && menso.menso;
@@ -112,20 +112,25 @@
     ];
   }
 
+  /* 사람이 보고 넘길 수 있는 멈춤. 줄 수 불일치·건수 상한은 확인으로 넘기지 못함 */
+  function ezOpenBlockers(job){
+    var list = (job && job.preview && job.preview.blockers) || [];
+    return job && job.ack ? list.filter(function(b){ return !/^(모르는 상품|처음 보는 구성)/.test(b); }) : list;
+  }
   /* 이지어드민 흐름도. 칸 상태는 시동 때 읽은 곡물도감 자료로만 판단: 나눌 묶음이 있으면 합포제외 차례, 없고 주문이 있으면 송장출력 차례 */
   function ezFlow(site, job){
-    var loginOk = !!site && site.state === 'ok', p = job && job.preview;
-    var blocked = !!p && (p.blockers || []).length > 0, orders = p ? Number(p.orders) || 0 : 0, packs = p ? Number(p.splitPacks) || 0 : 0;
+    var loginOk = !!site && site.state === 'ok', p = job && job.preview, open = ezOpenBlockers(job);
+    var blocked = !!p && open.length > 0, orders = p ? Number(p.orders) || 0 : 0, packs = p ? Number(p.splitPacks) || 0 : 0;
     var previewOk = loginOk && !!p && !blocked, splitTodo = previewOk && packs > 0, printTodo = previewOk && !packs && orders > 0;
     return [
       { id: 'ez_login', name: '접속·로그인', who: '비서', state: site ? (loginOk ? 'done' : 'todo') : 'wait', count: 0 },
-      { id: 'ez_preview', name: '주문 미리 보기', who: '비서', state: !loginOk || !p ? 'wait' : blocked ? 'todo' : 'done', count: blocked ? p.blockers.length : 0 },
+      { id: 'ez_preview', name: '주문 미리 보기', who: '비서', state: !loginOk || !p ? 'wait' : blocked ? 'todo' : 'done', count: blocked ? open.length : 0 },
       { id: 'ez_split', name: '일괄합포제외', who: '직접', state: splitTodo ? 'todo' : printTodo ? 'done' : 'wait', count: packs },
       { id: 'ez_print', name: '송장출력', who: '직접', state: printTodo ? 'todo' : 'wait', count: orders }
     ];
   }
 
-  var API = { ezFlow: ezFlow, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;

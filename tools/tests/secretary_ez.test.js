@@ -47,6 +47,7 @@ test('모르는 상품은 막음', () => {
   const p = go([row(1, 1, { name: '모르는 상품' })]);
   assert.strictEqual(p.flags.unknown, 1);
   assert.match(p.blockers.join(), /모르는 상품 1건/);
+  assert.deepStrictEqual(p.unknownProds, [{ prd: '모르는 상품', orders: 1 }]);
 });
 
 test('옵션·이미 나뉜 주문은 그대로 두고 건수만 알림', () => {

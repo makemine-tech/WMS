@@ -152,6 +152,20 @@ test('ezFlow: 읽은 자료대로 차례가 넘어감', () => {
   assert.strictEqual(C.ezFlow(ok, { preview: { orders: 10, splitPacks: 3 } }).find((x) => x.id === 'ez_split').count, 3);
 });
 
+test('ezFlow: 모르는 상품·처음 보는 구성은 확인하면 넘어가고, 줄 수 불일치는 확인해도 막힘', () => {
+  const st = (job) => Object.fromEntries(C.ezFlow({ state: 'ok' }, job).map((x) => [x.id, x.state]));
+  const preview = { orders: 10, splitPacks: 3, blockers: ['모르는 상품 3건', '처음 보는 구성 4건'] };
+  assert.deepStrictEqual([st({ preview }).ez_preview, st({ preview }).ez_split], ['todo', 'wait']);
+  assert.deepStrictEqual([st({ preview, ack: { at: 1 } }).ez_preview, st({ preview, ack: { at: 1 } }).ez_split], ['done', 'todo']);
+  const hard = { orders: 10, splitPacks: 3, blockers: ['이지어드민에는 2줄이 있는데 1줄만 읽혔습니다', '모르는 상품 1건'] };
+  assert.strictEqual(st({ preview: hard, ack: { at: 1 } }).ez_split, 'wait');
+  assert.deepStrictEqual(C.ezOpenBlockers({ preview: hard, ack: { at: 1 } }), [hard.blockers[0]]);
+  const now = 1000 * MIN, rooms = (job) => C.officeRooms({ runner: { ts: now }, sites: { ezadmin: { state: 'ok' }, ebut: { state: 'ok' } }, jobs: { a: { state: 'stopped', at: now, ...job } }, now }).find((x) => x.id === 'ezadmin').mode;
+  assert.strictEqual(rooms({ preview }), 'alert');
+  assert.strictEqual(rooms({ preview, ack: { at: 1 } }), 'idle');
+  assert.strictEqual(rooms({}), 'alert');
+});
+
 test('jobKey 와 회차', () => {
   assert.strictEqual(C.jobKey('check', '2026-11-01', 2), 'check:2026-11-01:2');
   assert.strictEqual(C.nextRound({}, 'check', '2026-11-01'), 1);
