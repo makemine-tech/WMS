@@ -34,7 +34,7 @@ function setup(opts) {
   const mensoPreview = opts.mensoPreview || (async (range) => { asked.push(range); return { rows: 10, campaigns: [{ need: 2 }], blockers: [] }; });
   const matchRead = opts.matchRead || (async () => ({ items: [{ name: 'A' }], masters: [], history: {} }));
   const matchSearch = async (text) => [{ code: '1', name: text }];
-  const runner = createRunner({ store, openSite, ezPreview, mensoPreview, matchRead, matchSearch, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
+  const runner = createRunner({ store, openSite, ezPreview, mensoPreview, matchRead, matchSearch, relogin: opts.relogin, now: () => opts.now || NOW, runnerId: 'me', info: { ext: '1.0.0' } });
   return { runner, db, opened, store };
 }
 const start = (at) => ({ type: 'start', at: at === undefined ? NOW : at, by: 'x' });
@@ -153,6 +153,62 @@ test('매칭 자료: 이벗 로그인이 풀리거나 읽기 실패면 이유를
   t = setup({ matchRead: async () => { throw new Error('시간 초과'); } });
   await t.runner.handleCommand('c1', { type: 'match_read', at: NOW });
   assert.match(t.db.commands.c1.why, /시간 초과/);
+});
+
+/* 이벗이 처음엔 풀려 있고 재로그인 뒤 살아나는 가짜 */
+function flaky(afterLogin) {
+  let logged = false;
+  return {
+    logged: () => { logged = true; },
+    open: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login: logged || !afterLogin ? logged : false }),
+  };
+}
+
+test('재로그인: 성공하면 로그인 유지로 표시', async () => {
+  const f = flaky(true); let calls = 0;
+  const { runner, db } = setup({ openSite: f.open, relogin: async () => { calls++; f.logged(); return { tried: true }; } });
+  await runner.keepAlive();
+  assert.strictEqual(calls, 1);
+  assert.strictEqual(db.sites.ebut.state, 'ok');
+  assert.match(db.sites.ebut.msg, /자동 재로그인/);
+});
+
+test('재로그인: 실패하면 한 번만 시도하고 이유를 남김', async () => {
+  let calls = 0;
+  const { runner, db } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login: false }), relogin: async () => { calls++; return { tried: false, why: '비밀번호가 채워지지 않음' }; } });
+  await runner.keepAlive();
+  await runner.keepAlive();
+  await runner.handleCommand('c1', menso());
+  assert.strictEqual(calls, 1);
+  assert.strictEqual(db.sites.ebut.state, 'login');
+  assert.match(db.sites.ebut.msg, /비밀번호가 채워지지 않음/);
+});
+
+test('재로그인: 로그인이 돌아왔다가 다시 끊기면 다시 한 번 시도', async () => {
+  let login = false, calls = 0;
+  const { runner } = setup({ openSite: async (s) => (s.id === 'ezadmin' ? { page: 'DG00' } : { login }), relogin: async () => { calls++; return { tried: false }; } });
+  await runner.keepAlive();
+  login = true; await runner.keepAlive();
+  login = false; await runner.keepAlive();
+  assert.strictEqual(calls, 2);
+});
+
+test('재로그인 오류나 사이트 오류로 멈추지 않음', async () => {
+  const { runner, db } = setup({ openSite: async (s) => { if (s.id === 'ezadmin') throw new Error('탭 안 열림'); return { login: false }; }, relogin: async () => { throw new Error('화면 없음'); } });
+  await runner.keepAlive();
+  assert.strictEqual(db.sites.ezadmin.state, 'error');
+  assert.match(db.sites.ebut.msg, /화면 없음/);
+});
+
+test('로그인 유지: 작업 중이나 멈춤이면 건너뜀', async () => {
+  let t = setup({ jobs: { a: { state: 'running' } } });
+  assert.strictEqual(await t.runner.keepAlive(), false);
+  assert.deepStrictEqual(t.opened, []);
+  t = setup({ control: { pause: true } });
+  assert.strictEqual(await t.runner.keepAlive(), false);
+  t = setup();
+  assert.strictEqual(await t.runner.keepAlive(), true);
+  assert.deepStrictEqual(t.opened, ['ezadmin', 'ebut']);
 });
 
 test('expired command: 만료 표시만 하고 실행 안 함', async () => {

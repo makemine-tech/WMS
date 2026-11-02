@@ -23,7 +23,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-01d';
+  var VER = '2026-11-02a';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -301,6 +301,21 @@
     });
   }
 
+  /* ── 자동 재로그인 ── 크롬이 비밀번호를 채워 둔 경우에만 로그인 버튼을 한 번 누름. 값을 읽어 보내거나 저장하지 않음.
+     이 페이지 비밀번호 칸에는 HTML 기본값이 있어 그 값이면 채워진 것으로 치지 않음 */
+  function cmdRelogin(){
+    var pw = document.querySelector('input[type=password]');
+    if (!pw) return { tried: false, why: '로그인 칸을 찾지 못함' };
+    if (!pw.value || pw.value === pw.defaultValue) return { tried: false, why: '저장된 비밀번호가 채워지지 않음' };
+    var form = pw.form || document, id = form.querySelector('input[type=text]');
+    if (!id || !id.value) return { tried: false, why: '아이디가 채워지지 않음' };
+    if (form.querySelector('input[name*=captcha i], input[name*=otp i]')) return { tried: false, why: '추가 인증이 필요함' };
+    var btn = form.querySelector('button[type=submit]');
+    if (!btn) return { tried: false, why: '로그인 버튼을 찾지 못함' };
+    setTimeout(function(){ btn.click(); }, 300);
+    return { tried: true };
+  }
+
   /* ── 매칭 화면 자료 읽기 (AI 물류비서, 저장 없음) ── 미매칭 주문 줄 + 마스터 상품 + 비슷한 과거 매칭 */
   function masterSearch(cust, text){
     var q = new URLSearchParams({ GBN: '1', SEARCH_VALUE: text, GBN2: '', SEARCH_VALUE_OPT: '', SEARCH_VALUE_OPT2: '', CUST_CODE: String(cust), ORDER_TYPE: '', BOPTCODE_TRUE: '', BOPTCODE_NAME_MULTI: '', autogbn: '1', ORDLIST_CUST: '', ORDLIST_MAT: '', rows: '1000', page: '1', sidx: 'basic_name', sord: 'asc', _search: 'false', nd: String(Date.now()) });
@@ -355,12 +370,12 @@
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
-    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : null;
+    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
     /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
     if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
-    busy++; if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
+    busy++; if (m.cmd === 'relogin') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
       if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');

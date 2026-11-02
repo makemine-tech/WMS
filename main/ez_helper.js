@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-10-31d';
+  var VER = '2026-11-02a';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -391,7 +391,22 @@
   function cmdPrintEnd(){ P.started = false; return { ok: true }; }
   function cmdPrintClose(){ if (P.started) throw new Error('출력이 진행 중입니다'); pGone(); return { ok: true }; }
 
-  var CMDS = { ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
+  /* 자동 재로그인: 크롬이 비밀번호를 채워 둔 경우에만 로그인 버튼을 한 번 누름. 값을 읽어 보내거나 저장하지 않음.
+     빈 칸으로 누르면 이지어드민이 alert 를 띄워 무인 탭이 멈추므로 먼저 확인 */
+  function cmdRelogin(){
+    var pw = document.getElementById('login-pwd'), id = document.getElementById('login-id'), dom = document.getElementById('login-domain');
+    if (!pw || !id || !dom) return { tried: false, why: '로그인 칸을 찾지 못함' };
+    if (!pw.value || pw.value === pw.defaultValue) return { tried: false, why: '저장된 비밀번호가 채워지지 않음' };
+    if (!id.value || !dom.value || dom.value === '도메인') return { tried: false, why: '아이디나 도메인이 채워지지 않음' };
+    var cap = document.getElementById('captchaCode');
+    if (cap && window.getComputedStyle(cap).display !== 'none' && cap.offsetParent !== null) return { tried: false, why: '보안문자가 필요함' };
+    var btn = document.querySelector('.login-btn');
+    if (!btn) return { tried: false, why: '로그인 버튼을 찾지 못함' };
+    setTimeout(function(){ btn.click(); }, 300);
+    return { tried: true };
+  }
+
+  var CMDS = { relogin: cmdRelogin, ping: function(){ return { ver: VER, page: isDG00() ? 'DG00' : '' }; }, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
                printPrep: cmdPrintPrep, printGo: cmdPrintGo, printStatus: cmdPrintStatus, printEnd: cmdPrintEnd, printClose: cmdPrintClose };
   var SAYS = { search: '곡물도감 검색 중… (이지어드민 화면이 잠깐 바뀝니다)', read: '주문 줄 읽는 중…', fill: '분할 채우는 중… (저장 안 함)', reset: '되돌리는 중…', commit: '일괄합포제외 실행 중…',
                printPrep: '송장출력 준비 중… (출력은 아직 안 함)', printGo: '송장출력 실행 중…' };
@@ -423,7 +438,7 @@
     else say('⚠️ 팝업이 막혔습니다 — 주소창 오른쪽에서 팝업 허용 후 다시 눌러 주세요');
   }
   function stop(){ pGone(); window.removeEventListener('message', onMsg); box.remove(); }
-  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
+  window.__mkwEzHelper = { hello: hello, ver: VER, stop: stop, relogin: cmdRelogin, read: cmdRead, search: cmdSearch, fill: cmdFill, reset: cmdReset, commit: cmdCommit,
                            printAsk: printAsk, printRowProblems: pRowProblems, printPrep: cmdPrintPrep, printGo: cmdPrintGo, printStatus: cmdPrintStatus };
   hello();
 })();

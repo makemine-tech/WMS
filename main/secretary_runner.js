@@ -4,6 +4,7 @@
    명령을 받아 정해진 작업만 한다. Firebase 와 탭은 deps 로 받는다.
      deps.store    claimRunner·getRunner·claimCommand·setCommand·getJobs·setJob·getControl·setSite
      deps.openSite 사이트 탭을 열어 도우미 ping 응답을 돌려줌. 안 되면 throw
+     deps.relogin  로그인 화면에서 크롬이 채운 값으로 로그인 버튼을 한 번 누름. { tried, why }. 비밀번호는 다루지 않음
      deps.ezPreview({ from, to }) 곡물도감 검색 후 secretary_ez.preview 결과를 돌려줌
    지금 작업은 연결·로그인 점검 + 읽기 전용 미리 보기(ez_daily A 단계). 송장·합포를 저장하는 경로가 없다.
 ============================================================ */
@@ -28,22 +29,55 @@
       return true;
     }
 
+    async function readSite(site){
+      try {
+        var reply = await deps.openSite(site), r = C.siteState(site.id, reply);
+        r.ver = (reply && reply.ver) || '';
+        return r;
+      } catch (e) {
+        return { state: 'error', msg: String((e && e.message) || e), ver: '' };
+      }
+    }
+    /* 로그인이 풀렸으면 재로그인을 한 번만 시도. 실패하면 로그인이 돌아올 때까지 다시 시도하지 않음(계정 잠김 방지) */
+    var triedLogin = {}, whyLogin = {};
+    async function checkOne(site){
+      var r = await readSite(site);
+      if (r.state === 'ok') { triedLogin[site.id] = false; whyLogin[site.id] = ''; }
+      if (r.state === 'login' && deps.relogin && !triedLogin[site.id]) {
+        triedLogin[site.id] = true;
+        var tried = null;
+        try { tried = await deps.relogin(site); } catch (e) { tried = { tried: false, why: String((e && e.message) || e) }; }
+        whyLogin[site.id] = (tried && tried.why) || (tried && tried.tried ? '자동 재로그인 실패' : '');
+        if (tried && tried.tried) {
+          r = await readSite(site);
+          if (r.state === 'ok') { triedLogin[site.id] = false; whyLogin[site.id] = ''; r.msg = '로그인 유지 (자동 재로그인)'; }
+        }
+      }
+      if (r.state === 'login' && whyLogin[site.id]) r.msg = '로그인이 필요합니다 (' + whyLogin[site.id] + ')';
+      r.checkedAt = deps.now();
+      await store.setSite(site.id, r);
+      return r;
+    }
     async function checkSites(){
       var results = [];
       for (var site of C.SITES) {
-        var r;
-        try {
-          var reply = await deps.openSite(site);
-          r = C.siteState(site.id, reply);
-          r.ver = (reply && reply.ver) || '';
-        } catch (e) {
-          r = { state: 'error', msg: String((e && e.message) || e), ver: '' };
-        }
-        r.checkedAt = deps.now();
-        await store.setSite(site.id, r);
+        var r = await checkOne(site);
         results.push({ id: site.id, name: site.name, state: r.state, msg: r.msg });
       }
       return results;
+    }
+    /* 로그인 유지: 사이트를 주기적으로 열어 세션을 살리고 끊김을 먼저 찾음. 작업 중이거나 멈춤이면 건너뜀 */
+    function keepAlive(){
+      var run = chain.then(async function(){
+        var control = await store.getControl();
+        if (control && control.pause) return false;
+        var jobs = (await store.getJobs()) || {};
+        if (Object.keys(jobs).some(function(k){ return jobs[k] && jobs[k].state === 'running'; })) return false;
+        await checkSites();
+        return true;
+      });
+      chain = run.catch(function(){});
+      return run;
     }
 
     async function runStart(id, cmd){
@@ -103,11 +137,7 @@
       await store.setJob(key, { state: 'running', recipe: 'menso_read', trigger: 'menso', by: cmd.by || '', at: now, cmd: id, from: range.from, to: range.to });
       try {
         await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
-        var ebut = C.SITES.find(function(s){ return s.id === 'ebut'; }), r;
-        try { var reply = await deps.openSite(ebut); r = C.siteState('ebut', reply); r.ver = (reply && reply.ver) || ''; }
-        catch (e) { r = { state: 'error', msg: String((e && e.message) || e), ver: '' }; }
-        r.checkedAt = deps.now();
-        await store.setSite('ebut', r);
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
         var patch = { state: 'stopped', endedAt: 0, notes: '' };
         if (r.state !== 'ok') patch.notes = '이벗: ' + r.msg;
         else {
@@ -165,7 +195,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

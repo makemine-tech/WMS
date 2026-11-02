@@ -6,6 +6,28 @@ const vm = require('vm');
 const fs = require('fs');
 const SRC = fs.readFileSync(__dirname + '/../../main/ez_helper.js', 'utf8');
 
+test('재로그인: 크롬이 칸을 채운 경우에만 버튼을 한 번 누름', async () => {
+  const run = (pw, id, dom, cap) => {
+    let clicks = 0;
+    const el = (value) => ({ value, defaultValue: '', style: {}, offsetParent: {} });
+    const extra = { 'login-pwd': el(pw), 'login-id': el(id), 'login-domain': el(dom), '.login-btn': { click(){ clicks++; } } };
+    if (cap) extra.captchaCode = el('');
+    const win = fakePage(() => {}, extra);
+    return { r: win.__mkwEzHelper.relogin(), clicks: () => clicks };
+  };
+  const ok = run('채움', 'me', 'ga89');
+  assert.strictEqual(ok.r.tried, true);
+  await new Promise((r) => setTimeout(r, 350));
+  assert.strictEqual(ok.clicks(), 1);
+  for (const [pw, id, dom, cap, why] of [['', 'me', 'ga89', false, /비밀번호/], ['채움', '', 'ga89', false, /아이디/], ['채움', 'me', '도메인', false, /도메인/], ['채움', 'me', 'ga89', true, /보안문자/]]) {
+    const t = run(pw, id, dom, cap);
+    assert.strictEqual(t.r.tried, false);
+    assert.match(t.r.why, why);
+    await new Promise((r) => setTimeout(r, 350));
+    assert.strictEqual(t.clicks(), 0);
+  }
+});
+
 /* post(url, data, cb, dataType) 를 받아 이지어드민 버튼이 하는 일을 흉내 내는 가짜 화면 */
 function fakePage(onClick, extra){
   const el = () => ({ style: {}, set innerHTML(v){}, remove(){}, appendChild(){}, querySelector(){ return null; } });

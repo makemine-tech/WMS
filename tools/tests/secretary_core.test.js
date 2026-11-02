@@ -22,7 +22,7 @@ test('맨소래담 작업은 이벗 방만 바꾸고, 이지어드민 미리 보
 });
 
 test('도우미 명령은 읽기만 통과', () => {
-  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch']);
+  assert.deepStrictEqual(C.HELPER_CMDS, ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin']);
   C.HELPER_CMDS.forEach((c) => C.assertSafeCmd(c));
   for (const bad of ['commit', 'printGo', 'printPrep', 'printStatus', 'printEnd', 'printClose', 'fill', 'reset', 'save', 'find', '', undefined, 'constructor']) {
     assert.throws(() => C.assertSafeCmd(bad), /허용되지 않은 명령/, String(bad));
