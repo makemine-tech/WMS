@@ -112,7 +112,7 @@ html.remote { --bg:#fff; --surface:#fff; --surface2:#f3f4f6; --border:#cfd3da; -
 .remote .wz-next.go { background:var(--accent); color:#fff; box-shadow:none; }
 .remote .wz-next.go:hover { background:#096640; }
 .remote .unified-hdr,.remote .ez-flow { display:none !important; }
-.remote #nextUpload,.remote .local-only{display:none}
+.remote #printCard,.remote #nextUpload,.remote .local-only{display:none}
 .remote #nextUpload.show{display:block}
 .pr-row{margin-top:.55rem}
 .pr-top{display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;margin-bottom:.2rem}
@@ -669,12 +669,7 @@ function remoteDone(c, v, allOk){
   if (c.jobKey) root.child('jobs/' + c.jobKey).update({ state: allOk ? 'done' : 'stopped', notes: allOk ? '' : '안 나뉜 묶음 ' + v.notApplied.length + '건 · 나뉜 묶음 ' + v.ok.length + '건', result: { ok: v.ok.length, notAppliedN: v.notApplied.length, goneN: v.gone.length, lock: c.lock == null ? -1 : c.lock } });
   if (!allOk) return;
   root.child('commands').push({ type: 'start', from: $('ezFrom').value, by: me ? me.email || '' : '', at: firebase.database.ServerValue.TIMESTAMP });
-  var next = $('nextUpload');
-  next.classList.add('show', 'go');
-  next.href = '#';
-  next.onclick = function(){ try { $('printCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(e){} return false; };
-  next.innerHTML = '✔ 합포제외 완료 · 다음 : 송장출력 →<small>나눌 묶음이 남았으면 불러오기로 이어서 하면 됩니다</small>';
-  try { next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
+  $('fillResult').insertAdjacentHTML('beforeend', '<div style="margin-top:.5rem">송장출력은 합포 분할 화면에서 직접 해 주세요.</div>');
 }
 /* ── ③ 송장출력 ──
    체크한 공급처를 차례로: 전부 미리 검색해 건수 확인 → 한 번 묻고 → 공급처마다 준비·출력 → 이지에이전트 「print_end」 가 와야 다음 공급처.
@@ -875,7 +870,6 @@ function doReset(){
 function watchRemote(){
   $('subTitle').textContent = '합포 분할 계산 → 상시 컴퓨터가 채우기 · 실행';
   LOAD_ERR.TIMEOUT = '상시 컴퓨터가 제때 답하지 않았습니다 — 저장 단계였다면 저장됐을 수 있으니 불러오기로 확인해 주세요';
-  if (new URLSearchParams(location.search).get('go') === 'print') { try { $('printCard').scrollIntoView({ block: 'start' }); } catch(e){} }
   var run = null, site = null;
   function paint(){
     var on = !!run && Date.now() - (run.ts || 0) < 180000;

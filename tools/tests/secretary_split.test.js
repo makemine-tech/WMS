@@ -179,6 +179,15 @@ test('흐름도: 저장 중 칸, 저장 명령은 읽기 명령 목록에 없음
   assert.strictEqual(room.find((x) => x.id === 'ebut').mode, 'idle');
 });
 
+test('송장출력 요청은 거절 (AI 물류비서에서 뺌)', async () => {
+  const s = setup();
+  for (const c of C.RELAY_PRINT) assert.match((await s.call(c, {})).err, /허용되지 않은 요청/);
+  assert.deepStrictEqual(s.log, []);
+});
+
+/* 아래는 다시 켤 때를 위해 남긴 출력 경로 시험 */
+test('(시작) 코드 안의 송장출력 경로를 잠시 켬', () => { C.RELAY_CMDS.push(...C.RELAY_PRINT); });
+
 const printFlow = async (s) => {
   await s.call('printPrep', { supplier: '곡물도감', from: '2026-10-26', to: '2026-11-02' });
   return s.call('printGo', { confirm: true, token: 'T', count: 3 });
@@ -258,14 +267,6 @@ test('헤드비서가 다시 켜지면 출력 중으로 남은 기록을 정리'
   assert.strictEqual(s.db.jobs['ez_print:2026-11-02:1'].state, 'interrupted');
 });
 
-test('흐름도: 출력 중 칸', () => {
-  const ok = { state: 'ok' }, job = { preview: { orders: 5, splitPacks: 0, blockers: [] } };
-  const st = (p) => C.ezFlow(ok, job, null, p).find((x) => x.id === 'ez_print').state;
-  assert.strictEqual(st({ state: 'printing' }), 'run');
-  assert.strictEqual(st({ state: 'done' }), 'todo');
-  assert.strictEqual(st(null), 'todo');
-});
-
 test('새 판 반영: 불러오기만 했으면 막지 않고, 채운 내용·출력 준비·출력 중이면 미룸', async () => {
   const s = setup();
   await s.call('search');
@@ -280,4 +281,9 @@ test('새 판 반영: 불러오기만 했으면 막지 않고, 채운 내용·�
   assert.strictEqual(t.runner.mustStay(), false);
   await printFlow(t);
   assert.strictEqual(t.runner.mustStay(), true);
+});
+
+test('(끝) 코드 안의 송장출력 경로를 다시 끔', () => {
+  C.RELAY_CMDS.length = 4;
+  assert.deepStrictEqual(C.RELAY_CMDS, ['search', 'fill', 'reset', 'commit']);
 });
