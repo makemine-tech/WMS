@@ -237,6 +237,17 @@
     if (!r){ warn(order, 'new'); return null; }
     return withOri(order, r);
   }
+  /* 사람이 꼭 봐야 할 주문만: 60박스를 넘는 송장, 모르는 상품, 수량 없는 주문. 나머지는 작업자가 육안으로 거름 (대표님 2026-11-02) */
+  function problems(orders, byPack, boxes){
+    var out = [];
+    orders.forEach(function(o){
+      if (o.flags.indexOf('unknown') >= 0) out.push({ why: 'unknown', order: o });
+      if (!o.lines.length) out.push({ why: 'empty', order: o });
+      var invs = byPack[o.pack] || [];
+      if (invs.some(function(inv){ return kanOf(inv) > 4 || parseInt(boxSize(inv, boxes), 10) > 60; })) out.push({ why: 'over60', order: o });
+    });
+    return out;
+  }
   function planExisting(orders, ctx){
     var byPack = {};
     orders.forEach(function(o){
@@ -292,8 +303,9 @@
         (kept === 1 ? v.ok : v.gone).push(pk.pack_seq);
         return;
       }
-      var good = pk.lines.every(function(l){ return (now[l.product_seq] || 0) === keepOf(l); });
-      (good ? v.ok : v.notApplied).push(pk.pack_seq);
+      /* 원래 수량 그대로일 때만 「안 나뉨」. 수량이 바뀌었으면 박스 1 몫과 달라도 나뉜 것 (이지어드민이 다른 박스를 원래 송장으로 쓴 경우) */
+      var same = pk.lines.every(function(l){ return (now[l.product_seq] || 0) === Number(l.qty); });
+      (same ? v.notApplied : v.ok).push(pk.pack_seq);
     });
     return v;
   }
@@ -313,7 +325,7 @@
     return Math.min(99, Math.round(Math.min(count, st.done * 30) / count * 100));
   }
 
-  var api = { printPct: printPct, printState: printState, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  var api = { printPct: printPct, printState: printState, problems: problems, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;

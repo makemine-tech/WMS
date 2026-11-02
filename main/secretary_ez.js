@@ -37,15 +37,24 @@
       .map(function(n){ return { prd: n, orders: unk[n] }; });
 
     if (rows.length !== Number(read.total)) blockers.push('이지어드민에는 ' + read.total + '줄이 있는데 ' + rows.length + '줄만 읽혔습니다');
+    /* 처음 보는 구성은 60박스만 안 넘으면 막지 않음 (대표님 2026-11-02) */
+    var over = {}, overN = 0;
+    Z.problems(orders, plan.byPack, ctx.boxes).forEach(function(x){
+      if (x.why !== 'over60') return;
+      overN++;
+      var c = compOf(x.order);
+      over[c] = (over[c] || 0) + 1;
+    });
+    var overComps = Object.keys(over).sort(function(a, b){ return over[b] - over[a]; }).slice(0, NEW_LIST).map(function(c){ return { comp: c, orders: over[c] }; });
     if (flags.unknown) blockers.push('모르는 상품 ' + flags.unknown + '건');
-    if (unseen) blockers.push('처음 보는 구성 ' + unseen + '건');
+    if (overN) blockers.push('60박스 넘침 ' + overN + '건');
     if (orders.length > MAX_ORDERS) blockers.push('주문 ' + orders.length + '건으로 상한 ' + MAX_ORDERS.toLocaleString('en-US') + '건을 넘었습니다');
 
     return {
       rows: rows.length, orders: orders.length, invoices: sm.total, single: sm.single, multi: sm.multi,
       splitPacks: Z.fillPayload(orders, plan.byPack).length,
       sizes: Object.keys(sm.bySize).sort().map(function(s){ return { size: s, single: sm.bySize[s].single, multi: sm.bySize[s].multi }; }),
-      flags: flags, newComps: newComps, unknownProds: unknownProds, unseen: unseen, blockers: blockers
+      flags: flags, newComps: newComps, overComps: overComps, unknownProds: unknownProds, unseen: unseen, blockers: blockers
     };
   }
 

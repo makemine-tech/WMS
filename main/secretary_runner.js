@@ -167,8 +167,9 @@
       var now = deps.now(), date = C.kstDate(now), key = C.jobKey('ez_split', date, C.nextRound(jobs, 'ez_split', date));
       await store.setJob(key, { state: 'running', recipe: 'ez_split', trigger: 'relay', by: call.by || '', at: now, step: '일괄합포제외 저장 중' });
       try {
-        var c = await deps.ezWrite('commit', args), bad = c.error != null && String(c.error) !== '0', failN = (c.fail_list || []).length;
-        await store.setJob(key, { state: bad || failN ? 'stopped' : 'done', step: '', endedAt: deps.now(), notes: bad || failN ? '이지어드민 응답 ' + c.error + ' · 실패 목록 ' + failN + '건' : '', result: { error: bad ? String(c.error) : '', failN: failN, lock: c.lock == null ? -1 : c.lock } });
+        /* fail_list 는 이지어드민이 나누지 않은 묶음 전부(애초에 채우지 않은 주문 포함)라 그 자체로 오류가 아님. 실제 반영은 화면이 다시 검색해 대조함 */
+        var c = await deps.ezWrite('commit', args), bad = c.error != null && String(c.error) !== '0';
+        await store.setJob(key, { state: bad ? 'stopped' : 'done', step: '', endedAt: deps.now(), notes: bad ? '이지어드민 응답 ' + c.error : '', result: { error: bad ? String(c.error) : '', undivided: (c.fail_list || []).length, lock: c.lock == null ? -1 : c.lock } });
         c.jobKey = key;
         return c;
       } catch (e) {

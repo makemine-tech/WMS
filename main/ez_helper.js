@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-02b';
+  var VER = '2026-11-02c';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -197,7 +197,7 @@
         }
         return post.apply($, arguments);
       };
-      t = setTimeout(function(){ restore(); rej(new Error('TIMEOUT')); }, 180000);
+      t = setTimeout(function(){ restore(); rej(new Error('TIMEOUT')); }, 600000);   /* 163건에 3분 넘게 걸린 실제 사례 (2026-11-02) */
       try { btn.click(); } catch(e){ restore(); rej(e); }
     });
   }

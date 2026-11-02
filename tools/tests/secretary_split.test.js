@@ -139,11 +139,28 @@ test('같은 요청을 두 번 받아도 한 번만 처리', async () => {
 });
 
 test('확인은 같은 구성일 때만 이어 감', () => {
-  const ack = { at: 1 }, prev = { ack, preview: { unseen: 2, flags: { unknown: 1 }, newComps: [{ comp: 'A' }, { comp: 'B' }], unknownProds: [{ prd: 'X' }] } };
-  assert.strictEqual(C.ezAckCarry(prev, { unseen: 1, flags: { unknown: 1 }, newComps: [{ comp: 'A' }], unknownProds: [{ prd: 'X' }] }), ack);
-  assert.strictEqual(C.ezAckCarry(prev, { unseen: 1, flags: { unknown: 0 }, newComps: [{ comp: 'C' }], unknownProds: [] }), null);
-  assert.strictEqual(C.ezAckCarry(prev, { unseen: 0, flags: { unknown: 1 }, newComps: [], unknownProds: [{ prd: 'Y' }] }), null);
-  assert.strictEqual(C.ezAckCarry({ preview: prev.preview }, { unseen: 0, newComps: [] }), null);
+  const ack = { at: 1 }, prev = { ack, preview: { flags: { unknown: 1 }, overComps: [{ comp: 'A' }, { comp: 'B' }], unknownProds: [{ prd: 'X' }] } };
+  assert.strictEqual(C.ezAckCarry(prev, { flags: { unknown: 1 }, overComps: [{ comp: 'A' }], unknownProds: [{ prd: 'X' }] }), ack);
+  assert.strictEqual(C.ezAckCarry(prev, { flags: { unknown: 0 }, overComps: [{ comp: 'C' }], unknownProds: [] }), null);
+  assert.strictEqual(C.ezAckCarry(prev, { flags: { unknown: 1 }, overComps: [], unknownProds: [{ prd: 'Y' }] }), null);
+  assert.strictEqual(C.ezAckCarry({ preview: prev.preview }, { overComps: [] }), null);
+});
+
+test('미분할 목록이 있어도 오류가 아니면 저장 기록은 완료, 건수만 남김', async () => {
+  const { call, db } = setup({ commit: { error: 0, fail_list: ['1', '2', '3'], lock: 1 } });
+  await call('search');
+  await call('fill');
+  const c = await call('commit', { confirm: true });
+  assert.strictEqual(db.jobs[c.data.jobKey].state, 'done');
+  assert.strictEqual(db.jobs[c.data.jobKey].result.undivided, 3);
+});
+
+test('이지어드민이 오류로 답하면 저장 기록은 멈춤', async () => {
+  const { call, db } = setup({ commit: { error: 9, fail_list: [], lock: 1 } });
+  await call('search');
+  await call('fill');
+  const c = await call('commit', { confirm: true });
+  assert.strictEqual(db.jobs[c.data.jobKey].state, 'stopped');
 });
 
 test('흐름도: 저장 중 칸, 저장 명령은 읽기 명령 목록에 없음', () => {

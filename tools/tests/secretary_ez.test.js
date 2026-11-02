@@ -57,12 +57,25 @@ test('옵션·이미 나뉜 주문은 그대로 두고 건수만 알림', () => 
   assert.strictEqual(p.splitPacks, 0);
 });
 
-test('피킹이지 기록이 없는 구성은 처음 보는 구성으로 막음', () => {
+test('피킹이지 기록이 없는 구성은 60박스를 안 넘으면 막지 않고 건수만 남김', () => {
   const p = go([row(1, 1), row(2, 1)]);
-  assert.strictEqual(p.newComps.length, 1);
+  assert.strictEqual(p.unseen, 2);
   assert.strictEqual(p.newComps[0].orders, 2);
-  assert.match(p.newComps[0].comp, /서리태/);
-  assert.match(p.blockers.join(), /처음 보는 구성 2건/);
+  assert.deepStrictEqual(p.blockers, []);
+});
+
+test('60박스를 넘는 송장은 막음 (나눌 수 없는 주문)', () => {
+  const p = go([row(1, 2, { name: '서리태 가득콩물 45입', options: '색상' })]);
+  assert.match(p.blockers.join(), /60박스 넘침 1건/);
+  assert.strictEqual(p.overComps[0].orders, 1);
+});
+
+test('이지어드민 표에서 수량이 바뀌었으면 나뉜 것, 그대로면 안 나뉜 것', () => {
+  const pay = [{ pack_seq: 'A', lines: [{ product_seq: '1', qty: 2, boxes: [{ no: 1, qty: 1 }, { no: 2, qty: 1 }] }, { product_seq: '2', qty: 1, boxes: [{ no: 2, qty: 1 }] }] },
+               { pack_seq: 'B', lines: [{ product_seq: '3', qty: 2, boxes: [{ no: 1, qty: 1 }, { no: 2, qty: 1 }] }, { product_seq: '4', qty: 1, boxes: [{ no: 2, qty: 1 }] }] }];
+  const v = Z.verifyAfter(pay, [{ pack_seq: 'A', product_seq: '2', qty: 1 }, { pack_seq: 'B', product_seq: '3', qty: 2 }, { pack_seq: 'B', product_seq: '4', qty: 1 }]);
+  assert.deepStrictEqual(v.ok, ['A']);
+  assert.deepStrictEqual(v.notApplied, ['B']);
 });
 
 test('기록이 있는 구성은 막지 않고, 건수와 박스별 수를 냄', () => {

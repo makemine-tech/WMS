@@ -152,9 +152,9 @@ test('ezFlow: 읽은 자료대로 차례가 넘어감', () => {
   assert.strictEqual(C.ezFlow(ok, { preview: { orders: 10, splitPacks: 3 } }).find((x) => x.id === 'ez_split').count, 3);
 });
 
-test('ezFlow: 모르는 상품·처음 보는 구성은 확인하면 넘어가고, 줄 수 불일치는 확인해도 막힘', () => {
+test('ezFlow: 모르는 상품·60박스 넘침은 확인하면 넘어가고, 줄 수 불일치는 확인해도 막힘', () => {
   const st = (job) => Object.fromEntries(C.ezFlow({ state: 'ok' }, job).map((x) => [x.id, x.state]));
-  const preview = { orders: 10, splitPacks: 3, blockers: ['모르는 상품 3건', '처음 보는 구성 4건'] };
+  const preview = { orders: 10, splitPacks: 3, blockers: ['모르는 상품 3건', '60박스 넘침 4건'] };
   assert.deepStrictEqual([st({ preview }).ez_preview, st({ preview }).ez_split], ['todo', 'wait']);
   assert.deepStrictEqual([st({ preview, ack: { at: 1 } }).ez_preview, st({ preview, ack: { at: 1 } }).ez_split], ['done', 'todo']);
   const hard = { orders: 10, splitPacks: 3, blockers: ['이지어드민에는 2줄이 있는데 1줄만 읽혔습니다', '모르는 상품 1건'] };

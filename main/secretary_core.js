@@ -18,7 +18,7 @@
   var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
-  var PAGE_VER = '2026-11-02e';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-02f';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -119,9 +119,10 @@
   }
 
   /* 사람이 보고 넘길 수 있는 멈춤. 줄 수 불일치·건수 상한은 확인으로 넘기지 못함 */
+  var EZ_ACKABLE = /^(모르는 상품|60박스 넘침)/;
   function ezOpenBlockers(job){
     var list = (job && job.preview && job.preview.blockers) || [];
-    return job && job.ack ? list.filter(function(b){ return !/^(모르는 상품|처음 보는 구성)/.test(b); }) : list;
+    return job && job.ack ? list.filter(function(b){ return !EZ_ACKABLE.test(b); }) : list;
   }
   /* 이지어드민 흐름도. 칸 상태는 시동 때 읽은 곡물도감 자료로만 판단: 나눌 묶음이 있으면 합포제외 차례, 없고 주문이 있으면 송장출력 차례 */
   function ezFlow(site, job, split){
@@ -137,17 +138,17 @@
     ];
   }
 
-  /* 사람이 확인한 모르는 상품·처음 보는 구성이 그대로면 다음 읽기에도 확인을 이어 감 */
+  /* 사람이 확인한 모르는 상품·60박스 넘침이 그대로면 다음 읽기에도 확인을 이어 감 */
   function ezAckCarry(prev, p){
     var a = prev && prev.preview;
     if (!prev || !prev.ack || !a) return null;
     var has = function(list, key, v){ return (list || []).some(function(x){ return x[key] === v; }); };
-    var comps = (p.newComps || []).every(function(c){ return has(a.newComps, 'comp', c.comp); });
+    var comps = (p.overComps || []).every(function(c){ return has(a.overComps, 'comp', c.comp); });
     var prods = (p.unknownProds || []).every(function(c){ return has(a.unknownProds, 'prd', c.prd); });
-    return comps && prods && (p.unseen || 0) <= (a.unseen || 0) && ((p.flags || {}).unknown || 0) <= ((a.flags || {}).unknown || 0) ? prev.ack : null;
+    return comps && prods && ((p.flags || {}).unknown || 0) <= ((a.flags || {}).unknown || 0) ? prev.ack : null;
   }
 
-  var API = { ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;
