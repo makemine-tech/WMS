@@ -23,7 +23,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-03b';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-03c';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -130,7 +130,7 @@
     var notes = Number(s.noteCount) || 0;
     return [
       { id: 'ceo', name: '대표실', mode: notes ? 'alert' : 'idle', say: notes ? '확인할 일 ' + notes + '건' : '보고 없음', count: 0 },
-      head, ez, eb
+      head, eb, ez   /* 아래층 왼쪽 이벗, 오른쪽 이지어드민 */
     ];
   }
 

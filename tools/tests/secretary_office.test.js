@@ -129,3 +129,30 @@ test('로그인 말풍선: 로그인이 풀린 방에만 뜨고 다른 문제에
   s2.run(0.5);
   assert.ok(!s2.painted().some((x) => x.c === '#3f7fd0' && x.w === 12 && x.h === 12), '로그인이 아니면 안 뜸');
 });
+
+test('창밖: 시간대와 날씨 코드 구분', () => {
+  const S = setup().win.SECRETARY_OFFICE;
+  assert.deepStrictEqual([4, 5, 7, 11, 17, 20, 23].map(S.skyPhase), ['night', 'dawn', 'morning', 'day', 'evening', 'night', 'night']);
+  assert.deepStrictEqual([0, 1, 2, 3, 45, 51, 61, 80, 71, 85, 95, 999].map(S.skyKind), ['clear', 'clear', 'partly', 'cloud', 'fog', 'rain', 'rain', 'rain', 'snow', 'snow', 'storm', 'clear']);
+});
+
+test('창밖: 시간대·날씨 조합마다 오류 없이 창 안에만 그림', () => {
+  const s = setup();
+  s.office.update(s.rooms('idle'));
+  for (const hour of [3, 6, 9, 13, 18, 22]) for (const code of [0, 2, 3, 45, 61, 71, 95]) {
+    s.office.setSky(code, hour);
+    s.run(0.2);
+    const bad = s.painted().filter((x) => x.w < 0 || x.h < 0 || Number.isNaN(x.x) || x.c === undefined);
+    assert.deepStrictEqual(bad, [], hour + '시 ' + code);
+  }
+});
+
+test('방 자리: 아래층 왼쪽 이벗, 오른쪽 이지어드민이면 모자 비서 방에도 창이 있음', () => {
+  const s = setup();
+  s.office.update(['ceo', 'head', 'ebut', 'ezadmin'].map((id) => ({ id, name: id, mode: 'idle', say: '', count: 0 })));
+  s.office.setSky(0, 13);
+  s.run(0.2);
+  const frames = s.painted().filter((x) => x.c === '#0e0d10' && x.h === 52 && x.w === 132);
+  assert.strictEqual(frames.length, 1, '이벗 방 창틀');
+  assert.strictEqual(frames[0].x, 16 + 96 - 1, '왼쪽 칸');
+});

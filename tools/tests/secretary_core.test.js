@@ -93,7 +93,7 @@ test('officeRooms: 켜짐·꺼짐·일함·문제가 왼쪽 화면 상태와 같
   const okSites = { ezadmin: { state: 'ok', msg: '' }, ebut: { state: 'ok', msg: '' } };
 
   /* 실제 있는 비서만 방이 있음 */
-  assert.deepStrictEqual(C.officeRooms({ now }).map((x) => x.id), ['ceo', 'head', 'ezadmin', 'ebut']);
+  assert.deepStrictEqual(C.officeRooms({ now }).map((x) => x.id), ['ceo', 'head', 'ebut', 'ezadmin']);
 
   /* 상시 컴퓨터가 꺼지면 대표실 빼고 퇴근 */
   let r = byId(C.officeRooms({ runner: { ts: now - 4 * MIN }, sites: okSites, now }));

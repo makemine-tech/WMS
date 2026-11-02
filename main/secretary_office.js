@@ -50,11 +50,31 @@
   };
 
   /* opts.fps: 사람이 안 보는 상시 컴퓨터는 그리는 횟수를 줄여 부담을 덜음 */
+  /* 창밖: 시간대와 날씨. 날씨 코드는 picktalk 와 같은 Open-Meteo WMO 코드 */
+  function skyPhase(h){ return h < 5 || h >= 20 ? 'night' : h < 7 ? 'dawn' : h < 11 ? 'morning' : h < 17 ? 'day' : 'evening'; }
+  function skyKind(c){
+    if (c === 0 || c === 1) return 'clear';
+    if (c === 2) return 'partly';
+    if (c === 3) return 'cloud';
+    if (c === 45 || c === 48) return 'fog';
+    if ((c >= 71 && c <= 77) || c === 85 || c === 86) return 'snow';
+    if (c >= 95 && c <= 99) return 'storm';
+    if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82)) return 'rain';
+    return 'clear';
+  }
+  var SKY_CLEAR = { dawn: ['#3d4a7a', '#e8a27c'], morning: ['#7fbfe8', '#d8eef8'], day: ['#3f94de', '#a8d6f2'], evening: ['#5a4a86', '#f08a4a'], night: ['#101a3e', '#24417e'] };
+  var SKY_GREY = { dawn: ['#5a6078', '#9a93a0'], morning: ['#8b97a8', '#c3cbd5'], day: ['#7f8b9c', '#b7c0cc'], evening: ['#56566e', '#8a7f86'], night: ['#141a2c', '#2a3044'] };
+  function mix(a, b, f){
+    var p = function(s, i){ return parseInt(s.substr(i, 2), 16); }, out = '#';
+    [1, 3, 5].forEach(function(i){ var v = Math.round(p(a, i) + (p(b, i) - p(a, i)) * f).toString(16); out += v.length < 2 ? '0' + v : v; });
+    return out;
+  }
+
   function mount(sc, opts){
     var minGap = opts && opts.fps ? 1000 / opts.fps : 0;
     var cv = sc.querySelector('canvas'), g = cv.getContext('2d');
     var reduce = root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var P = [], H = 0, T = 0;
+    var P = [], H = 0, T = 0, SKY = { code: 0, hour: null };
 
     function r(x, y, w, h, c){ g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
     /* 부품 목록을 윤곽선 먼저, 색 나중으로 그림 */
@@ -172,15 +192,49 @@
     function stripes(x, feet){
       for (var i = 0; i < 4; i++) { r(x, feet - 32 + i * 8, 22, 4, i % 2 ? '#23262e' : '#f0c23f'); r(x, feet - 28 + i * 8, 22, 4, i % 2 ? '#f0c23f' : '#23262e'); }
     }
-    /* 창밖 야경 */
-    function nightWindow(x, y, w, h){
-      boxed(x, y, w, h, '#24417e');
-      var tall = [10, 24, 14, 30, 18, 26, 12, 22];
+    /* 창밖 */
+    function skyWindow(x, y, w, h, t, seed){
+      var hour = SKY.hour == null ? (new Date(Date.now() + 9 * 3600000)).getUTCHours() : SKY.hour, phase = skyPhase(hour), kind = skyKind(SKY.code);
+      var grey = kind !== 'clear' && kind !== 'partly', pal = (grey ? SKY_GREY : SKY_CLEAR)[phase], dark = phase === 'night' || phase === 'evening' || phase === 'dawn';
+      /* 창 안으로 잘라서 그림 */
+      function c(px, py, pw, ph, col){
+        var l = Math.max(x, px), tp = Math.max(y, py), rt = Math.min(x + w, px + pw), bt = Math.min(y + h, py + ph);
+        if (rt > l && bt > tp) r(l, tp, rt - l, bt - tp, col);
+      }
+      r(x - 1, y - 1, w + 2, h + 2, INK);
+      for (var band = 0; band < 6; band++) c(x, y + band * h / 6, w, h / 6 + 1, mix(pal[0], pal[1], band / 5));
+      if (kind === 'clear' || kind === 'partly') {
+        if (phase === 'night') {
+          for (var st = 0; st < 12; st++) c(x + (st * 37 + seed * 13) % w, y + 4 + (st * 23 + seed) % (h / 2), 2, 2, '#e8ecff');
+          c(x + w * .72, y + 8, 12, 12, '#f4edc9'); c(x + w * .72 + 4, y + 6, 12, 12, pal[0]);
+        } else {
+          var sx = phase === 'day' ? .5 : phase === 'evening' ? .8 : .2, sy = phase === 'day' ? .12 : phase === 'morning' ? .28 : .42, sun = phase === 'evening' ? '#ffb45a' : phase === 'dawn' ? '#ffc98a' : '#ffe680';
+          c(x + w * sx - 6, y + h * sy, 14, 14, sun); c(x + w * sx - 8, y + h * sy + 3, 18, 8, sun); c(x + w * sx - 3, y + h * sy - 2, 8, 18, sun);
+        }
+      }
+      if (kind !== 'clear') {
+        var drift = reduce ? 0 : t * 2, cloud = grey ? mix(pal[0], '#d9dde4', .35) : (phase === 'night' ? '#3a4668' : '#ffffff');
+        for (var cl = 0; cl < (grey ? 4 : 2); cl++) {
+          var cx = x + ((cl * 53 + seed * 17 + drift) % (w + 30)) - 20, cy = y + 4 + cl * 6;
+          c(cx, cy + 3, 30, 7, cloud); c(cx + 6, cy, 16, 4, cloud);
+        }
+      }
+      var tall = [10, 24, 14, 30, 18, 26, 12, 22], bld = dark ? '#1a2c5c' : grey ? '#6a7486' : '#5c6f8f', lit = dark ? '#ffd76b' : '#b8d0e6';
       for (var i = 0, cx = x; cx < x + w - 2; i++) {
         var bw = Math.min(18, x + w - cx), bh = tall[i % 8] + h / 3;
-        r(cx, y + h - bh, bw - 2, bh, '#1a2c5c');
-        for (var a = 3; a < bw - 4; a += 5) for (var b = 4; b < bh - 3; b += 7) if ((a * 7 + b * 3 + i) % 4 === 0) r(cx + a, y + h - bh + b, 2, 3, '#ffd76b');
+        r(cx, y + h - bh, bw - 2, bh, bld);
+        for (var a = 3; a < bw - 4; a += 5) for (var b = 4; b < bh - 3; b += 7) if ((a * 7 + b * 3 + i) % 4 === 0) r(cx + a, y + h - bh + b, 2, 3, lit);
         cx += bw;
+      }
+      if (kind === 'fog') { g.globalAlpha = .55; for (var f = 0; f < 3; f++) c(x, y + h * .35 + f * h * .22, w, h * .12, '#e6e9ee'); g.globalAlpha = 1; }
+      if (kind === 'rain' || kind === 'storm') {
+        var fall = reduce ? 0 : t * 90;
+        for (var d = 0; d < 16; d++) c(x + (d * 19 + seed * 7) % w, y + ((d * 29 + fall) % (h + 8)) - 6, 1, 6, '#c5d8ee');
+      }
+      if (kind === 'storm' && !reduce && t % 7 < .12) { g.globalAlpha = .6; c(x, y, w, h, '#ffffff'); g.globalAlpha = 1; }
+      if (kind === 'snow') {
+        var down = reduce ? 0 : t * 16;
+        for (var n = 0; n < 16; n++) c(x + (n * 23 + seed * 5 + (reduce ? 0 : Math.sin(t + n) * 3)) % w, y + ((n * 31 + down) % (h + 4)) - 2, 2, 2, '#ffffff');
       }
       r(x, y, w, 3, '#c9d0dc');
       for (var k = x + w / 3; k < x + w - 2; k += w / 3) r(k, y, 2, h, '#3a3f4e');
@@ -279,10 +333,10 @@
       roomShell(R);
       if (o.mode === 'off') { curtain(R); band(o, t); glass(R); return; }
       var list = scriptOf(o), s = list[o.i % list.length] || { a: 'stand', t: 1 }, seated = s.a === 'sit' && o.x === c.seat, X = R.x + Math.round(o.x);
-      if (o.id === 'ceo') { nightWindow(R.x + 60, R.y + 36, 120, 56); attendance(R.x + 236, R.y + 36); bookshelf(R.x + 8, F); plant(R.x + 62, F); }
-      if (o.id === 'head') { nightWindow(R.x + 56, R.y + 36, 130, 56); lamps(R.x + 240, R.y + 36, o.count); cabinet(R.x + 8, F); plant(R.x + 40, F); copier(R.x + 246, F); plant(R.x + 296, F); }
-      if (o.id === 'ezadmin') { nightWindow(R.x + 62, R.y + 36, 80, 50); plant(R.x + 10, F); cabinet(R.x + 302, F); labels(R.x + 40, F, Math.min(14, o.count)); labels(R.x + 68, F, Math.min(14, Math.max(0, o.count - 14))); }
-      if (o.id === 'ebut') { stripes(R.x + 8, F); cardBox(R.x + 34, F - 20, 28, 20); cardBox(R.x + 38, F - 36, 22, 16); rack(R.x + 266, F); }
+      if (o.id === 'ceo') { skyWindow(R.x + 60, R.y + 36, 120, 56, t, 1); attendance(R.x + 236, R.y + 36); bookshelf(R.x + 8, F); plant(R.x + 62, F); }
+      if (o.id === 'head') { skyWindow(R.x + 56, R.y + 36, 130, 56, t, 2); lamps(R.x + 240, R.y + 36, o.count); cabinet(R.x + 8, F); plant(R.x + 40, F); copier(R.x + 246, F); plant(R.x + 296, F); }
+      if (o.id === 'ezadmin') { skyWindow(R.x + 62, R.y + 36, 80, 50, t, 3); plant(R.x + 10, F); cabinet(R.x + 302, F); labels(R.x + 40, F, Math.min(14, o.count)); labels(R.x + 68, F, Math.min(14, Math.max(0, o.count - 14))); }
+      if (o.id === 'ebut') { skyWindow(R.x + 96, R.y + 36, 130, 50, t, 4); stripes(R.x + 8, F); cardBox(R.x + 34, F - 20, 28, 20); cardBox(R.x + 38, F - 36, 22, 16); rack(R.x + 266, F); }
       if (c.desk) chair(R.x + c.seat, F);
       if (c.desk && !seated) desk(R.x + c.desk, F, true, t);
       var blink = blinking(t, c.seat);
@@ -350,8 +404,10 @@
         return { id: o.id, x: o.x, seated: o.mode !== 'off' && st.a === 'sit' && o.x === CAST[o.id].seat };
       });
     }
-    return { update: update, peek: peek };
+    /* 날씨 코드 변경. hour 를 주면 그 시각으로 고정 (시험용) */
+    function setSky(code, hour){ SKY.code = Number(code) || 0; SKY.hour = hour == null ? null : hour; }
+    return { update: update, peek: peek, setSky: setSky };
   }
 
-  root.SECRETARY_OFFICE = { mount: mount, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
+  root.SECRETARY_OFFICE = { mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
 })(window);
