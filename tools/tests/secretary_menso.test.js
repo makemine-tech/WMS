@@ -135,20 +135,27 @@ test('결과에 수령자 정보 칸이 없음', () => {
   assert.strictEqual(JSON.stringify(p).includes('서울'), false);
 });
 
-test('흐름 순서: 주문수집 → 비젬 주문수집 → 비젬 주문가져오기 → 매칭 … 비젬 송장전송', () => {
-  const ids = flow({ rows: [] }, []).steps.map((s) => s.id);
-  assert.deepStrictEqual(ids, ['collect', 'bizem_collect', 'bizem_import', 'match', 'confirm', 'gift', 'invoice', 'ship', 'send', 'bizem']);
+test('흐름 순서와 이름: 대표님이 정한 10칸', () => {
+  const steps = flow({ rows: [] }, []).steps;
+  assert.deepStrictEqual(steps.map((s) => s.name), ['비젬 주문수집', '비젬 주문 이벗에 넣기', '이벗 주문수집', '주문 매칭', '묶음 및 출력확정', '사은품 세팅', '운송장 부여', '출고처리', '이벗 운송장전송', '비젬 송장업로드']);
   const s = states(flow({ rows: [flowRow('A', { ivDate: '', dno: '' })] }, []));
   assert.strictEqual(s.bizem_collect, 'later');
   assert.strictEqual(s.bizem_import, 'later');
 });
 
-test('비젬 칸이 없이 저장된 예전 결과에도 제자리에 끼워 넣고, 두 번 넣지 않음', () => {
-  const { withBizem } = require('../../main/secretary_menso.js');
-  const old = [{ id: 'collect' }, { id: 'match' }];
-  const a = withBizem(old);
-  assert.deepStrictEqual(a.map((x) => x.id), ['collect', 'bizem_collect', 'bizem_import', 'match']);
-  assert.strictEqual(withBizem(a).length, 4);
+test('예전 순서로 저장된 결과도 새 순서와 이름으로, 비젬 칸을 끼워서 보여 줌', () => {
+  const { bizemSteps } = require('../../main/secretary_menso.js');
+  const old = [{ id: 'collect', name: '주문 수집', state: 'done', count: 0 }, { id: 'match', name: '주문 매칭', state: 'todo', count: 2 }, { id: 'send', name: '이벗 송장전송', state: 'later', count: 0 }];
+  const a = bizemSteps(old);
+  assert.deepStrictEqual(a.map((x) => x.name), ['비젬 주문수집', '비젬 주문 이벗에 넣기', '이벗 주문수집', '주문 매칭', '이벗 운송장전송']);
+  assert.strictEqual(a.find((x) => x.id === 'match').count, 2);
+  assert.strictEqual(a.find((x) => x.id === 'collect').state, 'done');
+});
+
+test('그룹: 3단계가 10칸을 빠짐없이 순서대로 나눔', () => {
+  const { GROUPS } = require('../../main/secretary_menso.js');
+  assert.deepStrictEqual(GROUPS.map((g) => g.ids.length), [3, 4, 3]);
+  assert.deepStrictEqual(GROUPS.flatMap((g) => g.ids), flow({ rows: [] }, []).steps.map((s) => s.id));
 });
 
 test('비젬 칸: 주문확정이 남으면 2번, 인쇄 대기만 남으면 3번, 못 읽었으면 점선', () => {

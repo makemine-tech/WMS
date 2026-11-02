@@ -87,7 +87,19 @@
     { id: 'invoice', name: '송장번호', who: '직접' },
     { id: 'ship', name: '출고처리', who: '직접' }
   ];
-  /* 비젬은 주문 수집 바로 뒤. 아직 연결 전이라 사람이 하는 칸. 이 칸이 없이 저장된 예전 결과에도 끼워 넣음 */
+  /* 대표님이 정한 순서와 이름 (2026-11-03). 저장된 예전 결과도 이 순서로 보여 줌 */
+  var ORDER = [['bizem_collect', '비젬 주문수집'], ['bizem_import', '비젬 주문 이벗에 넣기'], ['collect', '이벗 주문수집'], ['match', '주문 매칭'], ['confirm', '묶음 및 출력확정'],
+               ['gift', '사은품 세팅'], ['invoice', '운송장 부여'], ['ship', '출고처리'], ['send', '이벗 운송장전송'], ['bizem', '비젬 송장업로드']];
+  var GROUPS = [{ name: '주문수집 단계', ids: ['bizem_collect', 'bizem_import', 'collect'] },
+                { name: '주문확정 단계', ids: ['match', 'confirm', 'gift', 'invoice'] },
+                { name: '주문송장업로드 단계', ids: ['ship', 'send', 'bizem'] }];
+  function arrange(steps){
+    return ORDER.map(function(o){
+      var s = steps.find(function(x){ return x.id === o[0]; });
+      return s ? { id: s.id, name: o[1], who: s.who, state: s.state, count: s.count } : null;
+    }).filter(Boolean);
+  }
+  /* 비젬 칸이 없이 저장된 예전 결과에도 끼워 넣음 */
   function withBizem(steps){
     if (steps.some(function(s){ return s.id === 'bizem_collect'; })) return steps;
     var at = steps.findIndex(function(s){ return s.id === 'collect'; }) + 1;
@@ -99,7 +111,7 @@
   /* 비젬 건수로 칸 차례 표시. 주문확정이 남았으면 2번, 인쇄 대기만 남았으면 3번 */
   function bizemSteps(steps, site){
     var c = site && site.state === 'ok' ? site.counts : null;
-    return withBizem(steps).map(function(s){
+    return arrange(withBizem(steps)).map(function(s){
       if (s.id !== 'bizem_collect' && s.id !== 'bizem_import') return s;
       var n = !c ? 0 : s.id === 'bizem_collect' ? c.unconfirmed : (c.unconfirmed ? 0 : c.printWait);
       return { id: s.id, name: s.name, who: '직접', state: !c ? 'later' : n ? 'todo' : 'wait', count: n };
@@ -129,10 +141,10 @@
     });
     steps.push({ id: 'send', name: '이벗 송장전송', who: '직접', state: 'later', count: 0 });
     steps.push({ id: 'bizem', name: '비젬 송장전송', who: '연결 전', state: 'later', count: 0 });
-    return { orders: Object.keys(all).length, waiting: nos.length, steps: withBizem(steps) };
+    return { orders: Object.keys(all).length, waiting: nos.length, steps: arrange(withBizem(steps)) };
   }
 
-  var API = { withBizem: withBizem, bizemSteps: bizemSteps, preview: preview, previewCampaign: previewCampaign, giftStatus: giftStatus, flow: flow };
+  var API = { GROUPS: GROUPS, arrange: arrange, withBizem: withBizem, bizemSteps: bizemSteps, preview: preview, previewCampaign: previewCampaign, giftStatus: giftStatus, flow: flow };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_MENSO = API;
 })(typeof window !== 'undefined' ? window : this);
