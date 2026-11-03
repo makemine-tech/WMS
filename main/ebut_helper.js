@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-03d';
+  var VER = '2026-11-03e';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -549,14 +549,18 @@
       picks.forEach(function(p, i){ q.eq(i).val(String(Number(p.qty))); sum += Number(p.qty); });
       $('input:checkbox[name=qty_check]').prop('checked', sum !== Number($('#name1_qty').text()));
       $('input:checkbox[name=alert_check]').prop('checked', true);
-      var saved = ajaxDone(/site217save/);
+      $('#result_msg').text('');
+      var saved = ajaxDone(/\/site\/site217save(\?|$)/);
       window.go_new();
       return saved;
     }).then(function(x){
-      var j = null; try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
-      var ok = !!j && j.result === 'success';
+      /* 이벗 화면이 저장 뒤 결과 칸에 「메시지<br>success,…」 를 남김. 응답 글자를 직접 해석하지 않고 이것으로 판단 */
+      var shown = norm($('#result_msg').text()), j = null;
+      try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
+      var ok = /(^|[\s,>])success(,|$)/.test(shown) || (!!j && j.result === 'success');
+      var msg = (j && norm(j.msg)) || norm(shown.split('<br>')[0]);
       restore();
-      return { ok: ok, msg: norm(j && j.msg).slice(0, 120) || (ok ? '' : '이벗 응답을 읽지 못했습니다'), alerts: alerts };
+      return { ok: ok, msg: msg.slice(0, 120) || (ok ? '' : '이벗 저장 결과를 확인하지 못했습니다'), alerts: alerts };
     }, function(e){
       restore();
       return { ok: false, msg: String(e.message || e) + (alerts.length ? ' · ' + alerts.join(' / ') : ''), alerts: alerts };

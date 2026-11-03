@@ -638,12 +638,13 @@ test('매칭 저장: 상품마다 한 번씩 보내고, 결과를 초안에 남�
   assert.deepStrictEqual(j.result, { saved: 2, total: 2, stillOpen: 0 });
 });
 test('매칭 저장: 실패하면 거기서 멈추고 뒤는 보내지 않으며, 끊겨도 다시 보내지 않음', async () => {
-  let t = setupMatch({ results: [{ ok: false, msg: '주문 줄을 찾지 못했습니다' }] });
+  const still = [{ name: mitems[0].name, opt: mitems[0].opt, qty: 1 }];
+  let t = setupMatch({ results: [{ ok: false, msg: '주문 줄을 찾지 못했습니다' }], after: still });
   await t.runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
   assert.strictEqual(t.db.go.length, 1);
   assert.strictEqual(t.db.match['drafts/k1/saved'].ok, false);
   assert.strictEqual(t.db.jobs[Object.keys(t.db.jobs)[0]].state, 'stopped');
-  t = setupMatch({ throwAt: 1 });
+  t = setupMatch({ throwAt: 1, after: still });
   await t.runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
   assert.strictEqual(t.db.go.length, 1);
   assert.match(t.db.match['drafts/k1/saved'].msg, /끊겼/);
@@ -683,4 +684,27 @@ test('이벗 매칭: 왼쪽 검색은 기호 앞까지 잘라 찾고, 없으면 
   assert.strictEqual(cut('하다라보 고쿠쥰 리프팅 2종 세트, 로션 170ml + 밀크 140ml'), '하다라보 고쿠쥰 리프팅 2종 세트');
   assert.strictEqual(cut('하다라보 고쿠쥰 3종 세트, 로션 170ml + 밀크 + 크림'), '하다라보 고쿠쥰 3종 세트');
   assert.strictEqual(cut('[추가10%적립] 아크네스 데일리 딥 클렌저 120g, 2개'), '아크네스 데일리 딥 클렌저 120g');
+});
+
+test('매칭 저장: 결과가 애매해도 다시 읽어 미매칭에서 빠졌으면 저장됨으로 바로잡고, 남은 것은 보내지 않음', async () => {
+  const { runner, db } = setupMatch({ results: [{ ok: false, msg: '이벗 저장 결과를 확인하지 못했습니다' }], after: [{ name: '멘소래담 롤온', opt: '', qty: 2 }] });
+  await runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  assert.strictEqual(db.go.length, 1);
+  assert.deepStrictEqual(db.match['drafts/k1/saved'].ok, true);
+  assert.match(db.match['drafts/k1/saved'].msg, /다시 읽어 확인/);
+  const j = db.jobs[Object.keys(db.jobs)[0]];
+  assert.strictEqual(j.state, 'stopped');
+  assert.strictEqual(j.result.saved, 1);
+  assert.match(j.notes, /남은 1건/);
+});
+test('매칭 저장: 실패한 상품이 다시 읽어도 미매칭으로 남으면 실패 그대로', async () => {
+  const { runner, db } = setupMatch({ results: [{ ok: false, msg: '주문 줄을 찾지 못했습니다' }], after: [{ name: mitems[0].name, opt: mitems[0].opt, qty: 1 }] });
+  await runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  assert.strictEqual(db.match['drafts/k1/saved'].ok, false);
+  assert.match(db.jobs[Object.keys(db.jobs)[0]].notes, /저장 멈춤/);
+});
+test('이벗 도우미: 매칭 저장 성공은 이벗 결과 칸의 success 로 판단', () => {
+  const src = fs.readFileSync(__dirname + '/../../main/ebut_helper.js', 'utf8');
+  assert.ok(src.includes("var shown = norm($('#result_msg').text())"));
+  assert.ok(src.includes("$('#result_msg').text('');"));
 });

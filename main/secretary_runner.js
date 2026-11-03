@@ -617,24 +617,34 @@
         if (!list.length) return end('stopped', '저장할 상품이 없습니다');
         var r = C.siteState('ebut', await deps.ebutMatchPage());
         if (r.state !== 'ok') return end('stopped', '이벗: ' + r.msg);
-        var saved = 0, fail = '';
+        var saved = 0, fail = '', tried = [];
         for (var i = 0; i < list.length; i++) {
           var it = list[i], res;
           await store.setJob(key, { step: '매칭 저장 ' + (i + 1) + '/' + list.length, done: i });
           try { res = await deps.ebutGo('matchSave', { name: it.name, opt: it.opt, qty: it.qty, picks: it.picks }); }
           catch (e) { res = { ok: false, msg: '응답이 끊겼습니다. 저장됐을 수 있으니 이벗에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')' }; }
+          tried.push({ it: it, ok: !!res.ok });
           await store.setMatch('drafts/' + it.key + '/saved', { ok: !!res.ok, msg: res.msg || '', at: deps.now() });
           if (!res.ok) { fail = it.name + ' — ' + (res.msg || '저장 안 됨'); break; }
           saved++;
         }
         await store.setJob(key, { step: '다시 읽어 대조 중', done: saved });
-        var open = -1;
+        var open = -1, fixed = 0;
         try {
           var data = await readMatch(C.dateRange('', deps.now()));
-          open = list.slice(0, saved).filter(function(it){ return (data.items || []).some(function(x){ return x.name === it.name && x.opt === it.opt && Number(x.qty) === Number(it.qty); }); }).length;
+          var still = function(it){ return (data.items || []).some(function(x){ return x.name === it.name && x.opt === it.opt && Number(x.qty) === Number(it.qty); }); };
+          open = tried.filter(function(t){ return t.ok && still(t.it); }).length;
+          /* 결과가 애매했던 상품도 다시 읽어 미매칭에서 빠졌으면 저장된 것 */
+          for (var k = 0; k < tried.length; k++) {
+            if (tried[k].ok || still(tried[k].it)) continue;
+            await store.setMatch('drafts/' + tried[k].it.key + '/saved', { ok: true, msg: '저장됨 (다시 읽어 확인)', at: deps.now() });
+            fixed++; saved++;
+          }
+          if (fixed) fail = '';
         } catch (e) { open = -1; }
         var result = { saved: saved, total: list.length, stillOpen: open };
         if (fail) return end('stopped', '저장 멈춤: ' + fail + (saved ? ' (앞의 ' + saved + '건은 저장됨)' : ''), result);
+        if (saved < list.length) return end('stopped', '저장 결과가 애매했던 상품은 다시 읽어 보니 저장돼 있었습니다. 남은 ' + (list.length - saved) + '건은 다시 눌러 주세요', result);
         await end(open > 0 ? 'stopped' : 'done', open > 0 ? '저장했지만 아직 미매칭으로 보이는 상품 ' + open + '건. 이벗에서 확인해 주세요' : open < 0 ? '저장했지만 다시 읽지 못해 대조하지 못했습니다' : '', result);
       } catch (e) {
         await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 이벗에서 먼저 확인해 주세요' }).catch(function(){});
