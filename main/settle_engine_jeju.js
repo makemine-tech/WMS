@@ -9,7 +9,7 @@
        · 용차비 시트 = 화물 청구서 Sheet1 제주맥주 건 (settle_build 공통)
      제주맥주 전용(아래 after):
        · 기타출고및작업비 = 주문목록 고객사 제주맥주 (완료)
-           - 택배사 「제작후직배송」(B2B) 전부: 박스 = 캔 ÷ 24 (12본입은 ÷ 12) · 출고작업비 300/박스 (받는 곳 메이크마인 = 0)
+           - 판매처 「제주맥주_B2B」 전부 (택배로 나간 것 포함, 2026-11-03 — 전에는 택배사 「제작후직배송」 기준이라 빠짐): 박스 = 캔 ÷ 24 (12본입은 ÷ 12) · 출고작업비 300/박스 (받는 곳 메이크마인 = 0)
              파렛트 = 박스 25개 이상이면 100박스당 1 (올림), 그보다 적으면 비움 — 10~30박스는 노란 표시(지난달들에 1·0.5로 적은 적 있음)
            - 택배 중 선물세트(900)·디스펜서·감자칩(300) 작업 주문: 박스 = 수량
            - 맨 아래 합계: 출고비합계 → 거래명세표 기타출고비(1) 단가, 파렛트 → 파렛트출고비 수량
@@ -123,10 +123,12 @@
       var TH = []; ws.getRow(1).eachCell({ includeEmpty: true }, function(c, k){ TH[k - 1] = ns(c.value); });
       var at = function(h){ return TH.indexOf(h); };
       var cZ = at('가용수량'), cAA = at('출고작업비'), cAB = at('출고비합계'), cAC = at('전표파렛트출고수'), cAD = at('비고');
-      var rows = [], seen = {}, flag = [], orderSeen = {}, skipEtc = {}, nonBev = [];
+      var rows = [], seen = {}, flag = [], orderSeen = {}, skipEtc = {}, nonBev = [], oddB2B = [];
       F.forEach(function(x){ var a = XLSX.utils.sheet_to_json(x.Sheets[x.SheetNames[0]], { header: 1, defval: '' }); if (!a.length) return; var H = a[0].map(ns), g = function(r, h){ var i = H.indexOf(h); return i >= 0 ? r[i] : ''; };
         a.slice(1).forEach(function(r){ if (!MINE(g(r, '고객사'))) return; if (String(g(r, '상태')) !== '완료') return; var k = ns(g(r, 'NO')) || r.join('\u0001'); if (seen[k]) return; seen[k] = 1;
-          var b2b = /제작후직배송/.test(String(g(r, '택배사'))), nm = String(g(r, '상품명')), w = null;
+          /* B2B = 판매처 「제주맥주_B2B」 (대표님 2026-11-03 — 택배사 「제작후직배송」만 보면 택배로 나간 B2B 가 빠짐) */
+          var sel = String(g(r, '판매처')), b2b = /B2B/i.test(sel), nm = String(g(r, '상품명')), w = null;
+          if (!b2b && /제작후직배송/.test(String(g(r, '택배사')))){ b2b = true; oddB2B.push(nm.slice(0, 20) + '(' + (sel || '판매처 없음') + ')'); }
           if (!b2b){ for (var j = 0; j < WORK.length; j++) if (WORK[j][0].test(nm)){ w = WORK[j][1]; break; } if (w == null) return;
             /* 작업 택배 = 주문(코드) 1건 = 1줄 (9월 주문목록은 매칭 상품마다 줄이 나뉨 — 8월 확정본은 주문당 1줄) */
             var oc = ns(g(r, '코드')) || ns(g(r, '주문번호')); if (oc){ if (orderSeen[oc]) return; orderSeen[oc] = 1; }
@@ -159,6 +161,7 @@
       if (r26) st.getCell('G' + r26).value = { formula: '기타출고및작업비!' + colL(cAC) + sR, result: sAC };
       var nB = rows.filter(function(v){ return v[cAD] !== ''; }).length;
       log.push(['자동 적용', '기타출고및작업비 ← 주문목록 제주맥주 ' + rows.length + '줄 (B2B 직배송 ' + nB + ' · 작업 택배 ' + (rows.length - nB) + ') · 출고비합계 ' + sAB.toLocaleString() + ' · 파렛트 ' + sAC]);
+      if (oddB2B.length) log.push(['특이사항', '판매처가 B2B 가 아닌데 택배사 「제작후직배송」인 ' + oddB2B.length + '줄은 B2B 로 넣음 — 맞는지 확인: ' + oddB2B.join(', ')]);
       if (nonBev.length) log.push(['특이사항', '맥주가 아닌 B2B 직배송 ' + nonBev.length + '줄은 박스 0으로 둠(기준 없음) — 출고작업비를 받을 것이면 기타출고및작업비 시트 박스 칸에 직접: ' + nonBev.join(', ')]);
       var ek = Object.keys(skipEtc); if (ek.length) log.push(['특이사항', '판매처 「제주맥주 기타/M」 작업 주문은 뺌(8월 확정본 기준) — 청구할 것이면 직접: ' + ek.map(function(k){ return k + ' ' + skipEtc[k] + '건'; }).join(', ')]);
       if (rows.some(function(v){ return v[cAD] !== '' && !(+v[cZ]); })) log.push(['특이사항', 'B2B 줄 중 매칭수량이 없어 박스 수를 못 낸 줄이 있음 — 주문목록 매칭 확인']);
@@ -176,7 +179,7 @@
     after: after,
     ruleList: [R('배송비 = 이벗 택배비 리스트 출력양식 「제주맥주」 · 택배크기 = 지난달 같은 상품 조합의 크기, 처음 보는 조합은 캔 수(1~17 극소 · 18~19 소 · 20~23 중 · 24~35 소 · 36~ 중), 14~23캔·미매칭 노란 표시'),
       R('제주 추가운임 3,000 → 제주운임추가 · 반품비 극소·소 = 박스앤캔 반품(메이크창고(제주맥주)) + 반품 참조 파일'),
-      R('기타출고및작업비 = 주문목록 제주맥주: B2B 제작후직배송(박스 = 캔÷24, 12본입 ÷12 · 300/박스 · 메이크마인 0 · 파렛트 = 25박스 이상 100박스당 1) + 선물세트 900 · 디스펜서·감자칩 300 → 기타출고비(1)·파렛트출고비'),
+      R('기타출고및작업비 = 주문목록 제주맥주: 판매처 제주맥주_B2B(박스 = 캔÷24, 12본입 ÷12 · 300/박스 · 메이크마인 0 · 파렛트 = 25박스 이상 100박스당 1) + 선물세트 900 · 디스펜서·감자칩 300 → 기타출고비(1)·파렛트출고비'),
       R('보관비 = 전월 말일 보관파렛 + 화물관리 입고·출고(메모를 내용 칸에), 월말 택배출고 보정은 직접 · 용차비 = 화물 청구서 제주맥주 건 · 연동솔루션 매달 그대로'),
       R('배송비 맨 오른쪽 주소·전화1 = 주문목록 같은 송장번호'),
       R('당월말일기준재고표 = 참조 파일(재고) 제주맥주재고파악_MMDD(재고조사풀에서 마감한 파일): 전산재고 = 전산 가용 · 실재고조사수량 = 현재실재고 · 불량재고 · 불량차감후 = 수식, 줄·이름은 지난달 표 그대로, 보관 파렛트수는 지난달 값(노란 칸)')] });
