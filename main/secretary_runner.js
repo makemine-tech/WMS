@@ -480,7 +480,7 @@
         await store.setJob(key, { step: '비젬 양식 받는 중' });
         try { file = await deps.bizemFile(cmd.seen, key); }
         catch (e) { return end('stopped', '양식을 받지 못했습니다: ' + String((e && e.message) || e) + '. 비젬에 받은 기록이 남았을 수 있습니다'); }
-        var result = { lines: file.lines, orders: file.orders, sites: file.sites, box: false, menso: false };
+        var result = { lines: file.lines, orders: file.orders, sites: file.sites, box: false, menso: false, held: true };   /* held = 실행 PC 메모리에 두는 방식 */
         if (file.lines.boxncan) result.box = keep('boxncan');
         if (file.lines.menso + file.lines.boxncan < cmd.seen) { if (file.lines.menso) result.menso = keep('menso'); return end('stopped', '대기 ' + cmd.seen + '건인데 받은 줄이 ' + (file.lines.menso + file.lines.boxncan) + '줄이라 등록하지 않았습니다', result); }
         if (!file.lines.menso) return end('done', '', result);

@@ -458,6 +458,7 @@ test('등록: 받아서 나누고 맨소래담만 이벗에 한 번 등록, 박�
   assert.strictEqual(db.uploadAsked, 1);
   assert.strictEqual(j.result.box, true);
   assert.strictEqual(j.result.menso, false);
+  assert.strictEqual(j.result.held, true);
   assert.deepStrictEqual(j.result.upload.alerts, ['5건 등록되었습니다']);
   assert.deepStrictEqual(db.uploads[0].lines, 6);
   assert.ok(!JSON.stringify(db.jobs).includes('홍길동'));
