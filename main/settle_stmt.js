@@ -157,7 +157,8 @@
 
   /* 파일 이름에서 업체명: 08월_거래내역서_포인트나인크루.xlsx → 포인트나인크루 */
   function vendorFromFile(name){
-    var m = String(name || '').match(/^\d{1,2}월_거래내역서_(.+?)\.(xlsx|xls|xlsm)$/i);
+    /* 끝의 _초안·_수정·_최종·_확정 과 내려받기 번호 「 (1)」은 업체 이름이 아님 (대표님 2026-11-03 — 초안 파일을 고쳐 그대로 확정에 올림) */
+    var m = String(name || '').replace(/\s*\(\d+\)(?=\.(xlsx|xls|xlsm)$)/i, '').match(/^\d{1,2}월_거래내역서_(.+?)((_|\s)*(초안|수정본?|최종본?|확정본?|완료본?)\d*)*\.(xlsx|xls|xlsm)$/i);
     return m ? m[1] : String(name || '').replace(/\.(xlsx|xls|xlsm)$/i, '');
   }
 
