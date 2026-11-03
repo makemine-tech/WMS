@@ -527,3 +527,72 @@ test('파일 잠금: 받는 화면의 키로만 풀리고, 다른 키로는 못 
   assert.deepStrictEqual(back, buf);
   await assert.rejects(L.openFile(other.privateKey, sealed));
 });
+
+/* ── 이벗 주문수집 ── */
+function setupEbut(o) {
+  o = o || {};
+  const db = { commands: {}, jobs: {}, sites: {}, go: 0, reads: [] };
+  const store = {
+    getRunner: async () => ({ id: 'me', ts: NOW }), getControl: async () => null, claimCommand: async () => true,
+    setCommand: async (id, p) => { db.commands[id] = Object.assign(db.commands[id] || {}, p); },
+    getJobs: async () => db.jobs, setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); }, setSite: async (id, p) => { db.sites[id] = p; },
+  };
+  const statuses = (o.statuses || [{ done: false }, { done: true, lines: ['32건 등록'], newCnt: '0' }]).slice();
+  const runner = createRunner({
+    store, now: () => NOW, runnerId: 'me', info: {}, sleep: async () => {},
+    ebutOrderPage: async () => ({ login: o.login !== false }),
+    ebutRead: async (cmd) => { db.reads.push(cmd); if (cmd === 'storeCheck') return Object.assign({ page: true, busy: false, newCnt: '32', waitCnt: '328' }, o.check); const s = statuses.shift(); if (!s) throw new Error('끊김'); return s; },
+    ebutGo: async () => { db.go++; if (o.goThrow) throw new Error('응답 없음'); return o.go || { started: true, alerts: [] }; },
+  });
+  return { runner, db };
+}
+const ecol = (o) => Object.assign({ type: 'ebut_collect', at: NOW, by: 'x', seen: '32' }, o);
+
+test('이벗 확인: 건수만 돌려주고 가져오지 않음', async () => {
+  const { runner, db } = setupEbut();
+  await runner.handleCommand('c', { type: 'ebut_check', at: NOW });
+  assert.strictEqual(db.commands.c.store.newCnt, '32');
+  assert.strictEqual(db.go, 0);
+});
+test('이벗 가져오기: 한 번 누르고 끝까지 기다려 결과를 남김', async () => {
+  const { runner, db } = setupEbut();
+  await runner.handleCommand('c', ecol());
+  assert.strictEqual(db.go, 1);
+  const j = job(db);
+  assert.strictEqual(j.state, 'done');
+  assert.strictEqual(j.recipe, 'ebut_collect');
+  assert.deepStrictEqual(j.result, { before: { newCnt: '32', waitCnt: '328' }, after: '0', lines: ['32건 등록'] });
+});
+test('이벗 가져오기: 건수가 바뀌었거나 이미 가져오는 중·화면 없음·로그아웃이면 누르지 않음', async () => {
+  for (const o of [{ check: { newCnt: '33' } }, { check: { busy: true } }, { check: { page: false } }, { login: false }]) {
+    const { runner, db } = setupEbut(o);
+    await runner.handleCommand('c', ecol());
+    assert.strictEqual(db.go, 0, JSON.stringify(o));
+    assert.strictEqual(job(db).state, 'stopped');
+  }
+  const t = setupEbut();
+  await t.runner.handleCommand('c', ecol({ at: NOW - C.RELAY_TTL - 1 }));
+  assert.strictEqual(t.db.commands.c.status, 'expired');
+  assert.strictEqual(t.db.go, 0);
+});
+test('이벗 가져오기: 시작 거절·끊김·화면 사라짐이면 다시 누르지 않고 멈춤', async () => {
+  for (const o of [{ go: { started: false, why: '확인창 문구가 다름', alerts: [] } }, { goThrow: true }, { statuses: [{ lost: true }] }, { statuses: [] }]) {
+    const { runner, db } = setupEbut(o);
+    await runner.handleCommand('c', ecol());
+    assert.strictEqual(db.go, 1, JSON.stringify(o));
+    assert.strictEqual(job(db).state, 'stopped');
+  }
+});
+test('흐름 칸: 이벗 주문수집은 비서, 진행·멈춤·끝을 보여 줌', () => {
+  const st = (j) => bizemSteps(flow({ rows: [] }, []).steps, null, null, null, j).find((s) => s.id === 'collect');
+  assert.strictEqual(st({ state: 'running' }).state, 'run');
+  assert.strictEqual(st({ state: 'stopped' }).state, 'todo');
+  assert.strictEqual(st({ state: 'done' }).state, 'done');
+  assert.strictEqual(st(null).who, '비서');
+});
+test('이벗 도우미: 주문가져오기 명령이 있고 확인창은 발주확인○·중복 경고 문구일 때만 받아들임', () => {
+  const src = fs.readFileSync(__dirname + '/../../main/ebut_helper.js', 'utf8');
+  assert.ok(/m\.cmd === 'storeGo' \? cmdStoreGo/.test(src));
+  assert.ok(src.includes("return /발주확인:○/.test(m) && /중복등록/.test(m);"));
+  assert.ok(src.includes("STORE = '14374'"));
+});

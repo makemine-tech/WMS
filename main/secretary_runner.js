@@ -10,6 +10,7 @@
      deps.ebutUpload(file) 맨소래담 파일을 이벗 연동몰에 등록. 파일은 이 컴퓨터 메모리에만 있고 Firebase 로 가지 않음
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
      deps.bizemRead(cmd)·deps.bizemGo(cmd, args) 비젬 화면 읽기와, 사람이 누른 수집·주문확정 한 번씩
+     deps.ebutOrderPage()·deps.ebutRead(cmd)·deps.ebutGo(cmd) 이벗 주문서등록 화면 열기·읽기·사람이 누른 주문가져오기 한 번
      deps.bizemFile(seen, key) 비젬 양식을 받아 나눠 실행 PC 메모리에 둠. 사람이 요청하면 그 화면의 1회용 키로 잠가서만 내려보냄
    저장은 사람이 누른 요청으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
@@ -501,6 +502,60 @@
       }
     }
 
+    /* 이벗 주문가져오기 전 확인: 맨소레담공식스마트스토어 신규·배송대기 건수만 읽음 */
+    async function runEbutCheck(id){
+      if (!(await bizemBlock(id))) return;
+      await store.setCommand(id, { status: 'reading' });
+      try {
+        var r = C.siteState('ebut', await deps.ebutOrderPage());
+        if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '이벗: ' + r.msg, doneAt: deps.now() }); return; }
+        await store.setCommand(id, { status: 'done', store: await deps.ebutRead('storeCheck'), doneAt: deps.now() });
+      } catch (e) {
+        await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
+      }
+    }
+    /* 사람이 신규 건수를 보고 누른 주문가져오기 한 번. 끝나기 전에 다시 가져오면 중복 등록되므로 어떤 경우에도 다시 누르지 않음 */
+    async function runEbutCollect(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) return;
+      var now = deps.now(), date = C.kstDate(now), key = C.jobKey('ebut_collect', date, C.nextRound(jobs, 'ebut_collect', date));
+      async function end(state, notes, result){
+        var patch = { state: state, step: '', endedAt: deps.now(), notes: notes };
+        if (result) patch.result = result;
+        await store.setJob(key, patch);
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      }
+      await store.setJob(key, { state: 'running', recipe: 'ebut_collect', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '이벗 확인 중', notes: '' });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        var r = C.siteState('ebut', await deps.ebutOrderPage()), chk, go;
+        if (r.state !== 'ok') return end('stopped', '이벗: ' + r.msg);
+        try { chk = await deps.ebutRead('storeCheck'); }
+        catch (e) { return end('stopped', '이벗 주문서등록 화면을 읽지 못해 가져오지 않았습니다: ' + String((e && e.message) || e)); }
+        if (!chk.page) return end('stopped', '이벗 주문서등록 화면에서 맨소레담공식스마트스토어 줄을 찾지 못했습니다');
+        if (chk.busy) return end('stopped', '이벗이 이미 주문을 가져오는 중입니다. 끝난 뒤 확인해 주세요');
+        if (chk.newCnt !== cmd.seen) return end('stopped', '신규 주문이 ' + cmd.seen + '건에서 ' + chk.newCnt + '건으로 바뀌어 가져오지 않았습니다. 다시 눌러 확인해 주세요');
+        await store.setJob(key, { step: '맨소래담 주문 가져오는 중' });
+        try { go = await deps.ebutGo('storeGo'); }
+        catch (e) { return end('stopped', '응답이 끊겼습니다. 가져왔을 수 있으니 다시 누르지 말고 이벗에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')'); }
+        if (!go.started) return end('stopped', '주문가져오기가 시작되지 않았습니다: ' + go.why);
+        var s = null, miss = 0, tries = Math.ceil(C.COLLECT_MAX / C.COLLECT_POLL), deadline = deps.now() + C.COLLECT_MAX;
+        while (tries-- > 0 && deps.now() <= deadline) {
+          await bizemSleep(C.COLLECT_POLL);
+          try { s = await deps.ebutRead('storeStatus'); miss = 0; }
+          catch (e) { s = null; if (++miss >= 6) break; continue; }
+          if (s.done || s.lost) break;
+        }
+        if (!s || s.lost) return end('stopped', '이벗 화면이 끊겼습니다. 가져왔을 수 있으니 다시 누르지 말고 이벗에서 먼저 확인해 주세요');
+        if (!s.done) return end('stopped', '끝 소식을 받지 못했습니다. 다시 누르지 말고 이벗에서 먼저 확인해 주세요');
+        await end('done', '', { before: { newCnt: chk.newCnt, waitCnt: chk.waitCnt }, after: s.newCnt, lines: s.lines || [] });
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 이벗에서 먼저 확인해 주세요' }).catch(function(){});
+        throw e;
+      }
+    }
+
     /* 맨소래담: 이벗 로그인 점검 → 주문서목록 읽기 → 행사표로 사은품 대상 계산. 이벗에 쓰지 않음 */
     async function runMenso(id, cmd){
       var now = deps.now();
@@ -568,6 +623,8 @@
       if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
       if (cmd.type === 'bizem_confirm') return runBizemConfirm(id, cmd);
       if (cmd.type === 'bizem_form') return runBizemForm(id);
+      if (cmd.type === 'ebut_check') return runEbutCheck(id);
+      if (cmd.type === 'ebut_collect') return runEbutCollect(id, cmd);
       if (cmd.type === 'bizem_import') return runBizemImport(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
