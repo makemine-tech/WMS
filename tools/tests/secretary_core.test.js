@@ -139,7 +139,8 @@ test('officeRooms: 켜짐·꺼짐·일함·문제가 왼쪽 화면 상태와 같
 test('ezFlow: 읽은 자료대로 차례가 넘어감', () => {
   const st = (site, job) => Object.fromEntries(C.ezFlow(site, job).map((x) => [x.id, x.state]));
   const ok = { state: 'ok' };
-  assert.deepStrictEqual(C.ezFlow(ok, null).map((x) => x.id), ['ez_preview', 'ez_split']);
+  assert.deepStrictEqual(C.ezFlow(ok, null).map((x) => x.id), ['ez_split', 'ez_preview']);
+  assert.strictEqual(st(ok, null).ez_split, 'todo');
   assert.strictEqual(st({ state: 'login' }, { preview: { orders: 10, splitPacks: 3, blockers: [] } }).ez_split, 'wait');
   let s = st(ok, { preview: { orders: 10, splitPacks: 3, blockers: [] } });
   assert.deepStrictEqual([s.ez_preview, s.ez_split], ['done', 'todo']);

@@ -3,6 +3,7 @@
 
    건물 단면의 하얀 유리방. 비서 1명 = 방 1개이고, 비서가 늘면 층이 늘어난다.
    그림 자체는 데이터를 모른다. secretary_core.officeRooms 가 만든 rooms 를 update 로 받아 그리기만 한다.
+   progress(canvas) = 흰 화면 위 진행 막대. 화면이 실제 작업 기록으로 정한 상태만 받아 그린다.
      mode  off = 커튼 닫힘(퇴근) · idle = 대기 · work = 일하는 중 · alert = 방이 붉어짐(문제)
      count 쌓이는 일감 수, say 이름표 글자
 ============================================================ */
@@ -70,6 +71,77 @@
     return out;
   }
 
+  /* 그림판 그리기와 머리. 사무실과 진행 막대가 함께 씀 */
+  function paintRows(g, rows, x, feet, dir, p, lift){
+    var top = feet - rows.length * CELL - (lift || 0);
+    rows.forEach(function(row, ry){
+      for (var c = 0; c < row.length;) {
+        var ch = row[c], e = c + 1;
+        while (e < row.length && row[e] === ch) e++;
+        if (ch !== '.') {
+          var left = dir > 0 ? c * CELL - row.length : row.length - e * CELL;
+          g.fillStyle = ch === 'K' ? INK : p[ch];
+          g.fillRect(Math.round(x + left), Math.round(top + ry * CELL), (e - c) * CELL, CELL);
+        }
+        c = e;
+      }
+    });
+  }
+  function headOf(p, blink){
+    var face = (p.hair === 'bob' ? FACE_BOB : FACE).map(function(row, i){
+      return blink && i < 2 ? row.slice(0, 8) + 'S' + row.slice(9, 12) + 'S' + row.slice(13) : row;
+    });
+    return HEADS[p.hair].concat(face);
+  }
+
+  /* 진행 막대: 일하는 비서가 막대 끝에서 달리고, 끝나면 손을 들고 오른쪽으로 나감. 멈추면 막대가 붉어지고 서류를 들고 섬.
+     set({ who, state: run|done|stop|off, pct: 0~1 또는 null(단계를 모름) }) — 화면이 실제 작업 기록으로만 부름 */
+  var BAR = { run: '#2bb673', done: '#1d6fe8', stop: '#d92b2b' };
+  function progress(cv){
+    var g = cv.getContext('2d'), Wd = cv.width, Hd = cv.height, BY = Hd - 14, BX = 10, BW = Wd - 20;
+    var reduce = root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var S = { who: 'ebut', state: 'off', pct: 0 }, shown = 0, x = BX, leaving = false, gone = false, T = 0, last = 0, raf = 0;
+    function r(px, py, w, h, c){ g.fillStyle = c; g.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); }
+    function figure(px, feet, o){
+      var p = PAL[S.who] || PAL.ebut, step = o.walk && Math.sin(T * (o.fast ? 18 : 10)) > 0 ? 1 : 0, lift = o.walk ? (step ? 2 : 0) : 0, y = feet - lift;
+      g.globalAlpha = .18; r(px - 13, feet - 1, 26, 2, LINE); g.globalAlpha = 1;
+      paintRows(g, headOf(p, false).concat(p.suit ? SUIT : BODY, LEGS[step]), px, feet, 1, p, lift);
+      if (o.wave) { r(px + 11, y - 34, 4, 12, INK); r(px + 12, y - 33, 2, 10, p.T); r(px + 10, y - 38, 6, 5, p.S); }
+      if (o.sheet) { r(px + 11, y - 29, 14, 17, INK); r(px + 12, y - 28, 12, 15, '#ffffff'); for (var i = 0; i < 3; i++) r(px + 14, y - 25 + i * 4, 8, 1, '#9aa2b3'); }
+    }
+    function draw(){
+      g.clearRect(0, 0, Wd, Hd);
+      if (S.state === 'off') return;
+      var target = S.state === 'done' ? 1 : S.pct == null ? Math.max(shown, .12) : S.pct;
+      shown += (target - shown) * (reduce ? 1 : .08);
+      r(BX - 2, BY - 2, BW + 4, 12, INK); r(BX, BY, BW, 8, '#e3e6ec');
+      r(BX, BY, BW * shown, 8, BAR[S.state] || BAR.run);
+      /* 단계를 모르는 동안은 막대 안 빗금만 흐름 */
+      if (S.state === 'run' && !reduce) for (var k = -1; k < BW * shown / 12; k++) { var sx = BX + k * 12 + (T * 24) % 12; if (sx >= BX && sx < BX + BW * shown - 4) r(sx, BY + 1, 4, 6, 'rgba(255,255,255,.35)'); }
+      var end = BX + BW * shown;
+      if (S.state === 'run') { x += (Math.min(end, BX + BW - 12) - x) * .2; figure(x, BY - 2, { walk: !reduce, fast: true }); }
+      else if (S.state === 'stop') { x = Math.min(end, BX + BW - 30); figure(x, BY - 2, { sheet: true }); }
+      else if (S.state === 'done' && !gone) {
+        if (leaving && !reduce) { x += 1.4; if (x > Wd + 20) gone = true; figure(x, BY - 2, { walk: true, wave: true }); }
+        else figure(Math.min(end, BX + BW - 30), BY - 2, { wave: true });
+      }
+    }
+    function frame(n){
+      var dt = Math.min(.1, (n - last) / 1000 || 0); last = n; T += dt;
+      draw();
+      raf = S.state === 'off' || (S.state === 'done' && gone) || reduce ? 0 : requestAnimationFrame(frame);
+    }
+    function set(next){
+      var was = S.state;
+      S = { who: next.who || 'ebut', state: next.state || 'off', pct: next.pct == null ? null : Math.max(0, Math.min(1, next.pct)) };
+      if (S.state === 'run' && was !== 'run') { shown = 0; x = BX; gone = false; leaving = false; }
+      if (S.state === 'done' && was !== 'done') { leaving = was === 'run'; gone = false; if (!leaving) shown = 1; }
+      if (S.state !== 'done') { leaving = false; gone = false; }
+      if (!raf) raf = requestAnimationFrame(function(n){ last = n; frame(n); });
+    }
+    return { set: set };
+  }
+
   function mount(sc, opts){
     var minGap = opts && opts.fps ? 1000 / opts.fps : 0;
     var cv = sc.querySelector('canvas'), g = cv.getContext('2d');
@@ -83,20 +155,7 @@
       parts.forEach(function(p){ r(p[0], p[1], p[2], p[3], p[4]); });
     }
     /* 그림판을 그림. x = 가운데, feet = 바닥선, dir < 0 이면 좌우 반전. 같은 글자가 이어지면 한 번에 칠함 */
-    function paint(rows, x, feet, dir, p, lift){
-      var top = feet - rows.length * CELL - (lift || 0);
-      rows.forEach(function(row, ry){
-        for (var c = 0; c < row.length;) {
-          var ch = row[c], e = c + 1;
-          while (e < row.length && row[e] === ch) e++;
-          if (ch !== '.') {
-            var left = dir > 0 ? c * CELL - row.length : row.length - e * CELL;
-            r(x + left, top + ry * CELL, (e - c) * CELL, CELL, ch === 'K' ? INK : p[ch]);
-          }
-          c = e;
-        }
-      });
-    }
+    function paint(rows, x, feet, dir, p, lift){ paintRows(g, rows, x, feet, dir, p, lift); }
     /* 눈 깜빡임: 비서마다 주기가 달라 함께 깜빡이지 않고, 가끔 두 번 연달아 깜빡임 */
     function blinking(t, seat){
       if (reduce) return false;
@@ -104,12 +163,7 @@
       return at < BLINK_SEC || (n % 3 === 2 && at >= BLINK_SEC * 2 && at < BLINK_SEC * 3);
     }
     /* 머리 + 얼굴. 감은 눈 = 양쪽 눈의 위 두 칸을 살색으로 덮어 아래 한 칸만 남김 */
-    function headRows(p, blink){
-      var face = (p.hair === 'bob' ? FACE_BOB : FACE).map(function(row, i){
-        return blink && i < 2 ? row.slice(0, 8) + 'S' + row.slice(9, 12) + 'S' + row.slice(13) : row;
-      });
-      return HEADS[p.hair].concat(face);
-    }
+    function headRows(p, blink){ return headOf(p, blink); }
     function shadow(x, feet, w){ g.globalAlpha = .18; r(x - w / 2, feet - 1, w, 2, LINE); g.globalAlpha = 1; }
     /* 윤곽선 있는 네모 */
     function boxed(x, y, w, h, c){ r(x - 1, y - 1, w + 2, h + 2, INK); r(x, y, w, h, c); }
@@ -409,5 +463,5 @@
     return { update: update, peek: peek, setSky: setSky };
   }
 
-  root.SECRETARY_OFFICE = { mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
+  root.SECRETARY_OFFICE = { progress: progress, mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
 })(window);
