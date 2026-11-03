@@ -674,3 +674,13 @@ test('헤드비서: 이벗·비젬 저장 요청은 받은 내용을 그대로 �
   assert.ok(body('ebutGo').endsWith('cmd, args || {}, 60000)'), body('ebutGo'));
   assert.ok(body('bizemGo').endsWith('cmd, args, 60000)'), body('bizemGo'));
 });
+
+test('이벗 매칭: 왼쪽 검색은 기호 앞까지 잘라 찾고, 없으면 검색어 없이 다시 찾음', () => {
+  const src = fs.readFileSync(__dirname + '/../../main/ebut_helper.js', 'utf8');
+  assert.ok(src.includes(".concat(['']);"));
+  assert.ok(src.includes('function findLeft(i){'));
+  const cut = (name) => String(name).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().replace(/\[[^\]]*\]/g, ' ').split(/[+,()\[\]\/%&]/)[0].trim();
+  assert.strictEqual(cut('하다라보 고쿠쥰 리프팅 2종 세트, 로션 170ml + 밀크 140ml'), '하다라보 고쿠쥰 리프팅 2종 세트');
+  assert.strictEqual(cut('하다라보 고쿠쥰 3종 세트, 로션 170ml + 밀크 + 크림'), '하다라보 고쿠쥰 3종 세트');
+  assert.strictEqual(cut('[추가10%적립] 아크네스 데일리 딥 클렌저 120g, 2개'), '아크네스 데일리 딥 클렌저 120g');
+});

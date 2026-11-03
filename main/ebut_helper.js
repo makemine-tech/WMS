@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-03c';
+  var VER = '2026-11-03d';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -500,9 +500,26 @@
     function day(x){ return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
     if ($('#cust_code option[value=' + MATCH_CUST + ']').length) $('#cust_code').val(MATCH_CUST);
     $('#date1').val(day(from)); $('#date2').val(day(d));
-    $('#l_search_select').val('1'); $('#l_search_text').val(a.name);
-    var left = ajaxDone(/site217edit_left_jdata/);
-    window.go_search_left();
+    /* 이벗 왼쪽 검색은 + , ( ) 같은 기호가 든 긴 상품명을 못 찾음 (대표님 2026-11-03). 기호 앞까지 잘라 찾고, 없으면 검색어 없이 전부 불러와 같은 줄을 고름 */
+    var cut = norm(a.name).replace(/\[[^\]]*\]/g, ' ').split(/[+,()\[\]\/%&]/)[0].trim();
+    var queries = (cut.length >= 2 && cut !== norm(a.name) ? [cut] : cut.length >= 2 ? [cut] : []).concat(['']);
+    function exact(){
+      return L.jqGrid('getDataIDs').filter(function(id){
+        var r = L.jqGrid('getRowData', id);
+        return norm(r.ordlist_name_ori) === norm(a.name) && norm(r.ordlist_opt) === norm(a.opt) && Number(r.ordlist_qty) === Number(a.qty);
+      });
+    }
+    function findLeft(i){
+      $('#l_search_select').val('1'); $('#l_search_text').val(queries[i]);
+      var done = ajaxDone(/site217edit_left_jdata/);
+      window.go_search_left();
+      return done.then(function(){
+        var hit = exact();
+        if (hit.length || i + 1 >= queries.length) return hit;
+        return findLeft(i + 1);
+      });
+    }
+    var left = findLeft(0);
     function addPick(i){
       if (i >= picks.length) return Promise.resolve();
       $('#r_search_select').val('7'); $('#r_search_text').val(picks[i].code); $('#r_search_opt').val(''); $('#r_search_opt2').val('');
@@ -516,11 +533,7 @@
         return addPick(i + 1);
       });
     }
-    return left.then(function(){
-      var hit = L.jqGrid('getDataIDs').filter(function(id){
-        var r = L.jqGrid('getRowData', id);
-        return norm(r.ordlist_name_ori) === norm(a.name) && norm(r.ordlist_opt) === norm(a.opt) && Number(r.ordlist_qty) === Number(a.qty);
-      });
+    return left.then(function(hit){
       if (hit.length !== 1) throw new Error(hit.length ? '같은 주문 줄이 ' + hit.length + '개라 고르지 않았습니다' : '이벗 매칭 창에서 이 주문 줄을 찾지 못했습니다 (이미 매칭됐을 수 있음)');
       var auto = ajaxDone(/site217edit_right_jdata/).catch(function(){});
       L.jqGrid('setSelection', hit[0], false);
