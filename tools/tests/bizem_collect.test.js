@@ -456,7 +456,8 @@ test('등록: 받아서 나누고 맨소래담만 이벗에 한 번 등록, 박�
   const j = job(db);
   assert.strictEqual(j.state, 'done');
   assert.strictEqual(db.uploadAsked, 1);
-  assert.deepStrictEqual(db.saved, ['boxncan']);
+  assert.strictEqual(j.result.box, true);
+  assert.strictEqual(j.result.menso, false);
   assert.deepStrictEqual(j.result.upload.alerts, ['5건 등록되었습니다']);
   assert.deepStrictEqual(db.uploads[0].lines, 6);
   assert.ok(!JSON.stringify(db.jobs).includes('홍길동'));
@@ -480,7 +481,8 @@ test('등록: 받은 줄이 모자라거나 주소 없는 줄이 있으면 등�
   let t = setupImport({ file: { lines: { menso: 1, boxncan: 2 } } });
   await t.runner.handleCommand('c', imp());
   assert.strictEqual(t.db.uploadAsked, 0);
-  assert.deepStrictEqual(t.db.saved, ['boxncan', 'menso']);
+  assert.strictEqual(job(t.db).result.box, true);
+  assert.strictEqual(job(t.db).result.menso, true);
   t = setupImport({ file: { noAddress: 2 } });
   await t.runner.handleCommand('c', imp());
   assert.strictEqual(t.db.uploadAsked, 0);
@@ -492,7 +494,7 @@ test('등록: 이벗 로그아웃·끊김·오류 응답이면 다시 보내지 
     await runner.handleCommand('c', imp());
     assert.ok(db.uploadAsked <= 1);
     assert.strictEqual(job(db).state, 'stopped');
-    assert.ok(db.saved.includes('menso'));
+    assert.strictEqual(job(db).result.menso, true);
   }
 });
 test('등록: 맨소래담 줄이 없으면 등록 없이 끝, 받기 실패면 멈춤', async () => {
@@ -512,4 +514,15 @@ test('흐름 칸: 등록 진행 중 run, 멈춤 todo, 끝 done', () => {
   assert.strictEqual(st({ state: 'done' }).state, 'done');
   assert.strictEqual(st(null).state, 'todo');
   assert.strictEqual(st(null).who, '비서');
+});
+
+test('파일 잠금: 받는 화면의 키로만 풀리고, 다른 키로는 못 풂', async () => {
+  const L = require('../../main/secretary_login.js');
+  const mine = await L.createKeys(), other = await L.createKeys();
+  const buf = new Uint8Array(200000).map((_, i) => i % 251);
+  const sealed = await L.sealFile(mine.publicJwk, buf.buffer);
+  assert.ok(!sealed.data.includes('AAEC'));
+  const back = new Uint8Array(await L.openFile(mine.privateKey, sealed));
+  assert.deepStrictEqual(back, buf);
+  await assert.rejects(L.openFile(other.privateKey, sealed));
 });
