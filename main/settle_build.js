@@ -107,6 +107,42 @@ function refCardHtml(){
     + '<div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap"><span class="sm">용도</span><select id="refUse" class="tsel" style="padding:.2rem .4rem">' + REF_USES.map(function(u){ return '<option>' + u + '</option>'; }).join('') + '</select>'
     + '<label class="btn" style="cursor:pointer">＋ 참조 파일 올리기<input type="file" multiple style="display:none" onchange="addRefFiles(this)"></label></div><div id="refQueue"></div></div>';
 }
+/* ── 이번 달 입력값 (업체 엔진의 monthInputs — 포인트나인크루 시작·마감 파렛트 등, 대표님 2026-11-03) ──
+   저장: settlement/vendors/{업체키}/monthIn/{ym}/{열_줄} — run/{ym} 와 따로 둬서 「처음부터 다시」에도 남음
+   엔진 정의: monthInputs = { title, note, cols:[{k, t, need}], rows:[{k, t, hint}], def(colK, rowK, ym, prevIn) → 빈 칸 기본값 } */
+function prevYm(ym){ var y = +ym.slice(0, 4), m = +ym.slice(5, 7); return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); }
+function monthInOf(ym){ return (((VENDORS[VW.vkey] || {}).monthIn) || {})[ym] || {}; }
+function setMonthIn(k, v){ v = String(v == null ? '' : v).replace(/,/g, '').trim();
+  var V = VENDORS[VW.vkey] = VENDORS[VW.vkey] || {}, M = (V.monthIn = V.monthIn || {}), C = (M[YM] = M[YM] || {});   /* 바로 「초안 내려받기」를 눌러도 새 값으로 */
+  if (v === '') delete C[k]; else C[k] = isFinite(+v) ? +v : v;
+  return db.ref('settlement/vendors/' + VW.vkey + '/monthIn/' + YM + '/' + k).set(v === '' ? null : isFinite(+v) ? +v : v); }
+function monthInDef(){ var e = engineOf(VW.vkey); return e && e.monthInputs; }
+function monthInVals(){   /* 입력한 값, 비었으면 기본값(def) — { 열_줄: 값 } */
+  var D = monthInDef(); if (!D) return null; var cur = monthInOf(YM), prev = monthInOf(prevYm(YM)), o = {};
+  D.cols.forEach(function(c){ D.rows.forEach(function(r){ var k = c.k + '_' + r.k, v = cur[k];
+    if (v == null || v === '') v = D.def ? D.def(c.k, r.k, YM, prev) : null;
+    if (v != null && v !== '') o[k] = v; }); });
+  return o;
+}
+function monthInMissing(){ var D = monthInDef(); if (!D) return []; var v = monthInVals() || {}, miss = [];
+  D.cols.forEach(function(c){ if (!c.need) return; D.rows.forEach(function(r){ if (v[c.k + '_' + r.k] == null) miss.push(r.t + ' ' + c.t.split(' (')[0]); }); });
+  return miss; }
+function monthInHtml(){
+  var D = monthInDef(); if (!D) return '';
+  var cur = monthInOf(YM), prev = monthInOf(prevYm(YM)), miss = monthInMissing();
+  return '<div id="monthIn" style="border:1px solid ' + (miss.length ? '#fbbf24' : 'var(--line, #2a3040)') + ';border-radius:10px;padding:.6rem .8rem;margin:.2rem 0 .8rem">'
+    + '<div style="font-weight:800;margin-bottom:.2rem">✏️ ' + esc(D.title || '이번 달 입력') + ' <span class="dim sm" style="font-weight:400">— ' + esc(ymLabel(YM)) + ' · 초안 내려받기 전에 넣어 주세요' + (D.note ? ' · ' + esc(D.note) : '') + '</span></div>'
+    + '<table class="ftbl" style="min-width:0"><thead><tr><th></th>' + D.cols.map(function(c){ return '<th>' + esc(c.t) + (c.need ? ' <span style="color:#fbbf24">*</span>' : '') + '</th>'; }).join('') + '</tr></thead><tbody>'
+    + D.rows.map(function(r){ return '<tr><td><b>' + esc(r.t) + '</b>' + (r.hint ? '<div class="dim">' + esc(r.hint) + '</div>' : '') + '</td>'
+        + D.cols.map(function(c){ var k = c.k + '_' + r.k, v = cur[k], d = D.def ? D.def(c.k, r.k, YM, prev) : null;
+          return '<td><input class="famt minp" style="width:110px" type="number" step="any" data-k="' + esc(k) + '" value="' + (v != null ? esc(String(v)) : '') + '"'
+            + ' placeholder="' + (d != null ? esc(String(d)) : (c.need ? '꼭 입력' : '')) + '" onchange="setMonthIn(this.dataset.k, this.value)" onblur="setTimeout(monthInRefresh, 0)">'
+            + (v == null && d != null ? ' <span class="dim sm">비우면 ' + esc(String(d)) + '</span>' : '') + '</td>'; }).join('') + '</tr>'; }).join('')
+    + '</tbody></table>'
+    + (miss.length ? '<div class="sm" style="color:#fbbf24;margin-top:.35rem">⚠️ 아직 비어 있음: ' + esc(miss.join(' · ')) + '</div>' : '<div class="sm dim" style="margin-top:.35rem">✔ 다 들어 있습니다 — 고치면 바로 저장, 초안을 다시 받으면 반영</div>')
+    + '</div>';
+}
+function monthInRefresh(){ var a = document.activeElement, el = $('monthIn'); if (!el || (a && a.classList && a.classList.contains('minp'))) return; el.outerHTML = monthInHtml(); }   /* 입력 칸을 다 떠나면 그 카드만 다시 */
 function frIds(){ var S = selBox(); return Object.keys(FREIGHT[YM] || {}).filter(function(fid){ return !BOX[fid] || S[fid]; }); }   /* 체크 해제한 화물 청구서는 빼고 */
 function toggleFile(id, on){ var m = BOX[id]; if (m) db.ref('settlement/vendors/' + VW.vkey + '/files/' + fileSigKey(m)).set(on ? 1 : 0); }
 function saveFilePicks(){   /* 초안을 만들 때 추천 그대로인 것도 저장 → 다음 달부터 이 체크가 기본 */
@@ -181,7 +217,7 @@ function buildCardHtml(A, R){
       + ' <span class="dim">비우면 지난달 값</span></td></tr>';
   }).join('');
   var yy = YM.slice(5, 7);
-  return runStateHtml() + fileCardHtml() + refCardHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
+  return runStateHtml() + fileCardHtml() + refCardHtml() + monthInHtml() + '<div class="card-h"><span class="card-t">④ ' + esc(ymLabel(YM)) + ' 엑셀 만들기</span><span class="card-s">지난달 정산서를 틀로 이 업체 설정·적용 룰대로 만듭니다 — 확인할 칸은 노란색, 적용 결과는 내려받은 뒤 바로 아래에</span></div>'
     + (sRows ? '<div class="sec-note" style="margin:.2rem 0 .3rem">이번 달 원본으로 바꿀 데이터 시트 — 쓸 파일 확인</div><table class="ftbl" style="min-width:0"><tbody>' + sRows + '</tbody></table>'
       : '<div class="sec-note">이번 달 원본으로 바꿀 데이터 시트가 정해지지 않았습니다 (대화창에서 요청하면 업체 설정에 넣습니다).</div>')
     + (mRows ? '<div class="sec-note" style="margin:.7rem 0 .3rem">✏️ 매달 입력 항목 — 이번 달 수량</div><table class="ftbl" style="min-width:0"><tbody>' + mRows + '</tbody></table>' : '')
@@ -410,6 +446,7 @@ function makeDraft(msg){
     msg('업체 룰 적용 중…');
     /* afterBuild 는 Promise 를 돌려줘도 된다 — 이번 달 파일함(BOX)·원본 읽기(readBox → SheetJS 통합문서)·화면 메시지(msg) 제공 */
     var ctx = { YM: YM, A: A, st: wb.getWorksheet(A.sheet) || wb.worksheets[0], log: log, won: won, BOX: selBox(), REF: refList(), msg: msg,   /* 이 업체가 쓰는 파일(체크한 것)만 */
+      IN: monthInVals() || {},   /* ✏️ 이번 달 입력값 (monthInputs) */
       CARGO: (typeof CARGO !== 'undefined' && CARGO && CARGO.rows) ? CARGO.rows : null,   /* 입출고 화물관리 그 달 기록 */
       readBox: function(m){ var k = m.path || m.p || m.name; if (!RB_CACHE[k]) RB_CACHE[k] = decryptBox(m).then(function(b){ return XLSX.read(b, { type: 'array' }); }); return RB_CACHE[k]; } };   /* 같은 초안 안에서 같은 파일은 한 번만 열기 (주문목록 26MB 를 여러 단계가 읽음) */
     var RB_CACHE = {};
@@ -462,6 +499,10 @@ function draftTotal(buf, A0){
 function buildDraft(){
   if (!VW || !VW.A) return;
   var btn = $('buildBtn'), msg = function(t){ var e = $('buildMsg'); if (e) e.textContent = t; }, log, name;
+  var miss = monthInMissing();
+  if (miss.length && !confirm('✏️ 이번 달 입력이 비어 있어요:\n\n' + miss.join('\n') + '\n\n비운 채로 만들면 그 부분은 맞추지 못하고 「확인 필요」로 나옵니다.\n그래도 초안을 만들까요? (취소 = 입력하러 가기)')){
+    var box = $('monthIn'); if (box){ box.scrollIntoView({ behavior: 'smooth', block: 'center' }); var f = box.querySelector('input[placeholder="꼭 입력"]'); if (f) f.focus(); }
+    return; }
   btn.disabled = true; saveFilePicks();
   makeDraft(msg).then(function(D){
     log = D.log; name = D.name.replace(/\.xlsx$/,'_초안.xlsx');

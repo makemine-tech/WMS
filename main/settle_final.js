@@ -179,7 +179,8 @@ function leftChecks(buf){
   });
 }
 function confirmFinal(file){
-  if (FINAL_BUSY || !VW) return;
+  if (!VW) return;
+  if (FINAL_BUSY){ toast('앞서 올린 확정 파일을 아직 처리 중입니다 — 아래 진행 글이 끝날 때까지 기다려 주세요 (오래 멈춰 있으면 새로고침 후 다시)'); return; }
   if (!/\.(xlsx|xls|xlsm)$/i.test(file.name)){ alert('엑셀 파일(xlsx)을 올려 주세요'); return; }
   /* 옛 xls 확정본은 다음 달 초안의 틀이 될 때 서식(테두리·글꼴·도장)이 빠짐 → xlsx 로 저장해 올리게 */
   if (/\.xls$/i.test(file.name) && !confirm('옛 xls 형식입니다.\n\n이 파일이 다음 달 초안의 틀이 되는데, xls 는 웹에서 테두리·글꼴·도장 같은 서식이 빠집니다.\n엑셀에서 「다른 이름으로 저장 → Excel 통합 문서(xlsx)」로 저장해 올리시는 게 좋습니다.\n\n그래도 xls 로 확정할까요?')) return;

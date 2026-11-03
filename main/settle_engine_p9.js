@@ -25,7 +25,8 @@
   /* 달마다 넣는 값: start = 창고관리 전달 말일 + 부자재, end = 그달 말 재고조사 + 부자재, cod = [일, 내용, 건수, 건당비용] */
   var MONTHS = {
     '2026-09': { start: { 곡: 534, 셀: 8, 오: 168 }, end: { 곡: 1120, 셀: 8, 오: 104 },
-                 cod: [[14, '포인트나인 롯데 착불 (2건 합계 5,200원)', 2, 2600]] }
+                 cod: [[14, '포인트나인 롯데 착불 (2건 합계 5,200원)', 2, 2600]] },
+    '2026-10': { start: { 곡: 1120, 셀: 8, 오: 104 } }   /* 시작 = 9월 마감 (대표님 2026-11-03), 마감·착불 메모는 받으면 넣음 */
   };
 
   /* 곡물도감·오리진케어 포장비 = p9_fee.js (합포 분할 페이지와 같이 씀, 2026-10-27) */
@@ -158,7 +159,19 @@
   }
 
 
-  E['포인트나인크루'] = { traceSkip: true, needs: ['p9_row', 'coupang_po', 'cargo_io', 'ebut_orders'],   /* 화물 흔적: 용차비는 포인트나인크루_용차비 정산, 입출고는 보관비에 이미 씀 */
+  /* 정산 화면 「✏️ 이번 달 파렛트」 입력란 (settle_build.js monthInHtml) — 시작 비우면 지난달 마감 */
+  var MONTH_INPUTS = { title: '이번 달 파렛트 — 보관비 택배 파렛트 맞추기',
+    note: '마감 = 말일 재고조사 파렛트 + 부자재. 시작+입고−파렛트출고−마감 만큼을 택배 송장 건수 비율로 날마다 나눔',
+    cols: [{ k: 'start', t: '시작 파렛트 (전월 말일)' }, { k: 'end', t: '마감 파렛트 (이달 말일)', need: true }],
+    rows: [{ k: '곡', t: '곡물도감', hint: '부자재 +' + ADJ.곡 + ' 포함' }, { k: '셀', t: '셀시어스', hint: '부자재 +' + ADJ.셀 + ' 포함' }, { k: '오', t: '오리진케어', hint: '부자재 +' + ADJ.오 + ' 포함' }],
+    def: function(c, b, ym, prevIn){ var M0 = MONTHS[ym] || {};
+      if (M0[c] && M0[c][b] != null) return M0[c][b];
+      if (c !== 'start') return null;
+      if (prevIn && prevIn['end_' + b] != null) return prevIn['end_' + b];
+      var y = +ym.slice(0, 4), m = +ym.slice(5, 7), p = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+      return MONTHS[p] && MONTHS[p].end ? MONTHS[p].end[b] : null; } };
+
+  E['포인트나인크루'] = { traceSkip: true, monthInputs: MONTH_INPUTS, needs: ['p9_row', 'coupang_po', 'cargo_io', 'ebut_orders'],   /* 화물 흔적: 용차비는 포인트나인크루_용차비 정산, 입출고는 보관비에 이미 씀 */
     items: { 6: 'auto', 22: 'auto', 23: 'auto', 25: 'auto', 27: 'auto', 38: 'auto' },
     sheets: { '곡_ROW데이터': 'skip', '곡_작업상세': 'skip', '곡_보관비': 'skip', '셀_ROW데이터': 'skip', '셀_작업상세': 'skip', '셀_보관비': 'skip',
               '오_ROW데이터': 'skip', '오_작업상세': 'skip', '오_보관비': 'skip', '기타작업내역': 'skip', '택배착불및기타비용': 'skip', '오포장': 'skip', '작업비정산서': 'skip' },
@@ -196,17 +209,45 @@
       { d: '2026-10-03', t: '기타작업내역 A열 = 발주번호(숫자=쿠팡) 또는 채널(컬리·홈쇼핑·올리브영…). 컬리 크기 없는 서리태·맷돌 = 45입(54) 기본 · 파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 · 박스가 완파렛트로 떨어지는데 파렛트수가 적게 적혔으면 고침(936박스/12팔 → 13팔) — 모두 특이사항으로 알림' },
       { d: '2026-10-03', t: '점검 = 확인할 칸은 모두 노란색, 점검 시트(맨 앞) 시트 이름 누르면 그 칸으로 이동, 확인하면 그 칸 노란색을 지우고 점검 줄을 직접 삭제 = 완료 — ⑤ 완료 확정 때 남은 노란 칸을 자동으로 찾아 알림' },
       { d: '2026-10-03', t: '포장구분·작업비정산서 이름은 금액 기준만(기본포장 300 · 박스포장1 500 · 박스포장2 700 · 박스합포장1(작업상세는 합포장1) 1,000 · 박스합포장2(합포장2) 1,500) + 소분포장 300 — 설명형 이름 안 씀. 작업비정산서는 8월 양식 그대로에 소분포장 열(H)·줄(22) 추가, 합계 I:J열·23행' },
-      { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
+      { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' },
+      { d: '2026-11-03', t: '청구내역서 맨 위 월(지난달 → 이번 달) · 작업비정산서 작성일자(C3 = 말일)·기간(A14 = 1일 ~ 말일)은 달 값·ROW 파일이 없어도 항상 이번 달로' },
+      { d: '2026-11-03', t: '시작·마감 파렛트 = 정산 화면 「✏️ 이번 달 파렛트」 입력란 (곡·셀·오, 부자재 포함) — 시작은 비우면 지난달 마감, 마감이 비면 초안 전에 물어봄 · 택배 파렛트 = 시작+입고−파렛트출고−마감 을 우체국 송장 건수 비율로 날마다 나눔' }
     ],
     afterBuild: function(wb, ctx){
-      var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = MONTHS[YM];
+      var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = Object.assign({}, MONTHS[YM] || {});
+      /* 정산 화면 ✏️ 입력(시작·마감 파렛트)이 있으면 그것이 먼저 — 세 브랜드가 다 있어야 씀 (대표님 2026-11-03) */
+      ['start', 'end'].forEach(function(c){ var IN = ctx.IN || {}, o = {}, ok = true; ['곡', '셀', '오'].forEach(function(b){ var v = IN[c + '_' + b]; if (v == null || v === '' || !isFinite(+v)) ok = false; else o[b] = +v; }); if (ok) MC[c] = o; });
       var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
       var serial = function(d){ return Math.round(Date.UTC(Y, M - 1, d) / 864e5) + 25569; }, S0 = serial(1);
       var CHK = [];
       unshare(wb);
       /* 확인할 곳은 칸에 메모를 달지 않고 맨 뒤 「점검」 시트 목록에만 (대표님 요청 2026-10-03) */
       var mark = function(ws, a, note, list){ if (list !== false) CHK.push([ws.name, a, note]); };
-      if (!MC){ log.push(['확인 필요', YM + ' 시작·마감 파렛트(창고관리)와 착불 메모가 아직 없습니다 — 대화창에서 알려 주시면 넣습니다. 지난달 값으로 둡니다']); return; }
+      /* 청구내역서 맨 위 월 · 작업비정산서 작성일자·기간 = 이번 달 (대표님 2026-11-03 — 달 값·ROW 파일이 없어도 날짜는 먼저 바꿈) */
+      (function(){
+        var PY = M === 1 ? Y - 1 : Y, PM = M === 1 ? 12 : M - 1, PND = new Date(Date.UTC(PY, PM, 0)).getUTCDate(), p2 = function(n){ return String(n).padStart(2, '0'); };
+        var re = function(s){
+          s = s.replace(new RegExp(PY + '(\\s*[-./]\\s*)(0?)' + PM + '(?!\\d)', 'g'), function(_, sep, z){ return Y + sep + (z || PM > 9 ? p2(M) : M); });
+          if (PY !== Y) s = s.replace(new RegExp(PY + '(\\s*년)', 'g'), Y + '$1');
+          s = s.replace(new RegExp('(^|\\D)(0?)' + PM + '(\\s*월)', 'g'), function(_, a, z, w){ return a + (z ? p2(M) : M) + w; });
+          if (PND !== ND) s = s.replace(new RegExp('(' + Y + '\\s*[-./]\\s*0?' + M + '\\s*[-./]\\s*)' + PND + '(?!\\d)', 'g'), '$1' + ND);
+          return s; };
+        var shift = function(ws, rMax){ if (!ws) return; for (var r = 1; r <= rMax; r++) ws.getRow(r).eachCell(function(cl){ var v = cl.value;
+          if (v instanceof Date){ if (v.getUTCFullYear() === PY && v.getUTCMonth() + 1 === PM) cl.value = new Date(Date.UTC(Y, M - 1, Math.min(v.getUTCDate() === PND ? ND : v.getUTCDate(), ND))); return; }
+          if (typeof v === 'string'){ var t = re(v); if (t !== v) cl.value = t; }
+          else if (v && v.richText){ var c = false, rt = v.richText.map(function(x){ var t = re(x.text); if (t !== x.text) c = true; return Object.assign({}, x, { text: t }); }); if (c) cl.value = { richText: rt }; } }); };
+        shift(st, 5);
+        if (!new RegExp('(' + YM + '|' + Y + '\\s*[-./년]\\s*0?' + M + '(?!\\d)|(^|\\D)0?' + M + '\\s*월)').test(txt(st.getCell('B1').value))) st.getCell('B1').value = YM + ' 청구내역서';
+        var js = wb.getWorksheet('작업비정산서');
+        if (js){ shift(js, 16); js.getCell('C3').value = Y + '.' + p2(M) + '.' + ND + '.'; js.getCell('A14').value = YM + '-01 ~ ' + YM + '-' + ND; }
+        log.push(['자동 적용', '청구내역서 맨 위 월·작업비정산서 작성일자(' + Y + '.' + p2(M) + '.' + ND + '.)·기간(' + YM + '-01 ~ ' + YM + '-' + ND + ') = ' + M + '월']);
+      })();
+      /* 달 값이 없어도 ROW·작업상세·작업비정산서·기타작업내역·착불은 이번 달로 만듦 (대표님 2026-11-03 — 전에는 통째로 지난달 그대로였음)
+         시작 파렛트가 없으면 지난달 마감, 마감이 없으면 택배 파렛트를 못 맞춰 0으로 두고 확인 필요 */
+      var PYM = M === 1 ? (Y - 1) + '-12' : Y + '-' + String(M - 1).padStart(2, '0');
+      if (!MC.start && MONTHS[PYM] && MONTHS[PYM].end) MC.start = MONTHS[PYM].end;
+      if (!MC.start || !MC.end) log.push(['확인 필요', YM + ' ' + (!MC.start ? '시작 파렛트' : '') + (!MC.start && !MC.end ? '·' : '') + (!MC.end ? '마감 파렛트(재고조사 + 부자재)' : '') + '가 아직 없어 보관비 택배 파렛트를 못 맞춤 — 정산 화면 「✏️ 이번 달 파렛트」에 넣고 초안을 다시 받으세요']);
+      if (!MC.cod) log.push(['안내', YM + ' 착불 메모(대표님 메모) 없음 — 착불 시트는 로켓쉽먼트·번개배송·반품 양품화만']);
       var box = ctx.BOX || {}, ids = Object.keys(box);
       var rows = ids.filter(function(id){ return box[id].type === 'p9_row'; });
       var etcId = ids.filter(function(id){ return box[id].type === 'coupang_po' && /포인트나인/.test(box[id].name); })[0] || ids.filter(function(id){ return box[id].type === 'coupang_po'; })[0];
@@ -271,8 +312,6 @@
         var sumRef = function(t){ return ['곡', '셀', '오'].filter(function(b){ return work[b].tiers.indexOf(t) >= 0; }).map(function(b){ return work[b].ref(t); }).join('+'); };
         vC = (work.곡.cnt[300] || 0) + (work.오.cnt[300] || 0); vD = work.곡.pre + work.오.pre;
         vF = (work.곡.cnt[1000] || 0) + (work.셀.cnt[1000] || 0) + (work.오.cnt[1000] || 0); vG = (work.곡.cnt[1500] || 0) + (work.오.cnt[1500] || 0);
-        js.getCell('C3').value = Y + '.' + String(M).padStart(2, '0') + '.' + ND + '.';
-        js.getCell('A14').value = YM + '-01 ~ ' + YM + '-' + ND;
         /* 8월까지와 같은 양식: 포장비(기본포장 300·박스포장1 500·박스포장2 700) · 합포장(박스합포장1 1000·박스합포장2 1500) + 소분포장 300 을 H열·22행에 추가, 합계는 I:J열·23행 */
         var cp = function(from, to){ js.getCell(to).style = JSON.parse(JSON.stringify(js.getCell(from).style || {})); };
         var um = function(r){ try { js.unMergeCells(r); } catch (x) {} }, mg = function(r){ try { js.mergeCells(r); } catch (x) {} };
@@ -384,6 +423,7 @@
       }).then(function(){
         /* 보관비 */
         if (!work.곡 || !work.셀 || !work.오) return;
+        if (!MC.start){ log.push(['확인 필요', '시작 파렛트가 없어 곡·셀·오 보관비는 지난달 그대로']); return; }
         return (cargoId ? rd(cargoId) : Promise.resolve(null)).then(function(cb){
           var ca = cb ? XLSX.utils.sheet_to_json(cb.Sheets['입출고내역'] || cb.Sheets[cb.SheetNames[0]], { header: 1, defval: '' }) : [];
           /* 엑셀이 없으면 입출고 화물관리 기록 → 같은 모양 [날짜시리얼, 입고/출고, 업체, 박스, 파렛트, , , 메모] (택배출고 parcel 은 택배 파렛트라 제외) */
@@ -412,7 +452,7 @@
               (desc[d] = desc[d] || []).push(memo + q);
               list.push([r[1], M + '월' + (d - S0 + 1) + '일', r[7] || '', r[4] === '' ? null : +r[4], r[3] === '' ? null : +r[3]]); });
             var sum = function(o){ return Object.keys(o).reduce(function(s, k){ return s + o[k]; }, 0); }, sI = sum(cin), sO = sum(cout);
-            var need = MC.start[b] + sI - sO - MC.end[b];
+            var need = MC.end ? MC.start[b] + sI - sO - MC.end[b] : 0;
             var wd = [], wt = 0; for (var d = 1; d <= ND; d++){ var v = work[b].days[serial(d)] || 0; wd.push(v); wt += v; }
             var tk = wd.map(function(v){ return wt ? need * v / wt : 0; }), fl = tk.map(function(v){ return Math.floor(Math.max(0, v)); });
             var rem = Math.max(0, need) - fl.reduce(function(s, v){ return s + v; }, 0);
@@ -437,10 +477,10 @@
             if (b === '곡'){ for (var r3 = 2; r3 <= Math.max(ws.rowCount, 80); r3++) ['L', 'M', 'N', 'O', 'P'].forEach(function(c){ ws.getCell(c + r3).value = null; });
               list.forEach(function(x, i){ ['L', 'M', 'N', 'O', 'P'].forEach(function(c, j){ ws.getCell(c + (2 + i)).value = x[j]; }); }); }
             mark(ws, L.start, '시작 = 창고관리 전달 말일 + 부자재 ' + ADJ[b] + ' (대화창에서 받은 값)');
-            mark(ws, L.cur + lastR, '마감 = 재고조사 + 부자재 = ' + MC.end[b] + ' 에 맞춤' + (cur !== MC.end[b] ? ' ⚠ 실제 ' + cur : ''));
+            mark(ws, L.cur + lastR, MC.end ? '마감 = 재고조사 + 부자재 = ' + MC.end[b] + ' 에 맞춤' + (cur !== MC.end[b] ? ' ⚠ 실제 ' + cur : '') : '마감 파렛트 값이 없어 택배 파렛트를 안 뺌 — 마감 값 받은 뒤 다시 만들기');
             mark(ws, L.E + 5, '택배 파렛트 ' + need + '팔 = 시작+입고−파렛트출고−마감, 우체국 송장 건수 비례' + (need < 0 ? ' ⚠ 음수 — 시작·마감 값 확인' : ''));
             stor[b] = { sumR: sumR, money: T.S, sI: T.I, sO: T.O };
-            log.push([need < 0 ? '확인 필요' : '자동 적용', b + '_보관비 시작 ' + MC.start[b] + ' + 입고 ' + T.I + ' − 파렛트출고 ' + T.O + ' − 택배 ' + T.E + ' = ' + cur + ' (마감 ' + MC.end[b] + ') · 보관비 ' + won(T.S)]);
+            log.push([need < 0 ? '확인 필요' : '자동 적용', b + '_보관비 시작 ' + MC.start[b] + ' + 입고 ' + T.I + ' − 파렛트출고 ' + T.O + ' − 택배 ' + T.E + ' = ' + cur + ' (마감 ' + (MC.end ? MC.end[b] : '값 없음') + ') · 보관비 ' + won(T.S)]);
           });
           st.getCell('G6').value = { formula: 'SUM(곡_보관비!J' + stor.곡.sumR + '+셀_보관비!I' + stor.셀.sumR + '+오_보관비!I' + stor.오.sumR + ')', result: stor.곡.money + stor.셀.money + stor.오.money };
           st.getCell('F27').value = { formula: 'SUM(곡_보관비!D' + stor.곡.sumR + ',곡_보관비!F' + stor.곡.sumR + ',셀_보관비!C' + stor.셀.sumR + ',셀_보관비!E' + stor.셀.sumR + ',오_보관비!C' + stor.오.sumR + ',오_보관비!E' + stor.오.sumR + ')',
@@ -498,7 +538,6 @@
       }).then(function(){
         /* 청구내역서 결과값·표시 */
         var setR = function(a, v){ var c = st.getCell(a); c.value = c.value && c.value.formula ? { formula: c.value.formula, result: v } : v; };
-        st.getCell('B1').value = YM + ' 청구내역서';
         if (work._stor) setR('G6', work._stor.곡.money + work._stor.셀.money + work._stor.오.money);
         if (work._H22 != null) setR('G22', work._H22 * 1.1);
         if (work._M != null){ setR('G23', work._M * 11000); setR('G25', work._P); }
