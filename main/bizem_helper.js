@@ -2,8 +2,8 @@
    비젬 도우미 — AI 물류비서 짝꿍 (2026-11-03)
 
    비서가 연 탭에서 확장이 켠다. 대표님 로그인을 그대로 쓴다.
-   허용한 주소(ALLOW)에서 온 요청만 받는다. 읽기, 로그인 입력, 사람이 확인한 주문수집 한 번만 한다.
-   주문확정·삭제·양식다운로드 버튼은 누르지 않는다. 고객 정보와 쇼핑몰 계정 ID 를 읽지 않고 건수와 쇼핑몰 이름만 돌려준다.
+   허용한 주소(ALLOW)에서 온 요청만 받는다. 읽기, 로그인 입력, 사람이 확인한 주문수집과 주문확정(전체) 한 번씩만 한다.
+   삭제·양식다운로드 버튼은 누르지 않는다. 고객 정보와 쇼핑몰 계정 ID 를 읽지 않고 건수와 쇼핑몰 이름만 돌려준다.
 
    명령
      ping   → { login, checked, ver }
@@ -12,11 +12,14 @@
      collectCheck  → { malls, checked, from, to, opt }   주문서수집 화면을 열어 읽기만 함
      collectGo     → { started, why, alerts }   수집 버튼과 비젬 확인창을 한 번씩 누름. 쇼핑몰에 발주확인 처리되어 되돌릴 수 없음
      collectStatus → { done, malls } · { done:false, error } · { lost:true }
+     confirmCheck  → { orders, invoices, status, hold }   주문서확정 화면을 열어 검색하고 건수만 읽음
+     confirmGo { orders } → { started, why, alerts }     「조회된 운송장 전체 확정」과 비젬 확인창을 한 번씩 누름
+     confirmStatus → { done } · { ask:true } · { error } · { lost:true }
 ============================================================ */
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-03b';
+  var VER = '2026-11-03c';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -139,7 +142,67 @@
     return m && clean(m.textContent) ? { done: false, error: clean(m.textContent).slice(0, 120) } : { done: false };
   }
 
-  var CMDS = { ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus };
+  /* 주문확정: 화면 기본 조건(미확정, 보류 제외) 그대로 검색한 뒤 「조회된 운송장 전체 확정」. 확인창 문구가 다르면 누르지 않음 */
+  var CONFIRM_MENU = 'REQ008MA', CONFIRM_ALL = '#btnAllOrderSave a', CONFIRM_TEXT = /전체 주문건을 주문확정/, CONFIRM_POPUP = 'iframe[name=myframeMid],#myframeMid';
+  function menuWin(id){
+    var f = document.getElementById('iframe_' + id), w = f && f.contentWindow;
+    try { return w && w.document ? w : null; } catch (e) { return null; }
+  }
+  function cmdConfirmCheck(){
+    if (!menuWin(CONFIRM_MENU)) {
+      if (typeof window.addTabReload !== 'function') throw new Error('비젬 메뉴를 찾지 못했습니다');
+      window.addTabReload(CONFIRM_MENU);
+    }
+    return waitFor(function(){ var w = menuWin(CONFIRM_MENU); return w && w.document.readyState === 'complete' && w.document.getElementById('btnSearch') && typeof w.cmdSearch === 'function' ? w : null; }, GRID_WAIT).then(function(w){
+      if (!w) throw new Error('주문서확정 화면을 열지 못했습니다');
+      return sleep(SETTLE).then(function(){
+        var d = w.document, cnt = d.getElementById('ordercnt');
+        cnt.value = '';
+        d.getElementById('btnSearch').click();
+        return waitFor(function(){ return cnt.value !== '' ? cnt : null; }, GRID_WAIT).then(function(found){
+          if (!found) throw new Error('주문서확정 검색 결과를 읽지 못했습니다');
+          var radio = d.querySelector('input[name=radiotrnsprtsttusse]:checked'), grp = d.getElementById('grpcnt');
+          return { orders: Number(cnt.value) || 0, invoices: Number(grp && grp.value) || 0, status: radio ? radio.value : '', hold: d.getElementById('selresrveat').value };
+        });
+      });
+    });
+  }
+  function cmdConfirmGo(args){
+    var w = menuWin(CONFIRM_MENU), d = w && w.document, item = d && d.querySelector(CONFIRM_ALL), cnt = d && d.getElementById('ordercnt');
+    if (!item || !cnt) return { started: false, why: '주문서확정 화면이 없습니다', alerts: [] };
+    if (Number(cnt.value) !== Number(args.orders) || !Number(args.orders)) return { started: false, why: '건수가 달라졌습니다', alerts: [] };
+    var alerts = [];
+    w.alert = function(m){ alerts.push(clean(m).slice(0, 100)); };
+    item.click();
+    return waitFor(function(){
+      var ok = d.getElementById('myConfirmModalOkBtn'), body = d.getElementById('myConfirmModalBody');
+      return ok && body && CONFIRM_TEXT.test(body.textContent) ? ok : null;
+    }, CONFIRM_WAIT).then(function(ok){
+      if (!ok) return { started: false, why: '비젬 주문확정 확인창이 뜨지 않았습니다. 실행 PC 의 비젬 탭을 확인해 주세요', alerts: alerts };
+      var stale = d.querySelector(MODAL_TEXT);
+      ok.click();
+      return waitFor(function(){
+        if (d.querySelector(CONFIRM_POPUP)) return { started: true, alerts: alerts };
+        var m = d.querySelector(MODAL_TEXT);
+        return m && m !== stale && clean(m.textContent) ? { started: false, why: clean(m.textContent).slice(0, 120), alerts: alerts } : null;
+      }, START_WAIT).then(function(r){
+        return r || { started: false, why: '주문확정이 시작됐는지 확인하지 못했습니다. 비젬에서 확인해 주세요', alerts: alerts };
+      });
+    });
+  }
+  /* 진행창이 묻는 강제 확정·취소는 사람이 정함. 누르지 않고 내용도 옮기지 않음 */
+  function cmdConfirmStatus(){
+    var w = menuWin(CONFIRM_MENU), f = w && w.document.querySelector(CONFIRM_POPUP), p = null;
+    if (!f) return { lost: true };
+    try { p = f.contentWindow; if (!p.document) p = null; } catch (e) { p = null; }
+    if (!p) return { done: false };
+    if (p.isSuccess === true) return { done: true };
+    if (p.document.querySelector('[onclick*="ForceConfirm"],[onclick*="CancleConfirm"]')) return { done: false, ask: true };
+    var m = p.document.querySelector(MODAL_TEXT);
+    return m && clean(m.textContent) ? { done: false, error: clean(m.textContent).slice(0, 120) } : { done: false };
+  }
+
+  var CMDS = { ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'bizem-helper' || !ALLOW.test(e.origin)) return;

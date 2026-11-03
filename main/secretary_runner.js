@@ -9,7 +9,7 @@
      deps.unseal(sealed)·deps.login(site, creds) 비서 화면에서 입력한 로그인 값을 풀어 한 번 쓰고 버림. 저장·기록 금지
      deps.ebutUpload(file) 맨소래담 파일을 이벗 연동몰에 등록. 파일은 이 컴퓨터 메모리에만 있고 Firebase 로 가지 않음
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
-     deps.bizemRead(cmd)·deps.bizemGo() 비젬 주문서수집 화면 읽기와, 사람이 확인한 수집 한 번
+     deps.bizemRead(cmd)·deps.bizemGo(cmd, args) 비젬 화면 읽기와, 사람이 누른 수집·주문확정 한 번씩
    저장은 사람이 누른 요청으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
 (function(root){
@@ -332,6 +332,52 @@
       function find(list, n){ return (list || []).find(function(m){ return m.name === n; }); }
       return names.filter(function(n){ var a = find(after, n), b = find(before, n); return !a || a.status !== '정상종료' || !a.last || (!!b && a.last === b.last); });
     }
+    /* 주문확정(전체) 한 번. 화면 기본 조건 그대로이고, 어떤 경우에도 다시 누르지 않음. seen = 사람이 화면에서 본 대기 건수 */
+    async function bizemConfirm(key, seen){
+      var site = C.SITES.find(function(s){ return s.id === 'bizem'; }), r = await checkOne(site), chk, go;
+      if (r.state !== 'ok') return { note: '비젬: ' + r.msg + '. 주문확정은 하지 않았습니다' };
+      var before = r.counts || { unconfirmed: -1, printWait: -1 };
+      if (seen !== undefined && before.unconfirmed !== seen) return { note: '주문확정 대기가 ' + seen + '건에서 ' + before.unconfirmed + '건으로 바뀌어 확정하지 않았습니다. 다시 확인해 주세요' };
+      try { chk = await deps.bizemRead('confirmCheck'); }
+      catch (e) { return { note: '주문확정 건수를 읽지 못해 확정하지 않았습니다: ' + String((e && e.message) || e) }; }
+      if (chk.status !== 'A10' || chk.hold !== '10') return { note: '주문서확정 화면 조건이 평소와 달라 확정하지 않았습니다' };
+      if (!chk.orders) return { note: before.unconfirmed > 0 ? '화면 기간 안에 확정할 주문이 없는데 대기 ' + before.unconfirmed + '건이 남아 있습니다. 비젬에서 확인해 주세요' : '', confirm: { orders: 0, after: Math.max(before.unconfirmed, 0), printWait: Math.max(before.printWait, 0) } };
+      await store.setJob(key, { step: '주문확정 ' + chk.orders + '건 처리 중' });
+      try { go = await deps.bizemGo('confirmGo', { orders: chk.orders }); }
+      catch (e) { return { note: '응답이 끊겼습니다. 확정됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')' }; }
+      if (!go.started) return { note: '주문확정이 시작되지 않았습니다: ' + go.why };
+      var s = null, now = null, miss = 0, tries = Math.ceil(C.COLLECT_MAX / C.COLLECT_POLL), deadline = deps.now() + C.COLLECT_MAX, finished = false;
+      while (tries-- > 0 && deps.now() <= deadline) {
+        await bizemSleep(C.COLLECT_POLL);
+        try { s = await deps.bizemRead('confirmStatus'); now = await deps.bizemCounts(); miss = 0; }
+        catch (e) { if (++miss >= 6) break; continue; }
+        if (s.ask) return { note: '비젬이 주문확정 중 확인을 묻고 있습니다. 실행 PC 의 비젬 탭에서 직접 정해 주세요' };
+        if (s.error) return { note: '비젬 오류: ' + s.error + '. 비젬에서 먼저 확인해 주세요' };
+        if (s.done || now.unconfirmed === 0) { finished = true; break; }
+        if (s.lost) return { note: '진행 화면이 끊겼습니다. 확정됐을 수 있으니 비젬에서 먼저 확인해 주세요' };
+      }
+      if (!finished) return { note: '주문확정 끝 소식을 받지 못했습니다. 비젬에서 먼저 확인해 주세요' };
+      await store.setSite('bizem', Object.assign({}, r, { counts: now, countsAt: deps.now() }));
+      var confirm = { orders: chk.orders, after: now.unconfirmed, printWait: now.printWait };
+      return { note: now.unconfirmed > 0 ? '주문확정 뒤 대기 ' + now.unconfirmed + '건이 남았습니다. 비젬에서 확인해 주세요' : '', confirm: confirm };
+    }
+    /* 이미 수집된 주문을 확정만 함 */
+    async function runBizemConfirm(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) return;
+      var now = deps.now(), date = C.kstDate(now), key = C.jobKey('bizem_collect', date, C.nextRound(jobs, 'bizem_collect', date));
+      await store.setJob(key, { state: 'running', recipe: 'bizem_collect', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '주문확정 확인 중', notes: '' });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        var cf = await bizemConfirm(key, cmd.seen);
+        await store.setJob(key, { state: cf.note ? 'stopped' : 'done', step: '', endedAt: deps.now(), notes: cf.note, result: { confirm: cf.confirm || null } });
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 비젬에서 먼저 확인해 주세요' }).catch(function(){});
+        throw e;
+      }
+    }
     /* 사람이 쇼핑몰 목록을 보고 누른 수집 한 번. 쇼핑몰에 발주확인 처리되어 되돌릴 수 없음. 어떤 경우에도 다시 누르지 않음 */
     async function runBizemCollect(id, cmd){
       if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
@@ -355,7 +401,7 @@
         if (chk.checked.join('|') !== names.join('|') || chk.from !== cmd.from || chk.to !== cmd.to || chk.opt !== cmd.opt) return end('stopped', '화면에서 본 쇼핑몰·기간과 달라 수집하지 않았습니다. 다시 눌러 확인해 주세요');
         await store.setJob(key, { step: '주문수집 중' });
         var go;
-        try { go = await deps.bizemGo(); }
+        try { go = await deps.bizemGo('collectGo', {}); }
         catch (e) { return end('stopped', '응답이 끊겼습니다. 수집됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')'); }
         if (!go.started) return end('stopped', '수집이 시작되지 않았습니다: ' + go.why);
         var s = null, miss = 0, tries = Math.ceil(C.COLLECT_MAX / C.COLLECT_POLL), deadline = deps.now() + C.COLLECT_MAX;
@@ -375,7 +421,12 @@
         } catch (e) { after = null; }
         var notNew = collectNotNew(chk.malls, s.malls, names);
         var result = { counts: { before: before ? before.unconfirmed : -1, after: after ? after.unconfirmed : -1 }, notNew: notNew, alerts: go.alerts || [], malls: names.length };
-        await end(notNew.length ? 'stopped' : 'done', notNew.length ? '수집 확인 필요: ' + notNew.join(', ') : '', result);
+        /* 수집이 정상일 때만 이어서 확정. 일부 쇼핑몰이 빠졌으면 사람이 먼저 봄 */
+        if (notNew.length) return end('stopped', '수집 확인 필요: ' + notNew.join(', ') + '. 주문확정은 하지 않았습니다', result);
+        if (!cmd.confirm) return end('done', '', result);
+        var cf = await bizemConfirm(key);
+        result.confirm = cf.confirm || null;
+        await end(cf.note ? 'stopped' : 'done', cf.note, result);
       } catch (e) {
         await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 비젬에서 먼저 확인해 주세요' }).catch(function(){});
         throw e;
@@ -447,6 +498,7 @@
       if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
       if (cmd.type === 'bizem_check') return runBizemCheck(id);
       if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
+      if (cmd.type === 'bizem_confirm') return runBizemConfirm(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 

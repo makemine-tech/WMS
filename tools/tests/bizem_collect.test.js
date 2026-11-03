@@ -97,8 +97,8 @@ test('collectStatus: 버튼이 풀리면 끝, 진행창 오류는 알림, 화면
   assert.strictEqual(end.malls.length, 2);
 });
 
-test('도우미 코드에 주문확정·삭제·양식다운로드 버튼은 여전히 없음', () => {
-  for (const id of ['btnSave', 'btnDel', 'preexcelFormDownload']) assert.ok(!SRC.includes(id), id);
+test('도우미 코드에 선택 확정·삭제·보류·양식다운로드 버튼은 없음', () => {
+  for (const id of ['btnSave', 'btnDel', 'btnDelSearch', 'btnAllResrve', 'preexcelFormDownload']) assert.ok(!SRC.includes(id), id);
 });
 
 test('명령 목록: 읽기와 저장을 나눔', () => {
@@ -234,4 +234,140 @@ test('사무실: 수집 중에는 이벗 비서만 일하고 단계를 말함', 
   assert.strictEqual(eb.mode, 'work');
   assert.strictEqual(eb.say, '주문수집 중');
   assert.notStrictEqual(ez.mode, 'work');
+});
+
+/* 주문서확정 화면 흉내 */
+function confirmPage(o) {
+  o = o || {};
+  const state = { clicks: { search: 0, all: 0, ok: 0 }, tabs: [], popup: {} };
+  const els = { selresrveat: { value: o.hold || '10' }, ordercnt: { value: '' }, grpcnt: { value: '' } };
+  els.btnSearch = { click() { state.clicks.search++; els.ordercnt.value = String(o.orders === undefined ? 143 : o.orders); els.grpcnt.value = '120'; } };
+  const okBtn = { click() { state.clicks.ok++; els.__popup = { contentWindow: { isSuccess: state.popup.done === true, document: { querySelector: (q) => (/ForceConfirm/.test(q) ? state.popup.ask || null : state.popup.error || null) } } }; } };
+  const item = { click() { state.clicks.all++; if (o.noConfirm) return; els.myConfirmModalBody = { textContent: o.text || '조회된 전체 주문건을 주문확정 하시겠습니까?' }; els.myConfirmModalOkBtn = okBtn; } };
+  const frameDoc = { readyState: 'complete', getElementById: (i) => els[i] || null, querySelector: (q) => (q === '#btnAllOrderSave a' ? item : /radiotrnsprtsttusse/.test(q) ? { value: o.status || 'A10' } : /myframeMid/.test(q) ? els.__popup || null : null) };
+  const frame = { contentWindow: { document: frameDoc, alert() {}, cmdSearch() {} } };
+  const heard = [];
+  const win = { location: { hostname: 'partner.bizesm.com' }, addEventListener: (n, f) => heard.push(f), removeEventListener() {}, alert() {}, opener: null, setTimeout, clearTimeout, Promise, JSON };
+  win.document = { querySelector: () => null, getElementById: (i) => (i === 'iframe_REQ008MA' && state.tabs.length ? frame : null) };
+  win.addTabReload = (id) => state.tabs.push(id);
+  win.window = win;
+  win.fetch = async () => ({ text: async () => '([])' });
+  vm.runInNewContext(SRC, Object.assign(win, { RegExp, Object, String, Number, Array, Error }));
+  const send = (cmd, args) => new Promise((res) => { heard[0]({ data: { to: 'bizem-helper', id: 1, cmd, args }, origin: 'https://makewon.com', source: { postMessage: (m) => res(JSON.parse(JSON.stringify(m))) } }); });
+  return { send, state, els };
+}
+
+test('confirmCheck: 메뉴를 열어 검색하고 건수만 읽으며 확정은 누르지 않음', async () => {
+  const p = confirmPage();
+  const m = await p.send('confirmCheck', {});
+  assert.deepStrictEqual(m.data, { orders: 143, invoices: 120, status: 'A10', hold: '10' });
+  assert.deepStrictEqual(p.state.tabs, ['REQ008MA']);
+  assert.deepStrictEqual(p.state.clicks, { search: 1, all: 0, ok: 0 });
+});
+
+test('confirmGo: 전체 확정과 확인창을 한 번씩 누르고, 건수가 다르거나 문구가 다르면 확인을 누르지 않음', async () => {
+  let p = confirmPage();
+  await p.send('confirmCheck', {});
+  assert.strictEqual((await p.send('confirmGo', { orders: 143 })).data.started, true);
+  assert.deepStrictEqual(p.state.clicks, { search: 1, all: 1, ok: 1 });
+  p = confirmPage();
+  await p.send('confirmCheck', {});
+  assert.strictEqual((await p.send('confirmGo', { orders: 100 })).data.started, false);
+  assert.strictEqual(p.state.clicks.all, 0);
+  p = confirmPage({ text: '전체 삭제하시겠습니까?' });
+  await p.send('confirmCheck', {});
+  const r = (await p.send('confirmGo', { orders: 143 })).data;
+  assert.strictEqual(r.started, false);
+  assert.strictEqual(p.state.clicks.ok, 0);
+});
+
+test('confirmStatus: 끝, 강제 확정 질문, 오류, 화면 없음을 구분하고 질문에는 답하지 않음', async () => {
+  const p = confirmPage();
+  assert.strictEqual((await p.send('confirmStatus', {})).data.lost, true);
+  await p.send('confirmCheck', {});
+  p.state.popup = { ask: {} };
+  await p.send('confirmGo', { orders: 143 });
+  assert.strictEqual((await p.send('confirmStatus', {})).data.ask, true);
+  p.state.popup = { error: { textContent: ' 오류 ' } };
+  p.els.__popup.contentWindow.document.querySelector = (q) => (/ForceConfirm/.test(q) ? null : { textContent: ' 오류 ' });
+  assert.strictEqual((await p.send('confirmStatus', {})).data.error, '오류');
+  p.els.__popup.contentWindow.isSuccess = true;
+  assert.strictEqual((await p.send('confirmStatus', {})).data.done, true);
+});
+
+function setupConfirm(o) {
+  o = o || {};
+  const db = { commands: {}, jobs: {}, sites: {}, go: [], sent: [] };
+  const seq = (o.counts || [{ unconfirmed: 0, printWait: 0 }, { unconfirmed: 143, printWait: 0 }, { unconfirmed: 143, printWait: 0 }, { unconfirmed: 0, printWait: 120 }]).slice();
+  const store = {
+    getRunner: async () => ({ id: 'me', ts: NOW }), getControl: async () => null, claimCommand: async () => true,
+    setCommand: async (id, p) => { db.commands[id] = Object.assign(db.commands[id] || {}, p); },
+    getJobs: async () => db.jobs, setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); }, setSite: async (id, p) => { db.sites[id] = p; },
+  };
+  const runner = createRunner({
+    store, now: () => NOW, runnerId: 'me', info: {}, sleep: async () => {},
+    openSite: async () => ({ login: true }),
+    bizemCounts: async () => (seq.length > 1 ? seq.shift() : seq[0]),
+    bizemRead: async (cmd) => {
+      db.sent.push(cmd);
+      if (cmd === 'collectCheck') return BEFORE;
+      if (cmd === 'collectStatus') return o.collect || { done: true, malls: [mall('맨소래담-무신사', '2026-11-03 12:00:10'), mall('텐바이텐', '2026-11-03 12:00:12')] };
+      if (cmd === 'confirmCheck') return o.check || { orders: 143, invoices: 120, status: 'A10', hold: '10' };
+      return o.status || { done: true };
+    },
+    bizemGo: async (cmd, args) => { db.go.push([cmd, args]); return (o.go && o.go[cmd]) || { started: true, alerts: [] }; },
+  });
+  return { runner, db };
+}
+
+test('수집 + 확정: 수집이 정상이면 전체 확정까지 한 번에 하고 결과를 남김', async () => {
+  const { runner, db } = setupConfirm();
+  await runner.handleCommand('c', collect({ confirm: true }));
+  assert.deepStrictEqual(db.go.map((g) => g[0]), ['collectGo', 'confirmGo']);
+  assert.deepStrictEqual(db.go[1][1], { orders: 143 });
+  const j = job(db);
+  assert.strictEqual(j.state, 'done');
+  assert.deepStrictEqual(j.result.confirm, { orders: 143, after: 0, printWait: 120 });
+  assert.strictEqual(db.sites.bizem.counts.printWait, 120);
+});
+
+test('수집 + 확정: 빠진 쇼핑몰이 있으면 확정하지 않음', async () => {
+  const { runner, db } = setupConfirm({ collect: { done: true, malls: [mall('맨소래담-무신사', '2026-11-02 15:17:03'), mall('텐바이텐', '2026-11-03 12:00:12')] } });
+  await runner.handleCommand('c', collect({ confirm: true }));
+  assert.deepStrictEqual(db.go.map((g) => g[0]), ['collectGo']);
+  assert.strictEqual(job(db).state, 'stopped');
+  assert.match(job(db).notes, /주문확정은 하지 않았습니다/);
+});
+
+test('확정만: 사람이 본 건수와 다르거나 화면 조건이 다르면 누르지 않음', async () => {
+  let t = setupConfirm({ counts: [{ unconfirmed: 150, printWait: 0 }] });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW, seen: 143 });
+  assert.deepStrictEqual(t.db.go, []);
+  assert.strictEqual(job(t.db).state, 'stopped');
+  t = setupConfirm({ counts: [{ unconfirmed: 143, printWait: 0 }], check: { orders: 143, invoices: 1, status: 'A', hold: '10' } });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW, seen: 143 });
+  assert.deepStrictEqual(t.db.go, []);
+  t = setupConfirm({ counts: [{ unconfirmed: 143, printWait: 0 }] });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW - C.RELAY_TTL - 1, seen: 143 });
+  assert.strictEqual(t.db.commands.c.status, 'expired');
+  assert.deepStrictEqual(t.db.go, []);
+});
+
+test('확정만: 끝나면 완료, 대기가 남거나 비젬이 물으면 멈추고 다시 누르지 않음', async () => {
+  let t = setupConfirm({ counts: [{ unconfirmed: 143, printWait: 0 }, { unconfirmed: 0, printWait: 120 }] });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW, seen: 143 });
+  assert.strictEqual(job(t.db).state, 'done');
+  assert.strictEqual(t.db.go.length, 1);
+  t = setupConfirm({ counts: [{ unconfirmed: 143, printWait: 0 }, { unconfirmed: 5, printWait: 120 }] });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW, seen: 143 });
+  assert.strictEqual(job(t.db).state, 'stopped');
+  assert.match(job(t.db).notes, /5건/);
+  t = setupConfirm({ counts: [{ unconfirmed: 143, printWait: 0 }], status: { done: false, ask: true } });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW, seen: 143 });
+  assert.match(job(t.db).notes, /묻고/);
+  assert.strictEqual(t.db.go.length, 1);
+  t = setupConfirm({ counts: [{ unconfirmed: 143, printWait: 0 }], go: { confirmGo: { started: false, why: '확인창 없음' } } });
+  await t.runner.handleCommand('c', { type: 'bizem_confirm', at: NOW, seen: 143 });
+  assert.strictEqual(t.db.go.length, 1);
+  assert.match(job(t.db).notes, /확인창/);
 });
