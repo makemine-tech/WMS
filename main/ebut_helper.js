@@ -12,6 +12,7 @@
      storeCheck  → { page, busy, newCnt, waitCnt }   주문서등록 화면에서 맨소레담공식스마트스토어 건수만 읽음 (AI 물류비서)
      storeGo     → { started, why, alerts }        주문확인 체크 후 주문가져오기 한 번. 이벗 확인창 문구가 맞을 때만 확인
      storeStatus → { done, lines, newCnt } · { lost }
+     matchSave { name, opt, qty, picks:[{code,qty,name}] } → { ok, msg, alerts }  주문서매칭 창에서 사람과 같은 순서로 한 상품 매칭처리 (AI 물류비서)
      matchRead { cust, from, to, terms } → { items, masters, history }  미매칭 줄·마스터 상품·과거 매칭 읽기 / matchSearch { cust, text } → 마스터 상품 검색 (저장 없음)
      find  { orig, origDate }
            원송장으로 상담전용창 검색(/cs/cs200main_jdata, 발송일 기준, 이벗은 기간 최대 약 90일)
@@ -26,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-03b';
+  var VER = '2026-11-03c';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -473,16 +474,92 @@
     return storeCounts().then(function(c){ return { done: true, lines: lines, newCnt: c.newCnt }; }, function(){ return { done: true, lines: lines, newCnt: '' }; });
   }
 
+  /* ── 주문 매칭 저장 (AI 물류비서, 사람이 확정하고 누른 상품만) ──
+     이 탭에 연 주문서매칭 창(site217edit.jsp)에서 사람과 같은 순서: 왼쪽에서 그 주문 줄 선택 → 오른쪽에서 상품을 옵션코드로 찾아 추가 → 수량 → 매칭처리.
+     맨소래담은 「상품코드+상품명+옵션명+수량」 방식이라 넣는 수량 합이 주문 수량과 다르면 「실주문수량과 매칭수량을 확인하지 않음」을 체크함 */
+  var MATCH_CUST = '2237', MATCH_WAIT = 20000, MATCH_DAYS = 90;
+  function norm(s){ return String(s == null ? '' : s).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function ajaxDone(re){
+    var $ = window.jQuery;
+    return new Promise(function(ok, no){
+      var t = setTimeout(function(){ $(document).off('ajaxComplete', on); no(new Error('이벗 응답 없음')); }, MATCH_WAIT);
+      function on(e, x, s){ if (!re.test((s && s.url) || '')) return; clearTimeout(t); $(document).off('ajaxComplete', on); setTimeout(function(){ ok(x); }, 300); }
+      $(document).on('ajaxComplete', on);
+    });
+  }
+  function cmdMatchSave(a){
+    var $ = window.jQuery, L = $ && $('#gridList_left'), G = $ && $('#gridList_right');
+    if (!$ || !L.length || !G.length || typeof window.go_new !== 'function') throw new Error('이벗 주문서매칭 창이 아닙니다');
+    var picks = (a.picks || []).filter(function(p){ return p.code && Number(p.qty) >= 1; });
+    if (!a.name || !picks.length) throw new Error('매칭할 상품이 없습니다');
+    var alerts = [], keepA = window.alert, keepC = window.confirm;
+    function restore(){ window.alert = keepA; window.confirm = keepC; }
+    window.alert = function(m){ alerts.push(norm(m).slice(0, 120)); };
+    window.confirm = function(m){ return picks.length > 1 && /2개이상 선택/.test(String(m)); };
+    var d = new Date(), from = new Date(d.getTime() - MATCH_DAYS * 864e5);
+    function day(x){ return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+    if ($('#cust_code option[value=' + MATCH_CUST + ']').length) $('#cust_code').val(MATCH_CUST);
+    $('#date1').val(day(from)); $('#date2').val(day(d));
+    $('#l_search_select').val('1'); $('#l_search_text').val(a.name);
+    var left = ajaxDone(/site217edit_left_jdata/);
+    window.go_search_left();
+    function addPick(i){
+      if (i >= picks.length) return Promise.resolve();
+      $('#r_search_select').val('7'); $('#r_search_text').val(picks[i].code); $('#r_search_opt').val(''); $('#r_search_opt2').val('');
+      var right = ajaxDone(/site217edit_right_jdata/);
+      window.go_search_right();
+      return right.then(function(){
+        if (G.jqGrid('getInd', String(picks[i].code)) === false) throw new Error('이벗 상품(옵션코드 ' + picks[i].code + ')을 찾지 못했습니다');
+        var before = $('input[name=basic_seq]').length;
+        G.jqGrid('setSelection', String(picks[i].code), true);
+        if ($('input[name=basic_seq]').length !== before + 1) throw new Error('상품을 추가하지 못했습니다 ' + (alerts.slice(-1)[0] || ''));
+        return addPick(i + 1);
+      });
+    }
+    return left.then(function(){
+      var hit = L.jqGrid('getDataIDs').filter(function(id){
+        var r = L.jqGrid('getRowData', id);
+        return norm(r.ordlist_name_ori) === norm(a.name) && norm(r.ordlist_opt) === norm(a.opt) && Number(r.ordlist_qty) === Number(a.qty);
+      });
+      if (hit.length !== 1) throw new Error(hit.length ? '같은 주문 줄이 ' + hit.length + '개라 고르지 않았습니다' : '이벗 매칭 창에서 이 주문 줄을 찾지 못했습니다 (이미 매칭됐을 수 있음)');
+      var auto = ajaxDone(/site217edit_right_jdata/).catch(function(){});
+      L.jqGrid('setSelection', hit[0], false);
+      window.onSelectRowLeft(hit[0]);
+      return auto;
+    }).then(function(){
+      window.delete_right_list();
+      return addPick(0);
+    }).then(function(){
+      var q = $('input[name=bmat_qty]');
+      if (q.length !== picks.length) throw new Error('넣을 상품 수가 맞지 않습니다');
+      var sum = 0;
+      picks.forEach(function(p, i){ q.eq(i).val(String(Number(p.qty))); sum += Number(p.qty); });
+      $('input:checkbox[name=qty_check]').prop('checked', sum !== Number($('#name1_qty').text()));
+      $('input:checkbox[name=alert_check]').prop('checked', true);
+      var saved = ajaxDone(/site217save/);
+      window.go_new();
+      return saved;
+    }).then(function(x){
+      var j = null; try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
+      var ok = !!j && j.result === 'success';
+      restore();
+      return { ok: ok, msg: norm(j && j.msg).slice(0, 120) || (ok ? '' : '이벗 응답을 읽지 못했습니다'), alerts: alerts };
+    }, function(e){
+      restore();
+      return { ok: false, msg: String(e.message || e) + (alerts.length ? ' · ' + alerts.join(' / ') : ''), alerts: alerts };
+    });
+  }
+
   var busy = 0;
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
-    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : m.cmd === 'login' ? cmdLogin : m.cmd === 'uploadMenso' ? cmdUploadMenso : m.cmd === 'storeCheck' ? cmdStoreCheck : m.cmd === 'storeGo' ? cmdStoreGo : m.cmd === 'storeStatus' ? cmdStoreStatus : null;
+    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : m.cmd === 'login' ? cmdLogin : m.cmd === 'uploadMenso' ? cmdUploadMenso : m.cmd === 'storeCheck' ? cmdStoreCheck : m.cmd === 'storeGo' ? cmdStoreGo : m.cmd === 'storeStatus' ? cmdStoreStatus : m.cmd === 'matchSave' ? cmdMatchSave : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
     /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
     if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
-    busy++; if (m.cmd === 'uploadMenso') say('맨소래담 주문 등록 중… 창을 닫지 마세요'); else if (m.cmd === 'storeGo' || m.cmd === 'storeStatus') say('맨소래담 주문 가져오는 중… 창을 닫지 마세요'); else if (m.cmd === 'relogin' || m.cmd === 'login') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
+    busy++; if (m.cmd === 'uploadMenso') say('맨소래담 주문 등록 중… 창을 닫지 마세요'); else if (m.cmd === 'storeGo' || m.cmd === 'storeStatus') say('맨소래담 주문 가져오는 중… 창을 닫지 마세요'); else if (m.cmd === 'matchSave') say('주문 매칭 저장 중… 창을 닫지 마세요'); else if (m.cmd === 'relogin' || m.cmd === 'login') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
       if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');

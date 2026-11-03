@@ -10,6 +10,7 @@
      deps.ebutUpload(file) 맨소래담 파일을 이벗 연동몰에 등록. 파일은 이 컴퓨터 메모리에만 있고 Firebase 로 가지 않음
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
      deps.bizemRead(cmd)·deps.bizemGo(cmd, args) 비젬 화면 읽기와, 사람이 누른 수집·주문확정 한 번씩
+     deps.ebutMatchPage() 이벗 주문서매칭 창을 이 탭에 엶. 매칭 저장은 deps.ebutGo('matchSave', item)
      deps.ebutOrderPage()·deps.ebutRead(cmd)·deps.ebutGo(cmd) 이벗 주문서등록 화면 열기·읽기·사람이 누른 주문가져오기 한 번
      deps.bizemFile(seen, key) 비젬 양식을 받아 나눠 실행 PC 메모리에 둠. 사람이 요청하면 그 화면의 1회용 키로 잠가서만 내려보냄
    저장은 사람이 누른 요청으로만 한다. 그 밖의 작업은 읽기 전용.
@@ -590,6 +591,57 @@
       }
     }
 
+    /* 지난 매칭 기록은 상품명으로 묶여 오는데, 상품명의 [ ] . / 는 Firebase 이름표로 못 씀. 목록으로 바꿔 저장 */
+    function histList(h){ return Array.isArray(h) ? h : Object.keys(h || {}).map(function(n){ return { name: n, rows: h[n] }; }); }
+    async function readMatch(range){
+      var data = await deps.matchRead(range);
+      data.history = histList(data.history);
+      data.readAt = deps.now();
+      await store.setMatch('data', data);
+      return data;
+    }
+    /* 매칭 저장: 사람이 확정하고 「이벗에 저장」을 누른 상품만 하나씩 한 번. 실패하면 거기서 멈추고 다시 보내지 않음. 끝나면 다시 읽어 대조 */
+    var MATCH_SAVE_MAX = 30;
+    async function runMatchSave(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) return;
+      var list = (cmd.items || []).slice(0, MATCH_SAVE_MAX), now = deps.now(), date = C.kstDate(now), key = C.jobKey('match_save', date, C.nextRound(jobs, 'match_save', date));
+      async function end(state, notes, result){
+        await store.setJob(key, { state: state, step: '', endedAt: deps.now(), notes: notes, result: result || null });
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      }
+      await store.setJob(key, { state: 'running', recipe: 'match_save', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '이벗 매칭 창 여는 중', total: list.length, notes: '' });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        if (!list.length) return end('stopped', '저장할 상품이 없습니다');
+        var r = C.siteState('ebut', await deps.ebutMatchPage());
+        if (r.state !== 'ok') return end('stopped', '이벗: ' + r.msg);
+        var saved = 0, fail = '';
+        for (var i = 0; i < list.length; i++) {
+          var it = list[i], res;
+          await store.setJob(key, { step: '매칭 저장 ' + (i + 1) + '/' + list.length, done: i });
+          try { res = await deps.ebutGo('matchSave', { name: it.name, opt: it.opt, qty: it.qty, picks: it.picks }); }
+          catch (e) { res = { ok: false, msg: '응답이 끊겼습니다. 저장됐을 수 있으니 이벗에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')' }; }
+          await store.setMatch('drafts/' + it.key + '/saved', { ok: !!res.ok, msg: res.msg || '', at: deps.now() });
+          if (!res.ok) { fail = it.name + ' — ' + (res.msg || '저장 안 됨'); break; }
+          saved++;
+        }
+        await store.setJob(key, { step: '다시 읽어 대조 중', done: saved });
+        var open = -1;
+        try {
+          var data = await readMatch(C.dateRange('', deps.now()));
+          open = list.slice(0, saved).filter(function(it){ return (data.items || []).some(function(x){ return x.name === it.name && x.opt === it.opt && Number(x.qty) === Number(it.qty); }); }).length;
+        } catch (e) { open = -1; }
+        var result = { saved: saved, total: list.length, stillOpen: open };
+        if (fail) return end('stopped', '저장 멈춤: ' + fail + (saved ? ' (앞의 ' + saved + '건은 저장됨)' : ''), result);
+        await end(open > 0 ? 'stopped' : 'done', open > 0 ? '저장했지만 아직 미매칭으로 보이는 상품 ' + open + '건. 이벗에서 확인해 주세요' : open < 0 ? '저장했지만 다시 읽지 못해 대조하지 못했습니다' : '', result);
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 이벗에서 먼저 확인해 주세요' }).catch(function(){});
+        throw e;
+      }
+    }
+
     /* 매칭 화면 자료: 이벗에서 읽어 secretary/match 에 둔다. 이벗에 쓰지 않음 */
     async function runMatch(id, cmd){
       var now = deps.now();
@@ -601,9 +653,7 @@
         if (cmd.type === 'match_search') {
           await store.setMatch('search/' + id, { text: cmd.text || '', rows: await deps.matchSearch(cmd.text || ''), at: deps.now() });
         } else {
-          var data = await deps.matchRead(C.dateRange(cmd.from, now));
-          data.readAt = deps.now();
-          await store.setMatch('data', data);
+          await readMatch(C.dateRange(cmd.from, now));
         }
         await store.setCommand(id, { status: 'done', doneAt: deps.now() });
       } catch (e) {
@@ -623,6 +673,7 @@
       if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
       if (cmd.type === 'bizem_confirm') return runBizemConfirm(id, cmd);
       if (cmd.type === 'bizem_form') return runBizemForm(id);
+      if (cmd.type === 'match_save') return runMatchSave(id, cmd);
       if (cmd.type === 'ebut_check') return runEbutCheck(id);
       if (cmd.type === 'ebut_collect') return runEbutCollect(id, cmd);
       if (cmd.type === 'bizem_import') return runBizemImport(id, cmd);

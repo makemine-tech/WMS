@@ -596,3 +596,74 @@ test('이벗 도우미: 주문가져오기 명령이 있고 확인창은 발주�
   assert.ok(src.includes("return /발주확인:○/.test(m) && /중복등록/.test(m);"));
   assert.ok(src.includes("STORE = '14374'"));
 });
+
+/* ── 주문 매칭 ── */
+function setupMatch(o) {
+  o = o || {};
+  const db = { commands: {}, jobs: {}, sites: {}, match: {}, go: [] };
+  const store = {
+    getRunner: async () => ({ id: 'me', ts: NOW }), getControl: async () => null, claimCommand: async () => true,
+    setCommand: async (id, p) => { db.commands[id] = Object.assign(db.commands[id] || {}, p); },
+    getJobs: async () => db.jobs, setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); }, setSite: async (id, p) => { db.sites[id] = p; },
+    setMatch: async (path, p) => { db.match[path] = JSON.parse(JSON.stringify(p)); },
+  };
+  const results = (o.results || [{ ok: true, msg: '매칭되었습니다' }, { ok: true, msg: '매칭되었습니다' }]).slice();
+  const runner = createRunner({
+    store, now: () => NOW, runnerId: 'me', info: {}, sleep: async () => {},
+    openSite: async () => ({ login: true }), ebutMatchPage: async () => ({ login: o.login !== false }),
+    matchRead: async () => ({ items: o.after || [], masters: [], history: { '[추가10%적립] 아크네스 2개': [{ qty: 1 }] } }),
+    ebutGo: async (cmd, args) => { db.go.push([cmd, args]); if (o.throwAt === db.go.length) throw new Error('끊김'); return results.shift() || { ok: true }; },
+  });
+  return { runner, db };
+}
+const mitems = [{ key: 'k1', name: '[추가10%적립] 아크네스 2개', opt: '수량: 3개', qty: 1, picks: [{ code: '1659344', qty: 6, name: 'A' }] }, { key: 'k2', name: '멘소래담 롤온', opt: '', qty: 2, picks: [{ code: '2', qty: 2, name: 'B' }] }];
+
+test('매칭 읽기: 지난 매칭을 상품명 이름표가 아닌 목록으로 저장 ([ ] 는 Firebase 이름표 금지)', async () => {
+  const { runner, db } = setupMatch();
+  await runner.handleCommand('c', { type: 'match_read', at: NOW });
+  assert.strictEqual(db.commands.c.status, 'done');
+  assert.ok(Array.isArray(db.match.data.history));
+  assert.strictEqual(db.match.data.history[0].name, '[추가10%적립] 아크네스 2개');
+  const keys = (v) => (v && typeof v === 'object' ? Object.keys(v).concat(...Object.values(v).map(keys)) : []);
+  assert.ok(keys(db.match.data).every((k) => !/[.#$\[\]\/]/.test(k)));
+});
+test('매칭 저장: 상품마다 한 번씩 보내고, 결과를 초안에 남기고, 다시 읽어 대조', async () => {
+  const { runner, db } = setupMatch();
+  await runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  assert.deepStrictEqual(db.go.map((g) => g[0]), ['matchSave', 'matchSave']);
+  assert.deepStrictEqual(db.go[0][1], { name: mitems[0].name, opt: '수량: 3개', qty: 1, picks: mitems[0].picks });
+  assert.strictEqual(db.match['drafts/k1/saved'].ok, true);
+  const j = db.jobs[Object.keys(db.jobs)[0]];
+  assert.strictEqual(j.state, 'done');
+  assert.deepStrictEqual(j.result, { saved: 2, total: 2, stillOpen: 0 });
+});
+test('매칭 저장: 실패하면 거기서 멈추고 뒤는 보내지 않으며, 끊겨도 다시 보내지 않음', async () => {
+  let t = setupMatch({ results: [{ ok: false, msg: '주문 줄을 찾지 못했습니다' }] });
+  await t.runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  assert.strictEqual(t.db.go.length, 1);
+  assert.strictEqual(t.db.match['drafts/k1/saved'].ok, false);
+  assert.strictEqual(t.db.jobs[Object.keys(t.db.jobs)[0]].state, 'stopped');
+  t = setupMatch({ throwAt: 1 });
+  await t.runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  assert.strictEqual(t.db.go.length, 1);
+  assert.match(t.db.match['drafts/k1/saved'].msg, /끊겼/);
+});
+test('매칭 저장: 저장 뒤에도 미매칭으로 남으면 확인 필요, 늦은 요청·로그아웃은 보내지 않음', async () => {
+  let t = setupMatch({ after: [{ name: '멘소래담 롤온', opt: '', qty: 2 }] });
+  await t.runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  const j = t.db.jobs[Object.keys(t.db.jobs)[0]];
+  assert.strictEqual(j.state, 'stopped');
+  assert.strictEqual(j.result.stillOpen, 1);
+  t = setupMatch();
+  await t.runner.handleCommand('c', { type: 'match_save', at: NOW - C.RELAY_TTL - 1, items: mitems });
+  assert.strictEqual(t.db.commands.c.status, 'expired');
+  t = setupMatch({ login: false });
+  await t.runner.handleCommand('c', { type: 'match_save', at: NOW, items: mitems });
+  assert.strictEqual(t.db.go.length, 0);
+});
+test('이벗 도우미: 매칭 저장은 2개 이상 확인창만 받아들이고 수량 합이 다르면 수량 확인 안 함 체크', () => {
+  const src = fs.readFileSync(__dirname + '/../../main/ebut_helper.js', 'utf8');
+  assert.ok(/m\.cmd === 'matchSave' \? cmdMatchSave/.test(src));
+  assert.ok(src.includes("return picks.length > 1 && /2개이상 선택/.test(String(m));"));
+  assert.ok(src.includes("prop('checked', sum !== Number($('#name1_qty').text()))"));
+});
