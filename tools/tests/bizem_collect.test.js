@@ -371,3 +371,145 @@ test('확정만: 끝나면 완료, 대기가 남거나 비젬이 물으면 멈�
   assert.strictEqual(t.db.go.length, 1);
   assert.match(job(t.db).notes, /확인창/);
 });
+
+/* ── 비젬 주문 이벗에 넣기 ── */
+const { newPages, addPage } = require('../../main/bizem_split.js');
+test('쪽 합치기: 제목은 한 번, 앞 쪽과 같은 줄은 빼고, 같은 쪽을 또 받으면 0', () => {
+  const st = newPages(), h = ['주문번호', '주문자이름'];
+  assert.strictEqual(addPage(st, [h, [1, 'a'], [2, 'b']]), 2);
+  assert.strictEqual(addPage(st, [h, [2, 'b'], [3, 'c']]), 1);
+  assert.strictEqual(addPage(st, [h, [1, 'a'], [2, 'b'], [3, 'c']]), 0);
+  assert.strictEqual(addPage(st, [['없음']]), 0);
+  assert.deepStrictEqual(st.rows.map((r) => r[0]), ['주문번호', 1, 2, 3]);
+});
+
+function formPage(o) {
+  o = o || {};
+  const state = { tabs: [], fetched: [], made: 0 };
+  const sel = { value: '', options: [{ text: ' 다른양식 ', value: '1' }, { text: '0000_박스앤캔_코코나나양식', value: '3880' }] };
+  const frameWin = { pageNo: 1, alert() {}, document: { readyState: 'complete', getElementById: (i) => (i === 'selexcelform' ? sel : i === 'seltrnsprtsttusse' ? { value: 'B10' } : null) },
+    getWaybildwlddtCnt: async () => o.downloaded || 0, cmdCheckMsgConfirm: () => o.memo || '0',
+    downloadDateCheckExcelRequest() { state.realDownload = true; }, excelFormDownload() { state.made++; frameWin.downloadDateCheckExcelRequest('/api/TB_ORDER/GetTB_ORDER_WAYBILLFORM', JSON.stringify({ p_pageno: frameWin.pageNo, p_formid: sel.value })); } };
+  const heard = [];
+  const win = { location: { hostname: 'partner.bizesm.com' }, addEventListener: (n, f) => heard.push(f), removeEventListener() {}, alert() {}, opener: null, setTimeout, clearTimeout, Promise, JSON, encodeURIComponent };
+  win.document = { querySelector: () => null, getElementById: (i) => (i === 'iframe_REQ023MA' && state.tabs.length ? { contentWindow: frameWin } : null) };
+  win.addTabReload = (id) => state.tabs.push(id);
+  win.window = win;
+  win.fetch = async (u, init) => { state.fetched.push([u, init.body]); return { ok: !(o.bad && u === o.bad), status: 500, arrayBuffer: async () => new ArrayBuffer(4) }; };
+  vm.runInNewContext(SRC, Object.assign(win, { RegExp, Object, String, Number, Array, Error }));
+  const send = (cmd, args) => new Promise((res) => { heard[0]({ data: { to: 'bizem-helper', id: 1, cmd, args }, origin: 'https://makewon.com', source: { postMessage: (m) => res(m) } }); });
+  return { send, state, sel };
+}
+test('formCheck: 양식을 고르고 읽기만 하며 받지 않음', async () => {
+  const p = formPage({ downloaded: 2 });
+  const d = (await p.send('formCheck', {})).data;
+  assert.strictEqual(d.form, '0000_박스앤캔_코코나나양식');
+  assert.strictEqual(d.downloaded, 2);
+  assert.strictEqual(p.sel.value, '3880');
+  assert.deepStrictEqual(p.state.fetched, []);
+  assert.strictEqual(p.state.made, 0);
+});
+test('formPage: 비젬이 만든 요청을 DateCheck 뒤 보내고 내용을 돌려주며 원래 함수를 되돌림', async () => {
+  const p = formPage();
+  await p.send('formCheck', {});
+  const m = await p.send('formPage', { page: 2 });
+  assert.ok(m.ok, m.err);
+  assert.strictEqual(m.data.buffer.byteLength, 4);
+  assert.strictEqual(p.state.fetched[0][0], '/api/TB_ORDER/DateCheck');
+  assert.strictEqual(p.state.fetched[1][0], '/api/TB_ORDER/GetTB_ORDER_WAYBILLFORM');
+  assert.match(decodeURIComponent(p.state.fetched[1][1]), /command=excel&data=.*"p_pageno":2/);
+  assert.ok(!p.state.realDownload);
+});
+test('formPage: 비젬 오류면 실패로 답함', async () => {
+  const p = formPage({ bad: '/api/TB_ORDER/DateCheck' });
+  await p.send('formCheck', {});
+  const m = await p.send('formPage', { page: 1 });
+  assert.strictEqual(m.ok, false);
+  assert.strictEqual(p.state.fetched.length, 1);
+});
+
+function setupImport(o) {
+  o = o || {};
+  const db = { commands: {}, jobs: {}, sites: {}, uploads: [], saved: [], fileAsked: 0, uploadAsked: 0 };
+  const store = {
+    getRunner: async () => ({ id: 'me', ts: NOW }), getControl: async () => null, claimCommand: async () => true,
+    setCommand: async (id, p) => { db.commands[id] = Object.assign(db.commands[id] || {}, p); },
+    getJobs: async () => db.jobs, setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); }, setSite: async (id, p) => { db.sites[id] = p; }, setUpload: async (p) => { db.uploads.push(p); },
+  };
+  const file = Object.assign({ lines: { menso: 6, boxncan: 63 }, orders: 5, noAddress: 0, sites: [{ name: '맨소래담-무신사', count: 6, to: 'menso' }], menso: { buffer: new ArrayBuffer(2), name: 'm.xlsx' } }, o.file);
+  const runner = createRunner({
+    store, now: () => NOW, runnerId: 'me', info: {}, sleep: async () => {},
+    openSite: async (s) => ({ login: !(o.ebutOut && s.id === 'ebut') }),
+    bizemCounts: async () => ({ unconfirmed: 0, printWait: o.wait === undefined ? 69 : o.wait }),
+    bizemRead: async () => Object.assign({ form: '0000_박스앤캔_코코나나양식', status: 'B10', memo: 0, downloaded: 0 }, o.form),
+    bizemFile: async () => { db.fileAsked++; if (o.fileThrow) throw new Error('응답 없음'); return file; },
+    saveBizem: async (k) => { db.saved.push(k); },
+    ebutUpload: async () => { db.uploadAsked++; if (o.upThrow) throw new Error('끊김'); return o.up || { status: 200, alerts: ['5건 등록되었습니다', '홍길동 010-1234-5678 중복'] }; },
+  });
+  return { runner, db };
+}
+const imp = (o) => Object.assign({ type: 'bizem_import', at: NOW, by: 'x', seen: 69 }, o);
+
+test('등록: 받아서 나누고 맨소래담만 이벗에 한 번 등록, 박스앤캔은 저장, 고객 정보는 기록하지 않음', async () => {
+  const { runner, db } = setupImport();
+  await runner.handleCommand('c', imp());
+  const j = job(db);
+  assert.strictEqual(j.state, 'done');
+  assert.strictEqual(db.uploadAsked, 1);
+  assert.deepStrictEqual(db.saved, ['boxncan']);
+  assert.deepStrictEqual(j.result.upload.alerts, ['5건 등록되었습니다']);
+  assert.deepStrictEqual(db.uploads[0].lines, 6);
+  assert.ok(!JSON.stringify(db.jobs).includes('홍길동'));
+  assert.ok(!Object.keys(j.result).includes('buffer'));
+});
+test('등록: 건수가 다르거나 이미 받은 주문·쪽지·조건 차이가 있으면 받지 않음', async () => {
+  for (const o of [{ wait: 70 }, { form: { downloaded: 3 } }, { form: { memo: 1 } }, { form: { status: 'A' } }, { form: { form: '' } }]) {
+    const { runner, db } = setupImport(o);
+    await runner.handleCommand('c', imp());
+    assert.strictEqual(db.fileAsked, 0, JSON.stringify(o));
+    assert.strictEqual(job(db).state, 'stopped');
+  }
+});
+test('등록: 늦은 요청은 만료', async () => {
+  const { runner, db } = setupImport();
+  await runner.handleCommand('c', imp({ at: NOW - C.RELAY_TTL - 1 }));
+  assert.strictEqual(db.commands.c.status, 'expired');
+  assert.strictEqual(db.fileAsked, 0);
+});
+test('등록: 받은 줄이 모자라거나 주소 없는 줄이 있으면 등록하지 않고 파일을 남김', async () => {
+  let t = setupImport({ file: { lines: { menso: 1, boxncan: 2 } } });
+  await t.runner.handleCommand('c', imp());
+  assert.strictEqual(t.db.uploadAsked, 0);
+  assert.deepStrictEqual(t.db.saved, ['boxncan', 'menso']);
+  t = setupImport({ file: { noAddress: 2 } });
+  await t.runner.handleCommand('c', imp());
+  assert.strictEqual(t.db.uploadAsked, 0);
+  assert.match(job(t.db).notes, /주소 없는 줄 2건/);
+});
+test('등록: 이벗 로그아웃·끊김·오류 응답이면 다시 보내지 않고 맨소래담 파일을 남김', async () => {
+  for (const o of [{ ebutOut: true }, { upThrow: true }, { up: { status: 500, alerts: [] } }]) {
+    const { runner, db } = setupImport(o);
+    await runner.handleCommand('c', imp());
+    assert.ok(db.uploadAsked <= 1);
+    assert.strictEqual(job(db).state, 'stopped');
+    assert.ok(db.saved.includes('menso'));
+  }
+});
+test('등록: 맨소래담 줄이 없으면 등록 없이 끝, 받기 실패면 멈춤', async () => {
+  let t = setupImport({ file: { lines: { menso: 0, boxncan: 69 }, menso: null } });
+  await t.runner.handleCommand('c', imp());
+  assert.strictEqual(job(t.db).state, 'done');
+  assert.strictEqual(t.db.uploadAsked, 0);
+  t = setupImport({ fileThrow: true });
+  await t.runner.handleCommand('c', imp());
+  assert.strictEqual(job(t.db).state, 'stopped');
+  assert.strictEqual(t.db.fileAsked, 1);
+});
+test('흐름 칸: 등록 진행 중 run, 멈춤 todo, 끝 done', () => {
+  const st = (j) => bizemSteps(flow({ rows: [] }, []).steps, { state: 'ok', counts: { unconfirmed: 0, printWait: 5 } }, null, j).find((s) => s.id === 'bizem_import');
+  assert.strictEqual(st({ state: 'running' }).state, 'run');
+  assert.strictEqual(st({ state: 'stopped' }).state, 'todo');
+  assert.strictEqual(st({ state: 'done' }).state, 'done');
+  assert.strictEqual(st(null).state, 'todo');
+  assert.strictEqual(st(null).who, '비서');
+});

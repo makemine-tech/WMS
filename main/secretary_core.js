@@ -9,8 +9,8 @@
   var MIN = 60 * 1000;
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
-  var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin', 'counts', 'collectCheck', 'collectStatus', 'confirmCheck', 'confirmStatus'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
-  var HELPER_WRITE = ['collectGo', 'confirmGo', 'uploadMenso', 'login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
+  var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin', 'counts', 'collectCheck', 'collectStatus', 'confirmCheck', 'confirmStatus', 'formCheck'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
+  var HELPER_WRITE = ['formPage', 'collectGo', 'confirmGo', 'uploadMenso', 'login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
   var RELAY_CMDS = ['search', 'fill', 'reset', 'commit'];
   /* 송장출력은 불안정해 AI 물류비서에서 뺌 (대표님 2026-11-02). 곡물도감은 일괄합포제외까지, 출력은 합포 분할 화면에서 직접. 다시 켜려면 이 목록을 RELAY_CMDS 에 더하고 흐름도 칸을 되살림 */
   var RELAY_PRINT = ['printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* secretary/ezcall 로 받는 합포 분할 화면 요청 */
@@ -18,14 +18,14 @@
   var RELAY_TTL = 2 * MIN;        /* 늦게 처리된 요청이 저절로 저장되지 않게 */
   var PRINT_IDLE = 3 * MIN;       /* 출력 중 화면 요청이 이만큼 끊기면 화면이 닫힌 것으로 보고 헤드비서가 마무리 */
   var RELAY_HOLD = 30 * MIN;      /* 불러오기·채우기 뒤 사람이 화면을 보는 동안 이지어드민 탭을 새로 열지 않음 */
-  var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search', 'bizem_check', 'bizem_collect', 'bizem_confirm'];
+  var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search', 'bizem_check', 'bizem_collect', 'bizem_confirm', 'bizem_form', 'bizem_import'];
   var COLLECT_POLL = 5000;        /* 비젬 주문수집 진행 확인 간격 */
   var COLLECT_MAX = 15 * MIN;     /* 이만큼 끝 소식이 없으면 작업을 풀고 사람에게 넘김. 다시 누르지 않음 */
   var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-03g';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-03h';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://www.ezadmin.co.kr/index.html', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -110,7 +110,7 @@
       var v = sites[id];
       if (!on) return { id: id, name: name, mode: 'off', say: '퇴근', count: 0 };
       if (running && runRecipe === 'ez_split' && id === 'ezadmin') return { id: id, name: name, mode: 'work', say: s.jobs[keys[0]].step || '일괄합포제외 중', count: 0 };
-      if (running && runRecipe !== 'ez_split' && (runRecipe === 'ez_daily' || id === 'ebut')) return { id: id, name: name, mode: 'work', say: runRecipe === 'bizem_collect' ? (s.jobs[keys[0]].step || '비젬 주문수집 중') : runRecipe === 'menso_read' ? '주문 읽는 중' : workSay, count: 0 };
+      if (running && runRecipe !== 'ez_split' && (runRecipe === 'ez_daily' || id === 'ebut')) return { id: id, name: name, mode: 'work', say: /^bizem_/.test(runRecipe) ? (s.jobs[keys[0]].step || '비젬 일하는 중') : runRecipe === 'menso_read' ? '주문 읽는 중' : workSay, count: 0 };
       if (v && v.state !== 'ok') return { id: id, name: name, mode: 'alert', say: v.msg, count: 0 };
       return { id: id, name: name, mode: 'idle', say: idleSay, count: 0 };
     }

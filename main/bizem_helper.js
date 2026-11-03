@@ -3,7 +3,7 @@
 
    비서가 연 탭에서 확장이 켠다. 대표님 로그인을 그대로 쓴다.
    허용한 주소(ALLOW)에서 온 요청만 받는다. 읽기, 로그인 입력, 사람이 확인한 주문수집과 주문확정(전체) 한 번씩만 한다.
-   삭제·양식다운로드 버튼은 누르지 않는다. 고객 정보와 쇼핑몰 계정 ID 를 읽지 않고 건수와 쇼핑몰 이름만 돌려준다.
+   양식은 사람이 누른 등록 요청 때만 받아 실행 PC 메모리로만 넘긴다. 삭제 버튼은 누르지 않는다. 고객 정보와 쇼핑몰 계정 ID 를 읽지 않고 건수와 쇼핑몰 이름만 돌려준다.
 
    명령
      ping   → { login, checked, ver }
@@ -15,11 +15,13 @@
      confirmCheck  → { orders, invoices, status, hold }   주문서확정 화면을 열어 검색하고 건수만 읽음
      confirmGo { orders } → { started, why, alerts }     「조회된 운송장 전체 확정」과 비젬 확인창을 한 번씩 누름
      confirmStatus → { done } · { ask:true } · { error } · { lost:true }
+     formCheck → { form, status, memo, downloaded }  운송장인쇄 화면을 열어 읽기만 함
+     formPage { page } → { buffer }  양식 파일 내용. 비젬에 다운로드 기록이 남음
 ============================================================ */
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-03c';
+  var VER = '2026-11-03d';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -202,7 +204,43 @@
     return m && clean(m.textContent) ? { done: false, error: clean(m.textContent).slice(0, 120) } : { done: false };
   }
 
-  var CMDS = { ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
+  /* 양식 받기: 비젬 함수가 만든 요청을 받아 같은 순서(DateCheck → 양식 요청)로 보내고, 파일을 저장하는 대신 내용을 돌려줌 */
+  var FORM_MENU = 'REQ023MA', FORM_NAME = '0000_박스앤캔_코코나나양식';
+  function cmdFormCheck(){
+    if (!menuWin(FORM_MENU)) {
+      if (typeof window.addTabReload !== 'function') throw new Error('비젬 메뉴를 찾지 못했습니다');
+      window.addTabReload(FORM_MENU);
+    }
+    function option(d){ return Array.prototype.filter.call(d.getElementById('selexcelform') ? d.getElementById('selexcelform').options : [], function(o){ return clean(o.text) === FORM_NAME; })[0]; }
+    return waitFor(function(){ var w = menuWin(FORM_MENU); return w && w.document.readyState === 'complete' && typeof w.excelFormDownload === 'function' && option(w.document) ? w : null; }, GRID_WAIT).then(function(w){
+      if (!w) return { form: '' };
+      return sleep(SETTLE).then(function(){
+        var d = w.document, opt = option(d);
+        d.getElementById('selexcelform').value = opt.value;
+        return Promise.resolve(w.getWaybildwlddtCnt(opt.value)).then(function(n){
+          return { form: clean(opt.text), status: d.getElementById('seltrnsprtsttusse').value, memo: Number(w.cmdCheckMsgConfirm()) || 0, downloaded: Number(n) || 0 };
+        });
+      });
+    });
+  }
+  function cmdFormPage(args){
+    var w = menuWin(FORM_MENU);
+    if (!w || typeof w.excelFormDownload !== 'function') throw new Error('운송장인쇄 화면이 없습니다');
+    var keep = w.downloadDateCheckExcelRequest, req = null;
+    w.downloadDateCheckExcelRequest = function(url, param){ req = { url: url, param: param }; };
+    w.pageNo = Number(args.page) || 1;
+    try { w.excelFormDownload(); } finally { w.downloadDateCheckExcelRequest = keep; }
+    if (!req) throw new Error('양식 요청을 만들지 못했습니다');
+    return fetch('/api/TB_ORDER/DateCheck', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json;charset=utf-8' }, body: req.param }).then(function(r){
+      if (!r.ok) throw new Error('비젬 날짜 확인 실패 ' + r.status);
+      return fetch(req.url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'command=excel&data=' + encodeURIComponent(req.param) });
+    }).then(function(r){
+      if (!r.ok) throw new Error('비젬 양식 응답 ' + r.status);
+      return r.arrayBuffer();
+    }).then(function(buffer){ return { buffer: buffer }; });
+  }
+
+  var CMDS = { formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'bizem-helper' || !ALLOW.test(e.origin)) return;

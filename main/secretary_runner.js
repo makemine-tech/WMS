@@ -10,6 +10,7 @@
      deps.ebutUpload(file) 맨소래담 파일을 이벗 연동몰에 등록. 파일은 이 컴퓨터 메모리에만 있고 Firebase 로 가지 않음
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
      deps.bizemRead(cmd)·deps.bizemGo(cmd, args) 비젬 화면 읽기와, 사람이 누른 수집·주문확정 한 번씩
+     deps.bizemFile(seen)·deps.saveBizem(kind) 비젬 양식을 받아 나눔·나눈 파일을 실행 PC 에 저장. 고객 정보는 Firebase 로 가지 않음
    저장은 사람이 누른 요청으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
 (function(root){
@@ -433,6 +434,73 @@
       }
     }
 
+    /* 양식 받기 전 확인: 대기 건수는 화면에 이미 있으므로 양식·이미 받은 건수만 읽어 돌려줌. 비젬에 쓰지 않음 */
+    async function runBizemForm(id){
+      if (!(await bizemBlock(id))) return;
+      await store.setCommand(id, { status: 'reading' });
+      try {
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'bizem'; }));
+        if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '비젬: ' + r.msg, doneAt: deps.now() }); return; }
+        await store.setCommand(id, { status: 'done', form: await deps.bizemRead('formCheck'), printWait: r.counts ? r.counts.printWait : -1, doneAt: deps.now() });
+      } catch (e) {
+        await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
+      }
+    }
+    /* 이벗 답은 고객 정보가 섞일 수 있어 건수 안내로 보이는 짧은 문구만 기록 */
+    function safeAlerts(list){
+      return (list || []).filter(function(a){ return String(a).length <= 60 && /건|등록|완료|실패|중복/.test(a) && !/\d{9,}|\d+-\d+-\d+/.test(a); });
+    }
+    /* 사람이 건수를 보고 누른 한 번: 비젬 양식 받기 → 나누기 → 맨소래담 이벗 등록. 어떤 단계도 다시 시도하지 않음.
+       박스앤캔 파일과, 등록하지 못한 맨소래담 파일은 실행 PC 다운로드 폴더에 남김 */
+    async function runBizemImport(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) return;
+      var now = deps.now(), date = C.kstDate(now), key = C.jobKey('bizem_import', date, C.nextRound(jobs, 'bizem_import', date));
+      async function end(state, notes, result){
+        var patch = { state: state, step: '', endedAt: deps.now(), notes: notes };
+        if (result) patch.result = result;
+        await store.setJob(key, patch);
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      }
+      async function keep(kind){ try { await deps.saveBizem(kind); return true; } catch (e) { return false; } }
+      await store.setJob(key, { state: 'running', recipe: 'bizem_import', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '비젬 확인 중', notes: '' });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'bizem'; })), chk, file;
+        if (r.state !== 'ok') return end('stopped', '비젬: ' + r.msg);
+        if (!r.counts || r.counts.printWait !== cmd.seen) return end('stopped', '운송장인쇄 대기가 화면에서 본 건수와 달라 받지 않았습니다. 다시 눌러 확인해 주세요');
+        try { chk = await deps.bizemRead('formCheck'); }
+        catch (e) { return end('stopped', '양식 화면을 읽지 못해 받지 않았습니다: ' + String((e && e.message) || e)); }
+        if (!chk.form) return end('stopped', '양식 0000_박스앤캔_코코나나양식 을 찾지 못해 받지 않았습니다');
+        /* 화면 기본값이 빈 값(전체)이거나 B10 일 수 있음. 전에 받은 주문이 섞이면 위 downloaded 로 멈춤 */
+        if (chk.status !== 'B10' && chk.status !== '') return end('stopped', '운송장인쇄 화면 조건이 평소와 달라 받지 않았습니다');
+        if (chk.memo) return end('stopped', '비젬에 먼저 읽어야 할 쪽지가 있습니다. 비젬 탭에서 확인해 주세요');
+        if (chk.downloaded) return end('stopped', '이미 양식을 받은 주문 ' + chk.downloaded + '건이 섞여 있어 받지 않았습니다. 확인 후 파일 선택으로 진행해 주세요');
+        await store.setJob(key, { step: '비젬 양식 받는 중' });
+        try { file = await deps.bizemFile(cmd.seen); }
+        catch (e) { return end('stopped', '양식을 받지 못했습니다: ' + String((e && e.message) || e) + '. 비젬에 받은 기록이 남았을 수 있습니다'); }
+        var result = { lines: file.lines, orders: file.orders, sites: file.sites, box: false, menso: false };
+        if (file.lines.boxncan) result.box = await keep('boxncan');
+        if (file.lines.menso + file.lines.boxncan < cmd.seen) { if (file.lines.menso) result.menso = await keep('menso'); return end('stopped', '대기 ' + cmd.seen + '건인데 받은 줄이 ' + (file.lines.menso + file.lines.boxncan) + '줄이라 등록하지 않았습니다', result); }
+        if (!file.lines.menso) return end('done', '', result);
+        if (file.noAddress) { result.menso = await keep('menso'); return end('stopped', '맨소래담 주소 없는 줄 ' + file.noAddress + '건이 있어 등록하지 않았습니다. 이벗은 그 줄 이후를 등록하지 않습니다', result); }
+        await store.setJob(key, { step: '이벗 등록 중' });
+        var e2 = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
+        if (e2.state !== 'ok') { result.menso = await keep('menso'); return end('stopped', '이벗: ' + e2.msg + '. 등록하지 않았습니다', result); }
+        var res;
+        try { res = await deps.ebutUpload(file.menso); }
+        catch (e) { result.menso = await keep('menso'); return end('stopped', '등록 중 끊겼습니다. 등록됐을 수 있으니 이벗에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')', result); }
+        await store.setUpload({ day: date, lines: file.lines.menso, orders: file.orders, at: deps.now(), by: cmd.by || '', status: res.status });
+        result.upload = { status: res.status, alerts: safeAlerts(res.alerts) };
+        if (res.status !== 200) { result.menso = await keep('menso'); return end('stopped', '이벗 응답 ' + res.status + '. 이벗에서 먼저 확인해 주세요', result); }
+        await end('done', '', result);
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 비젬과 이벗에서 먼저 확인해 주세요' }).catch(function(){});
+        throw e;
+      }
+    }
+
     /* 맨소래담: 이벗 로그인 점검 → 주문서목록 읽기 → 행사표로 사은품 대상 계산. 이벗에 쓰지 않음 */
     async function runMenso(id, cmd){
       var now = deps.now();
@@ -499,6 +567,8 @@
       if (cmd.type === 'bizem_check') return runBizemCheck(id);
       if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
       if (cmd.type === 'bizem_confirm') return runBizemConfirm(id, cmd);
+      if (cmd.type === 'bizem_form') return runBizemForm(id);
+      if (cmd.type === 'bizem_import') return runBizemImport(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 

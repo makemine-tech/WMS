@@ -108,8 +108,8 @@
       { id: 'bizem_import', name: '비젬 주문가져오기', who: '연결 전', state: 'later', count: 0 }
     ], steps.slice(at));
   }
-  /* 비젬 건수로 칸 차례 표시. 주문확정이 남았으면 2번, 인쇄 대기만 남았으면 3번. job = 오늘 마지막 비젬 주문수집 */
-  function bizemSteps(steps, site, job){
+  /* 비젬 건수로 칸 차례 표시. 주문확정이 남았으면 2번, 인쇄 대기만 남았으면 3번. job·importJob = 오늘 마지막 비젬 주문수집·이벗 등록 */
+  function bizemSteps(steps, site, job, importJob){
     var c = site && site.state === 'ok' ? site.counts : null;
     return arrange(withBizem(steps)).map(function(s){
       if (s.id !== 'bizem_collect' && s.id !== 'bizem_import') return s;
@@ -120,6 +120,11 @@
         if (job && job.state === 'running') state = 'run';
         else if (job && (job.state === 'stopped' || job.state === 'interrupted')) state = 'todo';
         else if (job && job.state === 'done' && !n) state = 'done';
+      } else {
+        who = '비서';
+        if (importJob && importJob.state === 'running') state = 'run';
+        else if (importJob && (importJob.state === 'stopped' || importJob.state === 'interrupted')) state = 'todo';
+        else if (importJob && importJob.state === 'done') state = 'done';
       }
       return { id: s.id, name: s.name, who: who, state: state, count: n };
     });

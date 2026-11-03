@@ -38,7 +38,19 @@
   }
   function fileName(kind, ymd){ return (kind === 'menso' ? '맨소래담' : '박스앤캔') + '_' + ymd + '.xlsx'; }
 
-  var API = { split: split, fileName: fileName, MENSO_SITES: MENSO_SITES };
+  /* 양식을 여러 쪽으로 받을 때 합침. 앞 쪽과 같은 줄은 넣지 않음. 돌려준 값 = 새로 넣은 줄 수 (0 이면 끝) */
+  function newPages(){ return { rows: [], seen: {} }; }
+  function addPage(st, rows){
+    var at = -1;
+    for (var i = 0; i < Math.min(HEAD_SCAN, rows.length) && at < 0; i++) if ((rows[i] || []).map(text).indexOf(COLUMN) >= 0) at = i;
+    if (at < 0) return 0;
+    if (!st.rows.length) st.rows.push(rows[at]);
+    var fresh = rows.slice(at + 1).filter(function(r){ return (r || []).some(function(v){ return text(v) !== ''; }) && !st.seen[JSON.stringify(r)]; });
+    fresh.forEach(function(r){ st.seen[JSON.stringify(r)] = 1; st.rows.push(r); });
+    return fresh.length;
+  }
+
+  var API = { newPages: newPages, addPage: addPage, split: split, fileName: fileName, MENSO_SITES: MENSO_SITES };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.BIZEM_SPLIT = API;
 })(typeof window !== 'undefined' ? window : this);
