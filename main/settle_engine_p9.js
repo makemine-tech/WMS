@@ -159,7 +159,19 @@
   }
 
 
-  E['포인트나인크루'] = { traceSkip: true, needs: ['p9_row', 'coupang_po', 'cargo_io', 'ebut_orders'],   /* 화물 흔적: 용차비는 포인트나인크루_용차비 정산, 입출고는 보관비에 이미 씀 */
+  /* 정산 화면 「✏️ 이번 달 파렛트」 입력란 (settle_build.js monthInHtml) — 시작 비우면 지난달 마감 */
+  var MONTH_INPUTS = { title: '이번 달 파렛트 — 보관비 택배 파렛트 맞추기',
+    note: '마감 = 말일 재고조사 파렛트 + 부자재. 시작+입고−파렛트출고−마감 만큼을 택배 송장 건수 비율로 날마다 나눔',
+    cols: [{ k: 'start', t: '시작 파렛트 (전월 말일)' }, { k: 'end', t: '마감 파렛트 (이달 말일)', need: true }],
+    rows: [{ k: '곡', t: '곡물도감', hint: '부자재 +' + ADJ.곡 + ' 포함' }, { k: '셀', t: '셀시어스', hint: '부자재 +' + ADJ.셀 + ' 포함' }, { k: '오', t: '오리진케어', hint: '부자재 +' + ADJ.오 + ' 포함' }],
+    def: function(c, b, ym, prevIn){ var M0 = MONTHS[ym] || {};
+      if (M0[c] && M0[c][b] != null) return M0[c][b];
+      if (c !== 'start') return null;
+      if (prevIn && prevIn['end_' + b] != null) return prevIn['end_' + b];
+      var y = +ym.slice(0, 4), m = +ym.slice(5, 7), p = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+      return MONTHS[p] && MONTHS[p].end ? MONTHS[p].end[b] : null; } };
+
+  E['포인트나인크루'] = { traceSkip: true, monthInputs: MONTH_INPUTS, needs: ['p9_row', 'coupang_po', 'cargo_io', 'ebut_orders'],   /* 화물 흔적: 용차비는 포인트나인크루_용차비 정산, 입출고는 보관비에 이미 씀 */
     items: { 6: 'auto', 22: 'auto', 23: 'auto', 25: 'auto', 27: 'auto', 38: 'auto' },
     sheets: { '곡_ROW데이터': 'skip', '곡_작업상세': 'skip', '곡_보관비': 'skip', '셀_ROW데이터': 'skip', '셀_작업상세': 'skip', '셀_보관비': 'skip',
               '오_ROW데이터': 'skip', '오_작업상세': 'skip', '오_보관비': 'skip', '기타작업내역': 'skip', '택배착불및기타비용': 'skip', '오포장': 'skip', '작업비정산서': 'skip' },
@@ -198,10 +210,13 @@
       { d: '2026-10-03', t: '점검 = 확인할 칸은 모두 노란색, 점검 시트(맨 앞) 시트 이름 누르면 그 칸으로 이동, 확인하면 그 칸 노란색을 지우고 점검 줄을 직접 삭제 = 완료 — ⑤ 완료 확정 때 남은 노란 칸을 자동으로 찾아 알림' },
       { d: '2026-10-03', t: '포장구분·작업비정산서 이름은 금액 기준만(기본포장 300 · 박스포장1 500 · 박스포장2 700 · 박스합포장1(작업상세는 합포장1) 1,000 · 박스합포장2(합포장2) 1,500) + 소분포장 300 — 설명형 이름 안 씀. 작업비정산서는 8월 양식 그대로에 소분포장 열(H)·줄(22) 추가, 합계 I:J열·23행' },
       { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' },
-      { d: '2026-11-03', t: '청구내역서 맨 위 월(지난달 → 이번 달) · 작업비정산서 작성일자(C3 = 말일)·기간(A14 = 1일 ~ 말일)은 달 값·ROW 파일이 없어도 항상 이번 달로' }
+      { d: '2026-11-03', t: '청구내역서 맨 위 월(지난달 → 이번 달) · 작업비정산서 작성일자(C3 = 말일)·기간(A14 = 1일 ~ 말일)은 달 값·ROW 파일이 없어도 항상 이번 달로' },
+      { d: '2026-11-03', t: '시작·마감 파렛트 = 정산 화면 「✏️ 이번 달 파렛트」 입력란 (곡·셀·오, 부자재 포함) — 시작은 비우면 지난달 마감, 마감이 비면 초안 전에 물어봄 · 택배 파렛트 = 시작+입고−파렛트출고−마감 을 우체국 송장 건수 비율로 날마다 나눔' }
     ],
     afterBuild: function(wb, ctx){
-      var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = MONTHS[YM] || {};
+      var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = Object.assign({}, MONTHS[YM] || {});
+      /* 정산 화면 ✏️ 입력(시작·마감 파렛트)이 있으면 그것이 먼저 — 세 브랜드가 다 있어야 씀 (대표님 2026-11-03) */
+      ['start', 'end'].forEach(function(c){ var IN = ctx.IN || {}, o = {}, ok = true; ['곡', '셀', '오'].forEach(function(b){ var v = IN[c + '_' + b]; if (v == null || v === '' || !isFinite(+v)) ok = false; else o[b] = +v; }); if (ok) MC[c] = o; });
       var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
       var serial = function(d){ return Math.round(Date.UTC(Y, M - 1, d) / 864e5) + 25569; }, S0 = serial(1);
       var CHK = [];
@@ -231,7 +246,7 @@
          시작 파렛트가 없으면 지난달 마감, 마감이 없으면 택배 파렛트를 못 맞춰 0으로 두고 확인 필요 */
       var PYM = M === 1 ? (Y - 1) + '-12' : Y + '-' + String(M - 1).padStart(2, '0');
       if (!MC.start && MONTHS[PYM] && MONTHS[PYM].end) MC.start = MONTHS[PYM].end;
-      if (!MC.start || !MC.end) log.push(['확인 필요', YM + ' ' + (!MC.start ? '시작 파렛트' : '') + (!MC.start && !MC.end ? '·' : '') + (!MC.end ? '마감 파렛트(재고조사 + 부자재)' : '') + '가 아직 없어 보관비 택배 파렛트를 못 맞춤 — 대화창에서 알려 주시면 넣습니다']);
+      if (!MC.start || !MC.end) log.push(['확인 필요', YM + ' ' + (!MC.start ? '시작 파렛트' : '') + (!MC.start && !MC.end ? '·' : '') + (!MC.end ? '마감 파렛트(재고조사 + 부자재)' : '') + '가 아직 없어 보관비 택배 파렛트를 못 맞춤 — 정산 화면 「✏️ 이번 달 파렛트」에 넣고 초안을 다시 받으세요']);
       if (!MC.cod) log.push(['안내', YM + ' 착불 메모(대표님 메모) 없음 — 착불 시트는 로켓쉽먼트·번개배송·반품 양품화만']);
       var box = ctx.BOX || {}, ids = Object.keys(box);
       var rows = ids.filter(function(id){ return box[id].type === 'p9_row'; });
