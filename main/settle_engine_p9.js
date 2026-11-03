@@ -25,7 +25,8 @@
   /* 달마다 넣는 값: start = 창고관리 전달 말일 + 부자재, end = 그달 말 재고조사 + 부자재, cod = [일, 내용, 건수, 건당비용] */
   var MONTHS = {
     '2026-09': { start: { 곡: 534, 셀: 8, 오: 168 }, end: { 곡: 1120, 셀: 8, 오: 104 },
-                 cod: [[14, '포인트나인 롯데 착불 (2건 합계 5,200원)', 2, 2600]] }
+                 cod: [[14, '포인트나인 롯데 착불 (2건 합계 5,200원)', 2, 2600]] },
+    '2026-10': { start: { 곡: 1120, 셀: 8, 오: 104 } }   /* 시작 = 9월 마감 (대표님 2026-11-03), 마감·착불 메모는 받으면 넣음 */
   };
 
   /* 곡물도감·오리진케어 포장비 = p9_fee.js (합포 분할 페이지와 같이 씀, 2026-10-27) */
@@ -200,7 +201,7 @@
       { d: '2026-11-03', t: '청구내역서 맨 위 월(지난달 → 이번 달) · 작업비정산서 작성일자(C3 = 말일)·기간(A14 = 1일 ~ 말일)은 달 값·ROW 파일이 없어도 항상 이번 달로' }
     ],
     afterBuild: function(wb, ctx){
-      var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = MONTHS[YM];
+      var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = MONTHS[YM] || {};
       var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate();
       var serial = function(d){ return Math.round(Date.UTC(Y, M - 1, d) / 864e5) + 25569; }, S0 = serial(1);
       var CHK = [];
@@ -226,7 +227,12 @@
         if (js){ shift(js, 16); js.getCell('C3').value = Y + '.' + p2(M) + '.' + ND + '.'; js.getCell('A14').value = YM + '-01 ~ ' + YM + '-' + ND; }
         log.push(['자동 적용', '청구내역서 맨 위 월·작업비정산서 작성일자(' + Y + '.' + p2(M) + '.' + ND + '.)·기간(' + YM + '-01 ~ ' + YM + '-' + ND + ') = ' + M + '월']);
       })();
-      if (!MC){ log.push(['확인 필요', YM + ' 시작·마감 파렛트(창고관리)와 착불 메모가 아직 없습니다 — 대화창에서 알려 주시면 넣습니다. 지난달 값으로 둡니다']); return; }
+      /* 달 값이 없어도 ROW·작업상세·작업비정산서·기타작업내역·착불은 이번 달로 만듦 (대표님 2026-11-03 — 전에는 통째로 지난달 그대로였음)
+         시작 파렛트가 없으면 지난달 마감, 마감이 없으면 택배 파렛트를 못 맞춰 0으로 두고 확인 필요 */
+      var PYM = M === 1 ? (Y - 1) + '-12' : Y + '-' + String(M - 1).padStart(2, '0');
+      if (!MC.start && MONTHS[PYM] && MONTHS[PYM].end) MC.start = MONTHS[PYM].end;
+      if (!MC.start || !MC.end) log.push(['확인 필요', YM + ' ' + (!MC.start ? '시작 파렛트' : '') + (!MC.start && !MC.end ? '·' : '') + (!MC.end ? '마감 파렛트(재고조사 + 부자재)' : '') + '가 아직 없어 보관비 택배 파렛트를 못 맞춤 — 대화창에서 알려 주시면 넣습니다']);
+      if (!MC.cod) log.push(['안내', YM + ' 착불 메모(대표님 메모) 없음 — 착불 시트는 로켓쉽먼트·번개배송·반품 양품화만']);
       var box = ctx.BOX || {}, ids = Object.keys(box);
       var rows = ids.filter(function(id){ return box[id].type === 'p9_row'; });
       var etcId = ids.filter(function(id){ return box[id].type === 'coupang_po' && /포인트나인/.test(box[id].name); })[0] || ids.filter(function(id){ return box[id].type === 'coupang_po'; })[0];
@@ -402,6 +408,7 @@
       }).then(function(){
         /* 보관비 */
         if (!work.곡 || !work.셀 || !work.오) return;
+        if (!MC.start){ log.push(['확인 필요', '시작 파렛트가 없어 곡·셀·오 보관비는 지난달 그대로']); return; }
         return (cargoId ? rd(cargoId) : Promise.resolve(null)).then(function(cb){
           var ca = cb ? XLSX.utils.sheet_to_json(cb.Sheets['입출고내역'] || cb.Sheets[cb.SheetNames[0]], { header: 1, defval: '' }) : [];
           /* 엑셀이 없으면 입출고 화물관리 기록 → 같은 모양 [날짜시리얼, 입고/출고, 업체, 박스, 파렛트, , , 메모] (택배출고 parcel 은 택배 파렛트라 제외) */
@@ -430,7 +437,7 @@
               (desc[d] = desc[d] || []).push(memo + q);
               list.push([r[1], M + '월' + (d - S0 + 1) + '일', r[7] || '', r[4] === '' ? null : +r[4], r[3] === '' ? null : +r[3]]); });
             var sum = function(o){ return Object.keys(o).reduce(function(s, k){ return s + o[k]; }, 0); }, sI = sum(cin), sO = sum(cout);
-            var need = MC.start[b] + sI - sO - MC.end[b];
+            var need = MC.end ? MC.start[b] + sI - sO - MC.end[b] : 0;
             var wd = [], wt = 0; for (var d = 1; d <= ND; d++){ var v = work[b].days[serial(d)] || 0; wd.push(v); wt += v; }
             var tk = wd.map(function(v){ return wt ? need * v / wt : 0; }), fl = tk.map(function(v){ return Math.floor(Math.max(0, v)); });
             var rem = Math.max(0, need) - fl.reduce(function(s, v){ return s + v; }, 0);
@@ -455,10 +462,10 @@
             if (b === '곡'){ for (var r3 = 2; r3 <= Math.max(ws.rowCount, 80); r3++) ['L', 'M', 'N', 'O', 'P'].forEach(function(c){ ws.getCell(c + r3).value = null; });
               list.forEach(function(x, i){ ['L', 'M', 'N', 'O', 'P'].forEach(function(c, j){ ws.getCell(c + (2 + i)).value = x[j]; }); }); }
             mark(ws, L.start, '시작 = 창고관리 전달 말일 + 부자재 ' + ADJ[b] + ' (대화창에서 받은 값)');
-            mark(ws, L.cur + lastR, '마감 = 재고조사 + 부자재 = ' + MC.end[b] + ' 에 맞춤' + (cur !== MC.end[b] ? ' ⚠ 실제 ' + cur : ''));
+            mark(ws, L.cur + lastR, MC.end ? '마감 = 재고조사 + 부자재 = ' + MC.end[b] + ' 에 맞춤' + (cur !== MC.end[b] ? ' ⚠ 실제 ' + cur : '') : '마감 파렛트 값이 없어 택배 파렛트를 안 뺌 — 마감 값 받은 뒤 다시 만들기');
             mark(ws, L.E + 5, '택배 파렛트 ' + need + '팔 = 시작+입고−파렛트출고−마감, 우체국 송장 건수 비례' + (need < 0 ? ' ⚠ 음수 — 시작·마감 값 확인' : ''));
             stor[b] = { sumR: sumR, money: T.S, sI: T.I, sO: T.O };
-            log.push([need < 0 ? '확인 필요' : '자동 적용', b + '_보관비 시작 ' + MC.start[b] + ' + 입고 ' + T.I + ' − 파렛트출고 ' + T.O + ' − 택배 ' + T.E + ' = ' + cur + ' (마감 ' + MC.end[b] + ') · 보관비 ' + won(T.S)]);
+            log.push([need < 0 ? '확인 필요' : '자동 적용', b + '_보관비 시작 ' + MC.start[b] + ' + 입고 ' + T.I + ' − 파렛트출고 ' + T.O + ' − 택배 ' + T.E + ' = ' + cur + ' (마감 ' + (MC.end ? MC.end[b] : '값 없음') + ') · 보관비 ' + won(T.S)]);
           });
           st.getCell('G6').value = { formula: 'SUM(곡_보관비!J' + stor.곡.sumR + '+셀_보관비!I' + stor.셀.sumR + '+오_보관비!I' + stor.오.sumR + ')', result: stor.곡.money + stor.셀.money + stor.오.money };
           st.getCell('F27').value = { formula: 'SUM(곡_보관비!D' + stor.곡.sumR + ',곡_보관비!F' + stor.곡.sumR + ',셀_보관비!C' + stor.셀.sumR + ',셀_보관비!E' + stor.셀.sumR + ',오_보관비!C' + stor.오.sumR + ',오_보관비!E' + stor.오.sumR + ')',
