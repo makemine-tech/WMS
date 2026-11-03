@@ -196,7 +196,8 @@
       { d: '2026-10-03', t: '기타작업내역 A열 = 발주번호(숫자=쿠팡) 또는 채널(컬리·홈쇼핑·올리브영…). 컬리 크기 없는 서리태·맷돌 = 45입(54) 기본 · 파렛트수도 작업비도 없는 출고(홈쇼핑 낱개 등) = 박스 × 300 · 박스가 완파렛트로 떨어지는데 파렛트수가 적게 적혔으면 고침(936박스/12팔 → 13팔) — 모두 특이사항으로 알림' },
       { d: '2026-10-03', t: '점검 = 확인할 칸은 모두 노란색, 점검 시트(맨 앞) 시트 이름 누르면 그 칸으로 이동, 확인하면 그 칸 노란색을 지우고 점검 줄을 직접 삭제 = 완료 — ⑤ 완료 확정 때 남은 노란 칸을 자동으로 찾아 알림' },
       { d: '2026-10-03', t: '포장구분·작업비정산서 이름은 금액 기준만(기본포장 300 · 박스포장1 500 · 박스포장2 700 · 박스합포장1(작업상세는 합포장1) 1,000 · 박스합포장2(합포장2) 1,500) + 소분포장 300 — 설명형 이름 안 씀. 작업비정산서는 8월 양식 그대로에 소분포장 열(H)·줄(22) 추가, 합계 I:J열·23행' },
-      { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' }
+      { d: '2026-10-03', t: '확인할 곳은 노란색 + 메모, 맨 뒤 「점검(확정 전 삭제)」 시트에 목록' },
+      { d: '2026-11-03', t: '청구내역서 맨 위 월(지난달 → 이번 달) · 작업비정산서 작성일자(C3 = 말일)·기간(A14 = 1일 ~ 말일)은 달 값·ROW 파일이 없어도 항상 이번 달로' }
     ],
     afterBuild: function(wb, ctx){
       var YM = ctx.YM, log = ctx.log, st = ctx.st, won = ctx.won, MC = MONTHS[YM];
@@ -206,6 +207,25 @@
       unshare(wb);
       /* 확인할 곳은 칸에 메모를 달지 않고 맨 뒤 「점검」 시트 목록에만 (대표님 요청 2026-10-03) */
       var mark = function(ws, a, note, list){ if (list !== false) CHK.push([ws.name, a, note]); };
+      /* 청구내역서 맨 위 월 · 작업비정산서 작성일자·기간 = 이번 달 (대표님 2026-11-03 — 달 값·ROW 파일이 없어도 날짜는 먼저 바꿈) */
+      (function(){
+        var PY = M === 1 ? Y - 1 : Y, PM = M === 1 ? 12 : M - 1, PND = new Date(Date.UTC(PY, PM, 0)).getUTCDate(), p2 = function(n){ return String(n).padStart(2, '0'); };
+        var re = function(s){
+          s = s.replace(new RegExp(PY + '(\\s*[-./]\\s*)(0?)' + PM + '(?!\\d)', 'g'), function(_, sep, z){ return Y + sep + (z || PM > 9 ? p2(M) : M); });
+          if (PY !== Y) s = s.replace(new RegExp(PY + '(\\s*년)', 'g'), Y + '$1');
+          s = s.replace(new RegExp('(^|\\D)(0?)' + PM + '(\\s*월)', 'g'), function(_, a, z, w){ return a + (z ? p2(M) : M) + w; });
+          if (PND !== ND) s = s.replace(new RegExp('(' + Y + '\\s*[-./]\\s*0?' + M + '\\s*[-./]\\s*)' + PND + '(?!\\d)', 'g'), '$1' + ND);
+          return s; };
+        var shift = function(ws, rMax){ if (!ws) return; for (var r = 1; r <= rMax; r++) ws.getRow(r).eachCell(function(cl){ var v = cl.value;
+          if (v instanceof Date){ if (v.getUTCFullYear() === PY && v.getUTCMonth() + 1 === PM) cl.value = new Date(Date.UTC(Y, M - 1, Math.min(v.getUTCDate() === PND ? ND : v.getUTCDate(), ND))); return; }
+          if (typeof v === 'string'){ var t = re(v); if (t !== v) cl.value = t; }
+          else if (v && v.richText){ var c = false, rt = v.richText.map(function(x){ var t = re(x.text); if (t !== x.text) c = true; return Object.assign({}, x, { text: t }); }); if (c) cl.value = { richText: rt }; } }); };
+        shift(st, 5);
+        if (!new RegExp('(' + YM + '|' + Y + '\\s*[-./년]\\s*0?' + M + '(?!\\d)|(^|\\D)0?' + M + '\\s*월)').test(txt(st.getCell('B1').value))) st.getCell('B1').value = YM + ' 청구내역서';
+        var js = wb.getWorksheet('작업비정산서');
+        if (js){ shift(js, 16); js.getCell('C3').value = Y + '.' + p2(M) + '.' + ND + '.'; js.getCell('A14').value = YM + '-01 ~ ' + YM + '-' + ND; }
+        log.push(['자동 적용', '청구내역서 맨 위 월·작업비정산서 작성일자(' + Y + '.' + p2(M) + '.' + ND + '.)·기간(' + YM + '-01 ~ ' + YM + '-' + ND + ') = ' + M + '월']);
+      })();
       if (!MC){ log.push(['확인 필요', YM + ' 시작·마감 파렛트(창고관리)와 착불 메모가 아직 없습니다 — 대화창에서 알려 주시면 넣습니다. 지난달 값으로 둡니다']); return; }
       var box = ctx.BOX || {}, ids = Object.keys(box);
       var rows = ids.filter(function(id){ return box[id].type === 'p9_row'; });
@@ -271,8 +291,6 @@
         var sumRef = function(t){ return ['곡', '셀', '오'].filter(function(b){ return work[b].tiers.indexOf(t) >= 0; }).map(function(b){ return work[b].ref(t); }).join('+'); };
         vC = (work.곡.cnt[300] || 0) + (work.오.cnt[300] || 0); vD = work.곡.pre + work.오.pre;
         vF = (work.곡.cnt[1000] || 0) + (work.셀.cnt[1000] || 0) + (work.오.cnt[1000] || 0); vG = (work.곡.cnt[1500] || 0) + (work.오.cnt[1500] || 0);
-        js.getCell('C3').value = Y + '.' + String(M).padStart(2, '0') + '.' + ND + '.';
-        js.getCell('A14').value = YM + '-01 ~ ' + YM + '-' + ND;
         /* 8월까지와 같은 양식: 포장비(기본포장 300·박스포장1 500·박스포장2 700) · 합포장(박스합포장1 1000·박스합포장2 1500) + 소분포장 300 을 H열·22행에 추가, 합계는 I:J열·23행 */
         var cp = function(from, to){ js.getCell(to).style = JSON.parse(JSON.stringify(js.getCell(from).style || {})); };
         var um = function(r){ try { js.unMergeCells(r); } catch (x) {} }, mg = function(r){ try { js.mergeCells(r); } catch (x) {} };
@@ -498,7 +516,6 @@
       }).then(function(){
         /* 청구내역서 결과값·표시 */
         var setR = function(a, v){ var c = st.getCell(a); c.value = c.value && c.value.formula ? { formula: c.value.formula, result: v } : v; };
-        st.getCell('B1').value = YM + ' 청구내역서';
         if (work._stor) setR('G6', work._stor.곡.money + work._stor.셀.money + work._stor.오.money);
         if (work._H22 != null) setR('G22', work._H22 * 1.1);
         if (work._M != null){ setR('G23', work._M * 11000); setR('G25', work._P); }
