@@ -1070,10 +1070,15 @@ body:not(.flipped) .flip-btn:hover{border-color:#7cd0ff;box-shadow:0 0 24px rgba
         projectId:"makechango-wms", appId:"1:333385336098:web:94f07492421965ab32917b" });
       firebase.auth().onAuthStateChanged(function(u){
         if (!u) return;
+        /* AI 물류비서는 작업 그룹원도 씀 (대표님 2026-11-04). 나머지 숨김 타일은 슈퍼관리자만 */
+        function showSecretary(){ document.getElementById('tileSecretary').style.display = ''; document.getElementById('tileSecretary').parentNode.classList.add('has-ai'); }
         firebase.database().ref('superadmins/' + u.uid).get().then(function(s){
-          if (!s.exists()) return;
-          ['tilePayroll','tileSettlement','tileStats','tileAds','tileSecretary'].forEach(function(id){ document.getElementById(id).style.display = ''; });
-          document.getElementById('tileSecretary').parentNode.classList.add('has-ai');
+          if (s.exists()) {
+            ['tilePayroll','tileSettlement','tileStats','tileAds'].forEach(function(id){ document.getElementById(id).style.display = ''; });
+            showSecretary();
+            return;
+          }
+          return firebase.database().ref('userGroup/' + u.uid).get().then(function(g){ if (g.exists()) showSecretary(); });
         }).catch(function(){});
       });
     }).catch(function(){});
