@@ -2,18 +2,21 @@
    비젬 도우미 — AI 물류비서 짝꿍 (2026-11-03)
 
    비서가 연 탭에서 확장이 켠다. 대표님 로그인을 그대로 쓴다.
-   허용한 주소(ALLOW)에서 온 요청만 받고, 지금은 읽기와 로그인 입력만 한다.
-   주문수집·주문확정·삭제·양식다운로드 버튼은 누르지 않는다. 고객 정보를 읽지 않고 건수만 돌려준다.
+   허용한 주소(ALLOW)에서 온 요청만 받는다. 읽기, 로그인 입력, 사람이 확인한 주문수집 한 번만 한다.
+   주문확정·삭제·양식다운로드 버튼은 누르지 않는다. 고객 정보와 쇼핑몰 계정 ID 를 읽지 않고 건수와 쇼핑몰 이름만 돌려준다.
 
    명령
      ping   → { login, checked, ver }
      counts → { unconfirmed, printWait }   주문확정 대기, 운송장인쇄 대기
      login  { id, pw } → { tried, why }    비서 화면에서 사람이 입력한 값으로 로그인 버튼을 한 번 누름
+     collectCheck  → { malls, checked, from, to, opt }   주문서수집 화면을 열어 읽기만 함
+     collectGo     → { started, why, alerts }   수집 버튼과 비젬 확인창을 한 번씩 누름. 쇼핑몰에 발주확인 처리되어 되돌릴 수 없음
+     collectStatus → { done, malls } · { done:false, error } · { lost:true }
 ============================================================ */
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-03a';
+  var VER = '2026-11-03b';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -61,7 +64,82 @@
     return { tried: true };
   }
 
-  var CMDS = { ping: cmdPing, counts: cmdCounts, login: cmdLogin };
+  /* 주문수집은 비젬 화면의 버튼을 그대로 눌러 비젬 자체 점검(기간·3분 제한·공지)을 모두 거침. 체크와 기간은 화면 값을 바꾸지 않음 */
+  var COLLECT_MENU = 'REQ005MA', COLLECT_GO = 'btngetorderafterconfirm', POPUP = 'myframe', MODAL_TEXT = '#myModal .modal-body';
+  var GRID_WAIT = 30000, CONFIRM_WAIT = 10000, START_WAIT = 15000, POLL = 200, SETTLE = 2000;
+  var COL_NAME = 4, COL_LAST = 5, COL_STATUS = 6;
+  function clean(v){ return String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); }
+  function sleep(ms){ return new Promise(function(ok){ setTimeout(ok, ms); }); }
+  function waitFor(found, ms){
+    var end = Date.now() + ms;
+    return (function tick(){
+      var v = found();
+      if (v) return Promise.resolve(v);
+      if (Date.now() >= end) return Promise.resolve(null);
+      return sleep(POLL).then(tick);
+    })();
+  }
+  function collectWin(){
+    var f = document.getElementById('iframe_' + COLLECT_MENU), w = f && f.contentWindow;
+    try { return w && w.document ? w : null; } catch (e) { return null; }
+  }
+  function readMalls(doc){
+    var out = [];
+    Array.prototype.forEach.call(doc.querySelectorAll('#grid1body tr'), function(tr){
+      var cb = tr.querySelector('input[type=checkbox]');
+      if (!cb) return;   /* 수집 미지원 줄 */
+      var last = clean(tr.cells[COL_LAST].textContent).match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+      out.push({ name: clean(tr.cells[COL_NAME].textContent), checked: !!cb.checked, last: last ? last[0] : '', status: clean(tr.cells[COL_STATUS].textContent) });
+    });
+    return out;
+  }
+  function cmdCollectCheck(){
+    if (!collectWin()) {
+      if (typeof window.addTabReload !== 'function') throw new Error('비젬 메뉴를 찾지 못했습니다');
+      window.addTabReload(COLLECT_MENU);
+    }
+    return waitFor(function(){ var w = collectWin(); return w && readMalls(w.document).length ? w : null; }, GRID_WAIT).then(function(w){
+      if (!w) throw new Error('주문서수집 화면을 읽지 못했습니다');
+      var d = w.document, malls = readMalls(d), opt = d.querySelector('input[name=getOpt]:checked');
+      return { malls: malls, checked: malls.filter(function(m){ return m.checked; }).map(function(m){ return m.name; }),
+               from: d.getElementById('txtstdt').value, to: d.getElementById('txtenddt').value, opt: opt ? opt.value : '' };
+    });
+  }
+  function cmdCollectGo(){
+    var w = collectWin(), d = w && w.document, btn = d && d.getElementById(COLLECT_GO);
+    if (!btn || btn.disabled) return { started: false, why: '주문수집 버튼을 누를 수 없는 상태입니다', alerts: [] };
+    var alerts = [];
+    w.alert = function(m){ alerts.push(clean(m).slice(0, 100)); };
+    btn.click();
+    return waitFor(function(){
+      var ok = d.getElementById('myConfirmModalOkBtn'), body = d.getElementById('myConfirmModalBody');
+      return ok && body && /발주확인/.test(body.textContent) ? ok : null;
+    }, CONFIRM_WAIT).then(function(ok){
+      if (!ok) return { started: false, why: '비젬 확인창이 뜨지 않았습니다. 공지창이 떴을 수 있으니 실행 PC 의 비젬 탭을 확인해 주세요', alerts: alerts };
+      var stale = d.querySelector(MODAL_TEXT);   /* 누르기 전부터 있던 안내창을 거절로 읽지 않음. 비젬은 새 안내 때 창을 새로 만듦 */
+      ok.click();
+      return waitFor(function(){
+        var f = d.getElementById(POPUP);
+        if (f && /cmdtype=getOrderAfterConfirm/.test(f.getAttribute('src') || '')) return { started: true, alerts: alerts };
+        var m = d.querySelector(MODAL_TEXT);
+        return m && m !== stale && clean(m.textContent) ? { started: false, why: clean(m.textContent).slice(0, 120), alerts: alerts } : null;
+      }, START_WAIT).then(function(r){
+        return r || { started: false, why: '수집이 시작됐는지 확인하지 못했습니다. 비젬에서 확인해 주세요', alerts: alerts };
+      });
+    });
+  }
+  function cmdCollectStatus(){
+    var w = collectWin(), d = w && w.document, btn = d && d.getElementById(COLLECT_GO);
+    if (!btn) return { lost: true };
+    /* 비젬이 끝나면 진행창에서 parent.resetButton 을 불러 버튼을 풀고 표를 다시 읽음 */
+    if (!btn.disabled) return sleep(SETTLE).then(function(){ return { done: true, malls: readMalls(d) }; });
+    var f = d.getElementById(POPUP), popup = null;
+    try { popup = f && f.contentWindow.document; } catch (e) { popup = null; }
+    var m = popup && popup.querySelector(MODAL_TEXT);
+    return m && clean(m.textContent) ? { done: false, error: clean(m.textContent).slice(0, 120) } : { done: false };
+  }
+
+  var CMDS = { ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'bizem-helper' || !ALLOW.test(e.origin)) return;

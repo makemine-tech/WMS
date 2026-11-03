@@ -76,7 +76,7 @@ secretary/
   runner      헤드비서 신호 (3분 끊기면 꺼진 것)
   sites       사이트별 로그인 상태
   jobs        작업 기록 ez_daily · ez_split · menso_read
-  commands    시동 등 명령 (start · menso · match_read · match_search)
+  commands    시동 등 명령 (start · menso · match_read · match_search · bizem_check · bizem_collect)
   ezcall      합포 분할 화면 요청 (search · fill · reset · commit)
   loginKey    로그인 값을 잠그는 공개키 (헤드비서가 켜질 때마다 새로 만듦)
   loginreq    잠긴 로그인 값. 헤드비서가 받자마자 지움

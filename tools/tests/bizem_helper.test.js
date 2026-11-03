@@ -74,6 +74,6 @@ test('로그인: 칸을 채우고 버튼을 한 번 누르며 값을 돌려주�
   assert.strictEqual(clicks, 0);
 });
 
-test('도우미 코드에 수집·확정·삭제·다운로드 버튼이 없음', () => {
-  for (const id of ['btngetorderafterconfirm', 'btnSave', 'btnDel', 'preexcelFormDownload', 'xlsDownload']) assert.ok(!SRC.includes(id), id);
+test('도우미 코드에 확정·삭제·다운로드 버튼이 없음', () => {
+  for (const id of ['btnSave', 'btnDel', 'preexcelFormDownload', 'xlsDownload']) assert.ok(!SRC.includes(id), id);
 });

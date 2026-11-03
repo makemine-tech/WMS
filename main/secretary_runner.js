@@ -9,7 +9,8 @@
      deps.unseal(sealed)·deps.login(site, creds) 비서 화면에서 입력한 로그인 값을 풀어 한 번 쓰고 버림. 저장·기록 금지
      deps.ebutUpload(file) 맨소래담 파일을 이벗 연동몰에 등록. 파일은 이 컴퓨터 메모리에만 있고 Firebase 로 가지 않음
      deps.ezSearch(args)·deps.ezWrite(cmd, args) 합포 분할 화면(ez_split.html?remote=1)이 보낸 요청을 도우미로 전달
-   저장은 합포 분할 화면에서 사람이 누른 요청(relay)으로만 한다. 그 밖의 작업은 읽기 전용.
+     deps.bizemRead(cmd)·deps.bizemGo() 비젬 주문서수집 화면 읽기와, 사람이 확인한 수집 한 번
+   저장은 사람이 누른 요청으로만 한다. 그 밖의 작업은 읽기 전용.
 ============================================================ */
 (function(root){
   'use strict';
@@ -306,6 +307,81 @@
       return run;
     }
 
+    /* 비젬 주문수집 전 확인: 체크된 쇼핑몰과 기간을 읽어 명령 결과로 돌려줌. 비젬에 쓰지 않음 */
+    async function bizemBlock(id){
+      var now = deps.now(), jobs = (await store.getJobs()) || {};
+      var running = Object.keys(jobs).map(function(k){ return jobs[k]; }).find(function(j){ return j && j.state === 'running'; });
+      var block = C.startBlock({ runner: await store.getRunner(), control: await store.getControl(), job: running, now: now });
+      if (block) await store.setCommand(id, { status: 'refused', why: block, doneAt: now });
+      return block ? null : jobs;
+    }
+    async function runBizemCheck(id){
+      if (!(await bizemBlock(id))) return;
+      await store.setCommand(id, { status: 'reading' });
+      try {
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'bizem'; }));
+        if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '비젬: ' + r.msg, doneAt: deps.now() }); return; }
+        await store.setCommand(id, { status: 'done', check: await deps.bizemRead('collectCheck'), doneAt: deps.now() });
+      } catch (e) {
+        await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
+      }
+    }
+    function bizemSleep(ms){ return deps.sleep ? deps.sleep(ms) : new Promise(function(ok){ setTimeout(ok, ms); }); }
+    /* 실행 후 대조: 체크한 쇼핑몰마다 수집 시각이 바뀌고 상태가 정상이어야 함 */
+    function collectNotNew(before, after, names){
+      function find(list, n){ return (list || []).find(function(m){ return m.name === n; }); }
+      return names.filter(function(n){ var a = find(after, n), b = find(before, n); return !a || a.status !== '정상종료' || !a.last || (!!b && a.last === b.last); });
+    }
+    /* 사람이 쇼핑몰 목록을 보고 누른 수집 한 번. 쇼핑몰에 발주확인 처리되어 되돌릴 수 없음. 어떤 경우에도 다시 누르지 않음 */
+    async function runBizemCollect(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) return;
+      var now = deps.now(), date = C.kstDate(now), key = C.jobKey('bizem_collect', date, C.nextRound(jobs, 'bizem_collect', date)), site = C.SITES.find(function(s){ return s.id === 'bizem'; });
+      async function end(state, notes, result){
+        var patch = { state: state, step: '', endedAt: deps.now(), notes: notes };
+        if (result) patch.result = result;
+        await store.setJob(key, patch);
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      }
+      var names = cmd.malls || [];
+      await store.setJob(key, { state: 'running', recipe: 'bizem_collect', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '비젬 확인 중', notes: '' });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        var r = await checkOne(site), before = r.counts || null, chk;
+        if (r.state !== 'ok') return end('stopped', '비젬: ' + r.msg);
+        try { chk = await deps.bizemRead('collectCheck'); }
+        catch (e) { return end('stopped', '쇼핑몰 목록을 읽지 못해 수집하지 않았습니다: ' + String((e && e.message) || e)); }
+        if (chk.checked.join('|') !== names.join('|') || chk.from !== cmd.from || chk.to !== cmd.to || chk.opt !== cmd.opt) return end('stopped', '화면에서 본 쇼핑몰·기간과 달라 수집하지 않았습니다. 다시 눌러 확인해 주세요');
+        await store.setJob(key, { step: '주문수집 중' });
+        var go;
+        try { go = await deps.bizemGo(); }
+        catch (e) { return end('stopped', '응답이 끊겼습니다. 수집됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')'); }
+        if (!go.started) return end('stopped', '수집이 시작되지 않았습니다: ' + go.why);
+        var s = null, miss = 0, tries = Math.ceil(C.COLLECT_MAX / C.COLLECT_POLL), deadline = deps.now() + C.COLLECT_MAX;
+        while (tries-- > 0 && deps.now() <= deadline) {
+          await bizemSleep(C.COLLECT_POLL);
+          try { s = await deps.bizemRead('collectStatus'); miss = 0; }
+          catch (e) { s = null; if (++miss >= 6) break; continue; }
+          if (s.done || s.error || s.lost) break;
+        }
+        if (!s || s.lost) return end('stopped', '진행 화면이 끊겼습니다. 수집됐을 수 있으니 비젬에서 먼저 확인해 주세요');
+        if (s.error) return end('stopped', '비젬 오류: ' + s.error + '. 비젬에서 먼저 확인해 주세요');
+        if (!s.done) return end('stopped', '끝 소식을 받지 못했습니다. 비젬에서 먼저 확인해 주세요');
+        var after = null;
+        try {
+          after = await deps.bizemCounts();
+          await store.setSite('bizem', Object.assign({}, r, { counts: after, countsAt: deps.now() }));
+        } catch (e) { after = null; }
+        var notNew = collectNotNew(chk.malls, s.malls, names);
+        var result = { counts: { before: before ? before.unconfirmed : -1, after: after ? after.unconfirmed : -1 }, notNew: notNew, alerts: go.alerts || [], malls: names.length };
+        await end(notNew.length ? 'stopped' : 'done', notNew.length ? '수집 확인 필요: ' + notNew.join(', ') : '', result);
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), notes: '오류: ' + String((e && e.message) || e) + '. 비젬에서 먼저 확인해 주세요' }).catch(function(){});
+        throw e;
+      }
+    }
+
     /* 맨소래담: 이벗 로그인 점검 → 주문서목록 읽기 → 행사표로 사은품 대상 계산. 이벗에 쓰지 않음 */
     async function runMenso(id, cmd){
       var now = deps.now();
@@ -369,6 +445,8 @@
       if (cmd.type === 'start') return runStart(id, cmd);
       if (cmd.type === 'menso') return runMenso(id, cmd);
       if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
+      if (cmd.type === 'bizem_check') return runBizemCheck(id);
+      if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 
