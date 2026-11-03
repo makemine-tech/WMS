@@ -667,3 +667,9 @@ test('이벗 도우미: 매칭 저장은 2개 이상 확인창만 받아들이�
   assert.ok(src.includes("return picks.length > 1 && /2개이상 선택/.test(String(m));"));
   assert.ok(src.includes("prop('checked', sum !== Number($('#name1_qty').text()))"));
 });
+
+test('헤드비서: 이벗·비젬 저장 요청은 받은 내용을 그대로 도우미에 넘김 (빈 요청을 보내 매칭이 멈췄던 일)', () => {
+  const s = fs.readFileSync(__dirname + '/../../main/secretary.html', 'utf8');
+  assert.ok(/ebutGo: function\(cmd, args\)\{[^}]*askAny\([^;]*, cmd, args \|\| \{\}, 60000\)/.test(s));
+  assert.ok(/bizemGo: function\(cmd, args\)\{[^}]*askAny\([^;]*, cmd, args, 60000\)/.test(s));
+});
