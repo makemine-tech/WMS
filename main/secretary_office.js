@@ -106,7 +106,13 @@
       var p = PAL[S.who] || PAL.ebut, step = o.walk && Math.sin(T * (o.fast ? 18 : 10)) > 0 ? 1 : 0, lift = o.walk ? (step ? 2 : 0) : 0, y = feet - lift;
       g.globalAlpha = .18; r(px - 13, feet - 1, 26, 2, LINE); g.globalAlpha = 1;
       paintRows(g, headOf(p, false).concat(p.suit ? SUIT : BODY, LEGS[step]), px, feet, 1, p, lift);
-      if (o.wave) { r(px + 11, y - 34, 4, 12, INK); r(px + 12, y - 33, 2, 10, p.T); r(px + 10, y - 38, 6, 5, p.S); }
+      /* 인사: 머리 옆 바깥으로 팔을 올리고 손을 좌우로 흔듦 */
+      if (o.wave) {
+        var hx = px + 18 + (reduce ? 0 : Math.round(Math.sin(T * 9) * 2));
+        r(px + 15, y - 24, 6, 6, INK); r(px + 16, y - 23, 4, 4, p.T);
+        r(hx - 1, y - 42, 5, 20, INK); r(hx, y - 41, 3, 18, p.S);
+        r(hx - 2, y - 47, 7, 7, INK); r(hx - 1, y - 46, 5, 5, p.S);
+      }
       if (o.sheet) { r(px + 11, y - 29, 14, 17, INK); r(px + 12, y - 28, 12, 15, '#ffffff'); for (var i = 0; i < 3; i++) r(px + 14, y - 25 + i * 4, 8, 1, '#9aa2b3'); }
     }
     function draw(){
