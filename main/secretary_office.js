@@ -5,6 +5,7 @@
    그림 자체는 데이터를 모른다. secretary_core.officeRooms 가 만든 rooms 를 update 로 받아 그리기만 한다.
    banner(canvas) = 시작 버튼 뒤 그림 띠 (상자 든 비서, 건물, 지게차, 선반). 움직이지 않는 그림.
    progress(canvas) = 흰 화면 위 진행 막대. 화면이 실제 작업 기록으로 정한 상태만 받아 그린다.
+   cheer(canvas) = 시동이 끝나면 담당 비서들이 함께 뛰어올라 손을 흔들고 사라짐. play(['head','ezadmin','ebut'])
      mode  off = 커튼 닫힘(퇴근) · idle = 대기 · work = 일하는 중 · alert = 방이 붉어짐(문제)
      count 쌓이는 일감 수, say 이름표 글자
 ============================================================ */
@@ -147,6 +148,49 @@
       if (!raf) raf = requestAnimationFrame(function(n){ last = n; frame(n); });
     }
     return { set: set };
+  }
+
+  /* 시동 끝 인사: 비서들이 차례로 폴짝 뛰어 등장 → 손 흔들며 콩콩 → 흐려지며 사라짐. 말풍선 글자는 화면(HTML)이 맡음 */
+  var CHEER_SEC = 4.2;
+  function cheer(cv){
+    var g = cv.getContext('2d'), Wd = cv.width, Hd = cv.height, feet = Hd - 6;
+    var reduce = root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var cast = [], t0 = 0, raf = 0;
+    function r(px, py, w, h, c){ g.fillStyle = c; g.fillRect(Math.round(px), Math.round(py), Math.round(w), Math.round(h)); }
+    function fig(who, px, lift, T){
+      var p = PAL[who] || PAL.ebut, y = feet - lift, blink = (T * 1.3 + px / 97) % 3 < BLINK_SEC;
+      g.save(); g.globalAlpha *= .2; r(px - 13, feet - 1, 26, 2, LINE); g.restore();
+      paintRows(g, headOf(p, blink).concat(p.suit ? SUIT : BODY, LEGS[lift > 4 ? 1 : 0]), px, feet, 1, p, lift);
+      var hx = px + 18 + (reduce ? 0 : Math.round(Math.sin(T * 9 + px) * 2));
+      r(px + 15, y - 24, 6, 6, INK); r(px + 16, y - 23, 4, 4, p.T);
+      r(hx - 1, y - 42, 5, 20, INK); r(hx, y - 41, 3, 18, p.S);
+      r(hx - 2, y - 47, 7, 7, INK); r(hx - 1, y - 46, 5, 5, p.S);
+    }
+    function xOf(i){ return Wd * (i * 2 + 1) / (cast.length * 2); }
+    function draw(T){
+      g.clearRect(0, 0, Wd, Hd);
+      if (T >= CHEER_SEC) return false;
+      g.globalAlpha = T > CHEER_SEC - .6 ? Math.max(0, (CHEER_SEC - T) / .6) : 1;
+      cast.forEach(function(who, i){
+        var tt = T - i * .18;
+        if (tt < 0 && !reduce) return;
+        var lift = reduce ? 0 : tt < .5 ? Math.sin(tt / .5 * Math.PI) * 26 : Math.abs(Math.sin((tt - .5) * 6)) * 4;
+        fig(who, xOf(i), lift, T);
+      });
+      g.globalAlpha = 1;
+      return true;
+    }
+    function frame(n){
+      var more = draw((n - t0) / 1000);
+      raf = more ? requestAnimationFrame(frame) : 0;
+    }
+    function play(list){
+      cast = (list || []).slice();
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      if (reduce) { draw(1); setTimeout(function(){ g.clearRect(0, 0, Wd, Hd); }, CHEER_SEC * 1000); return; }
+      raf = requestAnimationFrame(function(n){ t0 = n; frame(n); });
+    }
+    return { play: play, xOf: function(i){ return xOf(i) / Wd; }, sec: CHEER_SEC };
   }
 
   /* 시작 버튼 띠: 왼쪽 상자 든 헤드비서, 가운데 뒤 건물, 오른쪽 지게차 탄 이벗 비서와 선반 (대표님 시안 2026-11-04) */
@@ -505,5 +549,5 @@
     return { update: update, peek: peek, setSky: setSky };
   }
 
-  root.SECRETARY_OFFICE = { banner: banner, progress: progress, mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
+  root.SECRETARY_OFFICE = { banner: banner, progress: progress, cheer: cheer, mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
 })(window);

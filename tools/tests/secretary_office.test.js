@@ -156,3 +156,27 @@ test('방 자리: 아래층 왼쪽 이벗, 오른쪽 이지어드민이면 모�
   assert.strictEqual(frames.length, 1, '이벗 방 창틀');
   assert.strictEqual(frames[0].x, 16 + 96 - 1, '왼쪽 칸');
 });
+
+test('시동 끝 인사: 비서들이 뛰어올랐다가 내려오고, 정해진 시간 뒤 모두 사라짐', () => {
+  let cb = null, rects = [];
+  const g = { globalAlpha: 1, set fillStyle(v) { this._c = v; }, get fillStyle() { return this._c; },
+    fillRect(x, y, w, h) { rects.push({ x, y, w, h, c: this._c, a: this.globalAlpha }); }, clearRect() { rects = []; }, save() {}, restore() {} };
+  const cv = { width: 300, height: 96, getContext: () => g };
+  const win = { matchMedia: () => ({ matches: false }) };
+  const ctx = vm.createContext({ window: win, document: {}, requestAnimationFrame: (f) => { cb = f; return 1; }, cancelAnimationFrame() {}, setTimeout() {}, Math });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../main/secretary_office.js'), 'utf8'), ctx);
+  const ch = win.SECRETARY_OFFICE.cheer(cv);
+  ch.play(['head', 'ezadmin', 'ebut']);
+  const at = (sec) => { const f = cb; cb = null; f(sec * 1000); };
+  at(0);
+  const top = () => Math.min(...rects.filter((r) => r.c === '#0e0d10').map((r) => r.y));
+  at(.25); const jump = top();
+  at(1.5); const ground = top();
+  assert.ok(jump < ground - 10, '뛰어오름: ' + jump + ' < ' + ground);
+  assert.ok(rects.some((r) => r.c === '#3fa877'), '이벗 비서(초록 옷)도 그려짐');
+  assert.deepStrictEqual(rects.filter((r) => r.w <= 0 || r.h <= 0 || Number.isNaN(r.x) || r.c === undefined), []);
+  assert.deepStrictEqual([0, 1, 2].map((i) => Math.round(ch.xOf(i) * 100)), [17, 50, 83]);
+  at(ch.sec + .1);
+  assert.strictEqual(rects.length, 0, '끝나면 비움');
+  assert.strictEqual(cb, null, '끝나면 그리기를 멈춤');
+});
