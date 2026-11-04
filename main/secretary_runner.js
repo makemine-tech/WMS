@@ -475,14 +475,13 @@
         try { chk = await deps.bizemRead('formCheck'); }
         catch (e) { return end('stopped', '양식 화면을 읽지 못해 받지 않았습니다: ' + String((e && e.message) || e)); }
         if (!chk.form) return end('stopped', '양식 0000_박스앤캔_코코나나양식 을 찾지 못해 받지 않았습니다');
-        /* 화면 기본값이 빈 값(전체)이거나 B10 일 수 있음. 전에 받은 주문이 섞이면 위 downloaded 로 멈춤 */
+        /* 화면 기본값이 빈 값(전체)이거나 B10 일 수 있음. 전에 받은 주문이 섞여 있어도 파일은 항상 만듦 — 중복은 이벗 등록 단계에서 걸러짐 (대표님 2026-11-04) */
         if (chk.status !== 'B10' && chk.status !== '') return end('stopped', '운송장인쇄 화면 조건이 평소와 달라 받지 않았습니다');
         if (chk.memo) return end('stopped', '비젬에 먼저 읽어야 할 쪽지가 있습니다. 비젬 탭에서 확인해 주세요');
-        if (chk.downloaded) return end('stopped', '이미 양식을 받은 주문 ' + chk.downloaded + '건이 섞여 있어 받지 않았습니다. 확인 후 파일 선택으로 진행해 주세요');
         await store.setJob(key, { step: '비젬 양식 받는 중' });
         try { file = await deps.bizemFile(cmd.seen, key); }
         catch (e) { return end('stopped', '양식을 받지 못했습니다: ' + String((e && e.message) || e) + '. 비젬에 받은 기록이 남았을 수 있습니다'); }
-        var result = { lines: file.lines, orders: file.orders, sites: file.sites, box: false, menso: false, held: true };   /* held = 실행 PC 메모리에 두는 방식 */
+        var result = { lines: file.lines, orders: file.orders, sites: file.sites, box: false, menso: false, held: true, dup: Number(chk.downloaded) || 0 };   /* held = 실행 PC 메모리에 두는 방식 */
         if (file.lines.boxncan) result.box = keep('boxncan');
         if (file.lines.menso + file.lines.boxncan < cmd.seen) { if (file.lines.menso) result.menso = keep('menso'); return end('stopped', '대기 ' + cmd.seen + '건인데 받은 줄이 ' + (file.lines.menso + file.lines.boxncan) + '줄이라 등록하지 않았습니다', result); }
         if (!file.lines.menso) return end('done', '', result);

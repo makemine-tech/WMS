@@ -464,8 +464,16 @@ test('등록: 받아서 나누고 맨소래담만 이벗에 한 번 등록, 박�
   assert.ok(!JSON.stringify(db.jobs).includes('홍길동'));
   assert.ok(!Object.keys(j.result).includes('buffer'));
 });
-test('등록: 건수가 다르거나 이미 받은 주문·쪽지·조건 차이가 있으면 받지 않음', async () => {
-  for (const o of [{ wait: 70 }, { form: { downloaded: 3 } }, { form: { memo: 1 } }, { form: { status: 'A' } }, { form: { form: '' } }]) {
+test('등록: 이미 받은 주문이 섞여도 파일은 만들고 등록함 (중복은 이벗이 거름)', async () => {
+  const { runner, db } = setupImport({ form: { downloaded: 3 } });
+  await runner.handleCommand('c', imp());
+  assert.strictEqual(db.fileAsked, 1);
+  assert.strictEqual(job(db).state, 'done');
+  assert.strictEqual(job(db).result.box, true);
+  assert.strictEqual(job(db).result.dup, 3);
+});
+test('등록: 건수가 다르거나 쪽지·조건 차이가 있으면 받지 않음', async () => {
+  for (const o of [{ wait: 70 }, { form: { memo: 1 } }, { form: { status: 'A' } }, { form: { form: '' } }]) {
     const { runner, db } = setupImport(o);
     await runner.handleCommand('c', imp());
     assert.strictEqual(db.fileAsked, 0, JSON.stringify(o));
