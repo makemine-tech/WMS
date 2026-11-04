@@ -3,6 +3,7 @@
 
    건물 단면의 하얀 유리방. 비서 1명 = 방 1개이고, 비서가 늘면 층이 늘어난다.
    그림 자체는 데이터를 모른다. secretary_core.officeRooms 가 만든 rooms 를 update 로 받아 그리기만 한다.
+   banner(canvas) = 시작 버튼 뒤 그림 띠 (상자 든 비서, 건물, 지게차, 선반). 움직이지 않는 그림.
    progress(canvas) = 흰 화면 위 진행 막대. 화면이 실제 작업 기록으로 정한 상태만 받아 그린다.
      mode  off = 커튼 닫힘(퇴근) · idle = 대기 · work = 일하는 중 · alert = 방이 붉어짐(문제)
      count 쌓이는 일감 수, say 이름표 글자
@@ -146,6 +147,41 @@
       if (!raf) raf = requestAnimationFrame(function(n){ last = n; frame(n); });
     }
     return { set: set };
+  }
+
+  /* 시작 버튼 띠: 왼쪽 상자 든 헤드비서, 가운데 뒤 건물, 오른쪽 지게차 탄 이벗 비서와 선반 (대표님 시안 2026-11-04) */
+  function banner(cv){
+    var g = cv.getContext('2d'), Wd = cv.width, Hd = cv.height, floor = Hd - 12;
+    function r(x, y, w, h, c){ g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
+    function box(x, y, w, h){ r(x - 2, y - 2, w + 4, h + 4, INK); r(x, y, w, h, '#d9a866'); r(x + w / 2 - 2, y, 4, h, '#f2d7a0'); r(x + w - 8, y + h - 6, 5, 3, '#fff7e6'); }
+    function building(x, w, h, seed){
+      r(x, floor - h, w, h, '#2b3a55'); r(x, floor - h, w, 3, '#3a4d6e');
+      for (var yy = floor - h + 8; yy < floor - 10; yy += 12) for (var xx = x + 6; xx < x + w - 8; xx += 12) r(xx, yy, 6, 7, (xx + yy + seed) % 5 ? '#4a6994' : '#7fa6d6');
+    }
+    g.clearRect(0, 0, Wd, Hd);
+    r(0, 0, Wd, Hd, '#1b2232');
+    building(Wd * .17, 70, 70, 1); building(Wd * .17 + 76, 46, 52, 3);
+    building(Wd * .74, 54, 60, 2); building(Wd * .74 + 60, 64, 76, 4);
+    r(0, floor, Wd, Hd - floor, '#3b4456'); r(0, floor, Wd, 2, '#56617a');
+    /* 왼쪽: 상자 더미 + 상자를 든 헤드비서 */
+    box(28, floor - 24, 24, 22); box(54, floor - 24, 24, 22); box(41, floor - 46, 24, 22);
+    paintRows(g, headOf(PAL.head, false).concat(BODY, LEGS[0]), 118, floor, 1, PAL.head, 0);
+    box(124, floor - 34, 26, 22);
+    r(120, floor - 26, 6, 5, PAL.head.S);
+    /* 오른쪽: 선반 */
+    var sx = Wd - 66;
+    r(sx - 2, floor - 92, 4, 92, '#3f6fd0'); r(sx + 54, floor - 92, 4, 92, '#3f6fd0');
+    [floor - 64, floor - 34, floor - 4].forEach(function(y){ r(sx, y, 56, 4, '#e8892c'); });
+    box(sx + 4, floor - 84, 20, 18); box(sx + 30, floor - 84, 20, 18); box(sx + 4, floor - 54, 20, 18); box(sx + 30, floor - 54, 20, 18); box(sx + 16, floor - 24, 22, 18);
+    /* 오른쪽: 지게차와 이벗 비서 */
+    var fx = Wd - 170;
+    r(fx - 2, floor - 70, 6, 70, INK); r(fx - 1, floor - 69, 4, 68, '#5a6070');
+    r(fx - 26, floor - 8, 28, 4, INK);
+    box(fx - 28, floor - 30, 24, 20);
+    r(fx + 4, floor - 30, 42, 22, INK); r(fx + 6, floor - 28, 38, 18, '#e8a23c'); r(fx + 6, floor - 28, 38, 4, '#f6c060');
+    r(fx + 30, floor - 50, 4, 22, INK); r(fx + 8, floor - 52, 26, 4, INK);
+    paintRows(g, headOf(PAL.ebut, false).concat(BODY.slice(0, 4)), fx + 20, floor - 26, 1, PAL.ebut, 0);
+    [fx + 12, fx + 38].forEach(function(cx){ r(cx - 7, floor - 10, 14, 12, INK); r(cx - 4, floor - 7, 8, 6, '#9aa2b3'); });
   }
 
   function mount(sc, opts){
@@ -469,5 +505,5 @@
     return { update: update, peek: peek, setSky: setSky };
   }
 
-  root.SECRETARY_OFFICE = { progress: progress, mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
+  root.SECRETARY_OFFICE = { banner: banner, progress: progress, mount: mount, skyPhase: skyPhase, skyKind: skyKind, SPRITES: { HEADS: HEADS, FACE: FACE, FACE_BOB: FACE_BOB, BODY: BODY, SUIT: SUIT, LEGS: LEGS, SIT: SIT } };
 })(window);
