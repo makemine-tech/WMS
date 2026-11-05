@@ -175,7 +175,7 @@ function leftChecks(buf){
       ws.eachRow({ includeEmpty: false }, function(row){ row.eachCell({ includeEmpty: true }, function(c){
         var f = c.fill; if (f && f.type === 'pattern' && f.pattern === 'solid' && f.fgColor && String(f.fgColor.argb).toUpperCase() === CHECK_ARGB) L.push(ws.name + '!' + c.address); }); });
     });
-    return { list: L, sheet: sheetLeft };
+    return { list: L, sheet: sheetLeft, wb: wb };
   });
 }
 function confirmFinal(file){
@@ -189,7 +189,7 @@ function confirmFinal(file){
   var prev = doneOf(VW.vkey, YM);
   if (prev && !confirm('이미 확정된 파일이 있습니다.\n\n기존: ' + (prev.orig || prev.name) + ' (' + ftime(prev.at) + ')\n새 파일: ' + file.name + '\n\n새 파일을 정본으로 할까요? (기존 파일은 이력으로 남습니다)')) return;
   FINAL_BUSY = true;
-  var V = VW, ym = YM, vkey = V.vkey, buf, fwb, left = null, total = null, diff = null, diffErr = '', id = newId(), path = 'settlement/' + ym + '/' + id;
+  var V = VW, ym = YM, vkey = V.vkey, buf, fwb, left = null, recalced = 0, total = null, diff = null, diffErr = '', id = newId(), path = 'settlement/' + ym + '/' + id;
   var ext = (file.name.split('.').pop() || 'xlsx').toLowerCase(), name = ym.slice(5, 7) + '월_거래내역서_' + V.name + '.' + ext;
   finalMsg('확정 파일 읽는 중…');
   file.arrayBuffer().then(function(b){
@@ -201,6 +201,18 @@ function confirmFinal(file){
         if (!confirm(t + '그래도 이 파일로 확정할까요? (취소하면 엑셀에서 마저 확인)')) throw { cancel: true };
       }
     }).catch(function(x){ if (x && x.cancel) throw x; left = null; });
+  }).then(function(){
+    /* 엑셀에서 「편집 사용」 없이 저장·그대로 올린 파일은 수식 결과가 지난달 값 → 웹에서 다시 계산해 그 값으로 확정 (대표님 2026-11-05) */
+    if (!left || !left.wb) return;
+    finalMsg('수식 결과 확인 중…');
+    return SETTLE_RECALC.run(left.wb).then(function(o){
+      if (!o.changed) return;
+      var show = function(v){ return typeof v === 'number' ? won(v) : String(v == null ? '' : v); };
+      var t = '이 파일은 수식 결과가 최신이 아닙니다 (엑셀에서 「편집 사용」 후 저장하지 않은 파일).\n\n웹에서 다시 계산하니 ' + o.changed + '칸이 달라집니다:\n' + o.samples.slice(0, 6).map(function(s){ return s[0] + '  ' + show(s[1]) + ' → ' + show(s[2]); }).join('\n')
+        + '\n\n확인 = 다시 계산한 값으로 확정 (정산 금액도 그 값) · 취소 = 엑셀에서 「편집 사용」 → 저장 후 다시 올리기';
+      if (!confirm(t)) throw { cancel: true, why: 'recalc' };
+      return left.wb.xlsx.writeBuffer().then(function(b2){ buf = b2; fwb = XLSX.read(b2, { type: 'array', cellFormula: true }); recalced = o.changed; });
+    }, function(e){ console.warn('수식 다시 계산 실패', e); });
   }).then(function(){
     try { var A2 = SETTLE_STMT.analyze(fwb); total = A2 && A2.totals ? (A2.totals.total != null ? A2.totals.total : null) : null; } catch (e) {}
     finalMsg('같은 설정으로 초안을 다시 만들어 비교하는 중…');
@@ -222,7 +234,7 @@ function confirmFinal(file){
     if (prev && prev.id) hist[prev.id] = { name: prev.name, orig: prev.orig || '', at: prev.at || 0 };
     var rec = { id: id, name: name, orig: file.name, at: now, by: by, total: total,
       checksLeft: left ? left.list.length : null, checksList: left && left.list.length ? left.list.slice(0, 200) : null,
-      nDiff: diff ? diff.n : null, diff: diff ? diff.list : null, diffErr: diffErr || null, hist: Object.keys(hist).length ? hist : null };
+      recalced: recalced || null, nDiff: diff ? diff.n : null, diff: diff ? diff.list : null, diffErr: diffErr || null, hist: Object.keys(hist).length ? hist : null };
     var u = {};
     u['box/' + ym + '/' + id] = meta;
     u['vendors/' + vkey + '/done/' + ym] = rec;
@@ -231,8 +243,8 @@ function confirmFinal(file){
   }).then(function(){
     FINAL_BUSY = false;
     toast('✅ ' + ymLabel(ym) + ' ' + V.name + ' 완료 확정');
-    finalMsg(diff ? '확정했습니다 — 초안과 다른 곳 ' + diff.n + '곳' : '확정했습니다' + (diffErr ? ' (초안 비교 실패: ' + diffErr + ')' : ''));
+    finalMsg((diff ? '확정했습니다 — 초안과 다른 곳 ' + diff.n + '곳' : '확정했습니다' + (diffErr ? ' (초안 비교 실패: ' + diffErr + ')' : '')) + (recalced ? ' · 수식 ' + recalced + '칸은 웹에서 다시 계산한 값' : '') + (total != null ? ' · 정산 금액 ' + won(total) + '원' : ''));
   }).catch(function(e){
-    FINAL_BUSY = false; if (e && e.cancel){ finalMsg('확정을 취소했습니다 — 엑셀에서 노란 칸을 마저 확인해 주세요'); return; } finalMsg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e);
+    FINAL_BUSY = false; if (e && e.cancel){ finalMsg(e.why === 'recalc' ? '확정을 취소했습니다 — 엑셀에서 「편집 사용」을 누르고 저장한 뒤 다시 올려 주세요' : '확정을 취소했습니다 — 엑셀에서 노란 칸을 마저 확인해 주세요'); return; } finalMsg('실패: ' + ((e && (e.code || e.message)) || e)); console.error(e);
   });
 }
