@@ -25,7 +25,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-05c';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-05d';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://login2.ezadmin.co.kr/login.htm', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
