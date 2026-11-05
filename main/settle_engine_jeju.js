@@ -13,7 +13,8 @@
              파렛트 = 박스 25개 이상이면 100박스당 1 (올림), 그보다 적으면 비움 — 10~30박스는 노란 표시(지난달들에 1·0.5로 적은 적 있음)
            - 택배 중 선물세트(900)·디스펜서·감자칩(300) 작업 주문: 박스 = 수량
            - 맨 아래 합계: 출고비합계 → 거래명세표 기타출고비(1) 단가, 파렛트 → 파렛트출고비 수량
-       · 보관비 = 전월 말일 보관파렛 + 입출고 화물관리(제주맥주) 입고·출고, 내용 칸 = 화물관리 메모
+       · 보관비 = 전월 말일 보관파렛 + 입고(입출고 화물관리 제주맥주, 내용 = 메모) − 출고(기타출고및작업비 전표파렛트출고수, 그 줄 등록일, 내용 = 비고) — 2026-11-05
+         화물관리 출고와 전체 파렛트 수가 다르면 특이사항 + 「점검_보관비출고」 시트 (날짜 차이는 안 봄)
          월말 「택배출고 보정」 같은 손 보정은 특이사항으로 (8월 31일 11팔)
        · 당월말일기준재고표·메이크마인발주서 = 아직 룰 없음 (지난달 그대로 + 확인 필요)
 ============================================================ */
@@ -33,18 +34,44 @@
     var read = function(L){ return L.reduce(function(p, id){ return p.then(function(acc){ ctx.msg && ctx.msg(box[id].name + ' 읽는 중…'); return ctx.readBox(box[id]).then(function(x){ acc.push(x); return acc; }); }); }, Promise.resolve([])); };
     var lineRow = function(re){ var hit = 0; st.eachRow(function(row, r){ if (!hit && re.test(ns(row.getCell(2).value))) hit = r; }); return hit; };
 
-    /* ── 보관비 ── */
-    (function(){
+    /* ── 보관비 ── (기타출고및작업비 다음에 — 출고가 그 시트에서 옴)
+       입고 = 입출고 화물관리(제주맥주) 입고 · 출고 = 기타출고및작업비 전표파렛트출고수를 그 줄 등록일에 (대표님 2026-11-05)
+       화물관리 출고와는 전체 파렛트 수만 맞춰 보고(날짜 차이는 상관없음) 다르면 특이사항 + 「점검_보관비출고」 시트 */
+    var storeStep = function(OUT){
       var ws = wb.getWorksheet('보관비'); if (!ws) return;
       var sumR = 0; ws.eachRow(function(row, r){ var d = row.getCell(4).value; if (!sumR && r > 3 && d && typeof d === 'object' && /^SUM\(D3:/i.test(d.formula || '')) sumR = r; });
       if (!sumR){ log.push(['확인 필요', '보관비 시트 합계 줄을 못 찾음 — 지난달 그대로']); return; }
       var start = 0; for (var r0 = 3; r0 < sumR; r0++){ if (txt(ws.getCell('A' + r0).value) && txt(ws.getCell('D' + r0).value) !== '') start = +txt(ws.getCell('D' + r0).value) || 0; }
       var Y = +YM.slice(0, 4), M = +YM.slice(5, 7), ND = new Date(Date.UTC(Y, M, 0)).getUTCDate(), S0 = Math.round(Date.UTC(Y, M - 1, 1) / 864e5) + 25569;
-      var din = {}, dout = {}, tin = {}, tout = {}, n = 0;
+      var din = {}, dout = {}, tin = {}, tout = {}, n = 0, CO = [], outside = [];
       (ctx.CARGO || []).forEach(function(x){ if (!x || !x.date || !MINE(x.vendor)) return; var d = Math.round(Date.parse(x.date + 'T00:00:00Z') / 864e5) + 25569; if (d < S0 || d >= S0 + ND) return;
         var p = (+x.aj || 0) + (+x.etc || 0), memo = String(x.memo || x.note || '').trim(); n++;
         if (x.kind === 'in'){ din[d] = (din[d] || 0) + p; (tin[d] = tin[d] || []).push((memo || '입고') + ' ' + p); }
-        else if (x.kind === 'out'){ dout[d] = (dout[d] || 0) + p; (tout[d] = tout[d] || []).push((memo || '출고') + ' ' + p); } });
+        else if (x.kind === 'out'){ CO.push({ d: d, p: p, memo: memo || '출고' }); } });
+      var src = OUT ? '기타출고및작업비' : '화물관리';
+      if (!OUT) log.push(['확인 필요', '기타출고및작업비를 못 만들어(주문목록 없음) 보관비 출고는 화물관리 출고로 채움']);
+      (OUT || CO).forEach(function(o){ var d = o.d;
+        if (d == null || d < S0 || d >= S0 + ND){ outside.push((o.memo || '출고') + ' ' + o.p + (d == null ? '(등록일 없음)' : '')); d = d != null && d >= S0 + ND ? S0 + ND - 1 : S0; }
+        dout[d] = (dout[d] || 0) + o.p; (tout[d] = tout[d] || []).push((o.memo || '출고') + ' ' + o.p); });
+      if (outside.length) log.push(['특이사항', '보관비 출고 중 등록일이 ' + M + '월 밖이거나 없는 ' + outside.length + '줄은 1일·말일에 넣음: ' + outside.join(', ')]);
+      /* 검수: 기타출고 전표파렛트 합 vs 화물관리 출고 합 */
+      if (OUT){
+        var sumO = OUT.reduce(function(s, o){ return s + o.p; }, 0), sumC = CO.reduce(function(s, o){ return s + o.p; }, 0);
+        if (Math.abs(sumO - sumC) > 1e-9) log.push(['특이사항', '보관비 출고 파렛트: 기타출고및작업비 ' + sumO + ' ≠ 화물관리 출고 ' + sumC + ' (차이 ' + (sumO - sumC > 0 ? '+' : '') + Math.round((sumO - sumC) * 100) / 100 + ') — 보관비는 기타출고 기준, 「점검_보관비출고」 시트에서 비교']);
+        else log.push(['자동 적용', '보관비 출고 파렛트 검수: 기타출고및작업비 ' + sumO + ' = 화물관리 출고 ' + sumC + ' (날짜는 따로 안 봄)']);
+        var old = wb.getWorksheet('점검_보관비출고'); if (old) wb.removeWorksheet(old.id);
+        if (Math.abs(sumO - sumC) > 1e-9){
+          var ck = wb.addWorksheet('점검_보관비출고'); ck.orderNo = -1; ck.properties.tabColor = { argb: 'FFC00000' };
+          ck.columns = [{ width: 12 }, { width: 10 }, { width: 44 }, { width: 3 }, { width: 12 }, { width: 10 }, { width: 44 }];
+          ck.getCell('A1').value = '보관비 출고 검수 — 기타출고및작업비(보관비에 넣은 것) vs 입출고 화물관리 출고 · 날짜 차이는 상관없음, 전체 파렛트 수만 확인 · 다 보면 이 시트 삭제'; ck.getCell('A1').font = { bold: true };
+          ck.getRow(2).values = ['기타출고 ' + sumO, '', '', '', '화물관리 ' + sumC, '', '차이 ' + Math.round((sumO - sumC) * 100) / 100]; ck.getRow(2).font = { bold: true, color: { argb: 'FFC00000' } };
+          ck.getRow(3).values = ['등록일', '파렛트', '내용', '', '날짜', '파렛트', '메모']; ck.getRow(3).font = { bold: true };
+          var srt = function(a){ return a.slice().sort(function(x, y){ return (x.d || 0) - (y.d || 0); }); }, A1 = srt(OUT), B1 = srt(CO);
+          for (var k = 0; k < Math.max(A1.length, B1.length); k++){ var a = A1[k], b = B1[k], rw = ck.getRow(4 + k);
+            if (a){ rw.getCell(1).value = a.d; rw.getCell(1).numFmt = 'yyyy-mm-dd'; rw.getCell(2).value = a.p; rw.getCell(3).value = a.memo; }
+            if (b){ rw.getCell(5).value = b.d; rw.getCell(5).numFmt = 'yyyy-mm-dd'; rw.getCell(6).value = b.p; rw.getCell(7).value = b.memo; } }
+        }
+      }
       var sty = ws.getRow(3).getCell(1).style, newSum = 3 + ND;
       /* 합계 줄 자리 (말일 수가 다르면 옮김) */
       var sumCells = []; ws.getRow(sumR).eachCell(function(c, k){ sumCells.push([k, c.style]); });
@@ -61,9 +88,9 @@
       ws.getCell('D' + newSum).value = { formula: 'SUM(D3:D' + L + ')', result: tot };
       sumCells.forEach(function(s){ if (s[1]) ws.getRow(newSum).getCell(s[0]).style = s[1]; });
       var sr = lineRow(/^보관비$/); if (sr) st.getCell('G' + sr).value = { formula: '보관비!D' + newSum, result: tot };
-      log.push(['자동 적용', '보관비 시작 ' + start + '팔(지난달 말일) + 입고 ' + sin + ' − 출고 ' + sout + ' (화물관리 ' + n + '건) → 마감 ' + cur + '팔 · 파렛트×일 ' + tot]);
-      log.push(['특이사항', '보관비 월말 「택배출고 보정」(택배로 나간 만큼 파렛트 빼기 — 8월 31일 11팔)과 화물관리에 없는 출고는 보관비 시트 G열에 직접']);
-    })();
+      log.push(['자동 적용', '보관비 시작 ' + start + '팔(지난달 말일) + 입고 ' + sin + '(화물관리) − 출고 ' + sout + '(' + src + ' ' + (OUT || CO).length + '줄) → 마감 ' + cur + '팔 · 파렛트×일 ' + tot]);
+      log.push(['특이사항', '보관비 월말 「택배출고 보정」(택배로 나간 만큼 파렛트 빼기 — 8월 31일 11팔)은 보관비 시트 G열에 직접']);
+    };
 
     /* ── 당월말일기준재고표 ← 제주맥주재고파악_MMDD (재고조사풀 stock_jeju.html 결과, 참조 파일 용도 재고) — 대표님 2026-10-04 ──
        지난달 표의 줄·이름·순서 그대로, 전산재고 = 전산 가용재고 · 실재고조사수량 = 현재실재고 · 불량재고 · 불량차감후 = 수식, 보관 파렛트수는 지난달 값(노란 칸) */
@@ -118,8 +145,9 @@
     };
 
     /* ── 기타출고및작업비 ── */
+    var dayOf = function(v){ if (typeof v === 'number') return Math.floor(v); var m = String(v || '').match(/(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})/); return m ? Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 864e5) + 25569 : null; };
     return Promise.resolve(stockStep()).then(addrStep).then(function(){ return read(ids('ebut_orders')); }).then(function(F){
-      var ws = wb.getWorksheet('기타출고및작업비'); if (!ws) return;
+      var ws = wb.getWorksheet('기타출고및작업비'); if (!ws || !F.length) return null;
       var TH = []; ws.getRow(1).eachCell({ includeEmpty: true }, function(c, k){ TH[k - 1] = ns(c.value); });
       var at = function(h){ return TH.indexOf(h); };
       var cZ = at('가용수량'), cAA = at('출고작업비'), cAB = at('출고비합계'), cAC = at('전표파렛트출고수'), cAD = at('비고');
@@ -135,6 +163,7 @@
             /* 판매처 「제주맥주 기타/M」(직원·샘플 발송 등)은 8월 확정본에서 빠짐 → 빼고 특이사항 */
             if (/기타\/?M/i.test(String(g(r, '판매처')))){ var sk = nm.slice(0, 30); skipEtc[sk] = (skipEtc[sk] || 0) + 1; return; } }
           var v = TH.map(function(h, c){ return c < cZ ? g(r, h) : ''; });
+          v._d = dayOf(g(r, '등록일'));   /* 보관비 출고 날짜 */
           if (!b2b && v[at('매칭상품명')] !== undefined){ v[at('매칭상품명')] = nm; v[at('매칭수량')] = +g(r, '수량') || 1; }   /* 세트 이름으로 */
           var q = +g(r, '매칭수량') || +g(r, '수량') || 0, to = String(g(r, '수령자')).trim();
           var mp = String(g(r, '매칭상품명'));
@@ -166,7 +195,9 @@
       var ek = Object.keys(skipEtc); if (ek.length) log.push(['특이사항', '판매처 「제주맥주 기타/M」 작업 주문은 뺌(8월 확정본 기준) — 청구할 것이면 직접: ' + ek.map(function(k){ return k + ' ' + skipEtc[k] + '건'; }).join(', ')]);
       if (rows.some(function(v){ return v[cAD] !== '' && !(+v[cZ]); })) log.push(['특이사항', 'B2B 줄 중 매칭수량이 없어 박스 수를 못 낸 줄이 있음 — 주문목록 매칭 확인']);
       if (flag.length) log.push(['특이사항', 'B2B 출고 10~30박스 ' + flag.length + '건은 파렛트 수(노란 칸) 확인 — 지난달들에 1·0.5·빈칸으로 다르게 적힘']);
-    });
+      /* 보관비 출고 = 전표파렛트출고수 있는 줄 (등록일 · 내용 = 비고(받는 곳)) */
+      return rows.filter(function(v){ return +v[cAC] > 0; }).map(function(v){ return { d: v._d, p: +v[cAC], memo: String(v[cAD] || '').trim() || 'B2B 출고' }; });
+    }).then(storeStep);
   }
 
   E['제주맥주'] = window.SETTLE_STD({ name: '제주맥주', shipSheet: '배송비', needs: ['ebut_shiplist', 'ebut_orders', 'bnc_courier', 'freight'],
@@ -180,7 +211,7 @@
     ruleList: [R('배송비 = 이벗 택배비 리스트 출력양식 「제주맥주」 · 택배크기 = 지난달 같은 상품 조합의 크기, 처음 보는 조합은 캔 수(1~17 극소 · 18~19 소 · 20~23 중 · 24~35 소 · 36~ 중), 14~23캔·미매칭 노란 표시'),
       R('제주 추가운임 3,000 → 제주운임추가 · 반품비 극소·소 = 박스앤캔 반품(메이크창고(제주맥주)) + 반품 참조 파일'),
       R('기타출고및작업비 = 주문목록 제주맥주: 판매처 제주맥주_B2B(박스 = 캔÷24, 12본입 ÷12 · 300/박스 · 메이크마인 0 · 파렛트 = 25박스 이상 100박스당 1) + 선물세트 900 · 디스펜서·감자칩 300 → 기타출고비(1)·파렛트출고비'),
-      R('보관비 = 전월 말일 보관파렛 + 화물관리 입고·출고(메모를 내용 칸에), 월말 택배출고 보정은 직접 · 용차비 = 화물 청구서 제주맥주 건 · 연동솔루션 매달 그대로'),
+      R('보관비 = 전월 말일 보관파렛 + 화물관리 입고(메모를 내용 칸에) − 기타출고및작업비 전표파렛트출고수(등록일·비고) · 화물관리 출고와 총 파렛트가 다르면 점검_보관비출고 시트, 월말 택배출고 보정은 직접 · 용차비 = 화물 청구서 제주맥주 건 · 연동솔루션 매달 그대로'),
       R('배송비 맨 오른쪽 주소·전화1 = 주문목록 같은 송장번호'),
       R('당월말일기준재고표 = 참조 파일(재고) 제주맥주재고파악_MMDD(재고조사풀에서 마감한 파일): 전산재고 = 전산 가용 · 실재고조사수량 = 현재실재고 · 불량재고 · 불량차감후 = 수식, 줄·이름은 지난달 표 그대로, 보관 파렛트수는 지난달 값(노란 칸)')] });
 })();

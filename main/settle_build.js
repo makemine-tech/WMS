@@ -481,7 +481,13 @@ function makeDraft(msg){
     /* 노란 표시를 끈 업체는 지운다 */
     if (optOf().noYellow) wb.eachSheet(function(ws){ ws.eachRow(function(row){ row.eachCell(function(c){ if (c.fill && c.fill.fgColor && c.fill.fgColor.argb === 'FFFFF2B3') c.fill = { type: 'pattern', pattern: 'none' }; }); }); });
     wb.calcProperties = wb.calcProperties || {}; wb.calcProperties.fullCalcOnLoad = true;
-    return { wb: wb, log: log, name: yy + '월_거래내역서_' + VW.name + '.xlsx' };
+    /* 수식 결과 다시 계산 — 안 하면 엑셀 「편집 사용」 전·웹 합계에 지난달 금액이 남음 (대표님 2026-11-05, settle_recalc.js) */
+    msg('수식 다시 계산 중…');
+    return SETTLE_RECALC.run(wb).then(function(o){
+      log.push(['자동 적용', '수식 ' + o.formulas.toLocaleString() + '개 다시 계산 — 지난달 값에서 바뀐 칸 ' + o.changed.toLocaleString() + '개 (엑셀 「편집 사용」 전에도 이번 달 금액)']);
+      if (o.errors.length) log.push(['확인 필요', '웹에서 못 푼 수식 ' + o.errors.length + '개는 지난달 저장값 그대로 — 엑셀에서 「편집 사용」 후 금액 확인: ' + o.errors.slice(0, 10).join(', ')]);
+    }, function(e){ log.push(['확인 필요', '수식 다시 계산 실패(' + ((e && e.message) || e) + ') — 엑셀에서 「편집 사용」을 눌러야 이번 달 금액이 보입니다']); })
+      .then(function(){ return { wb: wb, log: log, name: yy + '월_거래내역서_' + VW.name + '.xlsx' }; });
   });
 }
 /* 초안 포함가 추정: 초안 거래명세표 항목마다 수량×단가(둘 다 숫자일 때, 아니면 금액칸) 합 — 엑셀이 다시 계산하기 전이라 금액·합계 칸 저장값은 지난달 것일 수 있어서.
