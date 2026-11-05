@@ -230,6 +230,12 @@ tr.cp-row-short td{background:rgba(240,196,74,.03)}
 .cp-cd-btn{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.45);border-radius:5px;font-size:.66rem;font-weight:700;padding:.16rem .45rem;cursor:pointer;margin-left:.32rem;white-space:nowrap}
 .cp-cd-btn:hover{background:rgba(96,165,250,.2)}
 .cp-cd-badge{display:inline-flex;align-items:center;font-size:.6rem;font-weight:800;color:#60a5fa;background:rgba(96,165,250,.14);border:1px solid rgba(96,165,250,.4);border-radius:4px;padding:.06rem .32rem;margin-left:.32rem;vertical-align:middle;cursor:help;white-space:nowrap}
+/* 작업 중 현출고재고마감 (작업 종료 왼쪽) + 설명 레이어 */
+.cp-cd-trim-wrap{position:relative;display:inline-flex}
+.cp-cd-trim{background:rgba(96,165,250,.14);color:#60a5fa;border:1px solid rgba(96,165,250,.55)}
+.cp-cd-trim:hover{background:rgba(96,165,250,.24)}
+.cp-cd-trim-tip{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;width:260px;background:#1d2533;color:var(--tx);border:1px solid rgba(96,165,250,.55);border-radius:7px;padding:.55rem .7rem;font-size:.74rem;font-weight:600;line-height:1.5;box-shadow:0 6px 18px rgba(0,0,0,.45);white-space:normal;text-align:left}
+.cp-cd-trim-wrap:hover .cp-cd-trim-tip,.cp-cd-trim-wrap:focus-within .cp-cd-trim-tip{display:block}
 /* 확정됨 표시 */
 .cp-chip.asis{background:rgba(124,131,153,.2);color:var(--mu);border:1px solid var(--mu)}
 tr.cp-row-asis td{opacity:.55}
@@ -1456,15 +1462,19 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <span class="ss-dot" title="실시간 동기 중"></span>
         <div class="ss-fillers">
           <div><span class="ss-l">업체</span><div class="ss-v" id="cpSsVendor">-</div></div>
-          <div><span class="ss-l">PO 파일</span><div class="ss-v" id="cpSsFile">-</div></div>
-          <div><span class="ss-l">시작</span><div class="ss-v" id="cpSsStart">-</div></div>
-          <div><span class="ss-l">세션 ID</span><div class="ss-id" id="cpSsId">-</div></div>
+          <div style="min-width:0"><span class="ss-l">PO 파일</span><div class="ss-v" id="cpSsFile" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.8rem;font-weight:700;cursor:help">-</div></div>
+          <div style="display:none"><span class="ss-l">시작</span><div class="ss-v" id="cpSsStart">-</div></div>
+          <div style="display:none"><span class="ss-l">세션 ID</span><div class="ss-id" id="cpSsId">-</div></div>
         </div>
         <div class="ss-actions">
           <button class="cp-tts-toggle on" id="cpTtsBtn" onclick="cpToggleTts()" title="센터명 음성 안내 (TTS) 켜기/끄기">🔊 음성 ON</button>
           <button class="btn btn-y" onclick="cpPrintShipList('1up')" title="출고적재리스트 — A4 세로, 한 면에 파렛트 1장 (2부)">📃 적재 1장인쇄</button>
           <button class="btn btn-y" onclick="cpPrintShipList('2up')" title="출고적재리스트 — A4 가로 좌우 2칸, 파렛트별로 끊어서. 한 쪽짜리는 좌우 같은 내용(2부), 여러 쪽이면 좌1·우2 / 좌3·공란 순서">📑 적재 2장인쇄(좌우)</button>
           <button class="btn btn-s" onclick="cpPauseScan()" title="세션은 그대로 두고 PO뷰로 돌아갑니다">⏸ 일시정지</button>
+          <span class="cp-cd-trim-wrap" id="cpCdTrimWrap" style="display:none">
+            <button class="btn cp-cd-trim" onclick="cpCrossdockTrimNow()">📥 현출고재고마감</button>
+            <span class="cp-cd-trim-tip">이 버튼을 클릭시 현상황에서 미출고잔량의 가상재고를 원복합니다.<br><span style="color:var(--mu);font-weight:500">예) 발주 1000개로 입고를 잡았는데 지금까지 800개 출고 → 나머지 200개는 실입고가 없던 걸로 빼서 이 작업분 재고를 0 으로 맞춥니다</span></span>
+          </span>
           <button class="btn btn-r" onclick="cpEndScan()" title="세션 완료 처리">📤 작업 종료</button>
         </div>
       </div>
@@ -1917,6 +1927,7 @@ function attachRefs(){
     stockMeta = byBc;
     stockQty = qty;
     crossdockLogs = cdl;
+    try { cpRefreshCdTrimBtn(); } catch(e){}
     stockBoxes = boxList;
     boxIndex = bIdx;
     try { cpBoxListRender(); } catch(e){}   /* 박스 목록 갱신 */
@@ -2635,6 +2646,60 @@ function cpCrossdockSettlePlan(scans, poAt, rows){
     });
   });
   return out;
+}
+/* 작업 중 「현출고재고마감」 — 지금까지 찍은 수량(완료 + 처리 대기 + 입고 대기)만 남기고
+ * 아직 안 나간 만큼 동시입고(가상입고)를 지금 줄인다.
+ * 정리 완료(cdSettled)로 닫지는 않음 → 작업 종료 때 한 번 더 맞춤 (그때는 남는 게 없으면 0개 줄임) */
+function cpCrossdockInflight(){
+  var ws = workSession || {}, out = [];
+  (ws.scans || []).forEach(function(s){ if (!s.undone) out.push(s); });
+  (ws.pending || []).forEach(function(p){ out.push(p); });
+  (ws.staging || []).forEach(function(p){ out.push(p); });
+  return out;
+}
+function cpRefreshCdTrimBtn(){
+  var w = document.getElementById('cpCdTrimWrap');
+  if (!w) return;
+  var show = false;
+  if (workSession) {
+    var bcSet = {};
+    (workSession.rows || []).forEach(function(r){ var b = normBarcode(r.srcBarcode); if (b) bcSet[b] = 1; });
+    show = cpCrossdockOpenLogs(workSession.uploadedAt, bcSet).length > 0;
+  }
+  w.style.display = show ? '' : 'none';
+}
+function cpCrossdockTrimNow(){
+  if (!workSession || !groupId || typeof firebase === 'undefined') { cpFlash('er','❌ 작업 세션 또는 Firebase 연결 없음'); return; }
+  var plan = cpCrossdockSettlePlan(cpCrossdockInflight(), workSession.uploadedAt, workSession.rows);
+  if (!plan.length) { cpFlash('warn','⚠️ 이 작업으로 잡은 동시입고가 없습니다'); return; }
+  var red = plan.filter(function(x){ return x.reduced > 0; });
+  if (!red.length) { cpFlash('ok','✓ 미출고잔량 없음 — 가상입고가 이미 출고 수량과 맞습니다'); return; }
+  var tot = red.reduce(function(s,x){ return s + x.reduced; }, 0);
+  var lines = ['📥 현출고재고마감', '', '지금까지 찍은 수량만 남기고 미출고잔량의 가상재고를 원복합니다.',
+               '줄일 수량: ' + red.length + '개 상품 · ' + tot + '개', ''];
+  red.slice(0, 15).forEach(function(x){
+    lines.push('• ' + (x.name || x.bc) + ' — 가상입고 ' + x.qty + ' · 현재 출고 ' + x.shipped + ' → 입고 ' + x.newQty + ' (−' + x.reduced + ')');
+  });
+  if (red.length > 15) lines.push('… 외 ' + (red.length - 15) + '개');
+  lines.push('', '※ 이후 이 상품은 더 찍을 수 없습니다 (재고가 찍은 만큼만 남음).', '진행할까요?');
+  if (!confirm(lines.join('\n'))) return;
+  var nowTs = Date.now(), by = getUserId(), upd = {};
+  var lgByKey = {}; crossdockLogs.forEach(function(e){ lgByKey[e.key] = e.lg; });
+  red.forEach(function(x){
+    var p = 'wms_sync/groups/' + groupId + '/star_instock/logs/' + x.key;
+    var lg = lgByKey[x.key] || {};
+    upd[p + '/qty'] = x.newQty;
+    upd[p + '/cdTrimmed'] = (+lg.cdTrimmed || 0) + x.reduced;
+    upd[p + '/cdTrimmedAt'] = nowTs;
+    upd[p + '/cdTrimmedBy'] = by;
+    upd[p + '/cdTrimSession'] = workSession.sessionId || '';
+  });
+  firebase.database().ref().update(upd).then(function(){
+    cpFlash('ok','✓ 현출고재고마감 — 미출고잔량 ' + tot + '개 가상재고 원복 ('
+      + red.slice(0, 6).map(function(x){ return escH(x.name || x.bc) + ' ' + x.qty + '→' + x.newQty; }).join(', ') + (red.length > 6 ? ' …' : '') + ')');
+  }).catch(function(err){
+    cpFlash('er','❌ 현출고재고마감 실패: ' + (err && err.message || err));
+  });
 }
 function cpUndoAsIs(i){
   if (!cpState.asIs[i]) return;
@@ -3370,7 +3435,13 @@ function cpRefreshSessionHdr(){
     (workSession.poFileName ? ' <span style="font-size:.78rem">📄 ' + escH(workSession.poFileName) + '</span>' : '') +
     cpSessProgressHtml(workSession);
   setT('cpSsVendor', workSession.vendor || '(미입력)');
-  setT('cpSsFile',   workSession.poFileName || '-');
+  /* PO 파일 — 한 줄·30자까지만, 전체 이름·시작·세션 ID 는 마우스 올리면 */
+  var fn = workSession.poFileName || '-';
+  var fnShort = fn.replace(/\.(xlsx|xls|csv)$/i, '');
+  if (fnShort.length > 30) fnShort = fnShort.slice(0, 30) + '…';
+  setT('cpSsFile', fnShort);
+  var fEl = document.getElementById('cpSsFile');
+  if (fEl) fEl.title = fn + '\n시작: ' + (workSession.createdAt ? fmtDt(workSession.createdAt) : '-') + '\n세션 ID: ' + (workSession.sessionId || '-');
   setT('cpSsStart',  workSession.createdAt ? fmtDt(workSession.createdAt) : '-');
   setT('cpSsId',     workSession.sessionId || '-');
 }
@@ -8009,6 +8080,7 @@ function cpRefreshScanUI(){
     cpRefreshDonePool();
     cpRefreshPending();
     cpRefreshCenterSummary();
+    cpRefreshCdTrimBtn();
   });
 }
 
