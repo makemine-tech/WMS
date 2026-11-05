@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ezadmin\.co\.kr$/.test(location.hostname)){ alert('이지어드민(ezadmin.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-02d';
+  var VER = '2026-11-05a';
   var old = window.__mkwEzHelper;
   if (old){
     if (old.ver === VER){ old.hello(); return; }
@@ -406,7 +406,7 @@
     if (!id.value || !dom.value || dom.value === '도메인') return { tried: false, why: '아이디나 도메인이 채워지지 않음' };
     var cap = document.getElementById('captchaCode');
     if (cap && window.getComputedStyle(cap).display !== 'none' && cap.offsetParent !== null) return { tried: false, why: '보안문자가 필요함' };
-    var btn = document.querySelector('.login-btn');
+    var btn = document.querySelector('.btn-login') || document.querySelector('.login-btn');
     if (!btn) return { tried: false, why: '로그인 버튼을 찾지 못함' };
     setTimeout(function(){ btn.click(); }, 300);
     return { tried: true };
@@ -426,7 +426,7 @@
     if (!pw || !id || !dom) return { tried: false, why: '로그인 칸을 찾지 못함' };
     var cap = document.getElementById('captchaCode');
     if (cap && window.getComputedStyle(cap).display !== 'none' && cap.offsetParent !== null) return { tried: false, why: '보안문자가 있어 상시 컴퓨터에서 직접 로그인해 주세요' };
-    var btn = document.querySelector('.login-btn');
+    var btn = document.querySelector('.btn-login') || document.querySelector('.login-btn');
     if (!btn) return { tried: false, why: '로그인 버튼을 찾지 못함' };
     setField(dom, args.domain); setField(id, args.id); setField(pw, args.pw);
     if (dom.value !== args.domain) return { tried: false, why: '도메인을 넣지 못함' };

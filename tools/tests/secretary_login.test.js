@@ -146,3 +146,17 @@ test('이지어드민 도우미: 보안문자가 있으면 칸을 채우지도 �
   await new Promise((d) => setTimeout(d, 350));
   assert.strictEqual(clicks.n, 0);
 });
+
+test('이지어드민 새 로그인 화면(login3, 버튼 .btn-login)에서도 한 번 누름 · 로그인 주소는 메인 로그인 버튼과 같은 길', async () => {
+  const el = (v) => ({ value: v || '', defaultValue: '', style: {}, offsetParent: {} });
+  let n = 0;
+  const f = { 'login-pwd': el(), 'login-id': el(), 'login-domain': el(), '.btn-login': { click() { n++; } }, '.login-btn': null };
+  const { win, clicks } = page('ez_helper.js', 'login3.ezadmin.co.kr', f);
+  const r = win.__mkwEzHelper.login({ id: 'me', pw: SECRET, domain: 'clf' });
+  assert.strictEqual(r.tried, true);
+  await new Promise((d) => setTimeout(d, 350));
+  assert.strictEqual(n, 1);
+  assert.strictEqual(clicks.n, 0);
+  const ez = C.SITES.find((s) => s.id === 'ezadmin');
+  assert.strictEqual(ez.login, 'https://www.ezadmin.co.kr/get_login_server.php');
+});
