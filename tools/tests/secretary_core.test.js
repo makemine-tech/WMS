@@ -150,7 +150,7 @@ test('ezFlow: 읽은 자료대로 차례가 넘어감', () => {
   s = st(ok, { preview: { orders: 10, splitPacks: 3, blockers: ['처음 보는 구성 1건'] } });
   assert.deepStrictEqual([s.ez_preview, s.ez_split], ['todo', 'wait']);
   s = st(ok, { preview: { orders: 0, splitPacks: 0 } });
-  assert.deepStrictEqual([s.ez_preview, s.ez_split], ['done', 'wait']);
+  assert.deepStrictEqual([s.ez_preview, s.ez_split], ['done', 'done']);
   assert.strictEqual(C.ezFlow(ok, { preview: { orders: 10, splitPacks: 3 } }).find((x) => x.id === 'ez_split').count, 3);
 });
 

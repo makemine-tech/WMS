@@ -25,7 +25,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-05e';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-05f';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://login2.ezadmin.co.kr/login.htm', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -147,7 +147,7 @@
   function ezFlow(site, job, split){
     var loginOk = !!site && site.state === 'ok', p = job && job.preview, open = ezOpenBlockers(job);
     var blocked = !!p && open.length > 0, orders = p ? Number(p.orders) || 0 : 0, packs = p ? Number(p.splitPacks) || 0 : 0;
-    var previewOk = loginOk && !!p && !blocked, splitTodo = (loginOk && !p) || (previewOk && packs > 0), doneSplit = previewOk && !packs && orders > 0;
+    var previewOk = loginOk && !!p && !blocked, splitTodo = (loginOk && !p) || (previewOk && packs > 0), doneSplit = previewOk && !packs;   /* 나눌 묶음이 없으면(주문 0건 포함) 끝 (대표님 2026-11-05) */
     var splitRun = !!split && split.state === 'running';
     return [
       { id: 'ez_split', name: '일괄합포제외', who: '직접', state: splitRun ? 'run' : splitTodo ? 'todo' : doneSplit ? 'done' : 'wait', count: packs },
