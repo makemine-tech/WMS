@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-03d';
+  var VER = '2026-11-06a';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -240,7 +240,51 @@
     }).then(function(buffer){ return { buffer: buffer }; });
   }
 
-  var CMDS = { formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
+  /* 송장업로드 준비 조사 (2026-11-06): 송장 관련 메뉴를 열어 버튼·입력칸·표 제목만 읽음. 표 안 내용(고객 정보)은 읽지 않고 아무것도 누르지 않음 */
+  var SURVEY_MENU = /송장|운송장|발송/;
+  function surveyMenus(){
+    var seen = {}, out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('[onclick*="addTab"],a[href*="addTab"]'), function(el){
+      var src = String(el.getAttribute('onclick') || el.getAttribute('href') || ''), m = src.match(/addTab\w*\(\s*['"]([A-Za-z0-9_]+)['"]/);
+      if (!m || seen[m[1]]) return;
+      seen[m[1]] = true;
+      out.push({ code: m[1], text: clean(el.textContent).slice(0, 30) });
+    });
+    return out;
+  }
+  function surveyScreen(d){
+    var lim = function(a, n){ return Array.prototype.slice.call(a, 0, n); };
+    return {
+      title: clean(d.title).slice(0, 40),
+      buttons: lim(d.querySelectorAll('button,input[type=button],input[type=submit],a[onclick],[onclick]'), 120).map(function(el){
+        return { tag: el.tagName.toLowerCase(), id: el.id || '', text: clean(el.textContent || el.value).slice(0, 30), onclick: String(el.getAttribute('onclick') || '').slice(0, 120) };
+      }).filter(function(b){ return b.id || b.text || b.onclick; }),
+      inputs: lim(d.querySelectorAll('input:not([type=hidden]):not([type=button]):not([type=submit]),select,textarea'), 80).map(function(el){
+        var t = (el.getAttribute('type') || el.tagName).toLowerCase(), o = { type: t, id: el.id || '', name: el.name || '' };
+        if (t === 'radio' || t === 'checkbox') o.checked = !!el.checked;
+        if (el.tagName === 'SELECT') { o.selected = el.selectedIndex >= 0 ? clean(el.options[el.selectedIndex].text).slice(0, 30) : ''; o.options = lim(el.options, 15).map(function(op){ return clean(op.text).slice(0, 30); }); }
+        return o;
+      }),
+      heads: lim(d.querySelectorAll('th,.ui-jqgrid-sortable,[role=columnheader]'), 60).map(function(el){ return clean(el.textContent).slice(0, 20); }).filter(Boolean),
+      rows: d.querySelectorAll('tbody tr').length,
+      frames: lim(d.querySelectorAll('iframe'), 10).map(function(f){ return f.id || f.name || ''; }),
+      funcs: Object.keys(d.defaultView || {}).filter(function(k){ try { return typeof d.defaultView[k] === 'function' && /save|upload|send|insert|chk|check|trans|move|excel|file/i.test(k) && !/^on|^webkit/i.test(k); } catch (e) { return false; } }).slice(0, 60)
+    };
+  }
+  function cmdSurvey(){
+    var menus = surveyMenus(), want = menus.filter(function(m){ return SURVEY_MENU.test(m.text) || m.code === 'REQ014MA'; }).slice(0, 8);
+    var screens = {};
+    return want.reduce(function(p, m){
+      return p.then(function(){
+        if (!menuWin(m.code)) { try { window.addTabReload(m.code); } catch (e) { screens[m.code] = { err: '열지 못함' }; return; } }
+        return waitFor(function(){ var w = menuWin(m.code); return w && w.document.readyState === 'complete' && w.document.body ? w : null; }, GRID_WAIT).then(function(w){
+          if (!w) { screens[m.code] = { err: '화면이 안 열림' }; return; }
+          return sleep(SETTLE).then(function(){ try { screens[m.code] = surveyScreen(w.document); } catch (e) { screens[m.code] = { err: String(e.message || e).slice(0, 80) }; } });
+        });
+      });
+    }, Promise.resolve()).then(function(){ return { menus: menus.slice(0, 200), want: want, screens: screens, hash: location.hash }; });
+  }
+  var CMDS = { survey: cmdSurvey, formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'bizem-helper' || !ALLOW.test(e.origin)) return;

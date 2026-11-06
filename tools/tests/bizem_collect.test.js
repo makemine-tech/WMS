@@ -716,3 +716,12 @@ test('이벗 도우미: 매칭 저장 성공은 이벗 결과 칸의 success 로
   assert.ok(src.includes("var shown = norm($('#result_msg').text())"));
   assert.ok(src.includes("$('#result_msg').text('');"));
 });
+
+test('송장업로드 조사: 화면 구조만 명령 결과로 남기고 아무것도 누르지 않음', async () => {
+  const { runner, db } = setup();
+  await runner.handleCommand('c', { type: 'bizem_survey', at: NOW });
+  assert.strictEqual(db.commands.c.status, 'done');
+  assert.ok(db.commands.c.survey);
+  assert.strictEqual(db.go, 0);
+  assert.deepStrictEqual(db.jobs, {});
+});

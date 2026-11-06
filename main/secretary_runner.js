@@ -318,6 +318,18 @@
       if (block) await store.setCommand(id, { status: 'refused', why: block, doneAt: now });
       return block ? null : jobs;
     }
+    /* 송장업로드 준비 조사: 비젬 송장 관련 화면의 버튼·표 제목만 읽어 명령 결과에 남김 (고객 정보 없음) */
+    async function runBizemSurvey(id){
+      if (!(await bizemBlock(id))) return;
+      await store.setCommand(id, { status: 'reading' });
+      try {
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'bizem'; }));
+        if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '비젬: ' + r.msg, doneAt: deps.now() }); return; }
+        await store.setCommand(id, { status: 'done', survey: await (deps.bizemSurvey || function(){ return deps.bizemRead('survey'); })(), doneAt: deps.now() });
+      } catch (e) {
+        await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
+      }
+    }
     async function runBizemCheck(id){
       if (!(await bizemBlock(id))) return;
       await store.setCommand(id, { status: 'reading' });
@@ -679,6 +691,7 @@
       if (cmd.type === 'menso') return runMenso(id, cmd);
       if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
       if (cmd.type === 'bizem_check') return runBizemCheck(id);
+      if (cmd.type === 'bizem_survey') return runBizemSurvey(id);
       if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
       if (cmd.type === 'bizem_confirm') return runBizemConfirm(id, cmd);
       if (cmd.type === 'bizem_form') return runBizemForm(id);
