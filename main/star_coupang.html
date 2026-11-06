@@ -879,6 +879,29 @@ function wmsUpdateBadge(state) {
   }
 }
 
+/* 로그인 화면으로 보내기 — 30초 안에 두 번 넘게 왕복하면 더 보내지 않고 안내 (무한 반복 차단, 2026-11-06) */
+var WMS_BOUNCE_KEY = 'wmsBounce_star_coupang', wmsAuthWaitT = null;
+function wmsGoLogin(url){
+  var a = [];
+  try { a = JSON.parse(sessionStorage.getItem(WMS_BOUNCE_KEY) || '[]').filter(function(t){ return Date.now() - t < 30000; }); } catch(e){}
+  if (a.length >= 2){ wmsLoginStuck('로그인 화면과 이 페이지를 계속 오가고 있어 멈췄습니다.'); return; }
+  a.push(Date.now());
+  try { sessionStorage.setItem(WMS_BOUNCE_KEY, JSON.stringify(a)); } catch(e){}
+  window.location.replace(url);
+}
+function wmsLoginStuck(why){
+  if (document.getElementById('wmsStuck')) return;
+  var d = document.createElement('div'); d.id = 'wmsStuck';
+  d.style.cssText = 'position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:99999;background:#2a1414;color:#fecaca;border:1px solid #7f1d1d;border-radius:12px;padding:14px 18px;font:14px/1.6 "Noto Sans KR",sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:92vw';
+  d.innerHTML = '<b>⚠️ ' + why + '</b><br>작업 내용은 이 PC에 그대로 있습니다. 잠시 뒤 다시 시도하거나, 로그인 화면에서 다시 로그인해 주세요.'
+    + '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button id="wmsStuckRe" style="padding:6px 12px;border-radius:8px;border:0;background:#4af0a8;color:#0b0d12;font-weight:800;cursor:pointer">↻ 다시 시도</button>'
+    + '<button id="wmsStuckLg" style="padding:6px 12px;border-radius:8px;border:1px solid #fca5a5;background:none;color:#fecaca;font-weight:700;cursor:pointer">로그인 화면으로</button></div>';
+  document.body.appendChild(d);
+  document.getElementById('wmsStuckRe').onclick = function(){ try { sessionStorage.removeItem(WMS_BOUNCE_KEY); } catch(e){} location.reload(); };
+  document.getElementById('wmsStuckLg').onclick = function(){ try { sessionStorage.removeItem(WMS_BOUNCE_KEY); } catch(e){}
+    location.replace('/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search)); };
+}
+
 /* 인증/그룹 변경 → 페이지 정책 결정.
    - 미로그인 또는 그룹 없음 → /wms_login.html (권한 확인 + 자동 처리)
    - Firebase 초기 인증 인식이 늦을 수 있어 3초까지 대기 */
@@ -888,16 +911,21 @@ function wmsHandleAuthState(state) {
   /* 로그인 후 다시 이 페이지로 돌아오게 returnUrl 파라미터 부착 */
   var returnUrl = '/wms_login.html?return=' + encodeURIComponent(location.pathname + location.search);
   if (!state.user) {
-    setTimeout(function(){
-      if (!wmsAuthState || !wmsAuthState.user) {
-        window.location.replace(returnUrl);
-      }
-    }, 3000);
+    /* 로그인 확인이 아직 안 끝났으면 기다림 (2026-11-06) — 예전엔 3초 만에 「로그인 안 됨」으로 보고 로그인 화면으로 보냈는데,
+       작업 파일이 크면 확인(구글 로그인 → 관리자·그룹 조회)이 3초를 넘겨, 로그인 화면이 다시 돌려보내며 무한 반복했음 */
+    if (state.known === false){
+      clearTimeout(wmsAuthWaitT);
+      wmsAuthWaitT = setTimeout(function(){ if (!wmsAuthState || !wmsAuthState.user) wmsLoginStuck('로그인 확인이 20초 넘게 끝나지 않습니다.'); }, 20000);
+      return;
+    }
+    wmsGoLogin(returnUrl);
     return;
   }
+  clearTimeout(wmsAuthWaitT);
+  try { sessionStorage.removeItem(WMS_BOUNCE_KEY); } catch(e){}
   if (!state.groupId) {
     alert('이 계정은 작업 그룹에 등록되어 있지 않습니다.\n관리자에게 초대 코드를 요청하세요.\n\n로그인 화면으로 이동합니다.');
-    window.location.replace(returnUrl);
+    wmsGoLogin(returnUrl);
     return;
   }
   /* 인증 + 그룹 OK — 클라우드 동기화가 우선이므로 로컬 복원 배너 숨김 */
