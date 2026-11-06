@@ -50,6 +50,7 @@ test('명령·규칙·도우미 목록에 송장업로드가 있고, 쓰는 명�
 function setup(o) {
   o = o || {};
   const n = o.n || 3, orders = Array.from({ length: n }, (_, i) => 'A' + i);
+  const split = o.split || [n], chunks = []; let at = 0; split.forEach((k) => { chunks.push(orders.slice(at, at + k)); at += k; });
   const bz = {}; orders.forEach((x, i) => { bz[x] = { b: 'B' + i, s: (o.start && o.start[x]) || 'B10' }; });
   const db = { commands: {}, jobs: {}, sites: {}, calls: [] };
   let clock = T0;
@@ -63,12 +64,12 @@ function setup(o) {
     store, now: () => (clock += 5000), runnerId: 'me', info: {}, sleep: async () => {},
     openSite: async () => ({ login: true }),
     bizemCounts: async () => ({ unconfirmed: 0, printWait: 0 }),
-    openInvoice: async (sealed) => { if (sealed !== 'SEALED') throw new Error('키'); return { buffer: new ArrayBuffer(4), name: '송장업로드.xlsx', orders, lines: n }; },
+    openInvoice: async (sealed) => { const m = /^SEALED(\d*)$/.exec(sealed); if (!m) throw new Error('키'); const c = chunks[Number(m[1] || 0)]; return { buffer: { idx: Number(m[1] || 0) }, name: '송장업로드.xlsx', orders: c, lines: c.length }; },
     bizemList: async (a) => { db.calls.push('list:' + a.screen); return { rows: rows(a.screen) }; },
     bizemRead: async (cmd) => { db.calls.push(cmd); return { done: true }; },
     bizemGo: async (cmd, a) => {
       db.calls.push(cmd + (a.bzm ? ':' + a.bzm.length : ''));
-      if (cmd === 'invoiceUpload') { if (o.upFail) return { started: false, why: '업로드 화면 선택칸을 맞추지 못했습니다' }; orders.forEach((x) => { if (bz[x].s === 'B10' && !(o.skipUp || []).includes(x)) bz[x].s = 'C10'; }); return { started: true }; }
+      if (cmd === 'invoiceUpload') { db.calls.push('up:' + a.name); if (o.upFail) return { started: false, why: '업로드 화면 선택칸을 맞추지 못했습니다' }; chunks[a.buffer.idx].forEach((x) => { if (bz[x].s === 'B10' && !(o.skipUp || []).includes(x)) bz[x].s = 'C10'; }); return { started: true }; }
       if (cmd === 'invoiceCheckup') { if (!o.stuck) orders.forEach((x) => { if (a.bzm.includes(bz[x].b) && bz[x].s === 'C10') bz[x].s = 'D10'; }); return { ok: true }; }
       if (cmd === 'invoiceSend') { orders.forEach((x) => { if (a.bzm.includes(bz[x].b) && bz[x].s === 'D10') bz[x].s = (o.fail || []).includes(x) ? 'E11' : 'E10'; }); return { started: true }; }
       throw new Error('모르는 명령 ' + cmd);
@@ -150,4 +151,31 @@ test('늦게 받은 명령은 만료, 잠긴 파일 지움', async () => {
   await runner.handleCommand('c', cmd({ at: T0 - 10 * 60 * 1000 }));
   assert.strictEqual(db.commands.c.status, 'expired');
   assert.strictEqual(db.commands.c.sealed, null);
+});
+
+test('파일 두 개(맨소래담 2·박스앤캔 1)를 차례로 올린 뒤 3건 전부 한꺼번에 발송검수·전송', async () => {
+  const { runner, db, cmd, job } = setup({ split: [2, 1] });
+  await runner.handleCommand('c', cmd({ sealed: ['SEALED0', 'SEALED1'], parts: [{ lines: 2, orders: 2 }, { lines: 1, orders: 1 }] }));
+  const j = job();
+  assert.strictEqual(j.state, 'done', j.notes);
+  assert.strictEqual(j.result.files, 2);
+  assert.deepStrictEqual(db.calls.filter((c) => /^up:/.test(c)), ['up:송장업로드_1.xlsx', 'up:송장업로드_2.xlsx']);
+  assert.deepStrictEqual(db.calls.filter((c) => /^invoice(Checkup|Send):/.test(c)), ['invoiceCheckup:3', 'invoiceSend:3']);
+  assert.ok(db.calls.indexOf('up:송장업로드_2.xlsx') < db.calls.indexOf('invoiceCheckup:3'), '다 올린 뒤에 발송검수');
+  assert.strictEqual(db.commands.c.sealed, null);
+});
+
+test('두 번째 파일이 덜 올라가면 발송검수로 넘기지 않음', async () => {
+  const { runner, db, cmd, job } = setup({ split: [2, 1], skipUp: ['A2'] });
+  await runner.handleCommand('c', cmd({ sealed: ['SEALED0', 'SEALED1'], parts: [{ lines: 2, orders: 2 }, { lines: 1, orders: 1 }] }));
+  assert.strictEqual(job().state, 'stopped');
+  assert.match(job().notes, /2번째 파일/);
+  assert.ok(!db.calls.some((c) => /^invoiceCheckup/.test(c)));
+});
+
+test('파일별 건수가 화면과 다르면 하나도 올리지 않음', async () => {
+  const { runner, db, cmd, job } = setup({ split: [2, 1] });
+  await runner.handleCommand('c', cmd({ sealed: ['SEALED0', 'SEALED1'], parts: [{ lines: 1, orders: 1 }, { lines: 2, orders: 2 }] }));
+  assert.strictEqual(job().state, 'stopped');
+  assert.ok(!db.calls.some((c) => /^up:/.test(c)));
 });

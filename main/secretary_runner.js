@@ -515,6 +515,8 @@
     }
 
     /* 비젬 송장업로드 (대표님 2026-11-06): 사람이 파일 건수를 보고 한 번 누르면 업로드·저장 → 발송검수 → 운송장전송까지.
+       파일은 여러 개(예: 맨소래담·박스앤캔)를 한 번에 받아 운송장입력(대량)에 차례로 올리고(올리기는 계속 쌓임),
+       다 올라가면 그 파일들의 주문 전부를 한꺼번에 발송검수 → 운송장전송 (대표님 2026-11-07).
        올린 파일의 쇼핑몰주문번호만 다룸. 100개씩 나눠 하되 같은 묶음을 다시 보내지 않음(상태가 안 바뀌면 멈춤).
        잠긴 파일은 받자마자 명령에서 지우고, 작업 기록에는 건수만 남김 */
     var INV_POLL = 5000, INV_WAIT = 5 * 60 * 1000;
@@ -524,52 +526,70 @@
       if (!jobs) { await store.setCommand(id, { sealed: null }); return; }
       var now = deps.now(), date = C.kstDate(now), key = C.jobKey('bizem_invoice', date, C.nextRound(jobs, 'bizem_invoice', date));
       var I = (typeof window !== 'undefined' && window.BIZEM_INVOICE) || (typeof require === 'function' ? require('./bizem_invoice.js') : null);
-      var result = { lines: cmd.lines || 0, orders: cmd.orders || 0 };
+      function arr(v){ return v == null ? [] : Array.isArray(v) ? v : typeof v === 'object' ? Object.keys(v).sort(function(a, b){ return a - b; }).map(function(k){ return v[k]; }) : [v]; }
+      var seals = arr(cmd.sealed), parts = arr(cmd.parts);
+      var result = { files: seals.length, lines: cmd.lines || 0, orders: cmd.orders || 0 };
       async function end(state, notes){
         await store.setJob(key, { state: state, step: '', endedAt: deps.now(), notes: notes, result: result });
         await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
       }
       function why(e){ return String((e && e.message) || e); }
-      async function list(screen){ var r = await deps.bizemList({ screen: screen, orders: file.orders }); return I.tally(r.rows, file.orders); }
-      var file = null;
+      var files = [], all = [];
+      async function list(screen, orders){ orders = orders || all; var r = await deps.bizemList({ screen: screen, orders: orders }); return I.tally(r.rows, orders); }
       await store.setJob(key, { state: 'running', recipe: 'bizem_invoice', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '파일 여는 중', notes: '' });
       try {
-        var sealed = cmd.sealed;
-        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now, sealed: null });
-        try { file = await deps.openInvoice(sealed); }
-        catch (e) { return end('stopped', '파일을 열지 못했습니다 (상시 컴퓨터가 새로 켜졌을 수 있음). 파일을 다시 골라 주세요'); }
-        if (file.lines !== cmd.lines || file.orders.length !== cmd.orders) return end('stopped', '받은 파일 건수가 화면에서 본 건수와 달라 올리지 않았습니다');
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now, sealed: null, parts: null });
+        if (!seals.length) return end('stopped', '받은 파일이 없습니다. 파일을 다시 골라 주세요');
+        for (var fi = 0; fi < seals.length; fi++) {
+          var f;
+          try { f = await deps.openInvoice(seals[fi]); }
+          catch (e) { return end('stopped', '파일을 열지 못했습니다 (상시 컴퓨터가 새로 켜졌을 수 있음). 파일을 다시 골라 주세요'); }
+          if (seals.length > 1) f.name = String(f.name).replace(/(\.xlsx)?$/, '_' + (fi + 1) + '$1');
+          files.push(f);
+        }
+        var seen = {}, dupAcross = 0, lines = 0;
+        files.forEach(function(f){ lines += f.lines; f.orders.forEach(function(o){ if (seen[o]) dupAcross++; else { seen[o] = true; all.push(o); } }); });
+        var partsOk = !parts.length || (parts.length === files.length && parts.every(function(p, i){ return p && p.lines === files[i].lines && p.orders === files[i].orders.length; }));
+        if (!partsOk || lines !== cmd.lines || all.length !== cmd.orders) return end('stopped', '받은 파일 건수가 화면에서 본 건수와 달라 올리지 않았습니다');
+        if (dupAcross) return end('stopped', '여러 파일에 같은 주문이 ' + dupAcross + '건 있어 올리지 않았습니다. 파일을 확인해 주세요');
         var r = await checkOne(C.SITES.find(function(s){ return s.id === 'bizem'; }));
         if (r.state !== 'ok') return end('stopped', '비젬: ' + r.msg);
 
-        /* 0. 올리기 전: 이미 전송된 주문이 섞였으면 올리지 않음 */
+        /* 0. 올리기 전: 이미 전송된 주문이 섞였으면 하나도 올리지 않음 */
         await store.setJob(key, { step: '비젬 주문 확인 중' });
         var t = await list('send');
         result.before = { sent: t.E10, failed: t.E11 };
         if (t.E10) return end('stopped', '이미 운송장이 전송된 주문 ' + t.E10 + '건이 파일에 있어 올리지 않았습니다. 비젬에서 확인해 주세요');
 
-        /* 1. 업로드·저장 */
-        await store.setJob(key, { step: '비젬에 송장 올리는 중' });
-        var up;
-        try { up = await deps.bizemGo('invoiceUpload', { buffer: file.buffer, name: file.name }); }
-        catch (e) { return end('stopped', '올리는 중 끊겼습니다. 저장됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + why(e) + ')'); }
-        if (!up.started) return end('stopped', '올리지 못했습니다: ' + up.why);
-        var t0 = deps.now(), last = -1, same = 0;
-        for (;;) {
-          await bizemSleep(INV_POLL);
-          t = await list('check');
-          var done = t.C10 + t.D10 + t.E10 + t.E11;
-          if (done >= file.orders.length) break;
-          same = done === last ? same + 1 : 0; last = done;
-          if (deps.now() - t0 > INV_WAIT || (done > 0 && same >= 12)) break;
+        /* 1. 업로드·저장: 파일마다 차례로 올리고, 그 파일 주문에 운송장번호가 다 들어간 걸 본 뒤 다음 파일 */
+        result.uploaded = 0;
+        for (var ui = 0; ui < files.length; ui++) {
+          var file = files[ui], tag = files.length > 1 ? ' (' + (ui + 1) + '/' + files.length + ')' : '';
+          await store.setJob(key, { step: '비젬에 송장 올리는 중' + tag });
+          var up;
+          try { up = await deps.bizemGo('invoiceUpload', { buffer: file.buffer, name: file.name }); }
+          catch (e) { return end('stopped', (ui + 1) + '번째 파일을 올리는 중 끊겼습니다. 저장됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + why(e) + ')'); }
+          if (!up.started) return end('stopped', (ui + 1) + '번째 파일을 올리지 못했습니다: ' + up.why);
+          var t0 = deps.now(), last = -1, same = 0, tf;
+          for (;;) {
+            await bizemSleep(INV_POLL);
+            tf = await list('check', file.orders);
+            var done = tf.C10 + tf.D10 + tf.E10 + tf.E11;
+            if (done >= file.orders.length) break;
+            same = done === last ? same + 1 : 0; last = done;
+            if (deps.now() - t0 > INV_WAIT || (done > 0 && same >= 12)) break;
+          }
+          var got = tf.C10 + tf.D10 + tf.E10 + tf.E11;
+          result.uploaded += got;
+          await store.setJob(key, { result: result });
+          if (got < file.orders.length) return end('stopped', (ui + 1) + '번째 파일: 올린 뒤 운송장번호가 들어간 주문이 ' + got + ' / ' + file.orders.length + '건입니다. 비젬 업로드 결과 창에서 확인해 주세요');
         }
-        result.uploaded = t.C10 + t.D10 + t.E10 + t.E11;
-        if (result.uploaded < file.orders.length) return end('stopped', '올린 뒤 운송장번호가 들어간 주문이 ' + result.uploaded + ' / ' + file.orders.length + '건입니다. 비젬 업로드 결과 창에서 확인해 주세요');
+        var orderCount = all.length;
 
         /* 2. 발송검수: 운송장번호입력됨(C10)만 100개씩 */
         await store.setJob(key, { step: '발송검수 중' });
         result.checked = 0;
-        for (var round = 0; round < file.orders.length / I.BATCH + 3; round++) {
+        for (var round = 0; round < orderCount / I.BATCH + 3; round++) {
           t = await list('check');
           if (!t.bzm.C10.length) break;
           var b1 = t.bzm.C10.slice(0, I.BATCH), c;
@@ -587,7 +607,7 @@
         /* 3. 운송장전송: 검수됨(D10)만 100개씩. 전송 창이 끝나면 목록 상태로 다시 확인 */
         await store.setJob(key, { step: '운송장전송 중' });
         result.sent = 0;
-        for (var round2 = 0; round2 < file.orders.length / I.BATCH + 3; round2++) {
+        for (var round2 = 0; round2 < orderCount / I.BATCH + 3; round2++) {
           t = await list('send');
           if (!t.bzm.D10.length) break;
           var b2 = t.bzm.D10.slice(0, I.BATCH), s;
@@ -609,7 +629,7 @@
         t = await list('send');
         result.done = t.E10; result.failed = t.E11;
         if (t.E11) return end('stopped', '운송장전송 실패 ' + t.E11 + '건이 있습니다. 비젬 쇼핑몰운송장전송 화면에서 확인해 주세요');
-        if (t.E10 < file.orders.length) return end('stopped', '전송된 주문이 ' + t.E10 + ' / ' + file.orders.length + '건입니다. 비젬에서 확인해 주세요');
+        if (t.E10 < orderCount) return end('stopped', '전송된 주문이 ' + t.E10 + ' / ' + orderCount + '건입니다. 비젬에서 확인해 주세요');
         await end('done', '');
       } catch (e) {
         await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), result: result, notes: '오류: ' + why(e) + '. 비젬에서 먼저 확인해 주세요' }).catch(function(){});
