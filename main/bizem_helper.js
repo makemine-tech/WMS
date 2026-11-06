@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-06c';
+  var VER = '2026-11-06d';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -266,7 +266,7 @@
         if (ev) Object.keys(ev).forEach(function(t){ ev[t].forEach(function(h){ list.push(t + ': ' + String(h.handler).slice(0, 3000)); }); });
         if (el.onclick) list.push('onclick: ' + String(el.onclick).slice(0, 1500));
         if (el.onchange) list.push('onchange: ' + String(el.onchange).slice(0, 1500));
-        if (list.length) out['#' + id] = list.join(' ||| ');
+        if (list.length) out['btn_' + id] = list.join(' ||| ');
       } catch (e) {}
     });
     return out;
