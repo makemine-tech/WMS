@@ -681,7 +681,7 @@ test('헤드비서: 이벗·비젬 저장 요청은 받은 내용을 그대로 �
   const s = fs.readFileSync(__dirname + '/../../main/secretary.html', 'utf8');
   const body = (name) => { const i = s.indexOf(name + ': function(cmd, args){'); return i < 0 ? '' : s.slice(i, s.indexOf('60000)', i) + 6); };
   assert.ok(body('ebutGo').endsWith('cmd, args || {}, 60000)'), body('ebutGo'));
-  assert.ok(body('bizemGo').endsWith('cmd, args, 60000)'), body('bizemGo'));
+  assert.ok(body('bizemGo').endsWith("cmd, args, cmd === 'invoiceUpload' ? 180000 : 60000)"), body('bizemGo'));
 });
 
 test('이벗 매칭: 왼쪽 검색은 기호 앞까지 잘라 찾고, 없으면 검색어 없이 다시 찾음', () => {

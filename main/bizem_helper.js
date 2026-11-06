@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-06e';
+  var VER = '2026-11-06f';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -314,7 +314,121 @@
       } };
     }).catch(function(e){ return { err: String((e && e.message) || e).slice(0, 80) }; });
   }
-  var CMDS = { survey: cmdSurvey, formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
+  /* ── 송장업로드 (2026-11-06) ──────────────────────────────
+     운송장입력(대량) REQ014MA 에 파일을 넣고 저장 → 발송검수 REQ012MA → 쇼핑몰운송장전송 SHP010MA.
+     목록은 비젬 화면이 부르는 조회 요청을 그대로 써서 읽고, 주문번호·비젬주문번호·상태만 돌려줌(이름·주소·전화는 돌려주지 않음).
+     발송검수는 버튼(cmdWayBillCheckUp)이 보내는 요청과 같은 요청을, 전송은 버튼(cmdSend)과 같은 순서로 창을 띄움. 둘 다 받은 비젬주문번호만, 한 번에 100개까지 */
+  var UP_MENU = 'REQ014MA', CHK_MENU = 'REQ012MA', SEND_MENU = 'SHP010MA';
+  var UP_SET = [['selHdryc', '우체국택배'], ['selHdrycidx', '(선택없음)'], ['selordernotyp', '쇼핑몰주문번호'], ['selbzmordernocolidx', 'A'], ['selwaybilnocolidx', 'W'], ['selpostcolidx', 'J']];
+  var INV_MAX = 100, SEND_POPUP = 'iframe[name=myframeMid],#myframeMid';
+  function openMenu(code, ready){
+    if (!menuWin(code)) {
+      if (typeof window.addTabReload !== 'function') throw new Error('비젬 메뉴를 찾지 못했습니다');
+      window.addTabReload(code);
+    }
+    return waitFor(function(){ var w = menuWin(code); return w && w.document.readyState === 'complete' && w.jQuery && ready(w) ? w : null; }, GRID_WAIT).then(function(w){
+      if (!w) throw new Error('비젬 화면을 열지 못했습니다 (' + code + ')');
+      return sleep(SETTLE).then(function(){ return w; });
+    });
+  }
+  function pickOption(w, el, text){
+    var o = el && Array.prototype.filter.call(el.options, function(x){ return clean(x.text) === text; })[0];
+    if (!o) return false;
+    w.jQuery(el).val(o.value).trigger('change');
+    return el.value === o.value;
+  }
+  function memoWaiting(w){ return String(w.cmdCheckMsgConfirm()) !== '0'; }
+  function apiJson(w, url, body){
+    return fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json;charset=utf-8' }, body: JSON.stringify(body) }).then(function(r){
+      if (r.status === 401) throw new Error('비젬 로그인이 풀렸습니다');
+      if (!r.ok) throw new Error('비젬 응답 ' + r.status);
+      return r.text();
+    }).then(function(t){ var j = JSON.parse(t); return typeof w.responseConvert === 'function' ? w.responseConvert(j) : j; });
+  }
+  function cmdInvoiceUpload(args){
+    return openMenu(UP_MENU, function(w){ return typeof w.cmdsave === 'function' && w.document.getElementsByName('fileHdrycWaybil')[0]; }).then(function(w){
+      var d = w.document;
+      if (memoWaiting(w)) return { started: false, why: '비젬에 먼저 읽어야 할 쪽지가 있습니다. 비젬 탭에서 확인해 주세요' };
+      var miss = UP_SET.filter(function(s){ return !pickOption(w, d.getElementById(s[0]), s[1]); }).map(function(s){ return s[1]; });
+      if (miss.length) return { started: false, why: '업로드 화면 선택칸을 맞추지 못했습니다: ' + miss.join(', ') };
+      var input = d.getElementsByName('fileHdrycWaybil')[0], dt = new w.DataTransfer();
+      dt.items.add(new w.File([args.buffer], args.name || 'invoice.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      input.files = dt.files;
+      if (!input.files.length) return { started: false, why: '파일을 넣지 못했습니다' };
+      var msgs = [], opened = false, keep = { show: w.modalShow, win: w.modalWindowShow, alert: w.alert };
+      w.modalShow = function(m){ msgs.push(clean(m).slice(0, 120)); };
+      w.alert = function(m){ msgs.push(clean(m).slice(0, 120)); };
+      w.modalWindowShow = function(){ opened = true; return keep.win.apply(this, arguments); };
+      try { w.cmdsave(); } catch (e) { msgs.push(clean(e.message || e).slice(0, 120)); }
+      return waitFor(function(){ return opened || msgs.length || clean((d.getElementById('validationMsg') || {}).textContent) ? true : null; }, 60000).then(function(){
+        w.modalShow = keep.show; w.alert = keep.alert; w.modalWindowShow = keep.win;
+        if (opened) return { started: true, alerts: msgs };
+        return { started: false, why: msgs[0] || clean((d.getElementById('validationMsg') || {}).textContent) || '업로드가 시작됐는지 확인하지 못했습니다', alerts: msgs };
+      });
+    });
+  }
+  /* 목록: 화면의 검색 함수가 만드는 조회 조건을 가로채(보내지 않음) 쇼핑몰주문번호 여러 건 검색으로 바꿔 직접 조회. 상태는 전부 */
+  var LIST = { check: CHK_MENU, send: SEND_MENU };
+  function cmdInvoiceList(args){
+    var code = LIST[args.screen];
+    if (!code) throw new Error('모르는 목록');
+    var orders = (args.orders || []).map(clean).filter(Boolean);
+    return openMenu(code, function(w){ return typeof w.cmdSearch === 'function' && w.document.getElementById('txtmultigubunnm'); }).then(function(w){
+      var d = w.document;
+      if (!pickOption(w, d.getElementById('selmultigubun'), '쇼핑몰주문번호')) throw new Error('쇼핑몰주문번호 검색을 고르지 못했습니다');
+      d.getElementById('txtmultigubunnm').value = orders.join('\n');
+      var got = null, keep = w.jQuery.ajax;
+      w.jQuery.ajax = function(o){ if (!got) got = o; return { done: function(){ return this; }, fail: function(){ return this; }, always: function(){ return this; } }; };
+      try { w.cmdSearch(1); } finally { w.jQuery.ajax = keep; }
+      if (!got || !got.data || !/GetTB_ORDER_ListBy/.test(got.url)) throw new Error('검색 조건을 만들지 못했습니다');
+      var p = JSON.parse(got.data), out = [];
+      p.p_trnsprtsttusse = ''; p.p_pagesize = 500;
+      function page(n){
+        p.p_pageno = n;
+        return apiJson(w, got.url, p).then(function(r){
+          var t = (r && r.table) || [];
+          t.forEach(function(x){ out.push({ o: clean(x.SOPMAL_ORDERNO), b: clean(x.BZM_ORDERNO), s: clean(x.TRNSPRT_STTUS_SE) }); });
+          if (t.length >= p.p_pagesize && n < 10) return page(n + 1);
+        });
+      }
+      return page(1).then(function(){ return { rows: out }; });
+    });
+  }
+  function cmdInvoiceCheckup(args){
+    var bzm = (args.bzm || []).map(clean).filter(Boolean);
+    if (!bzm.length || bzm.length > INV_MAX) return { ok: false, why: '발송검수할 주문 수가 맞지 않습니다' };
+    return openMenu(CHK_MENU, function(w){ return typeof w.cmdWayBillCheckUp === 'function' && w.document.getElementById('userid'); }).then(function(w){
+      if (memoWaiting(w)) return { ok: false, why: '비젬에 먼저 읽어야 할 쪽지가 있습니다. 비젬 탭에서 확인해 주세요' };
+      var user = w.document.getElementById('userid').value;
+      return apiJson(w, '/api/TB_ORDER/UpdateWaybillCheckUp', bzm.map(function(b){ return { procText: '', paramInput: { p_bzmorderno: b, p_updusr: user } }; })).then(function(r){
+        return r && r.vo_code === 'OK' ? { ok: true, n: bzm.length } : { ok: false, why: '발송검수 실패: ' + clean(r && r.vo_errmsg).slice(0, 100) };
+      });
+    });
+  }
+  function cmdInvoiceSend(args){
+    var bzm = (args.bzm || []).map(clean).filter(Boolean);
+    if (!bzm.length || bzm.length > INV_MAX) return { started: false, why: '전송할 주문 수가 맞지 않습니다' };
+    return openMenu(SEND_MENU, function(w){ return typeof w.modalWindowShowPostMid === 'function' && w.document.getElementById('form1') && w.document.getElementById('bzmordernos'); }).then(function(w){
+      var d = w.document, $j = w.jQuery;
+      if (d.querySelector(SEND_POPUP)) return { started: false, why: '전송 창이 이미 열려 있습니다. 비젬 탭에서 확인해 주세요' };
+      if (memoWaiting(w)) return { started: false, why: '비젬에 먼저 읽어야 할 쪽지가 있습니다. 비젬 탭에서 확인해 주세요' };
+      try { if (typeof w.isExpired === 'function') w.isExpired(); } catch (e) {}
+      $j('#bzmordernos').val(bzm.join(','));
+      $j('#cmdtype').val('waybilTrnsmis');
+      $j('#form1').attr('action', '../COM/COM004PC');
+      w.modalWindowShowPostMid('', '', $j('#form1'), function(){ try { w.cmdSearch(1); } catch (e) {} try { w.parent.refreshWorkflowBadges(); } catch (e) {} });
+      return waitFor(function(){ return d.querySelector(SEND_POPUP); }, START_WAIT).then(function(f){ return f ? { started: true } : { started: false, why: '전송 창이 뜨지 않았습니다. 비젬 탭에서 확인해 주세요' }; });
+    });
+  }
+  /* 전송 창: 끝났는지(isSuccess)와 창이 닫혔는지만 봄. 끝은 헤드비서가 목록의 상태로 다시 확인 */
+  function cmdInvoiceSendStatus(){
+    var w = menuWin(SEND_MENU), f = w && w.document.querySelector(SEND_POPUP), p = null;
+    if (!f) return { lost: true };
+    try { p = f.contentWindow; if (!p.document) p = null; } catch (e) { p = null; }
+    return { done: !!(p && p.isSuccess === true) };
+  }
+
+  var CMDS = { invoiceList: cmdInvoiceList, invoiceUpload: cmdInvoiceUpload, invoiceCheckup: cmdInvoiceCheckup, invoiceSend: cmdInvoiceSend, invoiceSendStatus: cmdInvoiceSendStatus, survey: cmdSurvey, formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'bizem-helper' || !ALLOW.test(e.origin)) return;

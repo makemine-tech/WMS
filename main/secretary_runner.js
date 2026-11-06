@@ -514,6 +514,110 @@
       }
     }
 
+    /* 비젬 송장업로드 (대표님 2026-11-06): 사람이 파일 건수를 보고 한 번 누르면 업로드·저장 → 발송검수 → 운송장전송까지.
+       올린 파일의 쇼핑몰주문번호만 다룸. 100개씩 나눠 하되 같은 묶음을 다시 보내지 않음(상태가 안 바뀌면 멈춤).
+       잠긴 파일은 받자마자 명령에서 지우고, 작업 기록에는 건수만 남김 */
+    var INV_POLL = 5000, INV_WAIT = 5 * 60 * 1000;
+    async function runBizemInvoice(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', sealed: null, doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) { await store.setCommand(id, { sealed: null }); return; }
+      var now = deps.now(), date = C.kstDate(now), key = C.jobKey('bizem_invoice', date, C.nextRound(jobs, 'bizem_invoice', date));
+      var I = (typeof window !== 'undefined' && window.BIZEM_INVOICE) || (typeof require === 'function' ? require('./bizem_invoice.js') : null);
+      var result = { lines: cmd.lines || 0, orders: cmd.orders || 0 };
+      async function end(state, notes){
+        await store.setJob(key, { state: state, step: '', endedAt: deps.now(), notes: notes, result: result });
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      }
+      function why(e){ return String((e && e.message) || e); }
+      async function list(screen){ var r = await deps.bizemList({ screen: screen, orders: file.orders }); return I.tally(r.rows, file.orders); }
+      var file = null;
+      await store.setJob(key, { state: 'running', recipe: 'bizem_invoice', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '파일 여는 중', notes: '' });
+      try {
+        var sealed = cmd.sealed;
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now, sealed: null });
+        try { file = await deps.openInvoice(sealed); }
+        catch (e) { return end('stopped', '파일을 열지 못했습니다 (상시 컴퓨터가 새로 켜졌을 수 있음). 파일을 다시 골라 주세요'); }
+        if (file.lines !== cmd.lines || file.orders.length !== cmd.orders) return end('stopped', '받은 파일 건수가 화면에서 본 건수와 달라 올리지 않았습니다');
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'bizem'; }));
+        if (r.state !== 'ok') return end('stopped', '비젬: ' + r.msg);
+
+        /* 0. 올리기 전: 이미 전송된 주문이 섞였으면 올리지 않음 */
+        await store.setJob(key, { step: '비젬 주문 확인 중' });
+        var t = await list('send');
+        result.before = { sent: t.E10, failed: t.E11 };
+        if (t.E10) return end('stopped', '이미 운송장이 전송된 주문 ' + t.E10 + '건이 파일에 있어 올리지 않았습니다. 비젬에서 확인해 주세요');
+
+        /* 1. 업로드·저장 */
+        await store.setJob(key, { step: '비젬에 송장 올리는 중' });
+        var up;
+        try { up = await deps.bizemGo('invoiceUpload', { buffer: file.buffer, name: file.name }); }
+        catch (e) { return end('stopped', '올리는 중 끊겼습니다. 저장됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + why(e) + ')'); }
+        if (!up.started) return end('stopped', '올리지 못했습니다: ' + up.why);
+        var t0 = deps.now(), last = -1, same = 0;
+        for (;;) {
+          await bizemSleep(INV_POLL);
+          t = await list('check');
+          var done = t.C10 + t.D10 + t.E10 + t.E11;
+          if (done >= file.orders.length) break;
+          same = done === last ? same + 1 : 0; last = done;
+          if (deps.now() - t0 > INV_WAIT || (done > 0 && same >= 12)) break;
+        }
+        result.uploaded = t.C10 + t.D10 + t.E10 + t.E11;
+        if (result.uploaded < file.orders.length) return end('stopped', '올린 뒤 운송장번호가 들어간 주문이 ' + result.uploaded + ' / ' + file.orders.length + '건입니다. 비젬 업로드 결과 창에서 확인해 주세요');
+
+        /* 2. 발송검수: 운송장번호입력됨(C10)만 100개씩 */
+        await store.setJob(key, { step: '발송검수 중' });
+        result.checked = 0;
+        for (var round = 0; round < file.orders.length / I.BATCH + 3; round++) {
+          t = await list('check');
+          if (!t.bzm.C10.length) break;
+          var b1 = t.bzm.C10.slice(0, I.BATCH), c;
+          try { c = await deps.bizemGo('invoiceCheckup', { bzm: b1 }); }
+          catch (e) { return end('stopped', '발송검수 중 끊겼습니다. 비젬 발송검수 화면에서 확인해 주세요 (' + why(e) + ')'); }
+          if (!c.ok) return end('stopped', c.why);
+          result.checked += b1.length;
+          await store.setJob(key, { step: '발송검수 중 · ' + result.checked + '건', result: result });
+          var after = await list('check');
+          if (b1.some(function(b){ return after.bzm.C10.indexOf(b) >= 0; })) return end('stopped', '발송검수를 보냈는데 상태가 바뀌지 않은 주문이 있습니다. 다시 보내지 않았습니다');
+        }
+        t = await list('check');
+        if (t.C10) return end('stopped', '발송검수가 안 된 주문 ' + t.C10 + '건이 남았습니다');
+
+        /* 3. 운송장전송: 검수됨(D10)만 100개씩. 전송 창이 끝나면 목록 상태로 다시 확인 */
+        await store.setJob(key, { step: '운송장전송 중' });
+        result.sent = 0;
+        for (var round2 = 0; round2 < file.orders.length / I.BATCH + 3; round2++) {
+          t = await list('send');
+          if (!t.bzm.D10.length) break;
+          var b2 = t.bzm.D10.slice(0, I.BATCH), s;
+          try { s = await deps.bizemGo('invoiceSend', { bzm: b2 }); }
+          catch (e) { return end('stopped', '전송 중 끊겼습니다. 비젬 쇼핑몰운송장전송 화면에서 확인해 주세요 (' + why(e) + ')'); }
+          if (!s.started) return end('stopped', s.why);
+          var t1 = deps.now(), left = b2.length;
+          for (;;) {
+            await bizemSleep(INV_POLL);
+            var st = await deps.bizemRead('invoiceSendStatus').catch(function(){ return {}; });
+            t = await list('send');
+            left = b2.filter(function(b){ return t.bzm.D10.indexOf(b) >= 0; }).length;
+            if (!left || deps.now() - t1 > INV_WAIT || (st.lost && left === b2.length && deps.now() - t1 > 60000)) break;
+          }
+          result.sent += b2.length - left;
+          await store.setJob(key, { step: '운송장전송 중 · ' + result.sent + '건', result: result });
+          if (left) return end('stopped', '전송 창을 띄웠는데 아직 검수됨으로 남은 주문 ' + left + '건이 있습니다. 다시 보내지 않았습니다. 비젬에서 확인해 주세요');
+        }
+        t = await list('send');
+        result.done = t.E10; result.failed = t.E11;
+        if (t.E11) return end('stopped', '운송장전송 실패 ' + t.E11 + '건이 있습니다. 비젬 쇼핑몰운송장전송 화면에서 확인해 주세요');
+        if (t.E10 < file.orders.length) return end('stopped', '전송된 주문이 ' + t.E10 + ' / ' + file.orders.length + '건입니다. 비젬에서 확인해 주세요');
+        await end('done', '');
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), result: result, notes: '오류: ' + why(e) + '. 비젬에서 먼저 확인해 주세요' }).catch(function(){});
+        await store.setCommand(id, { status: 'done', jobKey: key, sealed: null, doneAt: deps.now() }).catch(function(){});
+        throw e;
+      }
+    }
+
     /* 이벗 주문가져오기 전 확인: 맨소레담공식스마트스토어 신규·배송대기 건수만 읽음 */
     async function runEbutCheck(id){
       if (!(await bizemBlock(id))) return;
@@ -685,13 +789,15 @@
     async function process(id, cmd){
       if (!(await store.claimCommand(id))) return;
       var now = deps.now();
-      if (C.commandExpired(cmd, now)) { await store.setCommand(id, { status: 'expired', doneAt: now }); return; }
-      if (printing) { await store.setCommand(id, { status: 'refused', why: '송장출력 중입니다', doneAt: now }); return; }
+      /* sealed = 잠긴 파일(송장업로드). 처리하지 않는 명령에서도 바로 지움 */
+      if (C.commandExpired(cmd, now)) { await store.setCommand(id, { status: 'expired', sealed: null, doneAt: now }); return; }
+      if (printing) { await store.setCommand(id, { status: 'refused', why: '송장출력 중입니다', sealed: null, doneAt: now }); return; }
       if (cmd.type === 'start') return runStart(id, cmd);
       if (cmd.type === 'menso') return runMenso(id, cmd);
       if (cmd.type === 'match_read' || cmd.type === 'match_search') return runMatch(id, cmd);
       if (cmd.type === 'bizem_check') return runBizemCheck(id);
       if (cmd.type === 'bizem_survey') return runBizemSurvey(id);
+      if (cmd.type === 'bizem_invoice') return runBizemInvoice(id, cmd);
       if (cmd.type === 'bizem_collect') return runBizemCollect(id, cmd);
       if (cmd.type === 'bizem_confirm') return runBizemConfirm(id, cmd);
       if (cmd.type === 'bizem_form') return runBizemForm(id);
