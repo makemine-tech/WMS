@@ -2,21 +2,24 @@
    ① 자동수집으로 가져온 PDF (폴더에서 지우기 전 원본 그대로)
    ② 전체 초기화·교체 직전의 작업 (PDF + 송장 목록 + 인쇄완료 기록)
    ③ 새 작업이 들어와 밀려난 이 PC 캐시 PDF (다른 PC 가 초기화해도 여기 남음)
-   보관: IndexedDB 'pk_backup' — meta(목록) / buf(PDF) 분리, 최근 KEEP 개 · KEEP_DAYS 일 (송장 PDF 는 하루를 넘길 일이 없어 하루 지나면 지움, 2026-10-31)
+   보관: IndexedDB 'pk_backup' — meta(목록) / buf(PDF) 분리, 최근 KEEP 개 · KEEP_DAYS 일 · 합계 MAX_BYTES 까지
+   (2026-10-31 하루 → 2026-11-06 검토할 일이 있어 7일로. 백업 하나가 140~350MB 라 개수 20 · 합계 5GB 로 PC 용량을 지킴)
    계산(정리 대상 고르기)은 순수 함수 → tools/tests/pk_backup.test.js */
 (function(root){
-  var KEEP = 10, KEEP_DAYS = 1, DAY = 86400000;
+  var KEEP = 20, KEEP_DAYS = 7, MAX_BYTES = 5 * 1024 * 1024 * 1024, DAY = 86400000;
 
-  /* metas: [{id, ts}] → 지울 id 목록 (최신 KEEP 개 안 + KEEP_DAYS 일 안만 남김) */
+  /* metas: [{id, ts, size}] → 지울 id 목록 (최신 KEEP 개 안 + KEEP_DAYS 일 안 + 새것부터 합계 MAX_BYTES 안만 남김, 가장 새것 하나는 늘 남김) */
   function pruneIds(metas, now){
-    var s = (metas || []).slice().sort(function(a, b){ return (b.ts || 0) - (a.ts || 0); });
-    return s.filter(function(m, i){ return i >= KEEP || (now - (m.ts || 0)) > KEEP_DAYS * DAY; })
-            .map(function(m){ return m.id; });
+    var s = (metas || []).slice().sort(function(a, b){ return (b.ts || 0) - (a.ts || 0); }), bytes = 0;
+    return s.filter(function(m, i){
+      bytes += m.size || 0;
+      return i >= KEEP || (now - (m.ts || 0)) > KEEP_DAYS * DAY || (i > 0 && bytes > MAX_BYTES);
+    }).map(function(m){ return m.id; });
   }
   /* 캐시 키 'J1761234567890_파일이름' → 만든 시각 */
   function jobKeyTs(key){ var m = /^J(\d{12,})/.exec(String(key || '')); return m ? +m[1] : 0; }
 
-  var PKB = { KEEP: KEEP, KEEP_DAYS: KEEP_DAYS, pruneIds: pruneIds, jobKeyTs: jobKeyTs };
+  var PKB = { KEEP: KEEP, KEEP_DAYS: KEEP_DAYS, MAX_BYTES: MAX_BYTES, pruneIds: pruneIds, jobKeyTs: jobKeyTs };
   if (typeof module !== 'undefined' && module.exports) { module.exports = PKB; return; }
 
   /* ───────── 브라우저: IndexedDB ───────── */
