@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-06b';
+  var VER = '2026-11-06c';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -254,7 +254,7 @@
   }
   /* 버튼이 부르는 비젬 함수의 코드(고객 정보 없음)만 읽음. 자동으로 누르기 전에 확인창·진행 방식을 알기 위함 */
   var SURVEY_FN = ['cmdsave', 'cmdSave', 'cmdAllSave', 'cmdWayBillCheckUp', 'cmdSend', 'cmdSendAll', 'cmdSendAllQueue', 'getSendSetup', 'selectChk', 'checkBoxClickAll', 'pagingSizeChange', 'cmdSearch', 'fnSearch', 'saveSelection', 'cmdCheckMsgConfirm', 'preCheckCheckedTableRowCnt', 'jsonsendForm', 'sendForm'];
-  var SURVEY_BTN = ['btnSave', 'btnSearch', 'btnWayBillCheckUp', 'btnSend', 'btnWbQueueSearch', 'chkall', 'btnGDPage', 'fileHdrycWaybil'];
+  var SURVEY_BTN = ['btnSearch', 'btnWayBillCheckUp', 'btnSend', 'btnWbQueueSearch', 'chkall', 'btnGDPage', 'fileHdrycWaybil'];
   function surveySrc(d){
     var w = d.defaultView, out = {};
     SURVEY_FN.forEach(function(n){ try { if (typeof w[n] === 'function') out[n] = String(w[n]).slice(0, 4000); } catch (e) {} });
