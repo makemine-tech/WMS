@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-06a';
+  var VER = '2026-11-06b';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -241,7 +241,7 @@
   }
 
   /* 송장업로드 준비 조사 (2026-11-06): 송장 관련 메뉴를 열어 버튼·입력칸·표 제목만 읽음. 표 안 내용(고객 정보)은 읽지 않고 아무것도 누르지 않음 */
-  var SURVEY_MENU = /송장|운송장|발송/;
+  var SURVEY_MENU = /^\[\d+\](운송장입력\(대량\)|발송검수|쇼핑몰운송장전송)$/;
   function surveyMenus(){
     var seen = {}, out = [];
     Array.prototype.forEach.call(document.querySelectorAll('[onclick*="addTab"],a[href*="addTab"]'), function(el){
@@ -249,6 +249,25 @@
       if (!m || seen[m[1]]) return;
       seen[m[1]] = true;
       out.push({ code: m[1], text: clean(el.textContent).slice(0, 30) });
+    });
+    return out;
+  }
+  /* 버튼이 부르는 비젬 함수의 코드(고객 정보 없음)만 읽음. 자동으로 누르기 전에 확인창·진행 방식을 알기 위함 */
+  var SURVEY_FN = ['cmdsave', 'cmdSave', 'cmdAllSave', 'cmdWayBillCheckUp', 'cmdSend', 'cmdSendAll', 'cmdSendAllQueue', 'getSendSetup', 'selectChk', 'checkBoxClickAll', 'pagingSizeChange', 'cmdSearch', 'fnSearch', 'saveSelection', 'cmdCheckMsgConfirm', 'preCheckCheckedTableRowCnt', 'jsonsendForm', 'sendForm'];
+  var SURVEY_BTN = ['btnSave', 'btnSearch', 'btnWayBillCheckUp', 'btnSend', 'btnWbQueueSearch', 'chkall', 'btnGDPage', 'fileHdrycWaybil'];
+  function surveySrc(d){
+    var w = d.defaultView, out = {};
+    SURVEY_FN.forEach(function(n){ try { if (typeof w[n] === 'function') out[n] = String(w[n]).slice(0, 4000); } catch (e) {} });
+    SURVEY_BTN.forEach(function(id){
+      var el = d.getElementById(id) || d.querySelector('[name=' + id + ']'), jq = w.jQuery;
+      if (!el) return;
+      try {
+        var ev = jq && jq._data && jq._data(el, 'events'), list = [];
+        if (ev) Object.keys(ev).forEach(function(t){ ev[t].forEach(function(h){ list.push(t + ': ' + String(h.handler).slice(0, 3000)); }); });
+        if (el.onclick) list.push('onclick: ' + String(el.onclick).slice(0, 1500));
+        if (el.onchange) list.push('onchange: ' + String(el.onchange).slice(0, 1500));
+        if (list.length) out['#' + id] = list.join(' ||| ');
+      } catch (e) {}
     });
     return out;
   }
@@ -267,6 +286,7 @@
       }),
       heads: lim(d.querySelectorAll('th,.ui-jqgrid-sortable,[role=columnheader]'), 60).map(function(el){ return clean(el.textContent).slice(0, 20); }).filter(Boolean),
       rows: d.querySelectorAll('tbody tr').length,
+      src: surveySrc(d),
       frames: lim(d.querySelectorAll('iframe'), 10).map(function(f){ return f.id || f.name || ''; }),
       funcs: Object.keys(d.defaultView || {}).filter(function(k){ try { return typeof d.defaultView[k] === 'function' && /save|upload|send|insert|chk|check|trans|move|excel|file/i.test(k) && !/^on|^webkit/i.test(k); } catch (e) { return false; } }).slice(0, 60)
     };
