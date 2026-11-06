@@ -21,7 +21,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-06d';
+  var VER = '2026-11-06e';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -253,11 +253,11 @@
     return out;
   }
   /* 버튼이 부르는 비젬 함수의 코드(고객 정보 없음)만 읽음. 자동으로 누르기 전에 확인창·진행 방식을 알기 위함 */
-  var SURVEY_FN = ['cmdsave', 'cmdSave', 'cmdAllSave', 'cmdWayBillCheckUp', 'cmdSend', 'cmdSendAll', 'cmdSendAllQueue', 'getSendSetup', 'selectChk', 'checkBoxClickAll', 'pagingSizeChange', 'cmdSearch', 'fnSearch', 'saveSelection', 'cmdCheckMsgConfirm', 'preCheckCheckedTableRowCnt', 'jsonsendForm', 'sendForm'];
+  var SURVEY_FN = ['cmdsave', 'cmdSave', 'cmdAllSave', 'cmdWayBillCheckUp', 'cmdSend', 'cmdSendAll', 'cmdSendAllQueue', 'getSendSetup', 'selectChk', 'checkBoxClickAll', 'pagingSizeChange', 'cmdSearch', 'fnSearch', 'saveSelection', 'cmdCheckMsgConfirm', 'preCheckCheckedTableRowCnt', 'jsonsendForm', 'sendForm', 'makeRowObject', 'cmdWbQueueSearch', 'showConfirmQueue', 'modalWindowShowPostMid', 'modalWindowShow'];
   var SURVEY_BTN = ['btnSearch', 'btnWayBillCheckUp', 'btnSend', 'btnWbQueueSearch', 'chkall', 'btnGDPage', 'fileHdrycWaybil'];
   function surveySrc(d){
     var w = d.defaultView, out = {};
-    SURVEY_FN.forEach(function(n){ try { if (typeof w[n] === 'function') out[n] = String(w[n]).slice(0, 4000); } catch (e) {} });
+    SURVEY_FN.forEach(function(n){ try { if (typeof w[n] === 'function') out[n] = String(w[n]).slice(0, 8000); } catch (e) {} });
     SURVEY_BTN.forEach(function(id){
       var el = d.getElementById(id) || d.querySelector('[name=' + id + ']'), jq = w.jQuery;
       if (!el) return;
@@ -302,7 +302,17 @@
           return sleep(SETTLE).then(function(){ try { screens[m.code] = surveyScreen(w.document); } catch (e) { screens[m.code] = { err: String(e.message || e).slice(0, 80) }; } });
         });
       });
-    }, Promise.resolve()).then(function(){ return { menus: menus.slice(0, 200), want: want, screens: screens, hash: location.hash }; });
+    }, Promise.resolve()).then(surveyPages).then(function(pages){ return { menus: menus.slice(0, 200), want: want, screens: screens, pages: pages, hash: location.hash }; });
+  }
+  /* 업로드 뒤 뜨는 결과 창(COM101PB)의 빈 틀만 받아 스크립트와 버튼을 읽음. 파일 이름을 주지 않아 내용(고객 정보)이 없고, 아무것도 저장하지 않음 */
+  function surveyPages(){
+    return fetch('/COM/COM101PB?pageid=REQ014MA', { credentials: 'include' }).then(function(r){ return r.text(); }).then(function(t){
+      var doc = new DOMParser().parseFromString(t, 'text/html');
+      return { COM101PB: {
+        scripts: Array.prototype.map.call(doc.querySelectorAll('script:not([src])'), function(s){ return s.textContent; }).join(' ||| ').slice(0, 24000),
+        buttons: Array.prototype.slice.call(doc.querySelectorAll('button,input[type=button],a[onclick],[onclick]'), 0, 60).map(function(el){ return (el.id || '') + '¦' + clean(el.textContent || el.value).slice(0, 30) + '¦' + String(el.getAttribute('onclick') || '').slice(0, 100); })
+      } };
+    }).catch(function(e){ return { err: String((e && e.message) || e).slice(0, 80) }; });
   }
   var CMDS = { survey: cmdSurvey, formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
   function onMsg(e){
