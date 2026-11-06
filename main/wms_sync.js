@@ -44,6 +44,9 @@
   var lastLocalTs = 0;
   var lastRemoteTs = 0;
   var initialized = false;
+  /* 로그인 확인이 끝났는지 (2026-11-06): 처음엔 「아직 모름」 — 페이지가 이걸 「로그인 안 됨」으로 오해해 로그인 화면과 무한 왕복하던 문제.
+     onAuthStateChanged 가 한 번 오고, 사용자가 있으면 관리자·그룹 조회까지 끝나야 true */
+  var authKnown = false;
 
   function init(name, opts) {
     if (initialized) return;
@@ -63,6 +66,7 @@
     }
     initialized = true;
     auth.onAuthStateChanged(function(user){
+      authKnown = !user;   /* 사용자가 있으면 그룹 조회가 끝난 뒤(emitAuth 직전) true */
       currentUser = user;
       currentGroupId = null;
       isAdminCache = false;
@@ -108,11 +112,13 @@
   }
 
   function emitAuth() {
+    authKnown = true;
     var state = {
       user: currentUser,
       groupId: currentGroupId,
       isAdmin: isAdminCache,
-      isReady: true
+      isReady: true,
+      known: true
     };
     authCallbacks.forEach(function(cb){
       try { cb(state); } catch(e) { console.error(e); }
@@ -161,7 +167,7 @@
   function onAuth(cb) {
     authCallbacks.push(cb);
     if (initialized) {
-      try { cb({ user: currentUser, groupId: currentGroupId, isAdmin: isAdminCache, isReady: true }); }
+      try { cb({ user: currentUser, groupId: currentGroupId, isAdmin: isAdminCache, isReady: true, known: authKnown }); }
       catch(e){ console.error(e); }
     }
   }

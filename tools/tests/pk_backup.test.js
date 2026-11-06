@@ -20,8 +20,15 @@ test('캐시 키에서 등록 시각 읽기', () => {
   assert.strictEqual(B.jobKeyTs('엉뚱한키'), 0);
 });
 
-test('하루가 지나면 지움, 하루 안은 남김', () => {
-  assert.strictEqual(B.KEEP_DAYS, 1);
-  const metas = [{ id: 'a', ts: NOW - 23 * 3600000 }, { id: 'b', ts: NOW - 25 * 3600000 }];
+test('7일이 지나면 지움, 7일 안은 남김', () => {
+  assert.strictEqual(B.KEEP_DAYS, 7);
+  const metas = [{ id: 'a', ts: NOW - 6.9 * DAY }, { id: 'b', ts: NOW - 7.1 * DAY }];
   assert.deepStrictEqual(B.pruneIds(metas, NOW), ['b']);
+});
+
+test('합계 용량을 넘으면 오래된 것부터 지움, 가장 새것은 커도 남김', () => {
+  const big = B.MAX_BYTES * 0.4;
+  const metas = [0, 1, 2, 3].map(i => ({ id: 'b' + i, ts: NOW - i * 3600000, size: big }));
+  assert.deepStrictEqual(B.pruneIds(metas, NOW).sort(), ['b2', 'b3']);
+  assert.deepStrictEqual(B.pruneIds([{ id: 'huge', ts: NOW, size: B.MAX_BYTES * 2 }], NOW), []);
 });
