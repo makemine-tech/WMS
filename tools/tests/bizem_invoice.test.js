@@ -179,3 +179,15 @@ test('파일별 건수가 화면과 다르면 하나도 올리지 않음', async
   assert.strictEqual(job().state, 'stopped');
   assert.ok(!db.calls.some((c) => /^up:/.test(c)));
 });
+
+test('이벗 파일 범위가 U열까지로 적혀 있어도 W열 운송장을 읽음 (2026-11-09 맨소래담 파일)', () => {
+  const B = require('../../main/bizem_invoice.js');
+  const ws = { '!ref': 'A1:U2', A1: { v: '주문번호' }, U1: { v: '판매금액' }, A2: { v: '202611061259030002' }, J2: { v: '15839' }, V2: { v: '우체국택배' }, W2: { v: '6077487267207' }, X2: { v: '' } };
+  B.fullRef(ws);
+  assert.strictEqual(ws['!ref'], 'A1:X2');
+  const row = []; for (let c = 0; c < 24; c++) row.push('');
+  row[0] = '202611061259030002'; row[9] = '15839'; row[22] = '6077487267207';
+  const p = B.pick([['주문번호'], row]);
+  assert.deepStrictEqual([p.lines.length, p.bad.length], [1, 0]);
+  assert.strictEqual(B.fullRef({ '!ref': 'A1:AB3', A1: { v: 1 } })['!ref'], 'A1:AB3', '더 넓게 적힌 범위는 그대로');
+});
