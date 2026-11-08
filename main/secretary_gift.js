@@ -42,6 +42,8 @@
     return why;
   }
 
+  /* 종료 일시가 지난 설정은 쓰지 않고 지움 (대표님 2026-11-08: 한 번 세팅하면 종료일까지 그대로, 지나면 자동으로 사라짐) */
+  function expired(set, now){ var b = kstMs(set && set.end); return isFinite(b) && now > b; }
   function tierOf(set, amt){
     var best = -1, bestLo = -1;
     (set.tiers || []).forEach(function(t, i){
@@ -96,7 +98,7 @@
     return ka.length === kb.length && ka.every(function(k, i){ return k === kb[i] && Number(a[k]) === Number(b[k]); });
   }
 
-  var api = { kstMs: kstMs, check: check, plan: plan, tierOf: tierOf, tierLabel: tierLabel, counts: counts, sameCounts: sameCounts };
+  var api = { kstMs: kstMs, expired: expired, check: check, plan: plan, tierOf: tierOf, tierLabel: tierLabel, counts: counts, sameCounts: sameCounts };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.SECRETARY_GIFT = api;
 })(typeof self !== 'undefined' ? self : this);

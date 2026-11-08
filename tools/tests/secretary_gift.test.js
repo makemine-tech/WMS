@@ -8,14 +8,14 @@ const { createRunner } = require('../../main/secretary_runner.js');
 const T0 = new Date('2026-11-08T15:00:00+09:00').getTime();
 
 const ITEM = { seq: '900', code: '1558860', name: '샤워볼', opt: '-', prov: '', qty: 1 };
-const SET = { start: '2026-11-06T00:00', end: '2026-11-07T23:59', all: false, memos: ['hhh'],
+const SET = { start: '2026-11-06T00:00', end: '2026-11-30T23:59', all: false, memos: ['hhh'],
   tiers: [{ min: 10000, max: 20000, items: [ITEM] }, { min: 20000, max: '', items: [Object.assign({}, ITEM, { code: '1', seq: '901', name: '크림' })] }] };
 const CHASU = [{ date: '20261108', ivno: '1', cnt: 5, memo: 'hhh', site: '14374', cust: '2237' }, { date: '20261108', ivno: '2', cnt: 1, memo: 'aaa', site: '14374', cust: '2237' }];
 function row(no, ivno, amt, odate, extra){ return Object.assign({ no: no, hap: 'H' + no, ivdate: '20261108', ivno: ivno, odate: odate || '2026-11-06T14:10:52.990+09:00', amt: amt, gift: false }, extra || {}); }
 const ROWS = [
   row('A', '1', 9000, null, {}), row('A', '1', 3000),            /* 12,000 → 1구간 */
   row('B', '1', 25000),                                           /* 2구간 */
-  row('C', '1', 15000, '2026-11-08T10:00:00+09:00'),              /* 기간 밖 */
+  row('C', '1', 15000, '2026-12-01T10:00:00+09:00'),              /* 기간 밖 */
   row('D', '1', 5000),                                            /* 가격대 밖 */
   row('E', '1', 15000), row('E', '1', 0, null, { gift: true }),   /* 이미 사은품 */
   row('F', '2', 30000),                                           /* aaa 차수 → 안 고름 */
@@ -49,7 +49,7 @@ test('한 묶음에 주문이 둘이면 사은품은 묶음 하나', () => {
 
 test('기간 경계와 한국 시각', () => {
   assert.strictEqual(G.kstMs('2026-11-06T00:00'), Date.parse('2026-11-05T15:00:00Z'));
-  const p = G.plan(SET, CHASU, [row('A', '1', 12000, '2026-11-07T23:59:00+09:00'), row('B', '1', 12000, '2026-11-08T00:00:01+09:00')]);
+  const p = G.plan(Object.assign({}, SET, { end: '2026-11-07T23:59' }), CHASU, [row('A', '1', 12000, '2026-11-07T23:59:00+09:00'), row('B', '1', 12000, '2026-11-08T00:00:01+09:00')]);
   assert.deepStrictEqual(p.groups[0].nos, ['A']);
 });
 
@@ -140,4 +140,13 @@ test('이벗이 받지 않으면 멈춤, 늦은 명령은 만료', async () => {
   const b = setup();
   await b.runner.handleCommand('c', b.cmd('gift_add', { at: T0 - 10 * 60 * 1000, expect: {} }));
   assert.strictEqual(b.db.commands.c.status, 'expired');
+});
+
+test('종료 일시가 지난 설정은 쓰지 않음', async () => {
+  assert.strictEqual(G.expired(SET, Date.parse('2026-11-30T23:58:00+09:00')), false);
+  assert.strictEqual(G.expired(SET, Date.parse('2026-12-01T00:00:00+09:00')), true);
+  const { runner, db, cmd } = setup();
+  await runner.handleCommand('c', cmd('gift_check', { set: Object.assign({}, SET, { end: '2026-11-07T23:59' }) }));
+  assert.strictEqual(db.commands.c.status, 'refused');
+  assert.match(db.commands.c.why, /종료 일시/);
 });

@@ -822,7 +822,7 @@
     }
     async function runGiftCheck(id, cmd){
       if (!(await bizemBlock(id))) return;
-      var G = giftLib(), why = G.check(cmd.set);
+      var G = giftLib(), why = G.expired(cmd.set, deps.now()) ? ['종료 일시가 지난 사은품 설정입니다'] : G.check(cmd.set);
       if (why.length) { await store.setCommand(id, { status: 'refused', why: why[0], doneAt: deps.now() }); return; }
       await store.setCommand(id, { status: 'reading' });
       try {
@@ -848,7 +848,7 @@
       await store.setJob(key, { state: 'running', recipe: 'gift_add', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, set: cmd.setId || '', step: '이벗 확인 중', notes: '' });
       try {
         await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
-        var bad = G.check(cmd.set);
+        var bad = G.expired(cmd.set, deps.now()) ? ['종료 일시가 지난 사은품 설정이라 넣지 않았습니다'] : G.check(cmd.set);
         if (bad.length) return end('stopped', bad[0]);
         var r = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
         if (r.state !== 'ok') return end('stopped', '이벗: ' + r.msg);
