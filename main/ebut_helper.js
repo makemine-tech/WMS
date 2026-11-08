@@ -13,6 +13,8 @@
      storeGo     → { started, why, alerts }        주문확인 체크 후 주문가져오기 한 번. 이벗 확인창 문구가 맞을 때만 확인
      storeStatus → { done, lines, newCnt } · { lost }
      matchSave { name, opt, qty, picks:[{code,qty,name}] } → { ok, msg, alerts }  주문서매칭 창에서 사람과 같은 순서로 한 상품 매칭처리 (AI 물류비서)
+     giftRead { cust, date } → { chasu:[{date,ivno,cnt,memo,site,cust}], rows:[{no,hap,ivdate,ivno,odate,amt,gift}] }  사은품 세팅: 그날 출력차수(메모)와 주문 줄(결제일·금액). 수령자 정보 없음, 저장 없음
+     giftAdd { ivdate, ivno, site, nos, hap, items:[{seq,code,name,opt,prov,qty}] } → { ok, hap, said }  사은품추가 조건10(주문번호) 으로 찾고 그 결과에 사은품 추가 한 번
      matchRead { cust, from, to, terms } → { items, masters, history }  미매칭 줄·마스터 상품·과거 매칭 읽기 / matchSearch { cust, text } → 마스터 상품 검색 (저장 없음)
      find  { orig, origDate }
            원송장으로 상담전용창 검색(/cs/cs200main_jdata, 발송일 기준, 이벗은 기간 최대 약 90일)
@@ -27,7 +29,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-08a';
+  var VER = '2026-11-08b';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -272,7 +274,7 @@
   function orderPage(view, a, page){
     var q = new URLSearchParams();
     ORDER_PARAMS.forEach(function(n){ q.set(n, ''); });
-    var set = { VIEW_TYPE: view, ORDLIST_CUST: String(a.cust), DATE_GBN: 'ord_date', DATE1: a.from, DATE2: a.to, GROUP_VIEW_TYPE: '1', gridReload: 'true', rows: '2000', page: String(page), sidx: 'ordlist_code', sord: 'asc', _search: 'false', nd: String(Date.now()) };
+    var set = { VIEW_TYPE: view, ORDLIST_CUST: String(a.cust), DATE_GBN: a.dateGbn || 'ord_date', DATE1: a.from, DATE2: a.to, GROUP_VIEW_TYPE: '1', gridReload: 'true', rows: '2000', page: String(page), sidx: 'ordlist_code', sord: 'asc', _search: 'false', nd: String(Date.now()) };
     Object.keys(set).forEach(function(k){ q.set(k, set[k]); });
     return fetch('/site/site210main_jdata?' + q.toString(), { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(r){ return r.text(); }).then(function(t){
@@ -376,7 +378,7 @@
     return fetch('/site/site217edit_right_jdata?' + q.toString(), { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(r){ return r.text(); }).then(function(t){
         if (!t) throw new Error('LOGIN');
-        return (JSON.parse(t).rows || []).map(function(x){ return { code: String(x.boptcode_code), seq: String(x.basic_seq), name: plain(x.basic_name), nick: plain(x.basic_nicn), opt: plain(x.boptcode_name), stock: /^-?\d+$/.test(String(x.boptcode_qty).trim()) ? Number(x.boptcode_qty) : null }; });   /* boptcode_qty = 이벗 화면 「가용」 열 */
+        return (JSON.parse(t).rows || []).map(function(x){ return { code: String(x.boptcode_code), seq: String(x.basic_seq), name: plain(x.basic_name), nick: plain(x.basic_nicn), opt: plain(x.boptcode_name), prov: String(x.basic_prov || ''), stock: /^-?\d+$/.test(String(x.boptcode_qty).trim()) ? Number(x.boptcode_qty) : null }; });   /* boptcode_qty = 이벗 화면 「가용」 열 */
       });
   }
   function matchHistory(cust, name){
@@ -567,16 +569,74 @@
     });
   }
 
+  /* ── 사은품 세팅 (AI 물류비서, 대표님 2026-11-08) ──
+     giftRead: 사은품추가 창의 출력차수 목록(메모 포함)과 그날 출력된 주문 줄. 수령자·전화·주소는 담지 않는다
+     giftAdd : 사은품추가 창이 하는 것과 같은 두 요청 — 조건10 찾기(/site/site3110main_jdata) → 사은품추가(/site/site3110save) 한 번.
+               찾은 묶음 수가 비서가 계산한 수와 다르면 넣지 않는다. 다시 보내지 않는다 */
+  function ymd8(s){ return String(s || '').replace(/-/g, ''); }
+  function giftChasu(date){
+    var body = new URLSearchParams({ IVMSTR_DATE: date, IVMSTR_IVNO1: '', IVMSTR_IVNO2: '', IVMSTR_EXPR: '', EXPR_NAME: '', nowBlock: '0', page: '0' });
+    return fetch('/jsp/site/site3110main.jsp', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+      .then(function(r){ return r.text(); }).then(function(h){
+        var d = new DOMParser().parseFromString(h, 'text/html');
+        if (!d.querySelector('#ivmstr_date, input[name=ivmstr_date]')) throw new Error('LOGIN');
+        return Array.prototype.map.call(d.querySelectorAll('input[name=chasu]'), function(el){
+          var v = String(el.value || '').split(','), tr = el.closest('tr'), td = tr ? Array.prototype.map.call(tr.children, function(c){ return norm(c.textContent); }) : [];
+          return { date: v[0], ivno: v[1], cnt: Number(v[2]) || 0, site: v[3], cust: v[4], memo: td[6] || '' };
+        });
+      });
+  }
+  function cmdGiftRead(a){
+    if (!/^\d+$/.test(String(a.cust)) || !/^\d{4}-\d{2}-\d{2}$/.test(a.date || '')) throw new Error('조회 조건이 올바르지 않습니다');
+    return giftChasu(a.date).then(function(chasu){
+      chasu = chasu.filter(function(c){ return String(c.cust) === String(a.cust); });
+      return orderAll('1', { cust: a.cust, from: a.date, to: a.date, dateGbn: 'ord_ivdate' }).then(function(o){
+        var rows = o.rows.filter(function(x){ return ymd8(x.ordlist_ivdate) === ymd8(a.date); }).map(function(x){
+          return { no: String(x.ordlist_no1 || ''), hap: String(x.ordlist_hapno || ''), ivdate: ymd8(x.ordlist_ivdate), ivno: String(x.ordlist_ivno || ''), odate: String(x.ordlist_odate || ''), amt: Number(x.ordlist_amt1) || 0, gift: plain(x.ordlist_name) === '사은품' };
+        });
+        return { chasu: chasu, rows: rows, ver: VER };
+      });
+    });
+  }
+  function giftPost(url, body){
+    return fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' }, body: body.toString() }).then(function(r){ return r.text().then(function(t){ return { status: r.status, text: t }; }); });
+  }
+  function cmdGiftAdd(a){
+    var nos = (a.nos || []).map(String).filter(function(x){ return /^[\w-]+$/.test(x); }), items = (a.items || []).filter(function(i){ return i.seq && i.code && Number(i.qty) >= 1; });
+    if (!/^\d{8}$/.test(String(a.ivdate)) || !/^\d+$/.test(String(a.ivno)) || !/^\d+$/.test(String(a.site))) throw new Error('출력차수가 올바르지 않습니다');
+    if (!nos.length || nos.length !== (a.nos || []).length) throw new Error('주문번호가 올바르지 않습니다');
+    if (!items.length || items.length !== (a.items || []).length) throw new Error('사은품 상품이 올바르지 않습니다');
+    var find = new URLSearchParams({ ivmstr_date: String(a.ivdate), ivmstr_ivno: String(a.ivno), ordlist_site: String(a.site), gbn: '10', no110: nos.join('\n') });
+    return giftPost('/site/site3110main_jdata', find).then(function(r){
+      var j = null; try { j = JSON.parse(r.text); } catch (e) { j = null; }
+      if (!j) throw new Error('LOGIN');
+      var hap = [];
+      (j.rows || []).forEach(function(x){ var h = String(x.ordlist_hapno || ''); if (h && hap.indexOf(h) < 0) hap.push(h); });
+      if (hap.length !== Number(a.hap)) return { ok: false, hap: hap.length, said: '이벗에서 찾은 묶음이 ' + hap.length + '건으로, 계산한 ' + a.hap + '건과 달라 넣지 않았습니다' };
+      var join = function(f, dash){ return items.map(function(i){ var v = String(f(i) == null ? '' : f(i)); return v === '' && dash ? dash : v; }).join(',') + ','; };
+      var save = new URLSearchParams();
+      [['ordlist_name', '사은품'], ['ordlist_opt1', '사은품옵션'], ['ordlist_qty', '1'],
+       ['basic_seqs', join(function(i){ return i.seq; })], ['boptcode_codes', join(function(i){ return i.code; })], ['ordbasic_qtys', join(function(i){ return Number(i.qty); })],
+       ['basic_provs', join(function(i){ return i.prov; }, '1')], ['basic_names', join(function(i){ return norm(i.name).replace(/,/g, ' '); }, '-')], ['boptcode_names', join(function(i){ return norm(i.opt).replace(/,/g, ' '); }, '-')],
+       ['ordloct_locas', join(function(){ return ''; }, '-')], ['ordloct_loca_yn', 'Y'], ['gbn', '10'], ['ordlist_ivdate', String(a.ivdate)], ['ordlist_ivno', String(a.ivno)], ['pslist_codt', '조건10 - 주문번호 검색 후 사은품 추가']
+      ].forEach(function(p){ save.append(p[0], p[1]); });
+      hap.forEach(function(h){ save.append('ordlist_hapno', h); save.append('multi_number', '1'); });
+      return giftPost('/site/site3110save?', save).then(function(s){
+        var said = ((s.text.match(/alert\(\s*["']([^"']*)["']/) || [])[1] || '').slice(0, 120);
+        return { ok: s.status === 200, hap: hap.length, said: said };
+      });
+    });
+  }
   var busy = 0;
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'ebut-helper' || !ALLOW.test(e.origin)) return;
-    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : m.cmd === 'login' ? cmdLogin : m.cmd === 'uploadMenso' ? cmdUploadMenso : m.cmd === 'storeCheck' ? cmdStoreCheck : m.cmd === 'storeGo' ? cmdStoreGo : m.cmd === 'storeStatus' ? cmdStoreStatus : m.cmd === 'matchSave' ? cmdMatchSave : null;
+    var run = m.cmd === 'find' ? cmdFind : m.cmd === 'save' ? cmdSave : m.cmd === 'ping' ? cmdPing : m.cmd === 'orders' ? cmdOrders : m.cmd === 'matchRead' ? cmdMatchRead : m.cmd === 'matchSearch' ? cmdMatchSearch : m.cmd === 'relogin' ? cmdRelogin : m.cmd === 'login' ? cmdLogin : m.cmd === 'uploadMenso' ? cmdUploadMenso : m.cmd === 'storeCheck' ? cmdStoreCheck : m.cmd === 'storeGo' ? cmdStoreGo : m.cmd === 'storeStatus' ? cmdStoreStatus : m.cmd === 'matchSave' ? cmdMatchSave : m.cmd === 'giftRead' ? cmdGiftRead : m.cmd === 'giftAdd' ? cmdGiftAdd : null;
     if (!run) return;
     peer = e.source; peerOrigin = e.origin;
     /* 마지막으로 연결된 반품 화면(스타/화물)을 기억 → 다음에 반품 화면 없이 도우미를 누르면 그 화면을 엶 */
     if (m.args && (m.args.db === 'cargo' || m.args.db === 'star')) try { localStorage.setItem('mkwRetDb', m.args.db); } catch(x){}
-    busy++; if (m.cmd === 'uploadMenso') say('맨소래담 주문 등록 중… 창을 닫지 마세요'); else if (m.cmd === 'storeGo' || m.cmd === 'storeStatus') say('맨소래담 주문 가져오는 중… 창을 닫지 마세요'); else if (m.cmd === 'matchSave') say('주문 매칭 저장 중… 창을 닫지 마세요'); else if (m.cmd === 'relogin' || m.cmd === 'login') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
+    busy++; if (m.cmd === 'uploadMenso') say('맨소래담 주문 등록 중… 창을 닫지 마세요'); else if (m.cmd === 'storeGo' || m.cmd === 'storeStatus') say('맨소래담 주문 가져오는 중… 창을 닫지 마세요'); else if (m.cmd === 'matchSave') say('주문 매칭 저장 중… 창을 닫지 마세요'); else if (m.cmd === 'giftAdd') say('사은품 추가 중… 창을 닫지 마세요'); else if (m.cmd === 'giftRead') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd === 'relogin' || m.cmd === 'login') say('로그인 시도 중…'); else if (m.cmd === 'orders' || m.cmd === 'matchRead' || m.cmd === 'matchSearch') say('자료 읽는 중… (저장 안 함)'); else if (m.cmd !== 'ping') say(m.cmd === 'save' ? '이벗에 반품입고 저장 중… ' + (m.args && m.args.rno || '') : '원송장 주문 찾는 중…');
     Promise.resolve().then(function(){ return run(m.args || {}); }).then(function(data){
       e.source.postMessage({ from: 'ebut-helper', id: m.id, ok: true, data: data }, e.origin);
       if (m.cmd !== 'ping') say('✔ 완료 — 🟢 연결됨');

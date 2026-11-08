@@ -806,6 +806,78 @@
       }
     }
 
+    /* 사은품 세팅 (대표님 2026-11-08): 설정(기간 = 주문 결제일시, 묶음출력 메모, 가격대 → 사은품)대로
+       gift_check = 오늘 출력차수·주문을 읽어 차수 × 가격대별 묶음 수만 계산 (이벗에 쓰지 않음)
+       gift_add   = 사람이 그 건수를 보고 누름. 다시 읽어 같은 건수일 때만 묶음마다 이벗 사은품추가(조건10) 한 번씩,
+                    넣은 뒤 그 주문에 사은품 줄이 생겼는지 다시 읽어 확인. 안 생기면 멈추고 다시 보내지 않음.
+       이미 사은품 줄이 있는 주문은 계산에서 빠지므로 두 번 들어가지 않음. 작업 기록에는 건수만 남김 */
+    function giftLib(){ return (typeof window !== 'undefined' && window.SECRETARY_GIFT) || (typeof require === 'function' ? require('./secretary_gift.js') : null); }
+    async function giftPlan(set){
+      var G = giftLib(), data = await deps.giftRead({ cust: C.MENSO_CUST, date: C.kstDate(deps.now()) });
+      var p = G.plan(set, data.chasu || [], data.rows || []);
+      return { p: p, chasu: data.chasu || [] };
+    }
+    function giftSummary(p){
+      return { orders: p.orders, skip: p.skip, chasu: p.chasu, groups: p.groups.map(function(g){ return { key: g.key, ivno: g.ivno, memo: g.memo, tier: g.tier, label: g.label, orders: g.nos.length, n: g.haps.length }; }) };
+    }
+    async function runGiftCheck(id, cmd){
+      if (!(await bizemBlock(id))) return;
+      var G = giftLib(), why = G.check(cmd.set);
+      if (why.length) { await store.setCommand(id, { status: 'refused', why: why[0], doneAt: deps.now() }); return; }
+      await store.setCommand(id, { status: 'reading' });
+      try {
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
+        if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '이벗: ' + r.msg, doneAt: deps.now() }); return; }
+        var g = await giftPlan(cmd.set);
+        await store.setCommand(id, { status: 'done', gift: Object.assign(giftSummary(g.p), { at: deps.now() }), doneAt: deps.now() });
+      } catch (e) {
+        await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
+      }
+    }
+    async function runGiftAdd(id, cmd){
+      if (deps.now() - cmd.at > C.RELAY_TTL) { await store.setCommand(id, { status: 'expired', doneAt: deps.now() }); return; }
+      var jobs = await bizemBlock(id);
+      if (!jobs) return;
+      var G = giftLib(), now = deps.now(), date = C.kstDate(now), key = C.jobKey('gift_add', date, C.nextRound(jobs, 'gift_add', date));
+      var result = { groups: 0, added: 0 };
+      async function end(state, notes){
+        await store.setJob(key, { state: state, step: '', endedAt: deps.now(), notes: notes, result: result });
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
+      }
+      function why(e){ return String((e && e.message) || e); }
+      await store.setJob(key, { state: 'running', recipe: 'gift_add', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, set: cmd.setId || '', step: '이벗 확인 중', notes: '' });
+      try {
+        await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
+        var bad = G.check(cmd.set);
+        if (bad.length) return end('stopped', bad[0]);
+        var r = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
+        if (r.state !== 'ok') return end('stopped', '이벗: ' + r.msg);
+        await store.setJob(key, { step: '대상 주문 다시 확인 중' });
+        var g = await giftPlan(cmd.set);
+        if (!G.sameCounts(G.counts(g.p), cmd.expect)) return end('stopped', '대상 건수가 화면에서 본 것과 달라져 넣지 않았습니다. 미리 보기를 다시 해 주세요');
+        var groups = g.p.groups;
+        result.total = groups.reduce(function(s, x){ return s + x.haps.length; }, 0);
+        for (var i = 0; i < groups.length; i++) {
+          var gr = groups[i], tier = cmd.set.tiers[gr.tier], label = gr.ivno + '차' + (gr.memo ? '(' + gr.memo + ')' : '') + ' · ' + gr.label;
+          await store.setJob(key, { step: '사은품 넣는 중 · ' + label + ' ' + gr.haps.length + '건', result: result });
+          var out;
+          try { out = await deps.ebutGo('giftAdd', { ivdate: gr.ivdate, ivno: gr.ivno, site: gr.site, nos: gr.nos, hap: gr.haps.length, items: tier.items }); }
+          catch (e) { return end('stopped', label + ': 넣는 중 끊겼습니다. 들어갔을 수 있으니 다시 누르지 말고 이벗에서 먼저 확인해 주세요 (' + why(e) + ')'); }
+          if (!out.ok) return end('stopped', label + ': ' + (out.said || '이벗이 받지 않았습니다'));
+          /* 넣은 뒤 그 주문들에 사은품 줄이 생겼는지 */
+          var after = await giftPlan(cmd.set).catch(function(){ return null; });
+          var still = after ? after.p.groups.filter(function(x){ return x.key === gr.key; }).reduce(function(s, x){ return s + x.haps.length; }, 0) : -1;
+          if (still !== 0) return end('stopped', label + ': 사은품추가를 보냈는데 ' + (still < 0 ? '결과를 다시 읽지 못했습니다' : '아직 사은품 줄이 없는 묶음이 ' + still + '건 있습니다') + '. 다시 보내지 않았습니다. 이벗 작업내역에서 확인해 주세요' + (out.said ? ' (이벗: ' + out.said + ')' : ''));
+          result.groups++; result.added += gr.haps.length;
+        }
+        await end('done', '');
+      } catch (e) {
+        await store.setJob(key, { state: 'interrupted', step: '', endedAt: deps.now(), result: result, notes: '오류: ' + why(e) + '. 이벗에서 먼저 확인해 주세요' }).catch(function(){});
+        await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() }).catch(function(){});
+        throw e;
+      }
+    }
+
     async function process(id, cmd){
       if (!(await store.claimCommand(id))) return;
       var now = deps.now();
@@ -825,6 +897,8 @@
       if (cmd.type === 'ebut_check') return runEbutCheck(id);
       if (cmd.type === 'ebut_collect') return runEbutCollect(id, cmd);
       if (cmd.type === 'bizem_import') return runBizemImport(id, cmd);
+      if (cmd.type === 'gift_check') return runGiftCheck(id, cmd);
+      if (cmd.type === 'gift_add') return runGiftAdd(id, cmd);
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 
