@@ -27,7 +27,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-03e';
+  var VER = '2026-11-08a';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -376,7 +376,7 @@
     return fetch('/site/site217edit_right_jdata?' + q.toString(), { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(r){ return r.text(); }).then(function(t){
         if (!t) throw new Error('LOGIN');
-        return (JSON.parse(t).rows || []).map(function(x){ return { code: String(x.boptcode_code), seq: String(x.basic_seq), name: plain(x.basic_name), nick: plain(x.basic_nicn), opt: plain(x.boptcode_name) }; });
+        return (JSON.parse(t).rows || []).map(function(x){ return { code: String(x.boptcode_code), seq: String(x.basic_seq), name: plain(x.basic_name), nick: plain(x.basic_nicn), opt: plain(x.boptcode_name), stock: /^-?\d+$/.test(String(x.boptcode_qty).trim()) ? Number(x.boptcode_qty) : null }; });   /* boptcode_qty = 이벗 화면 「가용」 열 */
       });
   }
   function matchHistory(cust, name){
