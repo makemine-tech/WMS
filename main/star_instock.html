@@ -67,7 +67,7 @@ h1 em{color:var(--g);font-style:normal}
 .scan-fb.ok{background:rgba(74,240,168,.08);border-color:var(--g);color:var(--g)}
 .scan-fb.er{background:rgba(240,88,88,.08);border-color:var(--r);color:var(--r)}
 .scan-fb.warn{background:rgba(240,196,74,.08);border-color:var(--y);color:var(--y)}
-/* 정상 / 불량·반품 상태 */
+/* 정상 / 불량 상태 */
 .cond-btn{padding:.38rem 1rem;border-radius:7px;border:2px solid var(--br);background:var(--s2);color:var(--mu);font-size:.84rem;font-weight:800;cursor:pointer;transition:all .15s}
 .cond-btn.ok.on{background:rgba(74,240,168,.16);color:var(--g);border-color:var(--g)}
 .cond-btn.def.on{background:var(--o);color:#0f1117;border-color:var(--o)}
@@ -266,13 +266,11 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
   <div class="mode-row">
     <button class="mode-btn in on" id="modeInBtn" onclick="setMode('in')">＋ 입고</button>
     <button class="mode-btn out" id="modeOutBtn" onclick="setMode('out')">－ 출고</button>
-    <span style="font-size:.72rem;color:var(--mu);margin-left:.3rem">바코드를 스캔하면 현재 모드로 기록됩니다</span>
-  </div>
-  <div class="mode-row cond-row">
-    <span style="font-size:.72rem;color:var(--mu);min-width:64px">📦 상태</span>
+    <span style="width:1px;height:28px;background:var(--br);margin:0 .6rem"></span>
+    <span style="font-size:.78rem;color:var(--mu);font-weight:700">상태</span>
     <button class="cond-btn ok on" id="condOkBtn" onclick="setCond('ok')">✓ 정상</button>
-    <button class="cond-btn def" id="condDefBtn" onclick="setCond('def')">⚠ 불량 · 반품</button>
-    <span id="condHint" style="font-size:.72rem;color:var(--mu)">정상 재고로 잡힙니다 (기본)</span>
+    <button class="cond-btn def" id="condDefBtn" onclick="setCond('def')">⚠ 불량</button>
+    <span id="condHint" style="font-size:.72rem;color:var(--mu);margin-left:.3rem">정상 재고로 잡힙니다 (기본)</span>
   </div>
   <div class="scan-lbl">🏷️ 바코드 스캔</div>
   <input type="text" id="scanInp" class="scan-inp" placeholder="바코드를 스캔하세요" autocomplete="off" onkeydown="onScanKey(event)">
@@ -340,7 +338,7 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
     <option value="in">입고 작업</option>
     <option value="out">출고 작업</option>
     <option value="cd">동시입출고만</option>
-    <option value="def">불량·반품만</option>
+    <option value="def">불량만</option>
   </select>
   <input type="text" id="workQ" placeholder="작업명·비고·바코드 검색" oninput="renderWorks()" style="min-width:200px;flex:1;max-width:320px">
   <button class="btn btn-b" style="padding:.4rem .85rem;font-size:.78rem;margin-left:auto" onclick="dlWorkList()">📋 이 목록 엑셀</button>
@@ -2074,7 +2072,7 @@ function setMode(m){
   refreshCondUI();
   document.getElementById('scanInp').focus();
 }
-/* 정상 / 불량·반품 — 불량은 정상 재고(qty)엔 안 잡히고 불량 수량(defQty)으로만 쌓이고 빠진다 */
+/* 정상 / 불량 — 불량은 정상 재고(qty)엔 안 잡히고 불량 수량(defQty)으로만 쌓이고 빠진다 */
 var scanCond = 'ok';   /* 'ok' | 'def' */
 function setCond(c){
   scanCond = c === 'def' ? 'def' : 'ok';
@@ -2091,11 +2089,11 @@ function refreshCondUI(){
   if (h) {
     h.style.color = def ? 'var(--o)' : 'var(--mu)';
     h.textContent = !def ? '정상 재고로 잡힙니다 (기본)'
-      : inMode ? '반품·불량 입고 — 정상 재고엔 안 잡히고 「불량」 수량으로만 쌓입니다'
+      : inMode ? '불량 입고 — 정상 재고엔 안 잡히고 「불량」 수량으로만 쌓입니다'
                : '불량 출고 — 「불량」 수량에서 빠집니다 (회송·폐기 등)';
   }
   var inp = document.getElementById('scanInp');
-  if (inp) inp.placeholder = (inMode ? '＋ 입고' : '－ 출고') + (def ? ' (불량·반품)' : '') + ' — 바코드를 스캔하세요';
+  if (inp) inp.placeholder = (inMode ? '＋ 입고' : '－ 출고') + (def ? ' (불량)' : '') + ' — 바코드를 스캔하세요';
 }
 function flashScan(kind, html){
   var el = document.getElementById('scanFb');
@@ -2136,12 +2134,12 @@ function onScanKey(ev){
     qty: isDef ? 0 : qty,
     note: noteVal
   };
-  /* 불량·반품 — 정상 재고(qty)는 0, 불량(defQty)을 입고면 +, 출고면 − */
+  /* 불량 — 정상 재고(qty)는 0, 불량(defQty)을 입고면 +, 출고면 − */
   if (isDef) { entry.cond = 'defect'; entry.defQty = scanMode === 'in' ? qty : -qty; }
   markSessionBarcode(val);
   pushLog(entry).then(function(){
     /* 갱신은 on('value')가 자동 처리 — 여기선 피드백만 */
-    var label = (scanMode==='in' ? '입고' : '출고') + (isDef ? ' (불량·반품)' : '');
+    var label = (scanMode==='in' ? '입고' : '출고') + (isDef ? ' (불량)' : '');
     var nm = meta.name ? (' · '+meta.name) : (known ? '' : ' · (미등록 바코드)');
     flashScan(isDef ? 'warn' : (scanMode==='in'?'ok':'warn'),
       (scanMode==='in'?'＋ ':'－ ') + label + ' ' + qty + '개 · ' + escH(val) + nm);
@@ -2199,7 +2197,7 @@ function renderLog(){
         }
       }
       var isDefLg = lg.cond === 'defect' || (!(+lg.qty) && +lg.defQty);
-      if (isDefLg) tag += ' <span class="tag tag-def">불량·반품</span>';
+      if (isDefLg) tag += ' <span class="tag tag-def">불량</span>';
       var note = lg.note || '';
       var cancelCell = '';
       if (isAdmin) {
