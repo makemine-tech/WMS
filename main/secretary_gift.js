@@ -1,7 +1,7 @@
 /* ============================================================
    사은품 세팅 — 대상 계산 (secretary.html 짝꿍, 브라우저·Node 공용, 대표님 2026-11-08)
 
-   설정 하나 = 기간(주문 결제일시 시작 ~ 종료) + 묶음출력 메모(모두 / aaa·hhh·mmm …) + 가격대 줄(이상 ~ 미만 → 사은품 매칭상품).
+   설정 하나 = 기간(주문 결제일시 시작 ~ 종료) + 묶음출력 메모(모두 / aaa·hhh·mmm …) + 판매처(모두 / 고른 판매처) + 가격대 줄(이상 ~ 미만 → 사은품 매칭상품).
    금액 = 주문번호별 판매금액 합(주문 전체, 배송비 제외). 주문당 사은품은 하나(가장 높은 구간 하나).
    이미 사은품 줄이 있는 주문은 빼서 두 번 들어가지 않게 함.
    이벗에는 출력차수 × 가격대 묶음마다 사은품추가 「조건10」(주문번호 목록)으로 넣는다.
@@ -27,6 +27,7 @@
     else if (a >= b) why.push('종료 일시가 시작보다 뒤여야 합니다');
     var memos = set.memos || [];
     if (!set.all && !memos.length) why.push('증정할 묶음출력을 고르세요');
+    if (set.siteAll === false && !(set.sites || []).length) why.push('증정할 판매처를 고르세요');
     var tiers = set.tiers || [];
     if (!tiers.length) why.push('가격대를 하나 이상 넣어 주세요');
     tiers.forEach(function(t, i){
@@ -44,6 +45,8 @@
 
   /* 종료 일시가 지난 설정은 쓰지 않고 지움 (대표님 2026-11-08: 한 번 세팅하면 종료일까지 그대로, 지나면 자동으로 사라짐) */
   function expired(set, now){ var b = kstMs(set && set.end); return isFinite(b) && now > b; }
+  /* 판매처: siteAll 이 없으면(판매처 칸 생기기 전 설정) 모두 */
+  function siteOk(set, site){ return set.siteAll !== false || (set.sites || []).map(String).indexOf(String(site)) >= 0; }
   function tierOf(set, amt){
     var best = -1, bestLo = -1;
     (set.tiers || []).forEach(function(t, i){
@@ -60,7 +63,7 @@
   /* chasu = [{ date:'20261108', ivno:'1', cnt, memo, site, cust }], rows = 이벗 주문 줄 [{ no, hap, ivdate, ivno, odate, amt, gift }]
      → { groups:[{ key, ivdate, ivno, site, memo, tier, label, nos:[주문번호], haps:[묶음번호] }] — 이벗은 묶음마다 사은품 하나, skip:{ period, range, already }, orders } */
   function plan(set, chasu, rows){
-    var pick = {}, out = { groups: [], skip: { period: 0, range: 0, already: 0, nodate: 0 }, orders: 0, chasu: [] };
+    var pick = {}, out = { groups: [], skip: { period: 0, range: 0, already: 0, nodate: 0, site: 0 }, orders: 0, chasu: [] };
     var memos = (set.memos || []).map(function(m){ return String(m).trim(); });
     (chasu || []).forEach(function(c){
       if (set.all || memos.indexOf(String(c.memo || '').trim()) >= 0) { pick[c.date + '|' + c.ivno] = c; out.chasu.push({ ivno: c.ivno, memo: c.memo || '', cnt: c.cnt }); }
@@ -70,13 +73,14 @@
       var k = r.ivdate + '|' + r.ivno;
       if (!pick[k] || !r.no) return;
       var o = orders[r.no];
-      if (!o) { o = orders[r.no] = { no: r.no, k: k, amt: 0, gift: false, odate: r.odate, hap: r.hap || r.no }; order.push(o); }
+      if (!o) { o = orders[r.no] = { no: r.no, k: k, amt: 0, gift: false, odate: r.odate, hap: r.hap || r.no, site: r.site != null ? r.site : pick[k].site }; order.push(o); }
       if (r.gift) o.gift = true; else o.amt += Number(r.amt) || 0;
       if (!o.odate && r.odate) o.odate = r.odate;
     });
     var groups = {};
     order.forEach(function(o){
       out.orders++;
+      if (!siteOk(set, o.site)) { out.skip.site++; return; }
       var t = Date.parse(o.odate);
       if (!isFinite(t)) { out.skip.nodate++; return; }
       if (t < a || t > b) { out.skip.period++; return; }
@@ -98,7 +102,7 @@
     return ka.length === kb.length && ka.every(function(k, i){ return k === kb[i] && Number(a[k]) === Number(b[k]); });
   }
 
-  var api = { kstMs: kstMs, expired: expired, check: check, plan: plan, tierOf: tierOf, tierLabel: tierLabel, counts: counts, sameCounts: sameCounts };
+  var api = { kstMs: kstMs, expired: expired, siteOk: siteOk, check: check, plan: plan, tierOf: tierOf, tierLabel: tierLabel, counts: counts, sameCounts: sameCounts };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.SECRETARY_GIFT = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -815,7 +815,7 @@
     async function giftPlan(set){
       var G = giftLib(), data = await deps.giftRead({ cust: C.MENSO_CUST, date: C.kstDate(deps.now()) });
       var p = G.plan(set, data.chasu || [], data.rows || []);
-      return { p: p, chasu: data.chasu || [] };
+      return { p: p, chasu: data.chasu || [], sites: data.sites || [] };
     }
     function giftSummary(p){
       return { orders: p.orders, skip: p.skip, chasu: p.chasu, groups: p.groups.map(function(g){ return { key: g.key, ivno: g.ivno, memo: g.memo, tier: g.tier, label: g.label, orders: g.nos.length, n: g.haps.length }; }) };
@@ -829,7 +829,7 @@
         var r = await checkOne(C.SITES.find(function(s){ return s.id === 'ebut'; }));
         if (r.state !== 'ok') { await store.setCommand(id, { status: 'refused', why: '이벗: ' + r.msg, doneAt: deps.now() }); return; }
         var g = await giftPlan(cmd.set);
-        await store.setCommand(id, { status: 'done', gift: Object.assign(giftSummary(g.p), { at: deps.now() }), doneAt: deps.now() });
+        await store.setCommand(id, { status: 'done', gift: Object.assign(giftSummary(g.p), { at: deps.now(), sites: g.sites }), doneAt: deps.now() });
       } catch (e) {
         await store.setCommand(id, { status: 'refused', why: String((e && e.message) || e), doneAt: deps.now() });
       }

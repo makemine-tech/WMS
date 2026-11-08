@@ -29,7 +29,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-08b';
+  var VER = '2026-11-08c';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -592,9 +592,12 @@
       chasu = chasu.filter(function(c){ return String(c.cust) === String(a.cust); });
       return orderAll('1', { cust: a.cust, from: a.date, to: a.date, dateGbn: 'ord_ivdate' }).then(function(o){
         var rows = o.rows.filter(function(x){ return ymd8(x.ordlist_ivdate) === ymd8(a.date); }).map(function(x){
-          return { no: String(x.ordlist_no1 || ''), hap: String(x.ordlist_hapno || ''), ivdate: ymd8(x.ordlist_ivdate), ivno: String(x.ordlist_ivno || ''), odate: String(x.ordlist_odate || ''), amt: Number(x.ordlist_amt1) || 0, gift: plain(x.ordlist_name) === '사은품' };
+          return { no: String(x.ordlist_no1 || ''), hap: String(x.ordlist_hapno || ''), ivdate: ymd8(x.ordlist_ivdate), ivno: String(x.ordlist_ivno || ''), odate: String(x.ordlist_odate || ''), amt: Number(x.ordlist_amt1) || 0, gift: plain(x.ordlist_name) === '사은품', site: String(x.ordlist_site_ori || x.ordlist_site || '') };
         });
-        return { chasu: chasu, rows: rows, ver: VER };
+        return fetch('/util/SearchInputData?' + new URLSearchParams({ gbn: 'site', site_cust: String(a.cust) }), { credentials: 'include' }).then(function(r){ return r.json(); }).catch(function(){ return { rows: [] }; }).then(function(j){
+          var sites = (j.rows || []).map(function(x){ return { code: String(x.site_code), name: plain(x.site_name) }; });
+          return { chasu: chasu, rows: rows, sites: sites, ver: VER };
+        });
       });
     });
   }

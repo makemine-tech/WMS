@@ -33,7 +33,7 @@ test('설정 확인: 기간·묶음출력·가격대·겹침', () => {
 test('대상 계산: 결제일시 기간, 주문 전체 금액, 이미 사은품 있으면 뺌, 고른 메모 차수만', () => {
   const p = G.plan(SET, CHASU, ROWS);
   assert.strictEqual(p.orders, 5);
-  assert.deepStrictEqual(p.skip, { period: 1, range: 1, already: 1, nodate: 0 });
+  assert.deepStrictEqual(p.skip, { period: 1, range: 1, already: 1, nodate: 0, site: 0 });
   assert.deepStrictEqual(p.groups.map((g) => [g.key, g.nos]), [['1|0', ['A']], ['1|1', ['B']]]);
   assert.strictEqual(p.groups[0].label, '10,000원 이상 ~ 20,000원 미만');
   const all = G.plan(Object.assign({}, SET, { all: true }), CHASU, ROWS);
@@ -149,4 +149,14 @@ test('종료 일시가 지난 설정은 쓰지 않음', async () => {
   await runner.handleCommand('c', cmd('gift_check', { set: Object.assign({}, SET, { end: '2026-11-07T23:59' }) }));
   assert.strictEqual(db.commands.c.status, 'refused');
   assert.match(db.commands.c.why, /종료 일시/);
+});
+
+test('판매처: 고른 판매처 주문만, 판매처 칸 없던 설정은 모두', () => {
+  const rows = [row('A', '1', 12000, null, { site: '14374' }), row('B', '1', 12000, null, { site: '26050' })];
+  const only = G.plan(Object.assign({}, SET, { siteAll: false, sites: ['26050'] }), CHASU, rows);
+  assert.deepStrictEqual(only.groups[0].nos, ['B']);
+  assert.strictEqual(only.skip.site, 1);
+  assert.strictEqual(G.plan(SET, CHASU, rows).groups[0].nos.length, 2, '예전 설정(siteAll 없음)은 모두');
+  assert.strictEqual(G.plan(Object.assign({}, SET, { siteAll: true }), CHASU, rows).groups[0].nos.length, 2);
+  assert.ok(G.check(Object.assign({}, SET, { siteAll: false, sites: [] })).some((w) => /판매처/.test(w)));
 });
