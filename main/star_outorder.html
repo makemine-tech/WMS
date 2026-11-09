@@ -285,6 +285,10 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-resume-banner .rb-row{display:flex;align-items:center;gap:.55rem;padding:.5rem .65rem;background:rgba(15,17,23,.4);border:1px solid rgba(240,196,74,.3);border-radius:7px;margin-bottom:.4rem;flex-wrap:wrap}
 .cp-resume-banner .rb-row:last-child{margin-bottom:0}
 .cp-resume-banner .rb-row.mine{border-color:var(--g);background:rgba(74,240,168,.06)}
+.cp-resume-banner .rb-merge-cb{display:flex;flex-direction:column;align-items:center;gap:.1rem;font-size:.66rem;color:#8cc4ff;cursor:pointer;padding:0 .2rem}
+.cp-resume-banner .rb-merge-cb input{width:20px;height:20px;cursor:pointer;accent-color:#4ea8ff}
+.cp-resume-banner .rb-merge-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.2rem 0 .5rem;font-size:.74rem;color:var(--mu)}
+.cp-resume-banner .rb-merge-bar .btn[disabled]{opacity:.45;cursor:not-allowed}
 .cp-resume-banner .rb-row .rb-info{flex:1;min-width:220px;color:var(--tx);font-size:.84rem}
 .cp-resume-banner .rb-row .rb-info b{color:var(--y);font-weight:900}
 .cp-resume-banner .rb-row.mine .rb-info b{color:var(--g)}
@@ -3435,6 +3439,14 @@ function cpAttachSessionListener(){
     }
     /* 아직 못 올린 스캔이 있으면 원격 값이 로컬 대기목록을 덮지 않게 한다 —
        이걸 안 막으면 저장 직전 스냅샷이 방금 찍은 수량을 되돌린다 */
+    if (v.status === 'merged' && v.mergedInto) {
+      var _into = v.mergedInto;
+      try { workSessionRef.off(); } catch(_){}
+      workSessionRef = null; workSession = null;
+      setMsg('cpScanMsg','warn','🔗 이 작업파일은 다른 작업파일과 묶였습니다 — 묶은 작업으로 옮겨 갑니다');
+      cpResumeSession(_into);
+      return;
+    }
     if (cpSavePending() && workSession) v.staging = workSession.staging || [];
     workSession = v;
     cpRefreshSessionHdr();
@@ -3869,7 +3881,11 @@ function cpShowResumeBanner(sessions, mineId, targetId){
       ? '<button class="btn btn-b" onclick="cpGoCurrentSession()">▶ 작업 화면으로</button>'
       : '<button class="btn btn-g" onclick="cpResumeSession(\''+sid+'\')">'+(curId ? '이 파일로 바꾸기' : '이어서 작업')+'</button>'+
         '<button class="btn btn-r" onclick="cpDiscardSession(\''+sid+'\')">버리기</button>';
+    var mergeCb = sessions.length > 1
+      ? '<label class="rb-merge-cb" title="체크해서 다른 작업파일과 한 작업으로 묶기"><input type="checkbox"'+(cpMergeSel[s.sessionId]?' checked':'')+' onchange="cpMergeToggle(\''+sid+'\', this.checked)"><span>묶기</span></label>'
+      : '';
     return '<div class="rb-row'+(isCur?' cur':(isMine?' mine':''))+'">'+
+      mergeCb +
       '<div class="rb-info">'+
         statusBadge + ' · <b>' + escH(s.vendor||'(업체 미입력)') + '</b>' +
         (s.poFileName ? ' <span style="color:var(--tx);font-size:.78rem">📄 '+escH(s.poFileName)+'</span>' : '') +
@@ -3882,11 +3898,19 @@ function cpShowResumeBanner(sessions, mineId, targetId){
   }).join('');
   var multi = sessions.length > 1;
   var tgt = isPicker ? 'picker' : 'banner';
+  /* 목록에서 사라진 작업파일은 선택에서 뺀다 */
+  Object.keys(cpMergeSel).forEach(function(id){ if (!sessions.some(function(s){ return s.sessionId === id; })) delete cpMergeSel[id]; });
+  var selN = Object.keys(cpMergeSel).length;
+  var mergeBar = multi
+    ? '<div class="rb-merge-bar"><button class="btn btn-b rb-merge-btn" onclick="cpMergeSessions()"'+(selN < 2 ? ' disabled' : '')+'>🔗 선택한 '+selN+'개 한 작업으로 묶기</button>'+
+      '<span>같은 제품군의 16일 출고분·17일 출고분처럼 따로 등록된 작업파일을 체크해서 한 번에 작업합니다. 입고일이 다르면 센터가 「16일-인천4」「17일-인천4」로 나뉩니다.</span></div>'
+    : '';
   b.innerHTML =
     '<div class="rb-hdr">' + (isPicker ? '📂 작업파일 선택 — ' : '🔁 ') + '진행 중 작업파일 ' + sessions.length + '개' + (isPicker ? '' : ' — 이어서 작업하거나 버리세요') +
       (isPicker ? '<button class="rb-refresh" onclick="cpToggleSessPicker(false)" style="margin-left:.3rem">닫기</button>' : '') +
       '<button class="rb-refresh" onclick="cpCheckResumeOnAttach(\''+tgt+'\')" title="방금 등록한 작업파일까지 다시 불러오기">⟳ 새로고침</button>' +
     '</div>' +
+    mergeBar +
     rowsHtml +
     '<div class="rb-hint">' + (multi ? '여러 PC 에서 시작된 세션이 있을 수 있습니다. ' : '') + '※ "버리기" 누르면 abandoned 처리되어 다시 이어작업 못 합니다.</div>';
 }
@@ -4001,6 +4025,191 @@ function cpDiscardSession(sessionId){
     cpShowResumeBanner(cpDiscoveredSessions, mineId, pickerOpen ? 'cpSessPicker' : 'cpResumeBanner');
     setMsg(pickerOpen ? 'cpScanMsg' : 'cpMsg','inf','세션 버림: '+sessionId);
   }).catch(function(err){ setMsg('cpMsg','er','❌ 버리기 실패: '+(err && err.message||err)); });
+}
+
+/* ═══════════ 진행 중 작업파일 묶기 ═══════════
+ * 이미 등록된 작업파일(세션) 여러 개를 골라 한 작업으로 합친다.
+ * 예: 16일 출고분 파일 + 17일 출고분 파일 → 한 번에 스캔.
+ *  - 줄(rows)을 이어 붙이고, 스캔·입고대기·처리대기의 줄 번호(srcIdx/overIdx)를 밀어 준다.
+ *  - 입고일이 2가지 이상이면 센터를 '16일-인천4' 로 바꾸고, 파렛트·출고박스·기록의 센터도 같이 바꾼다.
+ *  - 자동으로 만든 출고박스 번호(인천4-001)는 새 센터 이름으로 다시 매긴다 (원본 박스바코드는 그대로).
+ *  - 원래 작업파일은 지우지 않고 status='merged', mergedInto=새 ID 로 남긴다. */
+var cpMergeSel = {};
+function cpMergeToggle(sid, on){
+  if (on) cpMergeSel[sid] = 1; else delete cpMergeSel[sid];
+  var n = Object.keys(cpMergeSel).length;
+  document.querySelectorAll('.rb-merge-btn').forEach(function(b){
+    b.disabled = n < 2;
+    b.textContent = '🔗 선택한 ' + n + '개 한 작업으로 묶기';
+  });
+}
+/* 세션 여러 개 → 합친 세션 (순수 계산 — 저장은 따로) */
+function cpBuildMergedSession(list, newSid, by){
+  var now = Date.now();
+  var rows = [], offs = [];
+  list.forEach(function(s){
+    offs.push(rows.length);
+    (s.rows || []).forEach(function(r){
+      var c = {}; Object.keys(r).forEach(function(k){ c[k] = r[k]; });
+      if (c.origCenter === undefined || c.origCenter === null) c.origCenter = c.center || '';
+      c.srcSession = c.srcSession || s.sessionId;
+      c.srcFile = c.srcFile || s.poFileName || '';
+      c._oldCenter = r.center || '';
+      rows.push(c);
+    });
+  });
+  cpApplyDateCenters(rows);
+  /* (세션, 입고일, 옛 센터) → 새 센터 */
+  var cmaps = list.map(function(){ return {}; });
+  rows.forEach(function(r, i){
+    var si = 0; for (var k = 0; k < offs.length; k++) if (i >= offs[k]) si = k;
+    cmaps[si][String(r.eta||'') + '|' + r._oldCenter] = r.center;
+    delete r._oldCenter;
+  });
+  function ctrOf(si, eta, center){
+    if (!center) return center;
+    var m = cmaps[si];
+    var v = m[String(eta||'') + '|' + center];
+    if (v !== undefined) return v;
+    /* 입고일이 비어 있는 기록 — 같은 옛 센터가 한 가지 새 이름으로만 바뀌었으면 그걸로 */
+    var cand = {};
+    Object.keys(m).forEach(function(k){ if (k.slice(k.indexOf('|') + 1) === center) cand[m[k]] = 1; });
+    var ks = Object.keys(cand);
+    return ks.length === 1 ? ks[0] : center;
+  }
+  /* 출고박스 — 자동 번호는 새 센터 이름으로 다시 매김 */
+  var boxes = [], bmaps = list.map(function(){ return {}; }), usedNo = {};
+  function nextNo(center){
+    var prefix = String(center || 'BOX').trim(), n = 1;
+    while (usedNo[prefix + '-' + pad3(n)]) n++;
+    return prefix + '-' + pad3(n);
+  }
+  list.forEach(function(s, si){
+    (s.shipBoxes || []).forEach(function(b){
+      if (b.srcBoxBarcode && b.srcBoxBarcode === b.boxNo) { usedNo[b.boxNo] = 1; }
+    });
+  });
+  list.forEach(function(s, si){
+    (s.shipBoxes || []).forEach(function(b){
+      var c = {}; Object.keys(b).forEach(function(k){ c[k] = b[k]; });
+      c.center = ctrOf(si, b.eta, b.center);
+      if (!(b.srcBoxBarcode && b.srcBoxBarcode === b.boxNo)) {
+        var nn = nextNo(c.center);
+        bmaps[si][b.boxNo] = nn;
+        c.boxNo = nn;
+        usedNo[nn] = 1;
+      }
+      c.srcSession = s.sessionId;
+      boxes.push(c);
+    });
+  });
+  function fixItem(x, si){
+    var c = {}; Object.keys(x).forEach(function(k){ c[k] = x[k]; });
+    if (c.srcIdx != null && c.srcIdx >= 0) c.srcIdx = +c.srcIdx + offs[si];
+    if (c.overIdx != null && c.overIdx >= 0) c.overIdx = +c.overIdx + offs[si];
+    if (c.palletCenter) c.palletCenter = ctrOf(si, c.palletEta, c.palletCenter);
+    if (c.center) c.center = ctrOf(si, c.eta || c.palletEta, c.center);
+    if (c.shipBoxNo && bmaps[si][c.shipBoxNo]) c.shipBoxNo = bmaps[si][c.shipBoxNo];
+    if (c.boxNo && bmaps[si][c.boxNo]) c.boxNo = bmaps[si][c.boxNo];
+    return c;
+  }
+  var scans = [], staging = [], pending = [], hold = [], pallets = [], pc = {}, pbo = {};
+  list.forEach(function(s, si){
+    (s.scans || []).forEach(function(x){ scans.push(fixItem(x, si)); });
+    (s.staging || []).forEach(function(x){ staging.push(fixItem(x, si)); });
+    (s.pending || []).forEach(function(x){ pending.push(fixItem(x, si)); });
+    (s.holdPool || []).forEach(function(x){ hold.push(x); });
+    (s.pallets || []).forEach(function(p){
+      var c = fixItem(p, si);
+      c.key = cpPalletKey(c.eta, c.center);
+      pallets.push(c);
+    });
+    Object.keys(s.palletCounters || {}).forEach(function(k){
+      var i = k.indexOf('|'), eta = k.slice(0, i), ctr = k.slice(i + 1);
+      var nk = cpPalletKey(eta, ctrOf(si, eta, ctr));
+      pc[nk] = Math.max(pc[nk] || 0, +s.palletCounters[k] || 0);
+    });
+    Object.keys(s.palletBoxOverride || {}).forEach(function(k){
+      var p = k.split('|'); if (p.length < 3) { pbo[k] = s.palletBoxOverride[k]; return; }
+      var no = p.pop(), eta = p.shift(), ctr = p.join('|');
+      pbo[cpPalletKey(eta, ctrOf(si, eta, ctr)) + '|' + no] = s.palletBoxOverride[k];
+    });
+  });
+  scans.sort(function(a, b){ return (a.ts||0) - (b.ts||0); });
+  function uniqJoin(arr, sep){ var o = []; arr.forEach(function(v){ v = String(v||'').trim(); if (v && o.indexOf(v) < 0) o.push(v); }); return o.join(sep); }
+  return {
+    sessionId: newSid,
+    status: 'paused',
+    createdAt: Math.min.apply(null, list.map(function(s){ return s.createdAt || now; })),
+    createdBy: by,
+    updatedAt: now,
+    mergedAt: now, mergedBy: by,
+    mergedFrom: list.map(function(s){ return s.sessionId; }),
+    vendor: uniqJoin(list.map(function(s){ return s.vendor; }), ' / '),
+    vendorCode: uniqJoin(list.map(function(s){ return s.vendorCode; }), ' / '),
+    note: uniqJoin(list.map(function(s){ return s.note; }), ' / '),
+    poFileName: uniqJoin(list.map(function(s){ return s.poFileName; }), ' + '),
+    uploadedAt: Math.min.apply(null, list.map(function(s){ return s.uploadedAt || now; })),
+    uploadedAts: list.map(function(s){ return s.uploadedAt || 0; }),
+    rows: rows, scans: scans, staging: staging, pending: pending,
+    shipBoxes: boxes, palletCounters: pc, pallets: pallets, palletBoxOverride: pbo,
+    holdPool: hold
+  };
+}
+function cpMergeSessions(){
+  var ids = Object.keys(cpMergeSel).filter(function(id){ return cpDiscoveredSessions.some(function(s){ return s.sessionId === id; }); });
+  if (ids.length < 2) { alert('묶을 작업파일을 2개 이상 체크하세요.'); return; }
+  if (!groupId || typeof firebase === 'undefined') return;
+  /* 오래된 것부터 (먼저 시작한 작업이 앞 줄) */
+  ids.sort(function(a, b){
+    var sa = cpDiscoveredSessions.find(function(s){ return s.sessionId === a; }) || {};
+    var sb = cpDiscoveredSessions.find(function(s){ return s.sessionId === b; }) || {};
+    return (sa.createdAt||0) - (sb.createdAt||0);
+  });
+  var curId = workSession && workSession.sessionId;
+  if (curId && ids.indexOf(curId) >= 0) cpFlushSessionSave();
+  var base = 'wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/';
+  Promise.all(ids.map(function(id){ return firebase.database().ref(base + id).once('value'); })).then(function(snaps){
+    var list = snaps.map(function(sn, i){
+      var v = sn.val() || {};
+      if (ids[i] === curId && workSession) v = workSession;   /* 지금 화면의 작업은 로컬이 최신 */
+      v.sessionId = v.sessionId || ids[i];
+      return v;
+    });
+    var bad = list.filter(function(s){ return s.status !== 'active' && s.status !== 'paused'; });
+    if (bad.length) { alert('이미 끝났거나 버린 작업파일이 섞여 있습니다:\n' + bad.map(function(s){ return s.sessionId; }).join('\n') + '\n\n⟳ 새로고침 후 다시 고르세요.'); return; }
+    var vendors = {}; list.forEach(function(s){ vendors[(s.vendor||'').trim() || '(업체 미입력)'] = 1; });
+    var newSid = cpNewSessionId();
+    var merged = cpBuildMergedSession(list, newSid, getUserId());
+    var etas = {}; merged.rows.forEach(function(r){ if (r.eta) etas[r.eta] = 1; });
+    var nEta = Object.keys(etas).length;
+    var lines = ['🔗 작업파일 ' + list.length + '개를 한 작업으로 묶습니다', ''];
+    list.forEach(function(s){
+      lines.push('• ' + (s.poFileName || s.sessionId) + ' — ' + (s.rows||[]).length + '줄 · 스캔 ' + (s.scans||[]).length + '건');
+    });
+    lines.push('');
+    if (Object.keys(vendors).length > 1) lines.push('⚠ 업체가 서로 다릅니다: ' + Object.keys(vendors).join(', '), '');
+    if (nEta > 1) lines.push('입고일 ' + nEta + '가지 → 센터를 「날짜-센터」(예: 16일-인천4)로 나눠서 파렛트·출고박스가 따로 잡힙니다.', '');
+    lines.push('지금까지 찍은 스캔·입고대기·처리대기·출고박스·파렛트는 그대로 옮겨집니다.',
+               '원래 작업파일은 「묶음으로 옮김」으로 남고 목록에서 빠집니다.',
+               '⚠ 다른 PC 에서 이 파일들로 스캔 중이면 먼저 멈춘 뒤 묶으세요.', '', '묶을까요?');
+    if (!confirm(lines.join('\n'))) return;
+    var upd = {}, now = Date.now(), by = getUserId();
+    upd[base + newSid] = merged;
+    ids.forEach(function(id){
+      upd[base + id + '/status'] = 'merged';
+      upd[base + id + '/mergedInto'] = newSid;
+      upd[base + id + '/mergedAt'] = now;
+      upd[base + id + '/mergedBy'] = by;
+    });
+    if (curId && ids.indexOf(curId) >= 0 && workSessionRef) { try { workSessionRef.off(); } catch(_){} workSessionRef = null; workSession = null; }
+    firebase.database().ref().update(upd).then(function(){
+      cpMergeSel = {};
+      cpDiscoveredSessions = cpDiscoveredSessions.filter(function(s){ return ids.indexOf(s.sessionId) < 0; });
+      cpResumeSession(newSid);
+      setTimeout(function(){ setMsg('cpScanMsg','ok','🔗 작업파일 ' + ids.length + '개를 한 작업으로 묶었습니다 — ' + escH(merged.poFileName) + (nEta > 1 ? ' · 센터를 날짜-센터로 나눔' : '')); }, 600);
+    }).catch(function(err){ alert('묶기 실패: ' + (err && err.message || err)); });
+  }).catch(function(err){ alert('작업파일 읽기 실패: ' + (err && err.message || err)); });
 }
 
 /* ── 스캔 모드 토글 (Step 2-B 에서 본격 사용) ── */
