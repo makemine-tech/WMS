@@ -191,6 +191,10 @@ h1 em{color:var(--g);font-style:normal}
 .cp-drop{display:flex;align-items:center;gap:.55rem;border:1.5px dashed rgba(255,184,74,.45);background:rgba(255,184,74,.04);border-radius:9px;padding:.85rem 1.1rem;font-size:.84rem;color:rgba(255,184,74,.95);cursor:pointer;position:relative;overflow:hidden;transition:background .15s,border-color .15s}
 .cp-drop:hover{background:rgba(255,184,74,.08);border-color:rgba(255,184,74,.8)}
 .cp-drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.cp-drop-add{border-color:rgba(46,196,182,.55);background:rgba(46,196,182,.05);color:#2ec4b6;font-size:.8rem}
+.cp-drop-add:hover{background:rgba(46,196,182,.1);border-color:#2ec4b6}
+.cp-dc-badge{display:inline-block;font-weight:900;border:2px solid;border-radius:6px;padding:0 .4rem;font-size:.8rem;line-height:1.45;letter-spacing:.01em;white-space:nowrap;vertical-align:middle}
+.cp-dc-badge.big{font-size:1.02rem;padding:.08rem .55rem;border-width:2.5px}
 .cp-drop.has-file{background:rgba(74,240,168,.06);border-color:var(--g);color:var(--g)}
 .cp-meta{font-size:.7rem;color:var(--mu);margin-top:.45rem;font-family:var(--mo)}
 .cp-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.85rem}
@@ -795,6 +799,14 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
   font-family:Arial,sans-serif;
   padding-left:1mm;
 }
+/* 묶은 작업 — 입고일이 붙은 센터는 테두리로 눈에 띄게 ('16일 인4') */
+.prod-label .pl-ctr-tag.dated{
+  border:.35mm solid #000;
+  border-radius:.8mm;
+  padding:.3mm 1mm;
+  margin-left:1mm;
+  font-size:10pt;
+}
 
 @media print {
   body.printing-product-label > *{visibility:hidden}
@@ -1387,8 +1399,13 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <div class="cp-hero-title">② 쿠팡 발주 엑셀 업로드 (쿠팡 양식 그대로 사용)</div>
       <label class="cp-drop" id="cpDrop">
         <span style="font-size:1.4rem">📤</span>
-        <span id="cpDropLabel">쿠팡 발주 엑셀(.xlsx) 선택 또는 드래그</span>
-        <input type="file" accept=".xlsx,.xls" onchange="cpHandleExcel(this.files[0]);this.value='';">
+        <span id="cpDropLabel">쿠팡 발주 엑셀(.xlsx) 선택 또는 드래그 — 새 작업 (여러 개를 고르면 한 작업으로 묶음)</span>
+        <input type="file" accept=".xlsx,.xls" multiple onchange="cpHandleExcelFiles(this.files, false);this.value='';">
+      </label>
+      <label class="cp-drop cp-drop-add" id="cpAddFileBox" style="display:none;margin-top:.5rem" title="지금 올린 작업에 다른 발주 파일을 묶어서 한 번에 같이 작업합니다">
+        <span style="font-size:1.25rem">🔗</span>
+        <span><b>같이 작업할 파일 추가</b> — 예: 16일 출고분에 17일 출고분 묶기. 날짜가 다르면 센터가 「16일-인천4」「17일-인천4」로 나뉘어 파렛트가 따로 잡힙니다</span>
+        <input type="file" accept=".xlsx,.xls" multiple onchange="cpHandleExcelFiles(this.files, true);this.value='';">
       </label>
       <div class="cp-meta">필수 열: 발주번호 · SKU ID · 상품명 · 바코드 · 물류센터 · 입고예정일 · 확정수량 · 박스수 · 파렛트수 · 파렛트번호 · 유통기한</div>
       <div class="cp-meta" id="cpFileInfo" style="display:none;color:var(--g)"></div>
@@ -2040,7 +2057,7 @@ var CP_HEADER_ALIASES = {
   palletN:  ['파렛트번호', '팔레트번호'],
   expiry:   ['유통(소비)기한', '유통기한', '소비기한']
 };
-var cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{} };
+var cpState = { vendor:'', vendorCode:'', note:'', rows:[], files:[], fileName:'', uploadedAt:0, asIs:{} };
 var cpFilter = 'all';  /* 'all'|'fit'|'short'|'zero' — 카운터 카드 클릭 필터 */
 
 /* ─────────────── 쿠팡 스캔 세션 (Step 2) ─────────────── */
@@ -2083,9 +2100,75 @@ function cpFmtEta(raw){
   }
   return String(raw).trim();
 }
-function cpHandleExcel(file){
-  if (!file) return;
-  if (typeof XLSX === 'undefined') { setMsg('cpMsg','er','❌ XLSX 라이브러리 로딩 실패'); return; }
+/* ── 작업 묶기 ──
+ * 쿠팡 발주 파일 여러 개(예: 16일 입고분 + 17일 입고분)를 한 작업으로 묶어 한 번에 진행한다.
+ * 입고예정일이 2가지 이상 섞이면 센터 이름 앞에 날짜를 붙인다 ('인천4' → '16일-인천4').
+ * 그러면 같은 센터라도 날짜가 다르면 박스·파렛트·출고박스·라벨이 전부 따로 잡힌다.
+ * 원래 센터 이름은 origCenter 에 남는다. */
+function cpEtaParts(eta){
+  var m = String(eta||'').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
+  if (!m) return null;
+  return { y:+m[1], m:+m[2], d:+m[3] };
+}
+function cpEtaKey(eta){ var p = cpEtaParts(eta); return p ? (p.y*10000 + p.m*100 + p.d) : 0; }
+/* 작업 안 입고예정일 → 날짜 이름 { eta: '16일' } (같은 '일'이 두 달에 걸치면 '11/16일') */
+function cpEtaLabelMap(rows){
+  var seen = {}, list = [];
+  (rows||[]).forEach(function(r){ var e = String(r.eta||''); if (e && !seen[e]) { seen[e] = 1; list.push(e); } });
+  var dayCnt = {};
+  list.forEach(function(e){ var p = cpEtaParts(e); var k = p ? p.d : e; dayCnt[k] = (dayCnt[k]||0) + 1; });
+  var map = {};
+  list.forEach(function(e){
+    var p = cpEtaParts(e);
+    map[e] = p ? ((dayCnt[p.d] > 1 ? p.m + '/' : '') + p.d + '일') : e;
+  });
+  return { map: map, count: list.length };
+}
+function cpEtaLabel(eta){ var p = cpEtaParts(eta); return p ? p.d + '일' : String(eta||''); }
+/* 날짜가 2가지 이상이면 center = '16일-인천4', 1가지면 원래 이름 그대로. 날짜 수를 돌려준다 */
+function cpApplyDateCenters(rows){
+  var lm = cpEtaLabelMap(rows);
+  (rows||[]).forEach(function(r){
+    if (r.origCenter === undefined || r.origCenter === null) r.origCenter = r.center || '';
+    r.center = (lm.count > 1 && r.eta && r.origCenter) ? (lm.map[r.eta] || r.eta) + '-' + r.origCenter : r.origCenter;
+  });
+  return lm.count;
+}
+/* '16일-인천4' 처럼 날짜 붙은 센터면 날짜 부분 */
+function cpCtrDatePart(center){
+  var m = String(center||'').match(/^((?:\d{1,2}\/)?\d{1,2}일)-/);
+  return m ? m[1] : '';
+}
+/* 날짜마다 다른 색 — 작업 안 입고일 순서대로 */
+var CP_DC_COLORS = ['#ff9f1c','#2ec4b6','#ff4d6d','#9b7bff','#4ea8ff','#8ac926','#ff7ab6','#ffd23f'];
+function cpDcColor(eta){
+  var rows = (workSession && workSession.rows) || cpState.rows || [];
+  var list = [];
+  rows.forEach(function(r){ var e = String(r.eta||''); if (e && list.indexOf(e) < 0) list.push(e); });
+  list.sort(function(a,b){ return cpEtaKey(a) - cpEtaKey(b); });
+  var i = list.indexOf(String(eta||''));
+  return CP_DC_COLORS[(i < 0 ? 0 : i) % CP_DC_COLORS.length];
+}
+/* 날짜-센터 글자 — 센터에 날짜가 이미 붙어 있으면 그대로, 아니면 입고일을 붙여 보여 준다 */
+function cpDcText(eta, center){
+  var c = String(center||'');
+  if (!c) return '';
+  if (cpCtrDatePart(c) || !cpEtaParts(eta)) return c;
+  return cpEtaLabel(eta) + '-' + c;
+}
+/* 날짜-센터 강조 배지 — 입고대기·스캔 화면에서 상품마다 굵은 글씨 + 색 박스 */
+function cpDcBadge(eta, center, big){
+  var t = cpDcText(eta, center);
+  if (!t) return '';
+  var col = cpDcColor(eta);
+  return '<span class="cp-dc-badge' + (big ? ' big' : '') + '" style="border-color:' + col + ';color:' + col + ';background:' + col + '26">' + escH(t) + '</span>';
+}
+function cpDateChip(eta){
+  var col = cpDcColor(eta);
+  return '<span class="cp-dc-badge" style="border-color:' + col + ';color:' + col + ';background:' + col + '26">' + escH(cpEtaLabel(eta)) + '</span>';
+}
+
+function cpParseExcelFile(file, onOk, onErr){
   var reader = new FileReader();
   reader.onload = function(e){
     try {
@@ -2138,30 +2221,92 @@ function cpHandleExcel(file){
             box:      idx.box     !== -1 ? (+r[idx.box]||0) : 0,
             palletT:  idx.palletT !== -1 ? (+r[idx.palletT]||0) : 0,
             palletN:  idx.palletN !== -1 ? (+r[idx.palletN]||0) : 0,
-            expiry:   idx.expiry  !== -1 ? String(r[idx.expiry]||'').trim() : ''
+            expiry:   idx.expiry  !== -1 ? String(r[idx.expiry]||'').trim() : '',
+            srcFile:  file.name
           };
         })
         .filter(function(r){ return r.barcode || r.skuId; });
 
       if (!rows.length) throw new Error('유효한 데이터 행이 없습니다');
-
-      cpState.rows = rows;
-      cpState.fileName = file.name;
-      cpState.uploadedAt = Date.now();
-      cpState.asIs = {};   /* 새 PO 업로드 시 이전 확정 흔적 초기화 */
-      cpFilter = 'all';
-      cpExpandedRow = -1;
-      cpSavePersist();
-      cpRender();
-      var fi = document.getElementById('cpFileInfo');
-      fi.style.display=''; fi.textContent = '✓ ' + file.name + ' · ' + rows.length + '라인 업로드됨';
-      setMsg('cpMsg','ok','✓ ' + rows.length + '라인 업로드 — 재고 매칭 결과 아래 확인');
+      onOk(rows);
     } catch(err) {
-      setMsg('cpMsg','er','❌ 엑셀 파싱 실패: ' + (err && err.message || err));
+      onErr((file && file.name ? file.name + ' — ' : '') + (err && err.message || err));
     }
   };
-  reader.onerror = function(){ setMsg('cpMsg','er','❌ 파일 읽기 실패'); };
+  reader.onerror = function(){ onErr((file && file.name || '') + ' — 파일 읽기 실패'); };
   reader.readAsArrayBuffer(file);
+}
+/* 발주 파일 올리기 — append=true 면 지금 작업에 묶어서 추가(같이 작업하기), 아니면 새 작업.
+ * 파일을 여러 개 한꺼번에 고르면 그 파일들이 한 작업으로 묶인다. */
+function cpHandleExcel(file, append){ if (file) cpHandleExcelFiles([file], append); }
+function cpHandleExcelFiles(fileList, append){
+  var files = Array.prototype.slice.call(fileList || []).filter(Boolean);
+  if (!files.length) return;
+  if (typeof XLSX === 'undefined') { setMsg('cpMsg','er','❌ XLSX 라이브러리 로딩 실패'); return; }
+  append = !!append && cpState.rows.length > 0;
+  var have = append ? cpFileList().map(function(x){ return x.name; }) : [];
+  var dup = files.filter(function(f){ return have.indexOf(f.name) >= 0; });
+  if (dup.length && !confirm('이미 이 작업에 들어 있는 파일입니다:\n' + dup.map(function(f){ return f.name; }).join('\n') + '\n\n그래도 한 번 더 넣을까요? (수량이 두 번 잡힙니다)')) return;
+  var results = new Array(files.length), left = files.length, errs = [];
+  files.forEach(function(f, i){
+    cpParseExcelFile(f,
+      function(rows){ results[i] = rows; if (--left === 0) done(); },
+      function(msg){ errs.push(msg); results[i] = null; if (--left === 0) done(); });
+  });
+  function done(){
+    if (errs.length) { setMsg('cpMsg','er','❌ 엑셀 파싱 실패: ' + errs.map(escH).join('<br>')); return; }
+    var now = Date.now();
+    var base = append ? cpState.rows.slice() : [];
+    var flist = append ? cpFileList().slice() : [];
+    var added = 0;
+    files.forEach(function(f, i){
+      var rows = results[i] || [];
+      base = base.concat(rows);
+      added += rows.length;
+      flist.push({ name: f.name, lines: rows.length, uploadedAt: now });
+    });
+    var nDates = cpApplyDateCenters(base);
+    cpState.rows = base;
+    cpState.files = flist;
+    cpState.fileName = flist.map(function(x){ return x.name; }).join(' + ');
+    cpState.uploadedAt = now;
+    if (!append) cpState.asIs = {};   /* 새 작업이면 이전 확정 흔적 초기화 (추가면 기존 줄 번호 그대로라 유지) */
+    cpFilter = 'all';
+    cpExpandedRow = -1;
+    cpSavePersist();
+    cpRender();
+    cpRenderFileList();
+    var dTxt = nDates > 1 ? ' · 입고일 ' + nDates + '가지 → 센터를 「날짜-센터」로 나눠 작업합니다' : '';
+    setMsg('cpMsg','ok', (flist.length > 1 ? '🔗 ' + flist.length + '개 파일을 한 작업으로 묶음 — ' : '✓ ')
+      + (append ? added + '라인 추가 (전체 ' + base.length + '라인)' : base.length + '라인 업로드') + dTxt + ' — 재고 매칭 결과 아래 확인');
+  }
+}
+/* 이 작업에 묶인 파일 목록 (예전 저장본은 fileName 하나) */
+function cpFileList(){
+  var files = cpState.files || [];
+  if (!files.length && cpState.fileName) files = [{ name: cpState.fileName, lines: cpState.rows.length }];
+  return files;
+}
+function cpRenderFileList(){
+  var fi = document.getElementById('cpFileInfo');
+  var add = document.getElementById('cpAddFileBox');
+  if (add) add.style.display = cpState.rows.length ? '' : 'none';
+  if (!fi) return;
+  if (!cpState.rows.length) { fi.style.display = 'none'; fi.innerHTML = ''; return; }
+  var files = cpFileList();
+  var etaBy = {};
+  cpState.rows.forEach(function(r){
+    var k = r.srcFile || (files[0] && files[0].name) || '';
+    (etaBy[k] = etaBy[k] || {})[r.eta || ''] = 1;
+  });
+  fi.style.display = '';
+  fi.innerHTML = (files.length > 1 ? '<div style="font-weight:800">🔗 묶은 작업 · 파일 ' + files.length + '개 · ' + cpState.rows.length + '라인 — 한 번에 같이 진행합니다</div>' : '')
+    + files.map(function(x){
+        var etas = Object.keys(etaBy[x.name] || {}).filter(Boolean).sort(function(a,b){ return cpEtaKey(a) - cpEtaKey(b); });
+        return '<div>✓ ' + escH(x.name) + ' · ' + (x.lines||0) + '라인'
+          + (etas.length ? ' · 입고일 ' + etas.map(function(e){ return cpDateChip(e); }).join(' ') : '')
+          + '</div>';
+      }).join('');
 }
 
 function cpClassify(row){
@@ -3939,6 +4084,7 @@ function cpCurPallet(eta, center){
 }
 /* 입고일+센터를 짧게 (e.g., 0529 인천4) */
 function cpPalletShort(eta, center){
+  if (cpCtrDatePart(center)) return String(center);   /* 이미 '16일-인천4' */
   var e = String(eta||'').replace(/^\d{4}-/,'').replace(/-/g,''); /* 'MMDD' */
   return (e ? e + ' ' : '') + (center||'?');
 }
@@ -5488,7 +5634,7 @@ function cpUpdateDisplay(ev){
       (size ? '<span class="sep">·</span><span class="size">'+escH(size)+'</span>' : '') +
       '<span class="qty">+' + s.qty +'개</span>'+
       '<span class="colon">:</span>'+
-      '<span class="ctr'+(isDiff?' diff':'')+'">'+escH(ctr||'?')+'</span>'+
+      (ctr ? cpDcBadge(r.eta, ctr, true) : '<span class="ctr">?</span>')+
       actBtns('out', key)+
     '</div>';
   }
@@ -5587,6 +5733,9 @@ function cpCenterAbbr(center){
   if (!center) return '';
   var s = String(center).trim();
   if (!s) return '';
+  /* 묶은 작업의 날짜 붙은 센터 '16일-인천4' → '16일 인4' (라벨에서도 입고일이 보이게) */
+  var dp = cpCtrDatePart(s);
+  if (dp) { var rest = s.slice(dp.length + 1); var mm = rest.match(/(\d+)\s*$/); return dp + ' ' + rest.charAt(0) + (mm ? mm[1] : ''); }
   var m = s.match(/(\d+)\s*$/);
   return s.charAt(0) + (m ? m[1] : '');
 }
@@ -5723,7 +5872,7 @@ function cpBuildProdLabels(items){
           '<div class="pl-bottom">'+
             '<div>※ 소비자부주의로 인한 제품 보상은 되지 않으니, 소재에 맞는 세탁법 꼭 확인해 주십시오.</div>'+
             '<div class="pl-bottom-addr"><span class="pl-addr-text">경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645</span>'+
-              (ctrAbbr ? '<span class="pl-ctr-tag" title="센터 ' + escAttrLocal(r.center||'') + '">' + escH(ctrAbbr) + '</span>' : '') +
+              (ctrAbbr ? '<span class="pl-ctr-tag' + (cpCtrDatePart(r.center) ? ' dated' : '') + '" title="센터 ' + escAttrLocal(r.center||'') + '">' + escH(ctrAbbr) + '</span>' : '') +
             '</div>'+
           '</div>'+
         '</div>'
@@ -8257,7 +8406,9 @@ function cpRefreshStaging(){
       var code = meta.code || '';
       var ctr  = r.center || (it.unmatched ? '미매칭' : '');
       var eta  = r.eta || '';
-      var nameSmall = [code, ctr, eta].filter(Boolean).join(' · ');
+      var nameSmall = (it.unmatched ? [code, ctr, eta] : [code]).filter(Boolean).join(' · ');
+      /* 날짜-센터 — 상품마다 굵은 글씨 + 색 박스로 (날짜가 다르면 색도 다르다) */
+      var dcBadge = (!it.unmatched && r.center) ? cpDcBadge(eta, r.center, true) : '';
       /* 카테고리 판단:
        *   un       — 우리 PO에 없는 SKU
        *   over     — 발주수량 초과 (scans 합 + staging 합 > need)
@@ -8282,6 +8433,7 @@ function cpRefreshStaging(){
         'onclick="this.select()" title="수량 수정 (0 입력 시 삭제)">';
       return '<div class="'+itemCls+'">'+
         kindChip+
+        dcBadge+
         '<span class="nm">'+escH(name)+(nameSmall?'<small>'+escH(nameSmall)+'</small>':'')+'</span>'+
         '<span class="bc">'+escH(it.barcode||'')+'</span>'+
         qtyInput+'<span style="font-size:.7rem;color:var(--mu);margin-left:.18rem">개</span>'+
@@ -8862,14 +9014,13 @@ function cpReset(){
   if (cpState.rows.length || cpState.vendor) {
     if (!confirm('업로드된 쿠팡 데이터와 업체정보를 모두 비웁니다. 계속할까요?')) return;
   }
-  cpState = { vendor:'', vendorCode:'', note:'', rows:[], fileName:'', uploadedAt:0, asIs:{}, _headerTs:0 };
+  cpState = { vendor:'', vendorCode:'', note:'', rows:[], files:[], fileName:'', uploadedAt:0, asIs:{}, _headerTs:0 };
   cpFilter = 'all';
   cpExpandedRow = -1;
   cpSavePersist();
   cpSyncToForm();
   cpRender();
-  var fi = document.getElementById('cpFileInfo');
-  if (fi) { fi.style.display='none'; fi.textContent=''; }
+  cpRenderFileList();
   hideMsg('cpMsg');
   /* Firebase 사용자별 마지막 header 도 같이 비워야 새로고침 시 안 돌아옴 */
   if (lastHeaderRef){
@@ -8891,7 +9042,9 @@ function cpLoadPersist(){
       cpState.note       = v.note || '';
       cpState.rows       = Array.isArray(v.rows) ? v.rows : [];
       cpState.fileName   = v.fileName || '';
+      cpState.files      = Array.isArray(v.files) ? v.files : [];
       cpState.uploadedAt = +v.uploadedAt || 0;
+      cpApplyDateCenters(cpState.rows);   /* 예전 저장본엔 origCenter 가 없다 — 지금 센터를 원래 이름으로 */
       cpState.asIs       = (v.asIs && typeof v.asIs==='object') ? v.asIs : {};
       cpState._headerTs  = +v._headerTs || 0;
     }
@@ -8901,10 +9054,7 @@ function cpSyncToForm(){
   var v = document.getElementById('cpVendor');         if (v) v.value = cpState.vendor || '';
   var c = document.getElementById('cpVendorCode');     if (c) c.value = cpState.vendorCode || '';
   var n = document.getElementById('cpNote');           if (n) n.value = cpState.note || '';
-  var fi = document.getElementById('cpFileInfo');
-  if (fi && cpState.fileName) {
-    fi.style.display=''; fi.textContent = '✓ ' + cpState.fileName + ' · ' + cpState.rows.length + '라인 (저장됨)';
-  }
+  cpRenderFileList();
 }
 function cpRefreshAll(){
   cpLoadPersist();
