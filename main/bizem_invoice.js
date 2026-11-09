@@ -38,6 +38,23 @@
   }
   function fileName(day){ return '송장업로드_' + day + '.xlsx'; }
 
+  /* 이벗 송장 파일은 시트 범위가 제목 있는 U열까지(A1:U2)로 적혀 있고 V·W·X(택배사·운송장번호)는 범위 밖.
+     엑셀 읽기 도구는 적힌 범위만 읽으므로, 실제 칸을 보고 범위를 다시 잡음 (2026-11-09) */
+  function colNum(s){ var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n - 1; }
+  function colName(n){ var s = ''; n++; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+  function fullRef(ws){
+    if (!ws) return ws;
+    var maxR = -1, maxC = -1, m = /^[A-Z]+\d+:([A-Z]+)(\d+)$/.exec(ws['!ref'] || '');
+    if (m) { maxC = colNum(m[1]); maxR = Number(m[2]) - 1; }
+    Object.keys(ws).forEach(function(k){
+      var c = /^([A-Z]+)(\d+)$/.exec(k);
+      if (!c) return;
+      maxC = Math.max(maxC, colNum(c[1])); maxR = Math.max(maxR, Number(c[2]) - 1);
+    });
+    if (maxR >= 0) ws['!ref'] = 'A1:' + colName(maxC) + (maxR + 1);
+    return ws;
+  }
+
   /* 비젬 목록 줄({ o: 쇼핑몰주문번호, b: 비젬주문번호, s: 배송상태 })을 우리 주문만 남겨 상태별로 셈. 묶음이면 한 비젬주문번호에 여러 줄 */
   function tally(list, orders){
     var want = {}, byOrder = {}, out = { C10: 0, D10: 0, E10: 0, E11: 0, other: 0, missing: 0, bzm: { C10: [], D10: [] } }, seenB = {};
@@ -57,7 +74,7 @@
   }
   function batches(list){ var out = []; for (var i = 0; i < list.length; i += BATCH) out.push(list.slice(i, i + BATCH)); return out; }
 
-  var api = { COL: COL, BATCH: BATCH, pick: pick, sheetRows: sheetRows, fileName: fileName, tally: tally, batches: batches };
+  var api = { COL: COL, BATCH: BATCH, pick: pick, sheetRows: sheetRows, fileName: fileName, fullRef: fullRef, tally: tally, batches: batches };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.BIZEM_INVOICE = api;
 })(typeof self !== 'undefined' ? self : this);
