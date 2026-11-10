@@ -1117,6 +1117,22 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-pending-empty{padding:.7rem;text-align:center;color:var(--mu);font-size:.78rem;font-family:var(--mo)}
 
 /* ─── 출고처리 팝업 ─── */
+.cd-modal-back{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px}
+.cd-modal{background:var(--s1,#161a22);border:1px solid rgba(255,184,74,.45);border-radius:12px;max-width:760px;width:100%;max-height:88vh;display:flex;flex-direction:column;color:var(--tx);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.cd-modal h3{margin:0;padding:.85rem 1rem;font-size:1.02rem;border-bottom:1px solid rgba(255,255,255,.08)}
+.cd-modal .cd-body{overflow:auto;padding:.6rem 1rem;font-size:.84rem}
+.cd-modal .cd-sec{margin:.55rem 0 .3rem;font-weight:800;font-size:.86rem}
+.cd-modal .cd-tip{color:var(--mu);font-size:.74rem;margin-bottom:.35rem}
+.cd-modal table{width:100%;border-collapse:collapse}
+.cd-modal td,.cd-modal th{padding:.3rem .4rem;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;font-size:.8rem}
+.cd-modal th{color:var(--mu);font-weight:700;font-size:.72rem}
+.cd-modal td.n,.cd-modal th.n{text-align:right;font-family:var(--mo)}
+.cd-modal tr.on td{background:rgba(46,196,182,.1)}
+.cd-modal input[type=number]{width:70px;padding:.2rem .35rem;font-size:.9rem;font-weight:800;text-align:right;background:rgba(0,0,0,.3);color:var(--tx);border:1px solid rgba(255,255,255,.2);border-radius:5px}
+.cd-modal input[type=number]:disabled{opacity:.35}
+.cd-modal input[type=checkbox]{width:18px;height:18px;accent-color:#2ec4b6;cursor:pointer}
+.cd-modal .cd-foot{display:flex;gap:.5rem;align-items:center;padding:.7rem 1rem;border-top:1px solid rgba(255,255,255,.08);flex-wrap:wrap}
+.cd-modal .cd-foot .tot{margin-right:auto;font-weight:800;color:#ffb84a}
 .cp-popup-back{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;opacity:0;pointer-events:none;transition:opacity .15s}
 .cp-popup-back.open{opacity:1;pointer-events:auto}
 .cp-popup-box{position:fixed;left:50%;top:50%;transform:translate(-50%,-46%);width:min(680px,92vw);max-height:88vh;background:var(--s1);border:1.5px solid var(--g);border-radius:12px;z-index:9001;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .15s,transform .18s}
@@ -2714,7 +2730,7 @@ function cpCrossdockPlan(){
     var meta = stockMeta[bc] || {};
     var name = meta.name || g.row.skuName || '';
     if (have > 0) {
-      kept.push({ bc: bc, need: g.need, have: have, short: Math.max(0, g.need - have), name: name });
+      kept.push({ bc: bc, need: g.need, have: have, short: Math.max(0, g.need - have), name: name, meta: meta, poRow: g.row, rows: g.rows });
       return;
     }
     items.push({ bc: bc, need: g.need, have: have, add: g.need, rows: g.rows,
@@ -2722,43 +2738,105 @@ function cpCrossdockPlan(){
   });
   return { items: items, kept: kept, skipped: skipped };
 }
+/* 발주수량대로 입고 잡기 — 선택 창
+ *  ① 재고 없는 상품(현재고 0 이하) : 발주수량 그대로 입고 (자동)
+ *  ② 재고는 있는데 발주보다 적은 상품 : 기본은 입고 안 잡음(현재고만 출고).
+ *     실제로 같이 들어오는 물건이 있으면 체크하고 수량을 넣는다 → 그만큼 입고와 동시에 출고
+ *  ③ 재고가 발주만큼 있는 상품 : 입고 안 잡음 */
+var cpCdPlanCur = null;
 function cpCrossdockReceive(){
   if (!groupId || typeof firebase === 'undefined') { setMsg('cpMsg','er','❌ Firebase 연결 안 됨 — 로그인 확인'); return; }
   if (!cpState.uploadedAt || !(cpState.rows||[]).length) { setMsg('cpMsg','er','❌ 먼저 발주 엑셀을 업로드하세요'); return; }
   if (cpHasActiveSession()) { alert('스캔 작업 중에는 입고를 잡을 수 없습니다.\n작업을 종료하거나 일시정지한 뒤 발주 화면에서 다시 눌러주세요.'); return; }
   var plan = cpCrossdockPlan();
-  if (!plan.items.length) { setMsg('cpMsg','inf','재고가 없는(현재고 0) 상품이 없습니다 — 입고로 잡을 것이 없습니다. 재고 있는 상품은 현재고에서 출고합니다'); return; }
-  var totAdd = plan.items.reduce(function(s,x){ return s + x.add; }, 0);
-  var neg = plan.items.filter(function(x){ return x.have < 0; });
-  var lines = ['📥 발주수량대로 입고 잡기 (동시입출고)', '',
-               '재고가 없는(현재고 0) 상품만 발주수량대로 입고로 잡습니다: ' + plan.items.length + '개 상품 · ' + totAdd + '개', ''];
-  plan.items.slice(0, 15).forEach(function(x){
-    lines.push('• ' + (x.name || x.bc) + ' — 발주 ' + x.need + ' · 현재고 ' + x.have + ' → +' + x.add);
-  });
-  if (plan.items.length > 15) lines.push('… 외 ' + (plan.items.length - 15) + '개');
   var kept = plan.kept || [];
-  if (kept.length) {
-    lines.push('', '✋ 재고가 있는 상품 ' + kept.length + '개는 입고를 잡지 않고 현재고에서 그대로 출고합니다');
-    var keptShort = kept.filter(function(x){ return x.short > 0; });
-    if (keptShort.length) {
-      lines.push('⚠ 특이사항: 그중 발주보다 현재고가 적은 상품 ' + keptShort.length + '개 — 부족분은 입고로 채우지 않습니다 (실제 재고 확인 필요)');
-      keptShort.slice(0, 8).forEach(function(x){ lines.push('   ' + (x.name || x.bc) + ' — 발주 ' + x.need + ' · 현재고 ' + x.have + ' · 부족 ' + x.short); });
-      if (keptShort.length > 8) lines.push('   … 외 ' + (keptShort.length - 8) + '개');
-    }
-  }
-  if (neg.length) {
-    lines.push('', '⚠ 특이사항: 현재고가 마이너스인 상품 ' + neg.length + '개 — 발주수량만큼만 잡으므로 여전히 부족으로 남습니다');
-    neg.slice(0, 5).forEach(function(x){ lines.push('   ' + (x.name || x.bc) + ' 현재고 ' + x.have); });
-  }
-  if (plan.skipped) lines.push('', '※ 바코드가 없는 줄 ' + plan.skipped + '개는 제외');
-  lines.push('', '작업 종료 때 덜 나간 수량은 이 입고에서 자동으로 줄어듭니다.', '진행할까요?');
-  if (!confirm(lines.join('\n'))) return;
-
+  var keptShort = kept.filter(function(x){ return x.short > 0; });
+  var keptFull = kept.filter(function(x){ return x.short <= 0; });
+  if (!plan.items.length && !keptShort.length) { setMsg('cpMsg','inf','모든 상품의 재고가 발주만큼 있습니다 — 입고로 잡을 것이 없습니다'); return; }
+  cpCdPlanCur = { items: plan.items, keptShort: keptShort };
+  var h = '<div class="cd-modal" role="dialog">'
+    + '<h3>📥 발주수량대로 입고 잡기 (동시입출고)</h3><div class="cd-body">';
+  /* ① */
+  h += '<div class="cd-sec">① 재고 없는 상품 — 발주수량대로 입고 (' + plan.items.length + '개)</div>';
+  if (plan.items.length) {
+    h += '<table><tr><th>상품</th><th class="n">발주</th><th class="n">현재고</th><th class="n">입고</th></tr>'
+      + plan.items.map(function(x){
+          return '<tr><td>' + escH(x.name || x.bc) + '<div style="font-size:.68rem;color:var(--mu);font-family:var(--mo)">' + escH(x.bc) + '</div></td>'
+            + '<td class="n">' + x.need + '</td><td class="n"' + (x.have < 0 ? ' style="color:#ff6b6b" title="현재고 마이너스 — 발주수량만 잡으므로 여전히 부족"' : '') + '>' + x.have + '</td>'
+            + '<td class="n" style="color:#2ec4b6;font-weight:800">+' + x.add + '</td></tr>';
+        }).join('') + '</table>';
+  } else h += '<div class="cd-tip">없음</div>';
+  /* ② */
+  h += '<div class="cd-sec" style="margin-top:.9rem">② 재고는 있지만 발주보다 적은 상품 (' + keptShort.length + '개)</div>';
+  if (keptShort.length) {
+    h += '<div class="cd-tip">기본은 입고를 잡지 않고 <b>현재고만 출고</b>합니다. 실제로 지금 같이 들어오는 물건이 있으면 <b>체크하고 들어오는 수량</b>을 넣으세요 — 그만큼 입고와 동시에 출고합니다.</div>'
+      + '<table><tr><th style="width:2rem">✔</th><th>상품</th><th class="n">발주</th><th class="n">현재고</th><th class="n">부족</th><th class="n">같이 들어오는 수량</th></tr>'
+      + keptShort.map(function(x, i){
+          return '<tr id="cdKs' + i + '"><td><input type="checkbox" id="cdKsC' + i + '" onchange="cpCdKsToggle(' + i + ')"></td>'
+            + '<td>' + escH(x.name || x.bc) + '<div style="font-size:.68rem;color:var(--mu);font-family:var(--mo)">' + escH(x.bc) + '</div></td>'
+            + '<td class="n">' + x.need + '</td><td class="n">' + x.have + '</td><td class="n" style="color:#ffb84a">' + x.short + '</td>'
+            + '<td class="n"><input type="number" id="cdKsQ' + i + '" min="0" step="1" value="' + x.short + '" disabled oninput="cpCdTot()" onclick="this.select()"></td></tr>';
+        }).join('') + '</table>';
+  } else h += '<div class="cd-tip">없음</div>';
+  /* ③ */
+  if (keptFull.length) h += '<div class="cd-sec" style="margin-top:.9rem">③ 재고가 발주만큼 있는 상품 ' + keptFull.length + '개 — 입고 안 잡고 현재고에서 출고</div>';
+  if (plan.skipped) h += '<div class="cd-tip">※ 바코드가 없는 줄 ' + plan.skipped + '개는 제외</div>';
+  h += '<div class="cd-tip" style="margin-top:.7rem">작업 종료 때 덜 나간 수량은 이 입고에서 자동으로 줄어듭니다 (②의 원래 있던 재고는 줄이지 않음).</div>';
+  h += '</div><div class="cd-foot"><span class="tot" id="cdTot"></span>'
+    + '<button class="btn" onclick="cpCdClose()">취소</button>'
+    + '<button class="btn btn-g" id="cdRunBtn" onclick="cpCdRun()">📥 입고 잡기</button></div></div>';
+  var back = document.createElement('div');
+  back.className = 'cd-modal-back'; back.id = 'cdModalBack';
+  back.innerHTML = h;
+  back.addEventListener('click', function(ev){ if (ev.target === back) cpCdClose(); });
+  cpCdClose();
+  document.body.appendChild(back);
+  cpCdTot();
+}
+function cpCdClose(){ var b = document.getElementById('cdModalBack'); if (b) b.remove(); }
+function cpCdKsToggle(i){
+  var c = document.getElementById('cdKsC' + i), q = document.getElementById('cdKsQ' + i), tr = document.getElementById('cdKs' + i);
+  if (!c || !q) return;
+  q.disabled = !c.checked;
+  if (tr) tr.classList.toggle('on', c.checked);
+  if (c.checked) { q.focus(); q.select(); }
+  cpCdTot();
+}
+/* 체크된 ② 상품 → [{x, qty}] */
+function cpCdPicked(){
+  var p = cpCdPlanCur || { keptShort: [] }, out = [];
+  p.keptShort.forEach(function(x, i){
+    var c = document.getElementById('cdKsC' + i), q = document.getElementById('cdKsQ' + i);
+    if (!c || !c.checked) return;
+    var n = Math.floor(+(q && q.value) || 0);
+    if (n > 0) out.push({ x: x, qty: n });
+  });
+  return out;
+}
+function cpCdTot(){
+  var p = cpCdPlanCur || { items: [] };
+  var a = p.items.reduce(function(s, x){ return s + x.add; }, 0);
+  var pk = cpCdPicked();
+  var b = pk.reduce(function(s, y){ return s + y.qty; }, 0);
+  var el = document.getElementById('cdTot');
+  if (el) el.textContent = '입고 ' + (p.items.length + pk.length) + '개 상품 · ' + (a + b) + '개' + (pk.length ? ' (② 같이 들어옴 ' + b + '개 포함)' : '');
+  var btn = document.getElementById('cdRunBtn');
+  if (btn) btn.disabled = !(p.items.length + pk.length);
+}
+function cpCdRun(){
+  var p = cpCdPlanCur; if (!p) return;
+  var pk = cpCdPicked();
+  /* 발주 부족분보다 많이 넣으면 한 번 확인 (발주초과 입고) */
+  var over = pk.filter(function(y){ return y.qty > y.x.short; });
+  if (over.length && !confirm('부족분보다 많이 넣은 상품이 있습니다:\n' + over.map(function(y){ return '• ' + (y.x.name || y.x.bc) + ' — 부족 ' + y.x.short + ' · 입력 ' + y.qty; }).join('\n') + '\n\n남는 수량은 재고로 남습니다. 그대로 잡을까요?')) return;
+  var list = p.items.map(function(x){ return { x: x, qty: x.add, base: 0, manual: false }; })
+    .concat(pk.map(function(y){ return { x: y.x, qty: y.qty, base: Math.max(0, y.x.have), manual: true }; }));
+  if (!list.length) return;
   var base = 'wms_sync/groups/' + groupId + '/star_instock/logs/';
   var logsBase = firebase.database().ref(base);
   var by = getUserId(), ts0 = Date.now(), upd = {};
-  plan.items.forEach(function(x, k){
-    var meta = x.meta || {}, r = x.poRow || {};
+  list.forEach(function(e, k){
+    var x = e.x, meta = x.meta || {}, r = x.poRow || {};
     upd[base + logsBase.push().key] = {
       type: 'in', source: 'crossdock',
       ts: ts0 + k, by: by,
@@ -2769,18 +2847,24 @@ function cpCrossdockReceive(){
       altBarcode: (r.altBarcode || meta.altBarcode || ''),
       name: x.name, brand: meta.brand || '', code: meta.code || '',
       color: meta.color || '', size: meta.size || '', origin: meta.origin || '', material: meta.material || '',
-      qty: x.add,
-      note: '동시입출고(입고와 동시에 출고) · ' + (cpState.vendor || '') + ' · ' + (cpState.fileName || ''),
+      qty: e.qty,
+      note: '동시입출고(입고와 동시에 출고)' + (e.manual ? ' · 재고 ' + e.base + ' + 같이 들어옴 ' + e.qty : '') + ' · ' + (cpState.vendor || '') + ' · ' + (cpState.fileName || ''),
       cdPoAt: cpState.uploadedAt,
       cdPoFile: cpState.fileName || '',
-      cdOrigQty: x.add,
+      cdOrigQty: e.qty,
+      cdBaseHave: e.base,          /* 입고 잡을 때 원래 있던 재고 — 정리 때 이 아래로는 줄이지 않음 */
+      cdManual: e.manual,
       cdSettled: false
     };
   });
+  var tot = list.reduce(function(s, e){ return s + e.qty; }, 0);
+  var btn = document.getElementById('cdRunBtn'); if (btn) btn.disabled = true;
   setMsg('cpMsg','inf','<span>입고 잡는 중...</span>');
   firebase.database().ref().update(upd).then(function(){
-    setMsg('cpMsg','ok','✓ 동시입출고 입고 ' + plan.items.length + '개 상품 · ' + totAdd + '개 잡음 — 이제 스캔 시작하면 됩니다 (상품 스캔 모드로)');
+    cpCdClose();
+    setMsg('cpMsg','ok','✓ 동시입출고 입고 ' + list.length + '개 상품 · ' + tot + '개 잡음' + (pk.length ? ' (재고 있는 상품 ' + pk.length + '개는 같이 들어온 수량만)' : '') + ' — 이제 스캔 시작하면 됩니다 (상품 스캔 모드로)');
   }).catch(function(err){
+    if (btn) btn.disabled = false;
     setMsg('cpMsg','er','❌ 입고 잡기 실패: ' + (err && err.message || err));
   });
 }
@@ -2804,7 +2888,11 @@ function cpCrossdockSettlePlan(scans, poAt, rows){
   open.forEach(function(e){ var b = normBarcode(e.lg.barcode); (byBc[b] = byBc[b] || []).push(e); });
   var out = [];
   Object.keys(byBc).forEach(function(b){
-    var left = Math.max(0, (stockQty[b] || 0) - (shipped[b] || 0));   /* 출고 후 남을 재고 */
+    /* 입고 잡을 때 원래 있던 재고(cdBaseHave)는 진짜 재고 — 그 아래로는 줄이지 않는다.
+       예: 현재고 5 + 같이 들어온 5 입고 → 7개만 나가면 남는 3은 원래 재고분이라 그대로 둔다 */
+    var base = 0;
+    byBc[b].forEach(function(e){ base = Math.max(base, +e.lg.cdBaseHave || 0); });
+    var left = Math.max(0, (stockQty[b] || 0) - (shipped[b] || 0) - base);   /* 출고 후 남을 가상재고 */
     byBc[b].sort(function(a, c){ return (c.lg.ts||0) - (a.lg.ts||0); }).forEach(function(e){
       var q = +e.lg.qty || 0, red = Math.min(q, left);
       left -= red;
