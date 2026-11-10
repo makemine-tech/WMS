@@ -3877,10 +3877,11 @@ function cpShowResumeBanner(sessions, mineId, targetId){
     var penCnt = (s.pending||[]).length;
     var sBoxes = (s.shipBoxes||[]).length;
     var sid = escAttrLocal(s.sessionId);
-    var btns = isCur
+    var renBtn = '<button class="btn" onclick="cpRenameSession(\''+sid+'\')" title="업체명·작업파일 이름 고치기">✏️ 이름 수정</button>';
+    var btns = renBtn + (isCur
       ? '<button class="btn btn-b" onclick="cpGoCurrentSession()">▶ 작업 화면으로</button>'
       : '<button class="btn btn-g" onclick="cpResumeSession(\''+sid+'\')">'+(curId ? '이 파일로 바꾸기' : '이어서 작업')+'</button>'+
-        '<button class="btn btn-r" onclick="cpDiscardSession(\''+sid+'\')">버리기</button>';
+        '<button class="btn btn-r" onclick="cpDiscardSession(\''+sid+'\')">버리기</button>');
     var mergeCb = sessions.length > 1
       ? '<label class="rb-merge-cb" title="체크해서 다른 작업파일과 한 작업으로 묶기"><input type="checkbox"'+(cpMergeSel[s.sessionId]?' checked':'')+' onchange="cpMergeToggle(\''+sid+'\', this.checked)"><span>묶기</span></label>'
       : '';
@@ -4001,6 +4002,31 @@ function cpResumeSession(sessionId){
     cpSetSubView('scan');
     setMsg('cpScanMsg','ok','✓ 세션 이어서 작업 — '+sessionId);
   }).catch(function(err){ setMsg('cpMsg','er','❌ 세션 로드 실패: '+(err && err.message||err)); });
+}
+
+/* 작업파일 이름 수정 — 업체명(미입력 포함)과 파일명(목록 이름)을 고친다 */
+function cpRenameSession(sessionId){
+  if (!sessionId || !groupId || typeof firebase === 'undefined') return;
+  var sess = cpDiscoveredSessions.find(function(s){ return s.sessionId === sessionId; }) || {};
+  if (workSession && workSession.sessionId === sessionId) sess = workSession;
+  var v = prompt('업체명 (비워 두면 「업체 미입력」)', sess.vendor || '');
+  if (v === null) return;
+  var fn = prompt('작업파일 이름 (목록에 보이는 파일명)', sess.poFileName || '');
+  if (fn === null) return;
+  v = v.trim(); fn = fn.trim();
+  if (v === (sess.vendor || '') && fn === (sess.poFileName || '')) return;
+  var upd = { vendor: v, poFileName: fn, renamedAt: Date.now(), renamedBy: getUserId() };
+  var ref = firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sessionId);
+  ref.update(upd).then(function(){
+    cpDiscoveredSessions.forEach(function(s){ if (s.sessionId === sessionId) { s.vendor = v; s.poFileName = fn; } });
+    if (workSession && workSession.sessionId === sessionId) { workSession.vendor = v; workSession.poFileName = fn; cpRefreshSessionHdr(); }
+    var mineId = null;
+    try { mineId = localStorage.getItem(cpSessLsKey()); } catch(_){}
+    var pk = document.getElementById('cpSessPicker');
+    var pickerOpen = pk && pk.style.display !== 'none';
+    cpShowResumeBanner(cpDiscoveredSessions, mineId, pickerOpen ? 'cpSessPicker' : 'cpResumeBanner');
+    setMsg(pickerOpen ? 'cpScanMsg' : 'cpMsg', 'ok', '✓ 이름 수정 — ' + escH(v || '(업체 미입력)') + ' · ' + escH(fn || '-'));
+  }).catch(function(err){ alert('이름 수정 실패: ' + (err && err.message || err)); });
 }
 
 /* 특정 세션 버리기 */
