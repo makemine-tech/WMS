@@ -3948,8 +3948,14 @@ function cpCheckResumeOnAttach(target){
         live.push(s);
       }
     });
-    /* 최근 활동 순 정렬 */
-    live.sort(function(a,b){ return (b.updatedAt||b.createdAt||0) - (a.updatedAt||a.createdAt||0); });
+    /* 파일명 앞 4자리(예: 1116) 작은 순으로 위에서부터 — 숫자로 시작 안 하는 파일은 아래로.
+       앞 4자리가 같으면 최근 활동 순 */
+    function head4(s){ var m = String(s.poFileName||'').trim().match(/^(\d{4})/); return m ? +m[1] : Infinity; }
+    live.sort(function(a,b){
+      var ha = head4(a), hb = head4(b);
+      if (ha !== hb) return ha < hb ? -1 : 1;
+      return (b.updatedAt||b.createdAt||0) - (a.updatedAt||a.createdAt||0);
+    });
     cpDiscoveredSessions = live;
     if (!live.length) {
       try { localStorage.removeItem(cpSessLsKey()); } catch(_){}
