@@ -21,11 +21,11 @@
   var COMMAND_TYPES = ['start', 'menso', 'match_read', 'match_search', 'bizem_check', 'bizem_collect', 'bizem_confirm', 'bizem_form', 'bizem_import', 'ebut_check', 'ebut_collect', 'match_save', 'bizem_survey', 'bizem_invoice', 'gift_check', 'gift_add'];
   var COLLECT_POLL = 5000;        /* 비젬 주문수집 진행 확인 간격 */
   var COLLECT_MAX = 15 * MIN;     /* 이만큼 끝 소식이 없으면 작업을 풀고 사람에게 넘김. 다시 누르지 않음 */
-  var MATCH_TERMS = ['아크네스', '멘소래담', '하다라보', '멜라노', '로토', '소프트립스', '핸드베일', '사은품'];   /* 매칭 화면에 미리 읽어 둘 상품 */
+  var MATCH_TERMS = [''];   /* 매칭 화면에 미리 읽어 둘 상품. 빈 검색어 = 고객사 이벗 상품 전부(11-11 맨소래담 129개, 62KB). 낱말로만 읽으면 브랜드 낱말 없는 「[KKKIM 콜라보] 립아이스 립밤 자몽」 같은 상품이 빠졌음 */
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-09a';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-11a';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://login2.ezadmin.co.kr/login.htm', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
