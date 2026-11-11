@@ -84,18 +84,19 @@
     { id: 'match', name: '주문 매칭', who: '직접' },
     { id: 'confirm', name: '묶음 출력확정', who: '직접' },
     { id: 'gift', name: '사은품', who: '직접' },
-    { id: 'invoice', name: '송장번호', who: '직접' },
     { id: 'ship', name: '출고처리', who: '직접' }
   ];
-  /* 대표님이 정한 순서와 이름 (2026-11-03). 저장된 예전 결과도 이 순서로 보여 줌 */
-  var ORDER = [['bizem_collect', '비젬 주문수집'], ['bizem_import', '비젬 주문 이벗에 넣기'], ['collect', '이벗 주문수집'], ['match', '주문 매칭'], ['confirm', '묶음 및 출력확정'],
-               ['gift', '사은품 세팅'], ['invoice', '운송장 부여'], ['ship', '출고처리'], ['send', '이벗 운송장전송'], ['bizem', '비젬 송장업로드']];
+  /* 대표님이 정한 순서와 이름 (2026-11-03). 저장된 예전 결과도 이 순서로 보여 줌.
+     2026-11-11: 운송장 부여는 묶음및출력확정과 한 칸으로, 송장업로드 단계에 「송장번호 가져오기」(이벗 주문서삭제 화면에서 받기) 추가 */
+  var ORDER = [['bizem_collect', '비젬 주문수집'], ['bizem_import', '비젬 주문 이벗에 넣기'], ['collect', '이벗 주문수집'], ['match', '주문 매칭'], ['confirm', '묶음및출력확정 + 운송장부여'],
+               ['gift', '사은품 세팅'], ['ship', '출고처리'], ['send', '이벗 운송장전송'], ['fetch', '송장번호 가져오기'], ['bizem', '비젬 송장업로드']];
   var GROUPS = [{ name: '주문수집 단계', ids: ['bizem_collect', 'bizem_import', 'collect'] },
-                { name: '주문확정 단계', ids: ['match', 'confirm', 'gift', 'invoice'] },
-                { name: '주문송장업로드 단계', ids: ['ship', 'send', 'bizem'] }];
+                { name: '주문확정 단계', ids: ['match', 'confirm', 'gift'] },
+                { name: '주문송장업로드 단계', ids: ['ship', 'send', 'fetch', 'bizem'] }];
   function arrange(steps){
     return ORDER.map(function(o){
       var s = steps.find(function(x){ return x.id === o[0]; });
+      if (!s && o[0] === 'fetch') return { id: 'fetch', name: o[1], who: '직접', state: 'later', count: 0 };   /* 사람이 이벗에서 받음. 예전 결과에도 끼움 */
       return s ? { id: s.id, name: o[1], who: s.who, state: s.state, count: s.count } : null;
     }).filter(Boolean);
   }
@@ -148,7 +149,7 @@
     });
     var nos = Object.keys(waiting), count = function(f){ return nos.filter(function(n){ return waiting[n][f]; }).length; };
     var giftTodo = (campaigns || []).reduce(function(a, c){ return a + (Number(c.need) || 0) + (c.wrong || []).length; }, 0);
-    var todo = { collect: Object.keys(all).length ? 0 : -1, match: (read.unmatched || []).length, confirm: count('noConfirm'), gift: giftTodo, invoice: count('noInvoice'), ship: nos.length };
+    var todo = { collect: Object.keys(all).length ? 0 : -1, match: (read.unmatched || []).length, confirm: nos.filter(function(n){ return waiting[n].noConfirm || waiting[n].noInvoice; }).length, gift: giftTodo, ship: nos.length };
     var open = false, hasWork = Object.keys(all).length > 0;
     var steps = STEPS.map(function(s){
       var n = todo[s.id], state;
