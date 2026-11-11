@@ -405,7 +405,8 @@
         await store.setJob(key, patch);
         await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
       }
-      var names = cmd.malls || [];
+      /* malls = 수집할 쇼핑몰, seen = 사람이 화면에서 본 비젬 체크(기본 전체). 다르면 고른 쇼핑몰만 체크하고 수집 (대표님 2026-11-11) */
+      var names = cmd.malls || [], seen = cmd.seen || names;
       await store.setJob(key, { state: 'running', recipe: 'bizem_collect', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '비젬 확인 중', notes: '' });
       try {
         await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
@@ -413,10 +414,20 @@
         if (r.state !== 'ok') return end('stopped', '비젬: ' + r.msg);
         try { chk = await deps.bizemRead('collectCheck'); }
         catch (e) { return end('stopped', '쇼핑몰 목록을 읽지 못해 수집하지 않았습니다: ' + String((e && e.message) || e)); }
-        if (chk.checked.join('|') !== names.join('|') || chk.from !== cmd.from || chk.to !== cmd.to || chk.opt !== cmd.opt) return end('stopped', '화면에서 본 쇼핑몰·기간과 달라 수집하지 않았습니다. 다시 눌러 확인해 주세요');
+        if (chk.checked.join('|') !== seen.join('|') || chk.from !== cmd.from || chk.to !== cmd.to || chk.opt !== cmd.opt) return end('stopped', '화면에서 본 쇼핑몰·기간과 달라 수집하지 않았습니다. 다시 눌러 확인해 주세요');
+        var pick = names.join('|') !== chk.checked.join('|');
+        if (pick) {
+          var have = chk.malls.map(function(m){ return m.name; });
+          if (!names.length || names.some(function(n){ return have.indexOf(n) < 0; })) return end('stopped', '고른 쇼핑몰이 비젬 목록에 없어 수집하지 않았습니다. 다시 읽어 주세요');
+          await store.setJob(key, { step: '쇼핑몰 고르는 중' });
+          var picked;
+          try { picked = await deps.bizemGo('collectPick', { only: names }); }
+          catch (e) { return end('stopped', '비젬에서 쇼핑몰을 고르지 못해 수집하지 않았습니다 (' + String((e && e.message) || e) + ')'); }
+          if (!picked || (picked.picked || []).join('|') !== names.join('|')) return end('stopped', '비젬 체크가 고른 쇼핑몰과 달라 수집하지 않았습니다');
+        }
         await store.setJob(key, { step: '주문수집 중' });
         var go;
-        try { go = await deps.bizemGo('collectGo', {}); }
+        try { go = await deps.bizemGo('collectGo', pick ? { expect: names } : {}); }
         catch (e) { return end('stopped', '응답이 끊겼습니다. 수집됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')'); }
         if (!go.started) return end('stopped', '수집이 시작되지 않았습니다: ' + go.why);
         var s = null, miss = 0, tries = Math.ceil(C.COLLECT_MAX / C.COLLECT_POLL), deadline = deps.now() + C.COLLECT_MAX;

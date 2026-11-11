@@ -725,3 +725,56 @@ test('송장업로드 조사: 화면 구조만 명령 결과로 남기고 아무
   assert.strictEqual(db.go, 0);
   assert.deepStrictEqual(db.jobs, {});
 });
+
+/* 매출처 골라 수집 (대표님 2026-11-11): 기본 전체, 고르면 비젬 체크를 그곳만 남기고 수집 */
+test('collectPick: 고른 쇼핑몰만 체크하고, 표에 없는 이름이면 아무것도 바꾸지 않음', async () => {
+  const p = collectPage({ rows: [row('맨소래담-무신사', true, '2026-11-02 15:17:03', '정상종료'), row('텐바이텐', true, '2026-11-02 15:17:01', '정상종료')] });
+  await p.send('collectCheck', {});
+  const bad = await p.send('collectPick', { only: ['없는몰'] });
+  assert.strictEqual(bad.ok, false);
+  assert.deepStrictEqual((await p.send('collectCheck', {})).data.checked, ['맨소래담-무신사', '텐바이텐']);
+  const m = await p.send('collectPick', { only: ['맨소래담-무신사'] });
+  assert.deepStrictEqual(m.data.picked, ['맨소래담-무신사']);
+  assert.strictEqual(p.state.clicks.go, 0, '고르기만 하고 수집은 누르지 않음');
+  const no = await p.send('collectGo', { expect: ['맨소래담-무신사', '텐바이텐'] });
+  assert.strictEqual(no.data.started, false);
+  assert.strictEqual(p.state.clicks.go, 0, '체크가 기대와 다르면 누르지 않음');
+  const go = await p.send('collectGo', { expect: ['맨소래담-무신사'] });
+  assert.strictEqual(go.data.started, true);
+});
+
+function pickSetup(o) {
+  o = o || {};
+  const db = { jobs: {}, commands: {}, calls: [] };
+  const store = { getRunner: async () => ({ id: 'me', ts: NOW }), getControl: async () => null, claimCommand: async () => true,
+    setCommand: async (id, p) => { db.commands[id] = Object.assign(db.commands[id] || {}, p); }, getJobs: async () => db.jobs,
+    setJob: async (k, p) => { db.jobs[k] = Object.assign(db.jobs[k] || {}, p); }, setSite: async () => {} };
+  const runner = createRunner({ store, now: () => NOW, runnerId: 'me', info: {}, sleep: async () => {}, openSite: async () => ({ login: true }),
+    bizemCounts: async () => ({ unconfirmed: 1, printWait: 0 }),
+    bizemRead: async (cmd) => (cmd === 'collectCheck' ? BEFORE : { done: true, malls: [mall('맨소래담-무신사', '2026-11-03 12:00:10'), mall('텐바이텐', '2026-11-02 15:17:01')] }),
+    bizemGo: async (cmd, a) => { db.calls.push([cmd, a]); if (cmd === 'collectPick') { if (o.pickThrow) throw new Error('응답 없음'); return { picked: o.picked || a.only }; } return { started: true, alerts: [] }; } });
+  return { runner, db };
+}
+test('수집: 일부만 고르면 비젬에서 그곳만 체크한 뒤 수집하고, 안 고른 쇼핑몰은 수집 확인에서 빼고 봄', async () => {
+  const { runner, db } = pickSetup();
+  await runner.handleCommand('c', collect({ malls: ['맨소래담-무신사'], seen: BEFORE.checked }));
+  assert.deepStrictEqual(db.calls, [['collectPick', { only: ['맨소래담-무신사'] }], ['collectGo', { expect: ['맨소래담-무신사'] }]]);
+  assert.strictEqual(job(db).state, 'done', job(db).notes);
+  assert.strictEqual(job(db).result.malls, 1);
+});
+test('수집: 고르기가 안 되거나 체크가 다르면 수집 버튼을 누르지 않음', async () => {
+  for (const o of [{ pickThrow: true }, { picked: ['맨소래담-무신사', '텐바이텐'] }]) {
+    const { runner, db } = pickSetup(o);
+    await runner.handleCommand('c', collect({ malls: ['맨소래담-무신사'], seen: BEFORE.checked }));
+    assert.ok(!db.calls.some((c) => c[0] === 'collectGo'));
+    assert.strictEqual(job(db).state, 'stopped');
+  }
+  const { runner, db } = pickSetup();
+  await runner.handleCommand('c', collect({ malls: ['없는몰'], seen: BEFORE.checked }));
+  assert.strictEqual(db.calls.length, 0);
+});
+test('수집: 전체(기본)면 고르기 없이 예전처럼 바로 수집', async () => {
+  const { runner, db } = pickSetup();
+  await runner.handleCommand('c', collect({ seen: BEFORE.checked }));
+  assert.deepStrictEqual(db.calls.map((c) => c[0]), ['collectGo']);
+});
