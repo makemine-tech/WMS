@@ -351,11 +351,32 @@ window.addEventListener('message', function(e){
    NOTSENT: = 이벗에 안 보냄. 기다리다 포기할 때 status 를 먼저 잡아(cancelled) 헤드비서가 늦게 저장하지 않게 함 */
 var RELAY = !!CFG.relay, RELAY_WAIT = 30000, RELAY_LATE = 60000;
 function viaLocal(){ return !!(H.win && !H.win.closed && (!RELAY || H.local)); }
+/* 헤드비서 상태 (secretary/runner): 꺼졌거나 반품 연결이 없는 옛 판이면 요청을 쌓지 않고 이유를 그대로 보여 줌.
+   헤드비서는 작업·받은 비젬 파일(3시간)이 없을 때만 새 판으로 새로고침해서 배포 직후엔 옛 판일 수 있음 (2026-11-12) */
+var RUNNER_ALIVE = 3 * 60 * 1000, RUNNER_RET_VER = '2026-11-12a', RUN = null, RUN_WHY = '확인 중…';
+function runnerWhy(){
+  if (!RUN || !RUN.ts || Date.now() - RUN.ts > RUNNER_ALIVE) return '상시 컴퓨터(헤드비서) 꺼짐';
+  if (!RUN.ver || RUN.ver < RUNNER_RET_VER) return '상시 컴퓨터가 옛 판(' + (RUN.ver || '?') + ') — 새 판으로 새로고침 기다리는 중';
+  return '';
+}
+function watchRunner(){
+  db.ref('secretary/runner').on('value', function(s){
+    var was = RUN_WHY; RUN = s.val(); RUN_WHY = runnerWhy();
+    if (viaLocal()) return;
+    if (RUN_WHY){ if (RUN_WHY !== was || H.ok) setHelper(false); }
+    else if (was) ping();   /* 막 켜졌거나 새 판이 됨 → 바로 확인 */
+  });
+}
+var RET_PEND = {};   /* 이 화면이 보낸 요청 — 화면을 닫으면 지움 */
+window.addEventListener('pagehide', function(){ Object.keys(RET_PEND).forEach(function(k){ try { RET_PEND[k].child('status').transaction(function(cur){ if (cur) return; return 'cancelled'; }); RET_PEND[k].remove(); } catch(e){} }); });
 function rcall(cmd, args, ms){
   return new Promise(function(res, rej){
     if (!db){ rej(new Error('NOHELPER')); return; }
+    RUN_WHY = runnerWhy();
+    if (RUN_WHY){ rej(new Error('NOTSENT:' + RUN_WHY)); return; }
     var ref = db.ref('secretary/retcall').push(), t = null, fin = false;
-    function end(fn, v){ if (fin) return; fin = true; clearTimeout(t); ref.off(); ref.remove().catch(function(){}); fn(v); }
+    RET_PEND[ref.key] = ref;
+    function end(fn, v){ if (fin) return; fin = true; delete RET_PEND[ref.key]; clearTimeout(t); ref.off(); ref.remove().catch(function(){}); fn(v); }
     ref.on('value', function(s){
       var v = s.val();
       if (!v || v.out == null) return;
@@ -384,7 +405,7 @@ function hcall(cmd, args, ms){
 function setHelper(ok, login){
   H.ok = !!ok; H.login = login;
   $('hDot').className = 'dot' + (ok ? (login === false ? ' warn' : ' on') : '');
-  if (RELAY && !viaLocal()) $('hTxt').textContent = ok ? (login === false ? '상시 컴퓨터 이벗 로그아웃됨 — AI 물류비서에서 로그인' : '상시 컴퓨터 이벗 연결됨') : '상시 컴퓨터 이벗 연결 안 됨';
+  if (RELAY && !viaLocal()) $('hTxt').textContent = ok ? (login === false ? '상시 컴퓨터 이벗 로그아웃됨 — AI 물류비서에서 로그인' : '상시 컴퓨터 이벗 연결됨') : (RUN_WHY || '상시 컴퓨터 이벗 연결 안 됨 (이벗 탭·도우미 확인)');
   else $('hTxt').textContent = ok ? (login === false ? '이벗 로그아웃됨 — 다시 로그인' : '이벗 도우미 연결됨') : '이벗 도우미 연결 안 됨';
   if (ok && login !== false && CUR && RECS[CUR] && RECS[CUR].look === 'wait') lookup(CUR);
   renderList(); autoLook();
@@ -397,7 +418,13 @@ function ping(){ lastPing = Date.now(); return hcall('ping', {}, 8000).then(func
 /* 메모(특이사항)를 넣는 도우미는 2026-10-25a 부터 — 그 전 버전이면 반영 전에 멈춤 */
 var HELPER_MIN = '2026-10-25a';
 /* 상시 컴퓨터 쪽 확인은 매번 이벗을 한 번 조회하므로 1분마다 */
-setInterval(function(){ if (viaLocal() || (H.win && !RELAY)) ping(); else if (RELAY && db && Date.now() - lastPing > 55000) ping(); }, 30000);
+setInterval(function(){
+  if (viaLocal() || (H.win && !RELAY)) return ping();
+  if (!RELAY || !db) return;
+  var was = RUN_WHY; RUN_WHY = runnerWhy();   /* 헤드비서 신호가 끊겨도 값이 안 바뀌어 이벤트가 없으므로 여기서 다시 봄 */
+  if (RUN_WHY){ if (RUN_WHY !== was || H.ok) setHelper(false); }
+  else if (was || Date.now() - lastPing > 55000) ping();
+}, 30000);
 /* 도우미가 이 화면을 열었을 때(이벗 탭이 opener) — 도우미의 첫 인사를 놓쳤을 수 있으니 이쪽에서 먼저 부름 */
 if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; try { H.win.postMessage({ to: 'ebut-helper', id: 0, cmd: 'ping' }, EBUT_ORIGIN); } catch(e){} ping(); setTimeout(knock, 1500); })(); }
 function openEbut(){
@@ -1328,7 +1355,7 @@ WMSync.onAuth(function(st){
   base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); autoCleanNotes(); if (!trk1){ trk1 = true; setTimeout(function(){ trackNotes(false); }, 3000); } if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   $('rnoIn').focus();
-  if (RELAY && !viaLocal()) ping();   /* 상시 컴퓨터 이벗 연결 확인 (조회·저장 없음) */
+  if (RELAY){ if (!viaLocal()) $('hTxt').textContent = '상시 컴퓨터 확인 중…'; watchRunner(); }   /* 헤드비서가 켜져 있고 새 판이면 이벗 연결 확인 (조회·저장 없음) */
 });
 </script>
 <script src="/mm_copy.js" defer></script>
