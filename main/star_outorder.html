@@ -5879,6 +5879,10 @@ function cpProcessItemScan(raw){
   }
   var row = sessRows[idx];
   var prog = cpComputeRowProgress(idx);
+  /* 출고 기록 바코드 — 찍은 바코드가 작업 줄 바코드와 다르지만(원본↔대체 짝) 그 바코드로 재고가 있으면
+     찍은 실물 바코드로 남긴다. 그래야 실제 재고가 잡힌 쪽에서 빠진다 (예: 재고는 196432426614, 발주는 4550362757815) */
+  var outBc = normBarcode(row.srcBarcode);
+  if (bc !== outBc && (stockQty[bc] || 0) > 0 && stockMeta[bc]) outBc = bc;
   var stageAddForSrc = (workSession.staging || []).filter(function(x){
     return !x.unmatched && x.srcIdx === idx;
   }).reduce(function(s,x){return s+(+x.qty||0);},0);
@@ -5886,7 +5890,7 @@ function cpProcessItemScan(raw){
   var sg = (workSession.staging || []).slice();
   var foundIdx = -1;
   for (var k=0; k<sg.length; k++){
-    if (sg[k].type === 'item' && sg[k].batchId === 'ITEM' && sg[k].srcIdx === idx && !sg[k].unmatched) {
+    if (sg[k].type === 'item' && sg[k].batchId === 'ITEM' && sg[k].srcIdx === idx && !sg[k].unmatched && normBarcode(sg[k].barcode) === outBc) {
       foundIdx = k; break;
     }
   }
@@ -5908,7 +5912,7 @@ function cpProcessItemScan(raw){
       type: 'item',                                       /* commit 시 SKU별 cpEnsureShipBox */
       ts: nowTs, by: getUserId(),
       srcBoxBarcode: '',
-      barcode: row.srcBarcode, poBarcode: row.poBarcode || '',
+      barcode: outBc, poBarcode: row.poBarcode || '',
       qty: 1,
       seqs: [nowTs],
       palletEta: row.eta || '', palletCenter: row.center || '',
