@@ -7,7 +7,7 @@ var STAR_CUST = '446';   /* 이벗 고객사 — 스타인터내셔널 */
 
 /* 같은 화면을 두 가지 반품 데이터로 씀 (대표님 2026-10-24)
    - 스타(기본): 피킹 화면에서 들어옴. 모든 반품 송장을 우체국 추적, 스타인터내셔널(446)만 반영
-   - 화물(?db=cargo): 화물관리에서 들어옴. 한진·롯데 등 다른 택배도 많아 우체국 송장(6077·7077)만 추적,
+   - 화물(?db=cargo): 화물관리에서 들어옴. 한진·롯데 등 다른 택배도 많아 우체국 송장만 추적(6077·7077 은 자동 우체국, 그 밖의 번호는 택배사 「우체국」을 고르면),
      나머지는 원송장 없이 쌓였다가 사진 등으로 원송장을 찾아 ✏️ 수정에 넣으면 이벗 조회·반영. 업체명·택배사 선택. 고객사 제한 없음
      freeItems: 상품 스캔 필수 아님 (대표님 2026-11-12 — 3PL 반품은 변수가 많음). 스캔·입력이 없으면 이벗에서 불러온 주문 상품 전부를 반품으로 반영,
        직접 입력(아무 이름)·주문 외 상품은 막지 않고 이벗 반품 메모에 이름을 남김
@@ -19,7 +19,8 @@ var COURIERS = ['우체국', '한진', '롯데', 'CJ대한통운', '로젠', '�
 /* 송장번호 자리수는 택배사마다 달라 정하지 않음 (대표님 2026-10-24) — 숫자가 있기만 하면, 너무 긴 것(30자리 넘음)만 막음 */
 function okNo(no){ return !!no && no.length <= 30; }
 function isEpost(no){ return /^(6077|7077)/.test(String(no || '')); }
-function needTrace(no){ return CFG.traceAll || isEpost(no); }
+/* 우체국이면 번호 모양과 상관없이 추적 (대표님 2026-11-12 — 6077 은 이벗 연계, 그 밖의 우체국 송장은 이지어드민 발송) */
+function needTrace(no, courier){ return CFG.traceAll || isEpost(no) || courier === '우체국'; }
 function custOK(o){ return !CFG.cust || o.cust === CFG.cust; }
 function vkey(name){ return String(name || '').replace(/[.#$\[\]\/]/g, '_'); }
 

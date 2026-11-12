@@ -673,7 +673,7 @@ function startRno(no){
   /* 휴대폰은 최근 3일만 받아 두므로, 더 오래된 같은 송장 기록이 있는지 서버에서 한 번 더 확인 (덮어쓰기 방지) */
   base.child('recs/' + no).once('value').then(function(sn){
     if (sn.exists()){ RECS[no] = sn.val(); openRec(no); toast('예전에 스캔한 송장입니다 — 이어서 봅니다'); return; }
-    r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no) ? 'busy' : 'skip', items: [], extras: [], dev: 'm-' + OS };
+    r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no, courier) ? 'busy' : 'skip', items: [], extras: [], dev: 'm-' + OS };
     if (CFG.vendor) r.courier = courier;
     RECS[no] = r;
     return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40);
@@ -740,7 +740,9 @@ function toggleList(){ SHOWALL = !SHOWALL; render(); }
 /* 택배사: 첫 화면에선 다음 송장용(휴대폰에 기억), 송장 단계(기록 열림)에선 그 기록을 고침 */
 function setCourier(c){
   var r = CUR && RECS[CUR];
-  if (r){ if (locked(r)) return; if (isEpost(r.rno) && c !== '우체국'){ toast('우체국 송장(6077·7077)은 우체국으로 둡니다'); return; } upd(r, { courier: c }); }
+  if (r){ if (locked(r)) return; if (isEpost(r.rno) && c !== '우체국'){ toast('우체국 송장(6077·7077)은 우체국으로 둡니다'); return; } upd(r, { courier: c });
+    /* 우체국으로 바꾸면 그 자리에서 원송장 추적 (아직 원송장 없을 때만) */
+    if (c === '우체국' && !r.orig && r.trace !== 'busy' && r.trace !== 'ok'){ upd(r, { trace: 'busy', traceErr: null }); trace(r.rno); } }
   else { CUR_COURIER = c; try { localStorage.setItem('retCourier_' + CFG.db, c); } catch(e){} }
   vib(20); render();
 }
@@ -887,7 +889,7 @@ function render(lastCode){
         : '⚠️ 이벗 도우미 PC 연결 안 됨<small>찍고 기록하는 건 다 됩니다. 이벗 반영은 PC 반품입고관리에서 합니다' + (BEAT && BEAT.at ? ' (마지막 연결 ' + hm(BEAT.at) + ')' : '') + '</small>') + '</div>';
     h += '<div class="yb">' + yh('start', '반송장 찍기')
       + '<button class="ib big" onclick="openScan(\'rno\')">' + ico('scan', 'sico') + '카메라로 찍기</button>'
-      + (CFG.vendor ? segC(CUR_COURIER) + '<div class="yn">우체국 송장(6077·7077)은 안 골라도 우체국</div>' : '')
+      + (CFG.vendor ? segC(CUR_COURIER) + '<div class="yn">우체국 송장(6077·7077)은 안 골라도 우체국 · 그 밖의 우체국 번호는 「우체국」을 골라야 원송장 추적</div>' : '')
       + '<div class="man on"><input id="rnoIn" inputmode="numeric" placeholder="또는 송장번호 입력" autocomplete="off" onkeydown="if(event.key===\'Enter\')manualRno()"><button class="ib" onclick="manualRno()">확인</button></div></div>';
     f = '<button class="btn" onclick="go(\'list\')">' + ico('list') + '내 목록 ' + PEND + '건</button>';
   }

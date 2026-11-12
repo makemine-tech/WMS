@@ -307,7 +307,7 @@ var VENDORS = {};   /* 화물: 업체명 목록 dict/vendor/{이름} = { name, n
   if (!CFG.vendor) [].forEach.call(document.querySelectorAll('th.vcol, option.vcol'), function(th){ th.remove(); });
   if (CFG.vendor){
     $('cargoRow').style.display = 'block'; $('vfRow').style.display = 'flex';
-    $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국(6077·7077)만 원송장 자동 추적, 다른 택배는 원송장 없이 쌓임';
+    $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국 송장은 모두 원송장 자동 추적 (6077·7077 은 자동 우체국, 그 밖의 번호는 택배사 「우체국」 선택), 다른 택배는 원송장 없이 쌓임';
     try { $('vendorIn').value = localStorage.getItem('retVendor_' + CFG.db) || ''; } catch(e){}
   }
   if (CFG.relay) document.querySelector('.helper').title = '상시 컴퓨터(AI 물류비서 헤드비서)의 이벗 탭으로 주문 조회·이벗 반영을 합니다. 이 PC 에서 즐겨찾기 도우미를 누르면 이 PC 이벗이 먼저 쓰입니다';
@@ -316,7 +316,7 @@ var CUR_COURIER = '';
 function renderCourierChips(){
   if (!CFG.vendor) return;
   $('courierChips').innerHTML = COURIERS.map(function(c){ return '<span class="chip' + (CUR_COURIER === c ? ' on' : '') + '" onclick="CUR_COURIER=\'' + c + '\';renderCourierChips()">' + c + '</span>'; }).join('')
-    + '<span class="sm dim" style="margin-left:.3rem">(6077·7077 송장은 자동 우체국)</span>';
+    + '<span class="sm dim" style="margin-left:.3rem">(6077·7077 은 자동 우체국 · 우체국이면 번호와 상관없이 원송장 추적)</span>';
 }
 function renderVendorChips(){
   if (!CFG.vendor) return;
@@ -448,15 +448,15 @@ $('rnoIn').addEventListener('keydown', function(e){
   var vendor = CFG.vendor ? $('vendorIn').value.trim() : '', courier = isEpost(no) ? '우체국' : CUR_COURIER;
   if (CFG.vendor && !vendor){ beep(false); toast('업체명을 먼저 넣어 주세요'); $('vendorIn').focus(); return; }
   if (CFG.vendor && !courier){ beep(false); toast('우체국 송장이 아닙니다 — 택배사를 먼저 고르세요'); return; }
-  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no) ? 'busy' : 'skip', items: [], extras: [] };
+  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no, courier) ? 'busy' : 'skip', items: [], extras: [] };
   if (CFG.vendor){ r.vendor = vendor; r.courier = courier; addVendor(vendor); try { localStorage.setItem('retVendor_' + CFG.db, vendor); } catch(e){} }
   CUR = no; save(r).then(function(){ renderCur(); beep(true); if (r.trace === 'busy') trace(no); else focusItem(); });
 });
 function trace(no){
-  var r = RECS[no]; if (!r) return;
+  var r = RECS[no]; if (!r) return Promise.resolve();
   save(r, { trace: 'busy' }); renderCur();
   var fn = firebase.app().functions('asia-northeast3').httpsCallable('epostReturnOrigin', { timeout: 60000 });
-  fn({ nos: [no] }).then(function(res){
+  return fn({ nos: [no] }).then(function(res){
     var x = ((res.data && res.data.rows) || [])[0] || {};
     if (x.err){ save(RECS[no], { trace: 'err', traceErr: x.err }); }
     else if (x.orig){ save(RECS[no], { trace: 'ok', orig: x.orig, origDate: x.origDate || null, self: false, look: 'wait' }); }
@@ -529,8 +529,17 @@ function waitWhy(r){
   return { c:'y', t:'자동 넘김 대기', h:'펼쳐서 「✔ 검수 완료 → 반영 대기」' };
 }
 function whyHtml(r){ var w = waitWhy(r); return w ? '<div class="why ' + w.c + '"><b>' + esc(w.t) + '</b><span>→ ' + esc(w.h) + '</span></div>' : ''; }
+/* 우체국인데 원송장 추적을 안 한 반품(예전 6077·7077 만 추적하던 때 쌓인 것, 휴대폰에서 택배사를 나중에 고친 것) → 이 화면이 한 건씩 우체국 조회 (화면당 한 번씩만) */
+var TRACED = {}, traceBusy = false;
+function autoTrace(){
+  if (traceBusy) return;
+  var k = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r && !TRACED[k] && !locked(r) && !r.orig && r.trace === 'skip' && needTrace(r.rno, r.courier); })[0];
+  if (!k) return;
+  TRACED[k] = 1; traceBusy = true;
+  trace(k).then(function(){ traceBusy = false; setTimeout(autoTrace, 300); });
+}
 function autoLook(){
-  autoReady();
+  autoReady(); autoTrace();
   if (autoBusy || !H.ok || H.login === false) return;
   var k = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r && r.orig && !locked(r) && (r.look === 'wait' || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) > 120000)); })
     .sort(function(a, b){ return RECS[a].at - RECS[b].at; })[0];
@@ -602,7 +611,7 @@ function setOrigPC(v){
   if (no === (r.orig || '')) return;
   if (no && !okNo(no)){ toast('원송장 번호가 너무 깁니다'); return; }
   /* 원송장을 넣으면 이벗에서 그 주문 상품을 다시 불러옴(이 PC 의 도우미가 연결돼 있으면 바로) */
-  save(r, no ? { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' } : { orig: null, trace: needTrace(r.rno) ? 'err' : 'skip', look: null });
+  save(r, no ? { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' } : { orig: null, trace: needTrace(r.rno, r.courier) ? 'err' : 'skip', look: null });
   renderCur(); autoLook();
 }
 function toggleTagPC(t){
