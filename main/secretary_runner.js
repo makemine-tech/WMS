@@ -405,7 +405,8 @@
         await store.setJob(key, patch);
         await store.setCommand(id, { status: 'done', jobKey: key, doneAt: deps.now() });
       }
-      var names = cmd.malls || [];
+      /* malls = 수집할 쇼핑몰, seen = 사람이 화면에서 본 비젬 체크(기본 전체). 다르면 고른 쇼핑몰만 체크하고 수집 (대표님 2026-11-11) */
+      var names = cmd.malls || [], seen = cmd.seen || names;
       await store.setJob(key, { state: 'running', recipe: 'bizem_collect', trigger: 'relay', by: cmd.by || '', at: now, cmd: id, step: '비젬 확인 중', notes: '' });
       try {
         await store.setCommand(id, { status: 'started', jobKey: key, startedAt: now });
@@ -413,10 +414,20 @@
         if (r.state !== 'ok') return end('stopped', '비젬: ' + r.msg);
         try { chk = await deps.bizemRead('collectCheck'); }
         catch (e) { return end('stopped', '쇼핑몰 목록을 읽지 못해 수집하지 않았습니다: ' + String((e && e.message) || e)); }
-        if (chk.checked.join('|') !== names.join('|') || chk.from !== cmd.from || chk.to !== cmd.to || chk.opt !== cmd.opt) return end('stopped', '화면에서 본 쇼핑몰·기간과 달라 수집하지 않았습니다. 다시 눌러 확인해 주세요');
+        if (chk.checked.join('|') !== seen.join('|') || chk.from !== cmd.from || chk.to !== cmd.to || chk.opt !== cmd.opt) return end('stopped', '화면에서 본 쇼핑몰·기간과 달라 수집하지 않았습니다. 다시 눌러 확인해 주세요');
+        var pick = names.join('|') !== chk.checked.join('|');
+        if (pick) {
+          var have = chk.malls.map(function(m){ return m.name; });
+          if (!names.length || names.some(function(n){ return have.indexOf(n) < 0; })) return end('stopped', '고른 쇼핑몰이 비젬 목록에 없어 수집하지 않았습니다. 다시 읽어 주세요');
+          await store.setJob(key, { step: '쇼핑몰 고르는 중' });
+          var picked;
+          try { picked = await deps.bizemGo('collectPick', { only: names }); }
+          catch (e) { return end('stopped', '비젬에서 쇼핑몰을 고르지 못해 수집하지 않았습니다 (' + String((e && e.message) || e) + ')'); }
+          if (!picked || (picked.picked || []).join('|') !== names.join('|')) return end('stopped', '비젬 체크가 고른 쇼핑몰과 달라 수집하지 않았습니다');
+        }
         await store.setJob(key, { step: '주문수집 중' });
         var go;
-        try { go = await deps.bizemGo('collectGo', {}); }
+        try { go = await deps.bizemGo('collectGo', pick ? { expect: names } : {}); }
         catch (e) { return end('stopped', '응답이 끊겼습니다. 수집됐을 수 있으니 비젬에서 먼저 확인해 주세요 (' + String((e && e.message) || e) + ')'); }
         if (!go.started) return end('stopped', '수집이 시작되지 않았습니다: ' + go.why);
         var s = null, miss = 0, tries = Math.ceil(C.COLLECT_MAX / C.COLLECT_POLL), deadline = deps.now() + C.COLLECT_MAX;
@@ -902,6 +913,55 @@
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 
+    /* 반품입고관리(star_return.html ?db=cargo)의 요청을 이 컴퓨터 이벗 탭의 도우미로 넘김 (secretary/retcall, 대표님 2026-11-12)
+       반품 화면 PC 에서 즐겨찾기 도우미를 따로 띄우지 않아도 됨. 명령과 따로 줄을 세워 긴 작업이 반품 조회를 막지 않게 함
+       NOTSENT: = 이벗에 보내지 않음(화면이 반영 대기로 되돌림). 저장은 실패해도 다시 보내지 않음 */
+    var retChain = Promise.resolve();
+    async function retRun(call){
+      var cmd = call.cmd, site = C.SITES.find(function(s){ return s.id === 'ebut'; });
+      if (C.RET_CMDS.indexOf(cmd) < 0) throw new Error('NOTSENT:허용되지 않은 요청: ' + cmd);
+      if (!call.at || deps.now() - call.at > C.RELAY_TTL) throw new Error('NOTSENT:요청이 만료됐습니다. 다시 눌러 주세요');
+      var args = JSON.parse(call.args || '{}'), write = cmd === 'save';
+      var control = await store.getControl();
+      if (write && control && control.pause) throw new Error('NOTSENT:전체 멈춤 상태입니다');
+      var jobs = (await store.getJobs()) || {};
+      var busy = Object.keys(jobs).some(function(k){ return jobs[k] && (jobs[k].state === 'running' || jobs[k].state === 'printing'); });
+      if (write && busy) throw new Error('NOTSENT:상시 컴퓨터가 다른 작업 중입니다. 끝난 뒤 다시 반영해 주세요');
+      var p = null;
+      try { p = await deps.ebutAsk('ping', {}, 8000); } catch (e) { p = null; }
+      /* 도우미가 없으면 이벗 탭을 다시 엶. 다른 작업이 그 탭을 쓰는 중이면 열지 않음. 연결 확인(ping)만으로는 열지 않음 */
+      if (!p && cmd !== 'ping' && !busy && !holding()) {
+        var r = await checkOne(site);
+        if (r.state === 'login') throw new Error('LOGIN');
+        if (r.state === 'ok') try { p = await deps.ebutAsk('ping', {}, 8000); } catch (e) { p = null; }
+      }
+      if (!p) throw new Error('NOHELPER');
+      if (cmd === 'ping') return p;
+      /* 이벗 탭 도우미는 탭을 열 때만 새 판을 받음 — 반품 저장 규칙(화물 로케이션 미설정)이 없는 옛 판이면 작업이 없을 때 탭을 새로 엶 */
+      if (!p.ver || p.ver < C.RET_HELPER) {
+        if (busy || holding()) throw new Error('NOTSENT:상시 컴퓨터 이벗 도우미가 옛 판(' + (p.ver || '?') + ')입니다. 다른 작업이 끝난 뒤 다시 해 주세요');
+        var r2 = await checkOne(site);
+        if (r2.state === 'login') throw new Error('LOGIN');
+        try { p = await deps.ebutAsk('ping', {}, 8000); } catch (e) { p = null; }
+        if (!p) throw new Error('NOHELPER');
+        if (!p.ver || p.ver < C.RET_HELPER) throw new Error('NOTSENT:상시 컴퓨터 이벗 도우미가 옛 판(' + (p.ver || '?') + ')입니다. 확장 프로그램을 확인해 주세요');
+      }
+      if (p.login === false) throw new Error('LOGIN');
+      try { return await deps.ebutAsk(cmd, args, write ? 60000 : 90000); }
+      catch (e) { var m = String((e && e.message) || e); throw new Error(m === '로그인이 필요합니다' ? 'LOGIN' : m); }
+    }
+    function handleRet(id, call){
+      var run = retChain.then(async function(){
+        if (!(await store.claimRet(id))) return;
+        var out;
+        try { out = { ok: true, data: await retRun(call) }; }
+        catch (e) { out = { ok: false, err: String((e && e.message) || e) }; }
+        await store.setRet(id, { out: JSON.stringify(out) });
+      });
+      retChain = run.catch(function(){});
+      return run;
+    }
+
     /* 명령은 한 번에 하나씩. 실패해도 다음 명령을 막지 않음 */
     function handleCommand(id, cmd){
       var run = chain.then(function(){ return process(id, cmd); });
@@ -909,7 +969,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleLogin: handleLogin, uploadMenso: uploadMenso, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleRet: handleRet, handleLogin: handleLogin, uploadMenso: uploadMenso, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

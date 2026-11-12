@@ -111,15 +111,17 @@ test('흐름도: 앞 단계가 막히면 거기만 빨강, 뒤는 회색', () =>
 
 test('흐름도: 단계가 끝날수록 파랑이 앞으로', () => {
   assert.strictEqual(states(flow({ rows: [flowRow('A', { ivDate: '', dno: '' })] }, [])).confirm, 'todo');
+  /* 출력확정만 되고 송장번호가 없으면 아직 「묶음및출력확정 + 운송장부여」 칸 */
   let s = states(flow({ rows: [flowRow('A', { dno: '' })] }, [{ need: 2, wrong: [] }]));
+  assert.strictEqual(s.confirm, 'todo');
+  assert.strictEqual(s.gift, 'wait');
+  s = states(flow({ rows: [flowRow('A')] }, [{ need: 2, wrong: [] }]));
   assert.strictEqual(s.confirm, 'done');
   assert.strictEqual(s.gift, 'todo');
-  s = states(flow({ rows: [flowRow('A', { dno: '' })] }, [{ need: 0, wrong: [] }]));
-  assert.strictEqual(s.gift, 'done');
-  assert.strictEqual(s.invoice, 'todo');
   s = states(flow({ rows: [flowRow('A')] }, []));
-  assert.strictEqual(s.invoice, 'done');
+  assert.strictEqual(s.gift, 'done');
   assert.strictEqual(s.ship, 'todo');
+  assert.strictEqual(s.fetch, 'later');
 });
 
 test('흐름도: 모두 출고되면 출고처리까지 파랑, 취소·사은품 줄은 세지 않음', () => {
@@ -137,7 +139,7 @@ test('결과에 수령자 정보 칸이 없음', () => {
 
 test('흐름 순서와 이름: 대표님이 정한 10칸', () => {
   const steps = flow({ rows: [] }, []).steps;
-  assert.deepStrictEqual(steps.map((s) => s.name), ['비젬 주문수집', '비젬 주문 이벗에 넣기', '이벗 주문수집', '주문 매칭', '묶음 및 출력확정', '사은품 세팅', '운송장 부여', '출고처리', '이벗 운송장전송', '비젬 송장업로드']);
+  assert.deepStrictEqual(steps.map((s) => s.name), ['비젬 주문수집', '비젬 주문 이벗에 넣기', '이벗 주문수집', '주문 매칭', '묶음및출력확정 + 운송장부여', '사은품 세팅', '출고처리', '이벗 운송장전송', '송장번호 가져오기', '비젬 송장업로드']);
   const s = states(flow({ rows: [flowRow('A', { ivDate: '', dno: '' })] }, []));
   assert.strictEqual(s.bizem_collect, 'later');
   assert.strictEqual(s.bizem_import, 'later');
@@ -147,14 +149,14 @@ test('예전 순서로 저장된 결과도 새 순서와 이름으로, 비젬 �
   const { bizemSteps } = require('../../main/secretary_menso.js');
   const old = [{ id: 'collect', name: '주문 수집', state: 'done', count: 0 }, { id: 'match', name: '주문 매칭', state: 'todo', count: 2 }, { id: 'send', name: '이벗 송장전송', state: 'later', count: 0 }];
   const a = bizemSteps(old);
-  assert.deepStrictEqual(a.map((x) => x.name), ['비젬 주문수집', '비젬 주문 이벗에 넣기', '이벗 주문수집', '주문 매칭', '이벗 운송장전송']);
+  assert.deepStrictEqual(a.map((x) => x.name), ['비젬 주문수집', '비젬 주문 이벗에 넣기', '이벗 주문수집', '주문 매칭', '이벗 운송장전송', '송장번호 가져오기']);
   assert.strictEqual(a.find((x) => x.id === 'match').count, 2);
   assert.strictEqual(a.find((x) => x.id === 'collect').state, 'done');
 });
 
 test('그룹: 3단계가 10칸을 빠짐없이 순서대로 나눔', () => {
   const { GROUPS } = require('../../main/secretary_menso.js');
-  assert.deepStrictEqual(GROUPS.map((g) => g.ids.length), [3, 4, 3]);
+  assert.deepStrictEqual(GROUPS.map((g) => g.ids.length), [3, 3, 4]);
   assert.deepStrictEqual(GROUPS.flatMap((g) => g.ids), flow({ rows: [] }, []).steps.map((s) => s.id));
 });
 

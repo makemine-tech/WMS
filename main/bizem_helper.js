@@ -10,7 +10,8 @@
      counts → { unconfirmed, printWait }   주문확정 대기, 운송장인쇄 대기
      login  { id, pw } → { tried, why }    비서 화면에서 사람이 입력한 값으로 로그인 버튼을 한 번 누름
      collectCheck  → { malls, checked, from, to, opt }   주문서수집 화면을 열어 읽기만 함
-     collectGo     → { started, why, alerts }   수집 버튼과 비젬 확인창을 한 번씩 누름. 쇼핑몰에 발주확인 처리되어 되돌릴 수 없음
+     collectPick { only } → { picked }   주문서수집 표에서 고른 쇼핑몰만 체크(화면 체크만, 비젬에 저장 안 됨 — 화면을 열 때마다 비젬이 전부 체크)
+     collectGo { expect } → { started, why, alerts }   expect 가 있으면 체크된 쇼핑몰이 그와 같을 때만 누름.   수집 버튼과 비젬 확인창을 한 번씩 누름. 쇼핑몰에 발주확인 처리되어 되돌릴 수 없음
      collectStatus → { done, malls } · { done:false, error } · { lost:true }
      confirmCheck  → { orders, invoices, status, hold }   주문서확정 화면을 열어 검색하고 건수만 읽음
      confirmGo { orders } → { started, why, alerts }     「조회된 운송장 전체 확정」과 비젬 확인창을 한 번씩 누름
@@ -21,7 +22,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)bizesm\.com$/.test(location.hostname)) return;
-  var VER = '2026-11-06f';
+  var VER = '2026-11-11a';
   var old = window.__mkwBizemHelper;
   if (old) { if (old.ver === VER) { old.hello(); return; } old.stop(); }
   var ALLOW = /^https:\/\/(www\.)?makewon\.com$|^https:\/\/makechango-wms\.(web\.app|firebaseapp\.com)$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -110,9 +111,25 @@
                from: d.getElementById('txtstdt').value, to: d.getElementById('txtenddt').value, opt: opt ? opt.value : '' };
     });
   }
-  function cmdCollectGo(){
+  function checkedNames(d){ return readMalls(d).filter(function(m){ return m.checked; }).map(function(m){ return m.name; }); }
+  /* 고른 쇼핑몰만 체크. 이름이 표에 하나씩 있어야 함 (같은 쇼핑몰 코드가 두 줄일 수 있어 이름으로 고름) */
+  function cmdCollectPick(args){
+    var w = collectWin(), d = w && w.document, only = (args && args.only) || [];
+    if (!d) throw new Error('주문서수집 화면이 열려 있지 않습니다');
+    if (!only.length) throw new Error('고른 쇼핑몰이 없습니다');
+    var rows = Array.prototype.filter.call(d.querySelectorAll('#grid1body tr'), function(tr){ return tr.querySelector('input[type=checkbox]'); });
+    var names = rows.map(function(tr){ return clean(tr.cells[COL_NAME].textContent); });
+    only.forEach(function(n){ if (names.filter(function(x){ return x === n; }).length !== 1) throw new Error('표에서 쇼핑몰을 찾지 못했습니다: ' + n); });
+    var all = d.getElementById('chkall');
+    if (all) all.checked = false;
+    rows.forEach(function(tr, i){ tr.querySelector('input[type=checkbox]').checked = only.indexOf(names[i]) >= 0; });
+    return { picked: checkedNames(d) };
+  }
+  function cmdCollectGo(args){
     var w = collectWin(), d = w && w.document, btn = d && d.getElementById(COLLECT_GO);
     if (!btn || btn.disabled) return { started: false, why: '주문수집 버튼을 누를 수 없는 상태입니다', alerts: [] };
+    var expect = args && args.expect;
+    if (expect && checkedNames(d).join('|') !== expect.join('|')) return { started: false, why: '체크된 쇼핑몰이 고른 것과 달라 누르지 않았습니다', alerts: [] };
     var alerts = [];
     w.alert = function(m){ alerts.push(clean(m).slice(0, 100)); };
     btn.click();
@@ -428,7 +445,7 @@
     return { done: !!(p && p.isSuccess === true) };
   }
 
-  var CMDS = { invoiceList: cmdInvoiceList, invoiceUpload: cmdInvoiceUpload, invoiceCheckup: cmdInvoiceCheckup, invoiceSend: cmdInvoiceSend, invoiceSendStatus: cmdInvoiceSendStatus, survey: cmdSurvey, formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
+  var CMDS = { invoiceList: cmdInvoiceList, invoiceUpload: cmdInvoiceUpload, invoiceCheckup: cmdInvoiceCheckup, invoiceSend: cmdInvoiceSend, invoiceSendStatus: cmdInvoiceSendStatus, survey: cmdSurvey, formCheck: cmdFormCheck, formPage: cmdFormPage, ping: cmdPing, counts: cmdCounts, login: cmdLogin, collectCheck: cmdCollectCheck, collectPick: cmdCollectPick, collectGo: cmdCollectGo, collectStatus: cmdCollectStatus, confirmCheck: cmdConfirmCheck, confirmGo: cmdConfirmGo, confirmStatus: cmdConfirmStatus };
   function onMsg(e){
     var m = e.data;
     if (!m || m.to !== 'bizem-helper' || !ALLOW.test(e.origin)) return;

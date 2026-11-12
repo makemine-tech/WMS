@@ -8,9 +8,12 @@ var STAR_CUST = '446';   /* 이벗 고객사 — 스타인터내셔널 */
 /* 같은 화면을 두 가지 반품 데이터로 씀 (대표님 2026-10-24)
    - 스타(기본): 피킹 화면에서 들어옴. 모든 반품 송장을 우체국 추적, 스타인터내셔널(446)만 반영
    - 화물(?db=cargo): 화물관리에서 들어옴. 한진·롯데 등 다른 택배도 많아 우체국 송장(6077·7077)만 추적,
-     나머지는 원송장 없이 쌓였다가 사진 등으로 원송장을 찾아 ✏️ 수정에 넣으면 이벗 조회·반영. 업체명·택배사 선택. 고객사 제한 없음 */
+     나머지는 원송장 없이 쌓였다가 사진 등으로 원송장을 찾아 ✏️ 수정에 넣으면 이벗 조회·반영. 업체명·택배사 선택. 고객사 제한 없음
+     freeItems: 상품 스캔 필수 아님 (대표님 2026-11-12 — 3PL 반품은 변수가 많음). 스캔·입력이 없으면 이벗에서 불러온 주문 상품 전부를 반품으로 반영,
+       직접 입력(아무 이름)·주문 외 상품은 막지 않고 이벗 반품 메모에 이름을 남김
+     relay: 이벗 조회·반영을 상시 컴퓨터 헤드비서의 이벗 탭(메이크창고 계정)으로 보냄 (대표님 2026-11-12). 스타는 다른 이벗 계정이라 즐겨찾기 도우미 그대로 */
 var CFG = /[?&]db=cargo(&|$)/.test(location.search)
-  ? { db: 'cargo', path: 'cargo_return', title: '3PL 반품입고관리', badge: 'CARGO 3PL RETURN', cust: null, traceAll: false, vendor: true, back: 'cargo_log.html', backLabel: '화물관리로', q: '&db=cargo' }
+  ? { db: 'cargo', path: 'cargo_return', title: '3PL 반품입고관리', badge: 'CARGO 3PL RETURN', cust: null, traceAll: false, vendor: true, back: 'cargo_log.html', backLabel: '화물관리로', q: '&db=cargo', relay: true, freeItems: true }
   : { db: 'star', path: 'star_return', title: '스타 3PL 반품입고관리', badge: 'STAR 3PL RETURN', cust: STAR_CUST, traceAll: true, vendor: false, back: 'star_picking.html', backLabel: '피킹으로', q: '' };
 var COURIERS = ['우체국', '한진', '롯데', 'CJ대한통운', '로젠', '기타'];
 /* 송장번호 자리수는 택배사마다 달라 정하지 않음 (대표님 2026-10-24) — 숫자가 있기만 하면, 너무 긴 것(30자리 넘음)만 막음 */
@@ -66,9 +69,14 @@ function judge(r){
     var st = starOrders(r);
     if (!st.length) block.push('다른 고객사 주문 (' + (r.orders || []).map(function(o){ return o.custName || o.cust; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(', ') + ')');
     else if (!(r.items || []).length && st.every(function(o){ return o.ret !== '-'; })) block.push('이벗에서 이미 반품처리됨 (' + st.map(function(o){ return o.ret; }).join(',') + ')');
-    else if (!(r.items || []).some(function(it){ return it.got > 0; })) block.push('반품 상품 스캔 없음');
+    else if (!(r.items || []).some(function(it){ return it.got > 0; })){
+      if (!CFG.freeItems) block.push('반품 상품 스캔 없음');
+      else if ((r.items || []).length) info.push('스캔 없음 — 주문 상품 전부 반품으로 반영');
+      else block.push('이벗 주문에 반품할 상품 없음');
+    }
   }
-  if ((r.extras || []).length) info.push((CFG.db === 'cargo' && !(r.items || []).length ? '원송장 전 스캔 상품 ' : '반품 대상 아닌 상품 ') + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
+  if ((r.extras || []).length && CFG.freeItems) info.push('직접 입력·주문 외: ' + r.extras.map(function(x){ return xName(x) + ' ' + (x.n || 0) + '개' + (badOf(x) ? '(불량 ' + badOf(x) + ')' : ''); }).join(', '));
+  else if ((r.extras || []).length) info.push((CFG.db === 'cargo' && !(r.items || []).length ? '원송장 전 스캔 상품 ' : '반품 대상 아닌 상품 ') + r.extras.reduce(function(s, x){ return s + x.n; }, 0) + '개');
   (r.items || []).forEach(function(it){ if (it.got > it.qty) info.push('주문보다 많음: ' + it.name); });
   (r.items || []).forEach(function(it){ if (isMix(it)) info.push('정상·불량 섞임: ' + it.name + ' (정상 ' + goodOf(it) + ' · 불량 ' + badOf(it) + ') — 이벗은 손으로 나눠 입력'); });
   if ((r.items || []).some(function(it){ return it.got > 0 && it.got < it.qty; }) || ((r.items || []).some(function(it){ return !it.got; }) && (r.items || []).some(function(it){ return it.got > 0; }))) info.push('부분 반품');
@@ -81,6 +89,21 @@ function judge(r){
   if (r.memo) info.push('메모: ' + r.memo);
   return { block: block, info: info };
 }
+/* 이벗에 넣을 상품 줄 — 반품 온 수량(got)이 있는 줄만. freeItems(화물)에서 하나도 없으면 주문 상품 전부를 정상으로 */
+function ebutLines(r){
+  var items = r.items || [], got = items.filter(function(it){ return it.got > 0; });
+  if (got.length) return got.map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: badOf(it) ? '2' : '1' }; });
+  if (!CFG.freeItems) return [];
+  return items.filter(function(it){ return it.qty > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: it.qty, q: '1' }; });
+}
+/* 엑셀·PDF 상품 줄 — 이벗에 넣은 것과 같게 (화물에서 스캔이 없으면 주문 상품 전부를 반품 수량으로 보여 줌) */
+function gotItems(r){
+  var items = r.items || [], got = items.filter(function(it){ return it.got > 0; });
+  if (got.length || !CFG.freeItems) return got;
+  return items.filter(function(it){ return it.qty > 0; }).map(function(it){ return Object.assign({}, it, { got: it.qty, bad: 0, q: '1' }); });
+}
+/* 휴대폰 「완료」 건이 저절로 반영 대기로 넘어가도 되는지 — 주문 외 상품이 있으면 스타는 사람이 봄, 화물은 메모로 넘김 */
+function extrasHold(r){ return !CFG.freeItems && !!(r.extras || []).length; }
 function stOf(r){
   if (r.state === 'saving' && Date.now() - (r.saveAt || 0) > 120000) return { k: 'fail', t: '확인 필요' };
   if (r.state === 'done') return { k: 'done', t: r.ebut && r.ebut.mode === 'manual' ? '수동 완료' : '자동 완료' };

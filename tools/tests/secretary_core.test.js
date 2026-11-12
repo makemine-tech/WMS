@@ -205,3 +205,8 @@ test('시작 버튼: 작업·출력·채운 내용이 있으면 가져오지 않
   assert.strictEqual(C.startChoice({ runner: on, myId: 'me', hasExt: true, jobRunning: true, now }), 'send');
   assert.strictEqual(C.startChoice({ runner: { id: 'dmzoot', ts: now, busy: true }, myId: 'me', hasExt: true, now }), 'send');
 });
+
+test('매칭 미리 읽기는 빈 검색어 하나 = 고객사 이벗 상품 전부 (브랜드 낱말 없는 상품도 빠지지 않게, 2026-11-11)', () => {
+  const C = require('../../main/secretary_core.js');
+  assert.deepStrictEqual(C.MATCH_TERMS, ['']);
+});
