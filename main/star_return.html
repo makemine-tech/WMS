@@ -252,6 +252,7 @@
     <div class="card-h">🗂 반품입고 목록 <span class="sp"></span>
       <button class="btn" id="lookAllBtn" onclick="lookAll()">🔎 주문 조회 대기 <span id="nLook">0</span>건 찾기</button>
       <button class="btn" onclick="readySelected()" title="체크한 미완료 건 중 막힌 것 없는 건을 한 번에 「반영 대기」로">✔ 체크한 건 반영 대기로</button>
+      <button class="btn" onclick="manualDoneSelected()" title="체크한 미완료 건을 이벗 반영 없이 한 번에 「✋ 수동 완료」로 (반영 중인 건은 빼고)">✋ 체크한 건 수동 완료</button>
       <button class="btn p" id="pushBtn" onclick="pushAll()">📤 이벗에 반영 (<span id="nReady">0</span>건)</button>
       <button class="btn" onclick="downloadXlsx()">📥 엑셀</button>
       <button class="btn" id="pdfBtn" onclick="downloadReport()">📄 선택 PDF 보고서</button>
@@ -953,6 +954,24 @@ function delSelected(){
   if (!confirm('체크한 ' + ks.length + '건을 지울까요?' + delWarn(ks))) return;
   var up = {}; ks.forEach(function(k){ up['recs/' + k] = null; }); dropPhotos(ks);
   base.update(up).then(function(){ if (CUR && SEL[CUR]){ CUR = null; renderCur(); } SEL = {}; toast(ks.length + '건 지웠습니다'); });
+}
+
+/* 체크한 미완료 건을 한 번에 ✋ 수동 완료로 (대표님 2026-11-12 — 전체 선택 후 강제 완료) — 막힘·실패와 상관없이 완료로 넘김.
+   이벗 반영 중(saving)인 건은 결과를 모르니 빼고, 이미 완료된 건은 그대로. 이벗에는 아무것도 넣지 않음 */
+function manualDoneSelected(){
+  var ks = Object.keys(SEL).filter(function(k){ return RECS[k] && RECS[k].state !== 'done'; });
+  if (!ks.length){ toast('수동 완료할 미완료 줄을 먼저 체크하세요'); return; }
+  var go = ks.filter(function(k){ return RECS[k].state !== 'saving'; }), sv = ks.length - go.length;
+  if (!go.length){ alert('체크한 건이 모두 이벗에 반영 중입니다 — 끝난 뒤 다시 하세요.'); return; }
+  var why = prompt('✋ 체크한 ' + go.length + '건을 수동 완료로 넘깁니다.\n이벗에는 넣지 않고 완료로만 표시합니다.' + (sv ? '\n(이벗에 반영 중인 ' + sv + '건은 뺌)' : '') + '\n\n메모(선택):', CFG.db === 'cargo' ? '기록만 (이벗 반영 안 함)' : '이벗에 직접 입력');
+  if (why === null) return;
+  var by = byName(), now = Date.now(), msg = String(why || '').trim() || '수동 완료';
+  var up = {};
+  go.forEach(function(k){ var r = RECS[k], f = { state: 'done', saveAt: null, ebut: { at: now, by: by, mode: 'manual', msg: msg }, upd: now };
+    Object.assign(r, f); markNotes(r); Object.keys(f).forEach(function(n){ up['recs/' + k + '/' + n] = f[n]; }); });
+  base.update(up).then(function(){ go.forEach(function(k){ delete SEL[k]; }); if (CUR && go.indexOf(CUR) >= 0) renderCur(); renderList();
+    toast('✋ ' + go.length + '건 수동 완료' + (sv ? ' · 반영 중 ' + sv + '건은 뺌' : '')); })
+    .catch(function(e){ toast('수동 완료 실패: ' + (e.code || e.message)); });
 }
 
 /* 체크한 미완료 건을 한 번에 「반영 대기」로 (대표님 2026-10-26) — 펼쳐서 「✔ 검수 완료 → 반영 대기」 누르는 것과 같은 판정:
