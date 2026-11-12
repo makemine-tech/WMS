@@ -913,6 +913,46 @@
       await store.setCommand(id, { status: 'refused', why: '모르는 명령', doneAt: now });
     }
 
+    /* 반품입고관리(star_return.html ?db=cargo)의 요청을 이 컴퓨터 이벗 탭의 도우미로 넘김 (secretary/retcall, 대표님 2026-11-12)
+       반품 화면 PC 에서 즐겨찾기 도우미를 따로 띄우지 않아도 됨. 명령과 따로 줄을 세워 긴 작업이 반품 조회를 막지 않게 함
+       NOTSENT: = 이벗에 보내지 않음(화면이 반영 대기로 되돌림). 저장은 실패해도 다시 보내지 않음 */
+    var retChain = Promise.resolve();
+    async function retRun(call){
+      var cmd = call.cmd, site = C.SITES.find(function(s){ return s.id === 'ebut'; });
+      if (C.RET_CMDS.indexOf(cmd) < 0) throw new Error('NOTSENT:허용되지 않은 요청: ' + cmd);
+      if (!call.at || deps.now() - call.at > C.RELAY_TTL) throw new Error('NOTSENT:요청이 만료됐습니다. 다시 눌러 주세요');
+      var args = JSON.parse(call.args || '{}'), write = cmd === 'save';
+      var control = await store.getControl();
+      if (write && control && control.pause) throw new Error('NOTSENT:전체 멈춤 상태입니다');
+      var jobs = (await store.getJobs()) || {};
+      var busy = Object.keys(jobs).some(function(k){ return jobs[k] && (jobs[k].state === 'running' || jobs[k].state === 'printing'); });
+      if (write && busy) throw new Error('NOTSENT:상시 컴퓨터가 다른 작업 중입니다. 끝난 뒤 다시 반영해 주세요');
+      var p = null;
+      try { p = await deps.ebutAsk('ping', {}, 8000); } catch (e) { p = null; }
+      /* 도우미가 없으면 이벗 탭을 다시 엶. 다른 작업이 그 탭을 쓰는 중이면 열지 않음. 연결 확인(ping)만으로는 열지 않음 */
+      if (!p && cmd !== 'ping' && !busy && !holding()) {
+        var r = await checkOne(site);
+        if (r.state === 'login') throw new Error('LOGIN');
+        if (r.state === 'ok') try { p = await deps.ebutAsk('ping', {}, 8000); } catch (e) { p = null; }
+      }
+      if (!p) throw new Error('NOHELPER');
+      if (cmd === 'ping') return p;
+      if (p.login === false) throw new Error('LOGIN');
+      try { return await deps.ebutAsk(cmd, args, write ? 60000 : 90000); }
+      catch (e) { var m = String((e && e.message) || e); throw new Error(m === '로그인이 필요합니다' ? 'LOGIN' : m); }
+    }
+    function handleRet(id, call){
+      var run = retChain.then(async function(){
+        if (!(await store.claimRet(id))) return;
+        var out;
+        try { out = { ok: true, data: await retRun(call) }; }
+        catch (e) { out = { ok: false, err: String((e && e.message) || e) }; }
+        await store.setRet(id, { out: JSON.stringify(out) });
+      });
+      retChain = run.catch(function(){});
+      return run;
+    }
+
     /* 명령은 한 번에 하나씩. 실패해도 다음 명령을 막지 않음 */
     function handleCommand(id, cmd){
       var run = chain.then(function(){ return process(id, cmd); });
@@ -920,7 +960,7 @@
       return run;
     }
 
-    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleLogin: handleLogin, uploadMenso: uploadMenso, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
+    return { claim: claim, checkSites: checkSites, handleCommand: handleCommand, handleCall: handleCall, handleRet: handleRet, handleLogin: handleLogin, uploadMenso: uploadMenso, holding: holding, mustStay: mustStay, printWatch: printWatch, keepAlive: keepAlive };
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRunner: createRunner };

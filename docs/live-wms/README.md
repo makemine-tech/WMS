@@ -79,6 +79,7 @@ secretary/
   commands    시동 등 명령 (start · menso · match_read · match_search · bizem_check · bizem_collect · bizem_confirm · bizem_form · bizem_import · ebut_check · ebut_collect · match_save · bizem_survey · bizem_invoice · gift_check · gift_add)
   giftSets    사은품 설정 (기간·묶음출력 메모·가격대 → 사은품)
   ezcall      합포 분할 화면 요청 (search · fill · reset · commit)
+  retcall     화물 반품입고관리(star_return.html?db=cargo) 요청 (ping · find · save) → 헤드비서 이벗 탭 도우미
   loginKey    로그인 값을 잠그는 공개키 (헤드비서가 켜질 때마다 새로 만듦)
   loginreq    잠긴 로그인 값. 헤드비서가 받자마자 지움
   loginres    로그인 결과 (값 없음). 화면이 읽고 지움

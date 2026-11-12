@@ -356,3 +356,98 @@ test('비젬 로그인이 풀려도 이지어드민 작업은 진행', async () 
   assert.strictEqual(db.sites.bizem.state, 'login');
   assert.strictEqual(db.jobs['ez_daily:2026-11-01:1'].state, 'done');
 });
+
+/* 반품입고관리(star_return.html) → 상시 컴퓨터 이벗 도우미 (secretary/retcall) */
+function retSetup(opts) {
+  opts = opts || {};
+  const s = setup(opts);
+  const sent = [];
+  const rets = {};
+  s.store.claimRet = async (id) => { if (rets[id] && rets[id].status) return false; rets[id] = { status: 'taken' }; return true; };
+  s.store.setRet = async (id, p) => { rets[id] = Object.assign(rets[id] || {}, p); };
+  const alive = { v: opts.alive !== false };
+  const ebutAsk = async (cmd, args) => {
+    sent.push({ cmd, args });
+    if (cmd === 'ping') { if (!alive.v) throw new Error('도우미가 연결되지 않았습니다'); return { ok: true, login: opts.login !== false, ver: '2026-11-08c' }; }
+    if (opts.fail) throw new Error(opts.fail);
+    return { cmd, got: args };
+  };
+  const openSite = async (site) => { s.opened.push(site.id); alive.v = true; return { ver: 'v2', login: true }; };
+  const runner = createRunner({ store: s.store, openSite, ebutAsk, now: () => opts.now || NOW, runnerId: 'me' });
+  return { runner, db: s.db, opened: s.opened, sent, rets, alive };
+}
+const ret = (cmd, args, at) => ({ cmd, args: JSON.stringify(args || {}), at: at === undefined ? NOW : at, by: 'x' });
+const outOf = (rets, id) => JSON.parse(rets[id].out);
+
+test('반품: 조회(find)를 이벗 도우미로 넘기고 결과를 돌려줌', async () => {
+  const { runner, sent, rets, opened } = retSetup();
+  await runner.handleRet('r1', ret('find', { orig: '123', cust: null }));
+  assert.deepStrictEqual(outOf(rets, 'r1'), { ok: true, data: { cmd: 'find', got: { orig: '123', cust: null } } });
+  assert.deepStrictEqual(sent.map((x) => x.cmd), ['ping', 'find']);
+  assert.deepStrictEqual(opened, []);
+});
+
+test('반품: 정해진 명령만 받음', async () => {
+  const { runner, sent, rets } = retSetup();
+  await runner.handleRet('r1', ret('giftAdd', {}));
+  assert.strictEqual(outOf(rets, 'r1').ok, false);
+  assert.match(outOf(rets, 'r1').err, /^NOTSENT:/);
+  assert.deepStrictEqual(sent, []);
+});
+
+test('반품: 만료된 저장 요청은 보내지 않음', async () => {
+  const { runner, sent, rets } = retSetup();
+  await runner.handleRet('r1', ret('save', { rno: '1' }, NOW - 3 * 60 * 1000));
+  assert.match(outOf(rets, 'r1').err, /^NOTSENT:/);
+  assert.deepStrictEqual(sent, []);
+});
+
+test('반품: 전체 멈춤·진행 중 작업이면 저장하지 않음', async () => {
+  const a = retSetup({ control: { pause: true } });
+  await a.runner.handleRet('r1', ret('save', { rno: '1' }));
+  assert.match(outOf(a.rets, 'r1').err, /^NOTSENT:/);
+  assert.ok(!a.sent.some((x) => x.cmd === 'save'));
+  const b = retSetup({ jobs: { 'gift_add:2026-11-01:1': { state: 'running' } } });
+  await b.runner.handleRet('r1', ret('save', { rno: '1' }));
+  assert.match(outOf(b.rets, 'r1').err, /^NOTSENT:/);
+  assert.ok(!b.sent.some((x) => x.cmd === 'save'));
+});
+
+test('반품: 저장은 실패해도 한 번만 보냄', async () => {
+  const { runner, sent, rets } = retSetup({ fail: '도우미 응답 없음' });
+  await runner.handleRet('r1', ret('save', { rno: '1' }));
+  assert.strictEqual(sent.filter((x) => x.cmd === 'save').length, 1);
+  assert.strictEqual(outOf(rets, 'r1').err, '도우미 응답 없음');
+});
+
+test('반품: 도우미가 없으면 작업이 없을 때만 이벗 탭을 열고 조회', async () => {
+  const a = retSetup({ alive: false });
+  await a.runner.handleRet('r1', ret('find', { orig: '1' }));
+  assert.deepStrictEqual(a.opened, ['ebut']);
+  assert.strictEqual(outOf(a.rets, 'r1').ok, true);
+  const b = retSetup({ alive: false, jobs: { 'match_save:2026-11-01:1': { state: 'running' } } });
+  await b.runner.handleRet('r1', ret('find', { orig: '1' }));
+  assert.deepStrictEqual(b.opened, []);
+  assert.strictEqual(outOf(b.rets, 'r1').err, 'NOHELPER');
+});
+
+test('반품: 연결 확인(ping)은 이벗 탭을 열지 않음', async () => {
+  const { runner, rets, opened } = retSetup({ alive: false });
+  await runner.handleRet('r1', ret('ping'));
+  assert.deepStrictEqual(opened, []);
+  assert.strictEqual(outOf(rets, 'r1').err, 'NOHELPER');
+});
+
+test('반품: 이벗 로그아웃이면 LOGIN 으로 알림', async () => {
+  const { runner, rets, sent } = retSetup({ login: false });
+  await runner.handleRet('r1', ret('find', { orig: '1' }));
+  assert.strictEqual(outOf(rets, 'r1').err, 'LOGIN');
+  assert.ok(!sent.some((x) => x.cmd === 'find'));
+});
+
+test('반품: 이미 다른 쪽이 가져간 요청은 처리하지 않음', async () => {
+  const { runner, sent, rets } = retSetup();
+  rets.r1 = { status: 'cancelled' };
+  await runner.handleRet('r1', ret('find', { orig: '1' }));
+  assert.deepStrictEqual(sent, []);
+});

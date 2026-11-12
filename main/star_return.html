@@ -310,6 +310,7 @@ var VENDORS = {};   /* 화물: 업체명 목록 dict/vendor/{이름} = { name, n
     $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국(6077·7077)만 원송장 자동 추적, 다른 택배는 원송장 없이 쌓임';
     try { $('vendorIn').value = localStorage.getItem('retVendor_' + CFG.db) || ''; } catch(e){}
   }
+  if (CFG.relay) document.querySelector('.helper').title = '상시 컴퓨터(AI 물류비서 헤드비서)의 이벗 탭으로 주문 조회·이벗 반영을 합니다. 이 PC 에서 즐겨찾기 도우미를 누르면 이 PC 이벗이 먼저 쓰입니다';
 })();
 var CUR_COURIER = '';
 function renderCourierChips(){
@@ -341,12 +342,38 @@ var EBUT_ORIGIN = 'https://ebut3pl.co.kr';
 window.addEventListener('message', function(e){
   var m = e.data;
   if (!m || m.from !== 'ebut-helper' || !/^https:\/\/(www\.)?ebut3pl\.co\.kr$/.test(e.origin)) return;
-  if (m.cmd === 'ready'){ H.win = e.source; EBUT_ORIGIN = e.origin; H.ver = m.ver || ''; ping(); return; }
+  if (m.cmd === 'ready'){ H.win = e.source; H.local = true; EBUT_ORIGIN = e.origin; H.ver = m.ver || ''; ping(); return; }
   var p = H.pend[m.id]; if (!p) return;
   delete H.pend[m.id]; clearTimeout(p.t);
   if (m.ok) p.res(m.data); else p.rej(new Error(m.err || '도우미 오류'));
 });
+/* 상시 컴퓨터 헤드비서의 이벗 탭으로 보냄 (secretary/retcall, 화물만 — CFG.relay). 이 PC 에 즐겨찾기 도우미를 띄우면 그쪽이 먼저
+   NOTSENT: = 이벗에 안 보냄. 기다리다 포기할 때 status 를 먼저 잡아(cancelled) 헤드비서가 늦게 저장하지 않게 함 */
+var RELAY = !!CFG.relay, RELAY_WAIT = 30000, RELAY_LATE = 60000;
+function viaLocal(){ return !!(H.win && !H.win.closed && (!RELAY || H.local)); }
+function rcall(cmd, args, ms){
+  return new Promise(function(res, rej){
+    if (!db){ rej(new Error('NOHELPER')); return; }
+    var ref = db.ref('secretary/retcall').push(), t = null, fin = false;
+    function end(fn, v){ if (fin) return; fin = true; clearTimeout(t); ref.off(); ref.remove().catch(function(){}); fn(v); }
+    ref.on('value', function(s){
+      var v = s.val();
+      if (!v || v.out == null) return;
+      var o = JSON.parse(v.out);
+      if (o.ok) end(res, o.data); else end(rej, new Error(o.err || '상시 컴퓨터 오류'));
+    });
+    t = setTimeout(function(){
+      ref.child('status').transaction(function(cur){ if (cur) return; return 'cancelled'; }).then(function(r){
+        if (r.committed) return end(rej, new Error('NOTSENT:상시 컴퓨터(헤드비서)가 응답하지 않습니다'));
+        t = setTimeout(function(){ end(rej, new Error('TIMEOUT')); }, RELAY_LATE);   /* 이미 가져가 처리 중 — 조금 더 기다림 */
+      }, function(){ end(rej, new Error('TIMEOUT')); });
+    }, (ms || 30000) + RELAY_WAIT);
+    ref.set({ cmd: cmd, args: JSON.stringify(Object.assign({ db: CFG.db }, args || {})), by: byName(), at: firebase.database.ServerValue.TIMESTAMP })
+      .catch(function(e){ end(rej, new Error('NOTSENT:' + (e.message || e))); });
+  });
+}
 function hcall(cmd, args, ms){
+  if (RELAY && !viaLocal()) return rcall(cmd, args, ms);
   return new Promise(function(res, rej){
     if (!H.win || H.win.closed){ setHelper(false); rej(new Error('NOHELPER')); return; }
     var id = ++H.seq;
@@ -357,17 +384,20 @@ function hcall(cmd, args, ms){
 function setHelper(ok, login){
   H.ok = !!ok; H.login = login;
   $('hDot').className = 'dot' + (ok ? (login === false ? ' warn' : ' on') : '');
-  $('hTxt').textContent = ok ? (login === false ? '이벗 로그아웃됨 — 다시 로그인' : '이벗 도우미 연결됨') : '이벗 도우미 연결 안 됨';
+  if (RELAY && !viaLocal()) $('hTxt').textContent = ok ? (login === false ? '상시 컴퓨터 이벗 로그아웃됨 — AI 물류비서에서 로그인' : '상시 컴퓨터 이벗 연결됨') : '상시 컴퓨터 이벗 연결 안 됨';
+  else $('hTxt').textContent = ok ? (login === false ? '이벗 로그아웃됨 — 다시 로그인' : '이벗 도우미 연결됨') : '이벗 도우미 연결 안 됨';
   if (ok && login !== false && CUR && RECS[CUR] && RECS[CUR].look === 'wait') lookup(CUR);
   renderList(); autoLook();
   /* 휴대폰 화면이 「상품을 채워 줄 PC 가 있는지」 알 수 있게 연결 신호를 남김 (ping 마다 = 30초마다) */
   /* 도우미가 없는 다른 PC 가 신호를 덮지 않게, 도우미와 이야기한 PC 만 씀 (끊기면 신호가 90초 뒤 낡아서 휴대폰이 알아챔) */
   if (base && ok) base.child('helperBeat').set({ ok: !!ok && login !== false, at: firebase.database.ServerValue.TIMESTAMP, by: byName() }).catch(function(){});
 }
-function ping(){ return hcall('ping', {}, 8000).then(function(r){ H.ver = r.ver || ''; setHelper(true, r.login); return r; }, function(){ setHelper(false); }); }
+var lastPing = 0;
+function ping(){ lastPing = Date.now(); return hcall('ping', {}, 8000).then(function(r){ H.ver = r.ver || ''; setHelper(true, r.login); return r; }, function(e){ if (String(e.message) === 'LOGIN') setHelper(true, false); else setHelper(false); }); }
 /* 메모(특이사항)를 넣는 도우미는 2026-10-25a 부터 — 그 전 버전이면 반영 전에 멈춤 */
 var HELPER_MIN = '2026-10-25a';
-setInterval(function(){ if (H.win) ping(); }, 30000);
+/* 상시 컴퓨터 쪽 확인은 매번 이벗을 한 번 조회하므로 1분마다 */
+setInterval(function(){ if (viaLocal() || (H.win && !RELAY)) ping(); else if (RELAY && db && Date.now() - lastPing > 55000) ping(); }, 30000);
 /* 도우미가 이 화면을 열었을 때(이벗 탭이 opener) — 도우미의 첫 인사를 놓쳤을 수 있으니 이쪽에서 먼저 부름 */
 if (window.opener){ H.win = window.opener; var tries = 0; (function knock(){ if (H.ok || ++tries > 10) return; try { H.win.postMessage({ to: 'ebut-helper', id: 0, cmd: 'ping' }, EBUT_ORIGIN); } catch(e){} ping(); setTimeout(knock, 1500); })(); }
 function openEbut(){
@@ -431,7 +461,7 @@ function lookup(no){
     if (CUR === no){ renderCur(); var j = judge(RECS[no]); beep(!j.block.length || j.block[0] === '반품 상품 스캔 없음'); }
   }, function(e){
     var m = String(e.message || e);
-    if (m === 'NOHELPER' || m === 'LOGIN'){ patch(no, { look: 'wait' }); if (m === 'LOGIN') setHelper(true, false); }
+    if (m === 'NOHELPER' || m === 'LOGIN' || /^NOTSENT:/.test(m)){ patch(no, { look: 'wait' }); if (m === 'LOGIN') setHelper(true, false); else if (RELAY && !viaLocal()) setHelper(false); }
     else patch(no, { look: 'err', lookErr: m === 'TIMEOUT' ? '도우미 응답 없음' : m });
     if (CUR === no) renderCur();
   });
@@ -677,7 +707,7 @@ function pushAll(){
   if (!H.ver || H.ver < HELPER_MIN){ alert('이벗 도우미가 옛 버전(' + (H.ver || '?') + ')이라 특이사항 메모가 이벗에 안 들어갑니다.\n\n이벗 탭을 새로고침(F5)한 뒤 즐겨찾기 도우미를 다시 누르고, 다시 반영해 주세요.'); return; }
   if (!confirm('반영 대기 ' + q.length + '건을 이벗 반품입고로 저장합니다. 진행할까요?')) return;
   pushing = true; $('pushBtn').disabled = true;
-  var ok = 0, bad = 0, stop = false;
+  var ok = 0, bad = 0, stop = false, stopWhy = '';
   q.reduce(function(p, k){ return p.then(function(){
     if (stop) return;
     /* 다른 PC가 같은 건을 동시에 반영하지 않게 「반영 대기」인 것만 가져옴 */
@@ -698,6 +728,8 @@ function pushAll(){
       }, function(e){
         var m = String(e.message || e);
         if (m === 'LOGIN' || m === 'NOHELPER'){ stop = true; setHelper(m !== 'NOHELPER', false); return save(RECS[k], { state: 'ready', saveAt: null }); }
+        /* 상시 컴퓨터가 이벗에 보내지 않은 건 — 반영 대기로 되돌리고 멈춤 */
+        if (/^NOTSENT:/.test(m)){ stop = true; stopWhy = m.slice(8); return save(RECS[k], { state: 'ready', saveAt: null }); }
         bad++;
         if (m === 'TIMEOUT') return save(RECS[k], { state: 'fail', ebut: { at: Date.now(), msg: '도우미 응답 없음 — 이벗 반품내역에서 들어갔는지 확인 후 「다시 검수」', by: byName() } });
         if (/^ALREADY:/.test(m)) m = '이벗에서 이미 반품처리됨 (' + m.slice(8) + ')';
@@ -706,7 +738,7 @@ function pushAll(){
     });
   }); }, Promise.resolve()).then(function(){
     pushing = false; $('pushBtn').disabled = false; renderList(); if (CUR) renderCur();
-    toast(stop ? '이벗 로그인이 끊겨 멈췄습니다 — 다시 로그인 후 도우미를 누르고 이어서 반영' : '이벗 반영 끝 — 완료 ' + ok + '건' + (bad ? ' · 실패 ' + bad + '건' : ''));
+    toast(stopWhy ? '멈춤 (이벗에 안 넣음): ' + stopWhy + ' — 완료 ' + ok + '건' : stop ? '이벗 로그인이 끊겨 멈췄습니다 — 다시 로그인 후 도우미를 누르고 이어서 반영' : '이벗 반영 끝 — 완료 ' + ok + '건' + (bad ? ' · 실패 ' + bad + '건' : ''));
   });
 }
 
@@ -1296,6 +1328,7 @@ WMSync.onAuth(function(st){
   base.child('notes').on('value', function(s){ NOTES = s.val() || {}; renderNotes(); autoCleanNotes(); if (!trk1){ trk1 = true; setTimeout(function(){ trackNotes(false); }, 3000); } if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   base.child('photos').on('value', function(s){ PHOTOS = s.val() || {}; if (!busyTyping()){ if (CUR) renderCur(); else renderList(); } });
   $('rnoIn').focus();
+  if (RELAY && !viaLocal()) ping();   /* 상시 컴퓨터 이벗 연결 확인 (조회·저장 없음) */
 });
 </script>
 <script src="/mm_copy.js" defer></script>

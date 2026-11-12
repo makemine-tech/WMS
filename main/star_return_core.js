@@ -8,9 +8,10 @@ var STAR_CUST = '446';   /* 이벗 고객사 — 스타인터내셔널 */
 /* 같은 화면을 두 가지 반품 데이터로 씀 (대표님 2026-10-24)
    - 스타(기본): 피킹 화면에서 들어옴. 모든 반품 송장을 우체국 추적, 스타인터내셔널(446)만 반영
    - 화물(?db=cargo): 화물관리에서 들어옴. 한진·롯데 등 다른 택배도 많아 우체국 송장(6077·7077)만 추적,
-     나머지는 원송장 없이 쌓였다가 사진 등으로 원송장을 찾아 ✏️ 수정에 넣으면 이벗 조회·반영. 업체명·택배사 선택. 고객사 제한 없음 */
+     나머지는 원송장 없이 쌓였다가 사진 등으로 원송장을 찾아 ✏️ 수정에 넣으면 이벗 조회·반영. 업체명·택배사 선택. 고객사 제한 없음
+     relay: 이벗 조회·반영을 상시 컴퓨터 헤드비서의 이벗 탭(메이크창고 계정)으로 보냄 (대표님 2026-11-12). 스타는 다른 이벗 계정이라 즐겨찾기 도우미 그대로 */
 var CFG = /[?&]db=cargo(&|$)/.test(location.search)
-  ? { db: 'cargo', path: 'cargo_return', title: '3PL 반품입고관리', badge: 'CARGO 3PL RETURN', cust: null, traceAll: false, vendor: true, back: 'cargo_log.html', backLabel: '화물관리로', q: '&db=cargo' }
+  ? { db: 'cargo', path: 'cargo_return', title: '3PL 반품입고관리', badge: 'CARGO 3PL RETURN', cust: null, traceAll: false, vendor: true, back: 'cargo_log.html', backLabel: '화물관리로', q: '&db=cargo', relay: true }
   : { db: 'star', path: 'star_return', title: '스타 3PL 반품입고관리', badge: 'STAR 3PL RETURN', cust: STAR_CUST, traceAll: true, vendor: false, back: 'star_picking.html', backLabel: '피킹으로', q: '' };
 var COURIERS = ['우체국', '한진', '롯데', 'CJ대한통운', '로젠', '기타'];
 /* 송장번호 자리수는 택배사마다 달라 정하지 않음 (대표님 2026-10-24) — 숫자가 있기만 하면, 너무 긴 것(30자리 넘음)만 막음 */

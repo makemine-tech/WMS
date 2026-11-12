@@ -10,8 +10,9 @@
   var RUNNER_ALIVE = 3 * MIN;     /* 생존 신호 1분. 뒤에 깔린 탭의 타이머 지연까지 봐서 3분 */
   var COMMAND_TTL = 10 * MIN;     /* 크롬 지킴이 5분 + 헤드비서 탭 복귀 시간 */
   var HELPER_CMDS = ['ping', 'read', 'search', 'orders', 'matchRead', 'matchSearch', 'relogin', 'counts', 'collectCheck', 'collectStatus', 'confirmCheck', 'confirmStatus', 'formCheck', 'storeCheck', 'storeStatus', 'survey', 'invoiceList', 'invoiceSendStatus', 'giftRead'];   /* search = 이지어드민 검색 버튼, relogin = 로그인 버튼 한 번, 나머지 = 이벗 읽기. 업무 저장 없음 */
-  var HELPER_WRITE = ['giftAdd', 'invoiceUpload', 'invoiceCheckup', 'invoiceSend', 'matchSave', 'storeGo', 'formPage', 'collectPick', 'collectGo', 'confirmGo', 'uploadMenso', 'login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
+  var HELPER_WRITE = ['giftAdd', 'save','invoiceUpload', 'invoiceCheckup', 'invoiceSend', 'matchSave', 'storeGo', 'formPage', 'collectPick', 'collectGo', 'confirmGo', 'uploadMenso', 'login', 'fill', 'reset', 'commit', 'printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* 합포 분할 화면(사람이 누름)의 요청으로만 보냄. 페이지가 바뀌어도 다시 보내지 않음 */
   var RELAY_CMDS = ['search', 'fill', 'reset', 'commit'];
+  var RET_CMDS = ['ping', 'find', 'save'];   /* 반품입고관리 → 이벗 도우미 (secretary/retcall). find = 원송장 주문 읽기, save = 사람이 누른 반품입고 저장 */
   /* 송장출력은 불안정해 AI 물류비서에서 뺌 (대표님 2026-11-02). 곡물도감은 일괄합포제외까지, 출력은 합포 분할 화면에서 직접. 다시 켜려면 이 목록을 RELAY_CMDS 에 더하고 흐름도 칸을 되살림 */
   var RELAY_PRINT = ['printPrep', 'printGo', 'printStatus', 'printEnd', 'printClose'];   /* secretary/ezcall 로 받는 합포 분할 화면 요청 */
   var LOGIN_TTL = 2 * MIN;        /* 잠긴 로그인 값의 수명 */
@@ -25,7 +26,7 @@
   var MENSO_CUST = '2237';        /* 이벗 고객사 맨소레담아시아퍼시픽 */
   var KEEP_ALIVE_MS = 10 * MIN;   /* 로그인 유지 점검 간격 */
   var KEEP_ALIVE_ON = false;      /* 점검이 이지어드민 탭을 새로 열어 송장출력 중 페이지가 넘어감. 안정될 때까지 끔 (대표님 2026-11-02) */
-  var PAGE_VER = '2026-11-11e';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
+  var PAGE_VER = '2026-11-12a';   /* 고치면 올린다. 헤드비서 탭이 새 판을 보고 작업이 없을 때 새로고침함 */
 
   var SITES = [
     { id: 'ezadmin', name: '이지어드민', url: 'https://ga89.ezadmin.co.kr/template40.htm?template=DG00', login: 'https://login2.ezadmin.co.kr/login.htm', tab: 'mkw_sec_ez', from: 'ez-helper', to: 'ez-helper',
@@ -165,7 +166,7 @@
     return comps && prods && ((p.flags || {}).unknown || 0) <= ((a.flags || {}).unknown || 0) ? prev.ack : null;
   }
 
-  var API = { COLLECT_POLL: COLLECT_POLL, COLLECT_MAX: COLLECT_MAX, startChoice: startChoice, LOGIN_TTL: LOGIN_TTL, RELAY_PRINT: RELAY_PRINT, PRINT_IDLE: PRINT_IDLE, EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_ON: KEEP_ALIVE_ON, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
+  var API = { COLLECT_POLL: COLLECT_POLL, COLLECT_MAX: COLLECT_MAX, startChoice: startChoice, LOGIN_TTL: LOGIN_TTL, RELAY_PRINT: RELAY_PRINT, PRINT_IDLE: PRINT_IDLE, EZ_ACKABLE: EZ_ACKABLE, ezAckCarry: ezAckCarry, RELAY_CMDS: RELAY_CMDS, RET_CMDS: RET_CMDS, RELAY_TTL: RELAY_TTL, RELAY_HOLD: RELAY_HOLD, HELPER_WRITE: HELPER_WRITE, ezFlow: ezFlow, ezOpenBlockers: ezOpenBlockers, KEEP_ALIVE_ON: KEEP_ALIVE_ON, KEEP_ALIVE_MS: KEEP_ALIVE_MS, officeRooms: officeRooms, MENSO_CUST: MENSO_CUST, MATCH_TERMS: MATCH_TERMS, HELPER_CMDS: HELPER_CMDS, COMMAND_TYPES: COMMAND_TYPES, PAGE_VER: PAGE_VER, SITES: SITES, RECIPES: RECIPES, assertSafeCmd: assertSafeCmd, runnerState: runnerState,
               commandExpired: commandExpired, quietHours: quietHours, kstDate: kstDate, dateRange: dateRange, startBlock: startBlock, jobKey: jobKey, nextRound: nextRound, siteState: siteState };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.SECRETARY_CORE = API;
