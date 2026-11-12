@@ -29,7 +29,7 @@
 (function(){
   'use strict';
   if (!/(^|\.)ebut3pl\.co\.kr$/.test(location.hostname)){ alert('이벗(ebut3pl.co.kr) 탭에서 눌러 주세요.'); return; }
-  var VER = '2026-11-08c';
+  var VER = '2026-11-12a';
   /* 이미 도우미가 떠 있으면: 같은 버전은 그대로, 다른 버전은 끄고 새로 띄움 (2026-10-25 — 예전엔 옛 버전이 계속 남아 메모가 안 들어감)
      stop() 이 없는 아주 옛 버전(10-25a 이전)은 끌 수 없어 새로고침 안내 */
   var old = window.__mkwEbutHelper;
@@ -187,6 +187,8 @@
     }).then(function(f){
       var w = f.contentWindow, d = f.contentDocument, fm = d.form1, N = function(n){ return d.getElementsByName(n); };
       var locas = readLocas(f), items = readItems(f), tot = 0, partial = false, used = {};
+      /* 화물(3PL) 반품은 적치로케이션을 쓰지 않음 — 로케이션·입고창고는 팝업 기본값(미설정) 그대로 (대표님 2026-11-12, 첫 실반영이 「0000_불량존 못 찾음」으로 멈춤) */
+      var noLoca = a.db === 'cargo';
       try { items.forEach(function(it){
         var l = null;
         for (var k = 0; k < lines.length; k++){ if (!used[k] && lines[k].bopt === it.bopt && lines[k].ordlist === it.ordlist){ l = lines[k]; used[k] = 1; break; } }
@@ -199,7 +201,7 @@
         N('qty')[it.i].value = String(q);
         /* 적치로케이션: 로케이션 관리 계정(스타)만 칸이 있음 — 화물 쪽 이벗 계정은 칸 자체가 없어 건너뜀 (대표님 2026-10-24) */
         var ls = N('INOUTSTOCK_LOCA')[it.i];
-        if (ls){
+        if (ls && !noLoca){
           var loc = l.q === '2' ? locas.bad : locas.in;
           if (!loc) throw new Error('적치로케이션 「' + (l.q === '2' ? LOCA_BAD : LOCA_IN) + '」 을 팝업 목록에서 못 찾음');
           ls.value = loc;
@@ -210,7 +212,7 @@
       if (Object.keys(used).length !== lines.length){ f.remove(); throw new Error('팝업 상품 줄과 맞지 않는 상품이 있습니다'); }
       /* 입고창고(창고·로케이션 관리 회원사는 필수) = 로케이션 값 「창고,존,로케이션」의 창고 — 스타4물류(김포) 263 (2026-10-24 첫 실반영이 「입고창고를 선택하세요」로 멈춰서 추가) */
       var wahSel = d.getElementById('inoutstock_wah');
-      if (wahSel && N('INOUTSTOCK_LOCA').length){   /* 창고 칸도 로케이션 관리 계정에만 — 없으면 건너뜀 */
+      if (wahSel && N('INOUTSTOCK_LOCA').length && !noLoca){   /* 창고 칸도 로케이션 관리 계정에만 — 없으면 건너뜀 */
         var wah = String(locas.in || locas.bad || '').split(',')[0];
         if (!wah || ![].some.call(wahSel.options, function(o){ return o.value === wah; })){ f.remove(); throw new Error('입고창고(' + (wah || '?') + ')를 팝업 목록에서 못 찾음'); }
         wahSel.value = wah;

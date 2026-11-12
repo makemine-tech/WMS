@@ -937,6 +937,15 @@
       }
       if (!p) throw new Error('NOHELPER');
       if (cmd === 'ping') return p;
+      /* 이벗 탭 도우미는 탭을 열 때만 새 판을 받음 — 반품 저장 규칙(화물 로케이션 미설정)이 없는 옛 판이면 작업이 없을 때 탭을 새로 엶 */
+      if (!p.ver || p.ver < C.RET_HELPER) {
+        if (busy || holding()) throw new Error('NOTSENT:상시 컴퓨터 이벗 도우미가 옛 판(' + (p.ver || '?') + ')입니다. 다른 작업이 끝난 뒤 다시 해 주세요');
+        var r2 = await checkOne(site);
+        if (r2.state === 'login') throw new Error('LOGIN');
+        try { p = await deps.ebutAsk('ping', {}, 8000); } catch (e) { p = null; }
+        if (!p) throw new Error('NOHELPER');
+        if (!p.ver || p.ver < C.RET_HELPER) throw new Error('NOTSENT:상시 컴퓨터 이벗 도우미가 옛 판(' + (p.ver || '?') + ')입니다. 확장 프로그램을 확인해 주세요');
+      }
       if (p.login === false) throw new Error('LOGIN');
       try { return await deps.ebutAsk(cmd, args, write ? 60000 : 90000); }
       catch (e) { var m = String((e && e.message) || e); throw new Error(m === '로그인이 필요합니다' ? 'LOGIN' : m); }

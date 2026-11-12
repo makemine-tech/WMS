@@ -365,14 +365,15 @@ function retSetup(opts) {
   const rets = {};
   s.store.claimRet = async (id) => { if (rets[id] && rets[id].status) return false; rets[id] = { status: 'taken' }; return true; };
   s.store.setRet = async (id, p) => { rets[id] = Object.assign(rets[id] || {}, p); };
-  const alive = { v: opts.alive !== false };
+  const alive = { v: opts.alive !== false, ver: opts.ver || '2026-11-12a' };
   const ebutAsk = async (cmd, args) => {
     sent.push({ cmd, args });
-    if (cmd === 'ping') { if (!alive.v) throw new Error('도우미가 연결되지 않았습니다'); return { ok: true, login: opts.login !== false, ver: '2026-11-08c' }; }
+    if (cmd === 'ping') { if (!alive.v) throw new Error('도우미가 연결되지 않았습니다'); return { ok: true, login: opts.login !== false, ver: alive.ver }; }
     if (opts.fail) throw new Error(opts.fail);
     return { cmd, got: args };
   };
-  const openSite = async (site) => { s.opened.push(site.id); alive.v = true; return { ver: 'v2', login: true }; };
+  /* 탭을 새로 열면 확장이 최신 도우미를 넣음 */
+  const openSite = async (site) => { s.opened.push(site.id); alive.v = true; alive.ver = '2026-11-12a'; return { ver: 'v2', login: true }; };
   const runner = createRunner({ store: s.store, openSite, ebutAsk, now: () => opts.now || NOW, runnerId: 'me' });
   return { runner, db: s.db, opened: s.opened, sent, rets, alive };
 }
@@ -450,4 +451,20 @@ test('반품: 이미 다른 쪽이 가져간 요청은 처리하지 않음', asy
   rets.r1 = { status: 'cancelled' };
   await runner.handleRet('r1', ret('find', { orig: '1' }));
   assert.deepStrictEqual(sent, []);
+});
+
+test('반품: 이벗 탭 도우미가 옛 판이면 작업이 없을 때 탭을 새로 열고 저장', async () => {
+  const { runner, sent, rets, opened } = retSetup({ ver: '2026-11-08c' });
+  await runner.handleRet('r1', ret('save', { rno: '1', db: 'cargo' }));
+  assert.deepStrictEqual(opened, ['ebut']);
+  assert.strictEqual(outOf(rets, 'r1').ok, true);
+  assert.strictEqual(sent.filter((x) => x.cmd === 'save').length, 1);
+});
+
+test('반품: 도우미가 옛 판인데 다른 작업 중이면 저장하지 않음', async () => {
+  const { runner, sent, rets, opened } = retSetup({ ver: '2026-11-08c', jobs: { 'gift_add:2026-11-01:1': { state: 'running' } } });
+  await runner.handleRet('r1', ret('find', { orig: '1' }));
+  assert.deepStrictEqual(opened, []);
+  assert.match(outOf(rets, 'r1').err, /^NOTSENT:.*옛 판/);
+  assert.ok(!sent.some((x) => x.cmd === 'find'));
 });
