@@ -803,9 +803,10 @@ function handleKoLabelExcel(file){
       if (!sheetItems.length) { setMsg('m0','er','❌ 유효한 데이터 행이 없습니다'); return; }
 
       /* logs 에서 매칭 인덱스 — type:'in' 만, 원바코드 + altBarcode 둘 다 */
-      var byBc = {};
+      var byBc = {}, keyBc = {};
       logs.forEach(function(lg){
         if (lg.type !== 'in') return;
+        keyBc[lg.key] = normBarcode(lg.barcode);
         var bc1 = normBarcode(lg.barcode);
         var bc2 = normBarcode(lg.altBarcode);
         if (bc1) { (byBc[bc1] = byBc[bc1] || []).push(lg.key); }
@@ -841,6 +842,10 @@ function handleKoLabelExcel(file){
               matchedFieldCount++;
             }
           });
+          /* 입고를 대체바코드로 잡은 경우 — 엑셀의 원본바코드를 origBarcode 로 남겨
+             원본·대체 어느 쪽을 찍어도 같은 상품으로 읽히게 (출고지시서 스캔·매칭) */
+          var ob = normBarcode(item.barcode);
+          if (ob && keyBc[lk] && ob !== keyBc[lk]) updates[basePath + lk + '/origBarcode'] = String(item.barcode).trim();
         });
       });
 

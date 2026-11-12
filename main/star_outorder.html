@@ -1814,6 +1814,54 @@ var boxIndex = {};        /* 박스ID(원본 케이스) → { barcode: 입고합
 var stockByAlt = {};      /* 정규화된 altBarcode → 원본 barcode (입고 로그 + altMap 병합) */
 var stockByCore = {};     /* 숫자코어 → 재고 보유 barcode (앞뒤 알파벳 래핑 무시 매칭) */
 var altMap = {};          /* Firebase 저장 영구 매핑 {normalizedAlt: {src, by, ts, source}} */
+/* ── 같은 상품 바코드 묶음 (양방향) ──
+ * 원본바코드·대체바코드는 어느 쪽을 찍어도 같은 상품이어야 한다.
+ * 예전엔 '대체 → 원본' 한 방향 + 'A00000 처럼 숫자는 같고 알파벳만 다른' 규칙뿐이라
+ * 196432426614 / 4550362757815 처럼 숫자가 완전히 다른 짝은 한쪽이 안 읽혔다.
+ * 짝을 모으는 곳: 입고 로그(barcode·altBarcode·origBarcode) + 영구 매핑(altMap) + 발주 엑셀 줄(원본·대체) + 작업 줄 */
+var cpLogPairs = [];      /* 입고 로그에서 모은 [a, b] 짝 */
+var cpAliasCache = null;
+function cpAliasGroups(){
+  var wsRows = (workSession && workSession.rows) || null;
+  var c = cpAliasCache;
+  if (c && c.lp === cpLogPairs && c.am === altMap && c.pr === cpState.rows && c.wr === wsRows) return c;
+  var parent = {};
+  function find(x){ while (parent[x] && parent[x] !== x) { parent[x] = parent[parent[x]] || parent[x]; x = parent[x]; } return x; }
+  function uni(a, b){
+    a = normBarcode(a); b = normBarcode(b);
+    if (!a || !b || a === b) return;
+    if (!parent[a]) parent[a] = a;
+    if (!parent[b]) parent[b] = b;
+    var ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+  cpLogPairs.forEach(function(p){ uni(p[0], p[1]); });
+  Object.keys(altMap || {}).forEach(function(k){ var e = altMap[k]; if (e && e.src) uni(k, e.src); });
+  (cpState.rows || []).forEach(function(r){ uni(r.barcode, r.altBarcode); });
+  (wsRows || []).forEach(function(r){ uni(r.poBarcode, r.srcBarcode); uni(r.poBarcode, r.poAltBarcode); });
+  var groups = {};
+  Object.keys(parent).forEach(function(x){ var r = find(x); (groups[r] = groups[r] || []).push(x); });
+  var memberOf = {};
+  Object.keys(groups).forEach(function(r){ groups[r].forEach(function(x){ memberOf[x] = groups[r]; }); });
+  cpAliasCache = { lp: cpLogPairs, am: altMap, pr: cpState.rows, wr: wsRows, memberOf: memberOf };
+  return cpAliasCache;
+}
+/* 같은 상품의 다른 바코드들 (자기 자신 제외) */
+function cpAliasesOf(bc){
+  bc = normBarcode(bc);
+  var g = cpAliasGroups().memberOf[bc];
+  return g ? g.filter(function(x){ return x !== bc; }) : [];
+}
+/* 같은 상품 바코드 중 재고(입고 기록)가 있는 것 — 재고 많은 것 우선 */
+function cpAliasStockBc(bc){
+  var best = '', bq = -Infinity;
+  cpAliasesOf(bc).forEach(function(x){
+    if (!stockMeta[x]) return;
+    var q = stockQty[x] || 0;
+    if (q > bq) { bq = q; best = x; }
+  });
+  return best;
+}
 var altMapRef = null;
 var vendors = {};         /* 업체 즐겨찾기 {normalizedName: {name, code, ts, by, byName}} */
 var vendorsRef = null;
@@ -1933,10 +1981,15 @@ function attachRefs(){
     var boxes = {};     /* barcode → Set 처럼 사용할 객체 {boxId: true} */
     var bIdx = {};      /* boxIndex: boxId → { barcode: 누적입고qty } */
     var cdl = [];       /* 동시입출고로 잡은 입고 기록 */
+    var pairs = [], pairSeen = {};   /* 같은 상품 바코드 짝 (양방향) */
     Object.keys(v).forEach(function(k){
       var lg = v[k] || {};
       var bc = normBarcode(lg.barcode);
       if (!bc) return;
+      [lg.altBarcode, lg.origBarcode].forEach(function(o){
+        var ob = normBarcode(o);
+        if (ob && ob !== bc && !pairSeen[bc + '|' + ob]) { pairSeen[bc + '|' + ob] = 1; pairs.push([bc, ob]); }
+      });
       if (lg.source === 'crossdock' && lg.type === 'in') cdl.push({ key: k, lg: lg });
       var q = +lg.qty || 0;
       if (lg.type === 'out') {
@@ -1963,6 +2016,7 @@ function attachRefs(){
     Object.keys(boxes).forEach(function(bc){ boxList[bc] = Object.keys(boxes[bc]); });
     stockMeta = byBc;
     stockQty = qty;
+    cpLogPairs = pairs;
     crossdockLogs = cdl;
     try { cpRefreshCdTrimBtn(); } catch(e){}
     stockBoxes = boxList;
@@ -2346,6 +2400,12 @@ function cpClassify(row){
       have = stockQty[src] || 0;
       matchedBc = src;
       if (have > 0) matchedVia = 'alt';
+    } else if (cpAliasStockBc(bc) && (stockQty[cpAliasStockBc(bc)] || 0) > 0) {
+      /* 같은 상품으로 묶인 다른 바코드(원본↔대체 양방향)에 재고가 있음 */
+      var srcA = cpAliasStockBc(bc);
+      have = stockQty[srcA] || 0;
+      matchedBc = srcA;
+      matchedVia = 'alt';
     } else if (stockByCore[barcodeCore(bc)] && stockByCore[barcodeCore(bc)] !== bc) {
       /* 숫자코어 일치 — 앞뒤 알파벳만 다른 대체바코드 재고 자동 인식 */
       var srcC = stockByCore[barcodeCore(bc)];
@@ -5117,6 +5177,7 @@ function cpProcessRelabelScan(raw){
   var resolved = bc;
   var viaAlt = false;
   if (!stockMeta[bc] && stockByAlt[bc]) { resolved = stockByAlt[bc]; viaAlt = true; }
+  if (!stockMeta[resolved] && cpAliasStockBc(bc)) { resolved = cpAliasStockBc(bc); viaAlt = true; }
   if (!stockMeta[resolved] && stockByCore[barcodeCore(bc)]) { resolved = stockByCore[barcodeCore(bc)]; viaAlt = true; }
   var meta = stockMeta[resolved];
   if (!meta) {
@@ -5498,6 +5559,17 @@ function cpMatchingRowIdxs(bc){
       if (normBarcode(sessRows[j].srcBarcode) === src) idxs.push(j);
     }
     if (idxs.length) via = 'alt';
+  }
+  if (!idxs.length) {
+    /* 같은 상품으로 묶인 다른 바코드 (원본↔대체 양방향) */
+    var al = cpAliasesOf(bc);
+    if (al.length) {
+      for (var a=0; a<sessRows.length; a++){
+        var ra = sessRows[a];
+        if ([ra.srcBarcode, ra.poBarcode, ra.poAltBarcode].some(function(x){ var n = normBarcode(x); return n && al.indexOf(n) >= 0; })) idxs.push(a);
+      }
+      if (idxs.length) via = 'alt';
+    }
   }
   if (!idxs.length) {
     var scCore = barcodeCore(bc);
