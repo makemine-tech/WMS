@@ -3090,7 +3090,7 @@ function cpCheckAltBarcodes(){
     var meta = stockMeta[srcBc];
     if (!meta) { notFound.push({i:i, bc:r.barcode}); return; }
     /* 우선순위: PO F열 대체바코드 > 재고 메타 altBarcode */
-    var alt = (r.altBarcode||'').trim() || (meta.altBarcode||'').trim();
+    var alt = (r.altBarcode||'').trim() || (r.barcode||'').trim();   /* 발주 F열 기준 (재고관리 대체바코드로 넘어가지 않음) */
     if (alt && normBarcode(alt) !== normBarcode(srcBc)) {
       withAlt.push({i:i, po:r.barcode, src:srcBc, alt:alt, name:r.skuName||meta.name||''});
     } else {
@@ -3892,7 +3892,7 @@ function cpEndScan(){
   var orderItems = scans.map(function(s){
     var r = rows[s.srcIdx] || {};
     var meta = stockMeta[normBarcode(s.barcode)] || {};
-    var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
+    var altBc = cpLabelBarcode(s.barcode, r);
     return {
       shipBoxNo: s.shipBoxNo || '',
       srcBoxBarcode: s.srcBoxBarcode || s.boxBarcode || '',
@@ -6166,6 +6166,33 @@ function cpCenterAbbr(center){
 /* 스캔한(원본) 바코드 → 그 상품의 PO 대체바코드(F열) 찾기.
  * srcIdx 연결이 없는 인쇄 경로(덧방·박스스캔·모아뽑기)에서도 F열 대체바코드를 쓰도록,
  * 현재 PO(세션 rows + 업로드 rows)에서 원본바코드(완전일치 또는 숫자코어 일치)로 역추적. */
+/* ═══ 출고 라벨 바코드 — 발주(PO) SKU Barcode(F열)가 기준 ═══
+ * 쿠팡이 받는 바코드는 발주 엑셀 F열 그대로다: A 앞붙임(A406…), 뒤붙임(406…A), 원본 그대로(406…) 가 섞여 있다.
+ * 예전엔 F열이 원본과 같으면(대체 없음) '대체 없음'을 '모름'으로 보고 재고관리 대체바코드나
+ * 다른 발주의 대체바코드로 넘어가서, 원본 그대로 찍어야 할 상품에 A 를 붙여 찍었다
+ * (1103 아디다스 출고: F열이 원본 그대로인 15줄 44족 회송).
+ * 이제 그 상품의 발주 줄을 찾으면 F열(대체가 없으면 발주 바코드)을 그대로 쓰고,
+ * 발주 줄이 아예 없을 때만 재고관리 대체바코드를 쓴다. */
+function cpPoRowFor(bc){
+  bc = normBarcode(bc);
+  if (!bc) return null;
+  var al = (typeof cpAliasesOf === 'function') ? cpAliasesOf(bc) : [];
+  function hit(x){ var n = normBarcode(x); return n && (n === bc || al.indexOf(n) >= 0); }
+  var ws = (workSession && workSession.rows) || [];
+  for (var i=0; i<ws.length; i++){ var r = ws[i] || {}; if (hit(r.poBarcode) || hit(r.srcBarcode) || hit(r.poAltBarcode)) return { po: r.poBarcode || '', alt: r.poAltBarcode || '' }; }
+  var ps = (cpState && cpState.rows) || [];
+  for (var j=0; j<ps.length; j++){ var p = ps[j] || {}; if (hit(p.barcode) || hit(p.altBarcode)) return { po: p.barcode || '', alt: p.altBarcode || '' }; }
+  return null;
+}
+/* origBc = 실물(재고) 바코드, r = 작업 줄(있으면). 돌려주는 값 = 라벨에 찍을 바코드 */
+function cpLabelBarcode(origBc, r){
+  r = r || {};
+  if (r.poBarcode || r.poAltBarcode) return String(r.poAltBarcode || r.poBarcode).trim();
+  var p = cpPoRowFor(origBc);
+  if (p) return String(p.alt || p.po || origBc).trim();
+  var meta = stockMeta[normBarcode(origBc)] || {};
+  return String((meta.altBarcode || '').trim() || origBc || '').trim();
+}
 function cpResolveAltBarcode(bc){
   bc = normBarcode(bc);
   if (!bc) return '';
@@ -6249,8 +6276,8 @@ function cpBuildProdLabels(items){
      * stockMeta.altBarcode 가 있으면 그 alt 로 인쇄해야 함 (잘못 인쇄 시 전량 회수).
      * 비어있으면 원바코드 사용. 사장님 정책: '공란은 원바코드를 alt 로 그대로'.
      * 우선순위: PO F열 대체바코드(직접 연결 > 바코드 역추적) > 재고 메타 altBarcode > 원바코드. */
-    var altBc = (r.poAltBarcode || '').trim() || cpResolveAltBarcode(origBc) || (meta.altBarcode || '').trim();
-    var labelBc = altBc || origBc;
+    var labelBc = cpLabelBarcode(origBc, r);
+    var altBc = normBarcode(labelBc) !== normBarcode(origBc) ? labelBc : '';
     var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(origBc));
     var qty = +it.qty || 1;
     /* 우상단 한 줄 — 사내 규약 마커(받는 쪽에 '대체' 단어 노출 X) + 박스번호 뒷 4자리.
@@ -6812,7 +6839,7 @@ function cpRefreshDonePool(){
           '<td class="c-box grp-cell" rowspan="'+rowSpan+'" style="color:var(--mu)">' + escH(srcBcLabel) + '</td>';
       }
       /* 대체바코드 셀 — alt 있으면 보라색 강조, 없으면 회색 '-' */
-      var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
+      var altBc = cpLabelBarcode(s.barcode, r);
       var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(s.barcode));
       var altHtml = hasAlt
         ? '<span style="color:var(--p);font-weight:900" title="라벨 인쇄 시 사용: '+escH(altBc)+'">'+escH(altBc)+'</span>'
@@ -6936,7 +6963,7 @@ function cpBuildMixLabelHtmlForBox(boxLabel, items, vendor, center){
       var qtySum = byBc[k].qty;
       var r = rows[it.srcIdx] || {};
       var meta = stockMeta[normBarcode(it.barcode)] || {};
-      var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
+      var altBc = cpLabelBarcode(it.barcode, r);
       var labelBc = altBc || it.barcode;
       var codeOrId = meta.code || r.skuId || '-';
       return '<tr>'+
@@ -7433,7 +7460,7 @@ function cpDownloadDoneExcel(){
     var meta = stockMeta[normBarcode(s.barcode)] || {};
     var prog = progCache[s.srcIdx] || {shipped:0};
     var need = +r.qty || 0;
-    var altBc = (r.poAltBarcode||'').trim() || (meta.altBarcode||'').trim();
+    var altBc = cpLabelBarcode(s.barcode, r);
     var altCol = (altBc && normBarcode(altBc) !== normBarcode(s.barcode||'')) ? altBc : '';
     doneAoa.push([
       s.shipBoxNo || s.srcBoxBarcode || '',
