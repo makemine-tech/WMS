@@ -109,6 +109,8 @@ h1 em{color:var(--g);font-style:normal}
 .tbl tbody tr.hit{animation:hit .9s ease-out}
 @keyframes hit{0%{background:rgba(74,240,168,.32)}100%{background:transparent}}
 .cell-bc{font-family:var(--mo);color:var(--y);font-size:.76rem}
+.cell-alt{font-family:var(--mo);color:#ffb84a;font-size:.76rem;font-weight:700;white-space:nowrap}
+.cell-color{max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72rem}
 .cell-box{font-family:var(--mo);color:var(--b);font-size:.74rem}
 .cell-num{text-align:right;font-family:var(--mo);font-weight:800}
 .cell-stock{text-align:right;font-family:var(--mo);font-weight:900;font-size:1rem}
@@ -315,7 +317,7 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
 <div class="tbl-wrap">
   <table class="tbl">
     <thead><tr>
-      <th>바코드</th><th>품명</th><th>브랜드</th><th>품번</th><th>컬러</th><th>사이즈</th><th>원산지</th>
+      <th>원본바코드</th><th title="출고 라벨에 찍히는 바코드 — 입고 기록마다 다르면 ⚠ 로 표시">대체바코드</th><th>품명</th><th>브랜드</th><th>품번</th><th>컬러</th><th>사이즈</th><th>원산지</th>
       <th>박스</th><th style="text-align:right">입고</th><th style="text-align:right">출고</th><th style="text-align:right">재고</th><th style="text-align:right">불량</th><th>비고</th>
     </tr></thead>
     <tbody id="stockBody"></tbody>
@@ -1193,18 +1195,20 @@ function aggregateStock(asOfTs){
     if (asOfTs != null && (lg.ts||0) > asOfTs) return;
     var bc = normBarcode(lg.barcode);
     if (!bc) return;
-    if (!map[bc]) map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, defQty:0, boxes:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
+    if (!map[bc]) map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, defQty:0, boxes:{}, alts:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
     var g = map[bc];
     var q = +lg.qty || 0;
     if (lg.type === 'out') g.outQty += q; else g.inQty += q;
     g.defQty += +lg.defQty || 0;
     if (lg.box) g.boxes[String(lg.box).trim()] = 1;
+    /* 대체바코드 — 입고 기록마다 모은다 (기록끼리 다르면 누가 바꾼 것 → 오배송 위험 표시) */
+    if (lg.type !== 'out') { var _al = normBarcode(lg.altBarcode); if (_al && _al !== bc) g.alts[_al] = 1; }
     if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) { g.lastInTs = lg.ts||0; g.meta = lg; }
     var n = (lg.note==null?'':String(lg.note).trim());
     if (n && (lg.ts||0) >= g.lastNoteTs) { g.lastNoteTs = lg.ts||0; g.lastNote = n; }
   });
   return Object.keys(map).map(function(bc){
-    var g = map[bc]; g.stock = g.inQty - g.outQty; g.boxList = Object.keys(g.boxes); return g;
+    var g = map[bc]; g.stock = g.inQty - g.outQty; g.boxList = Object.keys(g.boxes); g.altList = Object.keys(g.alts || {}); return g;
   }).sort(function(a,b){ return String(a.barcode)<String(b.barcode)?-1:1; });
 }
 
@@ -1340,7 +1344,7 @@ function rebuildStock(){
     var bc = normBarcode(lg.barcode);
     if (!bc) return;
     if (!map[bc]) {
-      map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, defQty:0, boxes:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
+      map[bc] = { barcode: lg.barcode, inQty:0, outQty:0, defQty:0, boxes:{}, alts:{}, meta:null, lastInTs:0, lastNote:'', lastNoteTs:0 };
     }
     var g = map[bc];
     var q = +lg.qty || 0;
@@ -1348,6 +1352,8 @@ function rebuildStock(){
     else g.inQty += q;
     g.defQty += +lg.defQty || 0;   /* 불량 누적 — 재고(inQty-outQty)엔 영향 없음 */
     if (lg.box) g.boxes[String(lg.box).trim()] = 1;
+    /* 대체바코드 — 입고 기록마다 모은다 (기록끼리 다르면 ⚠) */
+    if (lg.type !== 'out') { var _al = normBarcode(lg.altBarcode); if (_al && _al !== bc) g.alts[_al] = 1; }
     /* 메타는 가장 최근 입고 로그 기준 */
     if (lg.type !== 'out' && (lg.ts||0) >= g.lastInTs) {
       g.lastInTs = lg.ts || 0;
@@ -1364,6 +1370,7 @@ function rebuildStock(){
     var g = map[bc];
     g.stock = g.inQty - g.outQty;
     g.boxList = Object.keys(g.boxes);
+    g.altList = Object.keys(g.alts);
     return g;
   }).sort(function(a,b){
     return String(a.barcode) < String(b.barcode) ? -1 : 1;
@@ -1731,7 +1738,7 @@ function renderStock(){
       '<span style="color:var(--mu);font-size:.72rem">'+
       '바코드 스캔이나 엑셀 입고/출고를 하면 여기 자동 표시됩니다.<br>'+
       '전체 재고를 보려면 위 <strong style="color:var(--g)">📂 전체 보기</strong>를 누르세요.</span>';
-    tb.innerHTML = '<tr><td colspan="13" class="empty-row">' + msg + '</td></tr>';
+    tb.innerHTML = '<tr><td colspan="14" class="empty-row">' + msg + '</td></tr>';
     return;
   }
 
@@ -1739,16 +1746,26 @@ function renderStock(){
   var truncated = data.length > RENDER_LIMIT;
   var rendered = truncated ? data.slice(0, RENDER_LIMIT) : data;
 
+  /* 거꾸로 — 다른 바코드의 대체바코드로 등록된 경우 (예: 4550… 줄 ← 196… 의 대체) */
+  var altOf = {};
+  (stockGroups || []).forEach(function(x){ (x.altList || []).forEach(function(a){ (altOf[a] = altOf[a] || []).push(normBarcode(x.barcode)); }); });
   tb.innerHTML = rendered.map(function(g){
     var m = g.meta || {};
+    var altL = g.altList || [];
+    var rev = altOf[normBarcode(g.barcode)] || [];
+    var altHtml = altL.length > 1
+      ? '<span style="color:#ff6b6b;font-weight:900" title="입고 기록마다 대체바코드가 다릅니다 — 확인 필요">⚠ ' + altL.map(escH).join('<br>') + '</span>'
+      : (altL.length ? escH(altL[0])
+         : (rev.length ? '<span style="color:var(--mu)" title="이 바코드는 다른 원본바코드의 대체바코드로 등록돼 있습니다">↔ ' + rev.map(escH).join(', ') + ' 의 대체</span>' : '<span style="color:var(--mu)">—</span>'));
     var stockCls = g.stock < 0 ? 'neg' : (g.stock === 0 ? 'zero' : '');
     var note = g.lastNote || '';
     return '<tr id="st-'+escH(normBarcode(g.barcode))+'">'+
       '<td class="cell-bc">'+escH(g.barcode)+'</td>'+
+      '<td class="cell-alt">'+altHtml+'</td>'+
       '<td class="cell-name" title="'+escH(m.name)+'">'+escH(m.name)+'</td>'+
       '<td>'+escH(m.brand)+'</td>'+
       '<td>'+escH(m.code)+'</td>'+
-      '<td>'+escH(m.color)+'</td>'+
+      '<td class="cell-color" title="'+escH(m.color)+'">'+escH(m.color)+'</td>'+
       '<td>'+escH(m.size)+'</td>'+
       '<td>'+escH(m.origin)+'</td>'+
       '<td class="cell-box">'+escH(g.boxList.join(', '))+'</td>'+
@@ -1761,7 +1778,7 @@ function renderStock(){
   }).join('');
 
   if (truncated) {
-    tb.innerHTML += '<tr><td colspan="13" class="empty-row" style="color:var(--y)">'+
+    tb.innerHTML += '<tr><td colspan="14" class="empty-row" style="color:var(--y)">'+
       '⚠️ 표시 한도 초과 — '+data.length+'종 중 '+RENDER_LIMIT+'종만 표시. '+
       '검색이나 「최근 작업」 모드로 좁혀 보세요.</td></tr>';
   }
