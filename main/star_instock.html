@@ -632,28 +632,60 @@ function pushLog(entry){
 
 /* 출고지시(쿠팡)에서 「발주수량대로 입고 잡기」로 이미 입고된 바코드인지 — 최근 30일.
    같은 물건을 여기서 또 입고하면 재고가 두 번 잡힘 → 경고 문구 반환 (없으면 '') */
-function crossdockWarn(bcList){
+function crossdockWarn(items){
+  /* items: [{barcode, qty}] 또는 바코드 문자열 배열(수량 1)
+   * 최근 30일 동시입출고(출고지시 「발주수량대로 입고 잡기」)로 입고된 바코드와 겹치면
+   * 바코드마다 「동시입출고 출고 수량 · 정리 완료 여부 · 현재고 vs 이번 입고 수량」을 보여 주고 판단을 붙인다.
+   *   🔴 동시입출고 작업이 아직 안 끝남 → 지금 입고하면 두 번 잡힐 수 있음
+   *   🟡 정리는 끝났지만 이번 입고 수량 = 동시입출고로 나간 수량 → 이미 나간 물건을 다시 적은 것일 수 있음
+   *   🟢 정리 끝 · 수량도 다름 → 창고에 남은 물건이면 입고해도 됨 */
   var since = Date.now() - 30 * 86400000, hit = {};
   var want = {};
-  bcList.forEach(function(b){ var n = normBarcode(b); if (n) want[n] = 1; });
+  (items || []).forEach(function(it){
+    var b = normBarcode(typeof it === 'string' ? it : (it && it.barcode));
+    if (!b) return;
+    want[b] = (want[b] || 0) + (typeof it === 'string' ? 1 : (+it.qty || 0));
+  });
   logs.forEach(function(lg){
     if (lg.source !== 'crossdock' || lg.type !== 'in' || (lg.ts||0) < since) return;
     var b1 = normBarcode(lg.barcode), b2 = normBarcode(lg.altBarcode);
-    var b = want[b1] ? b1 : (want[b2] ? b2 : '');
+    var b = want[b1] !== undefined ? b1 : (want[b2] !== undefined ? b2 : '');
     if (!b) return;
-    var h = hit[b] || (hit[b] = { name: lg.name || b, qty: 0, ts: 0 });
-    h.qty += (+lg.qty || 0);
-    if ((lg.ts||0) > h.ts) h.ts = lg.ts || 0;
+    var h = hit[b] || (hit[b] = { name: lg.name || b, qty: 0, orig: 0, open: 0, ts: 0, po: '' });
+    h.qty += (+lg.qty || 0);                                   /* 정리 후 = 실제로 나간 수량 */
+    h.orig += (+lg.cdOrigQty || +lg.qty || 0);                 /* 처음 잡은 수량 */
+    if (!lg.cdSettled) h.open++;
+    if ((lg.ts||0) > h.ts) { h.ts = lg.ts || 0; h.po = lg.cdPoFile || lg.batchName || ''; }
   });
   var ks = Object.keys(hit);
   if (!ks.length) return '';
-  var lines = ['⚠ 동시입출고로 이미 입고된 바코드 ' + ks.length + '개 (출고지시 「발주수량대로 입고 잡기」, 최근 30일)'];
-  ks.slice(0, 8).forEach(function(b){
-    var h = hit[b], d = new Date(h.ts);
-    lines.push('  • ' + h.name + ' — ' + (d.getMonth()+1) + '/' + d.getDate() + ' 입고 ' + h.qty + '개');
+  var stockOf = {};
+  (stockGroups || []).forEach(function(g){ stockOf[normBarcode(g.barcode)] = g.stock; });
+  var rows = ks.map(function(b){
+    var h = hit[b], inQ = want[b] || 0, st = stockOf[b] || 0;
+    var lv = h.open ? 0 : (inQ === h.qty ? 1 : 2);
+    return { b: b, h: h, inQ: inQ, st: st, lv: lv };
+  }).sort(function(a, c){ return a.lv - c.lv; });
+  var n = [0, 0, 0]; rows.forEach(function(r){ n[r.lv]++; });
+  var pos = {}; rows.forEach(function(r){ var p = String(r.h.po || '').replace(/\.xlsx?$/i, ''); if (p) pos[p.slice(0, 40)] = 1; });
+  var lines = ['⚠ 동시입출고로 입고된 적 있는 바코드 ' + ks.length + '개 (최근 30일)'];
+  if (Object.keys(pos).length) lines.push('   작업: ' + Object.keys(pos).slice(0, 3).join(' / ') + (Object.keys(pos).length > 3 ? ' …' : ''));
+  lines.push('');
+  lines.push('🔴 동시입출고 작업이 아직 안 끝남: ' + n[0] + '개' + (n[0] ? '  ← 지금 입고하면 두 번 잡힐 수 있음' : ''));
+  lines.push('🟡 정리 끝 · 이번 입고 수량 = 이미 나간 수량: ' + n[1] + '개' + (n[1] ? '  ← 이미 나간 물건을 다시 적은 것인지 확인' : ''));
+  lines.push('🟢 정리 끝 · 수량 다름: ' + n[2] + '개  ← 창고에 남은 물건이면 입고해도 됨');
+  lines.push('');
+  lines.push('바코드별 (이번 입고 / 동시입출고로 나간 수량 / 현재고):');
+  rows.slice(0, 12).forEach(function(r){
+    var d = new Date(r.h.ts);
+    lines.push('  ' + ['🔴','🟡','🟢'][r.lv] + ' ' + String(r.h.name).slice(0, 22) + ' — 입고 ' + r.inQ + (r.h.open ? ' / 동시입고 잡음 ' : ' / 나감 ') + r.h.qty
+      + (r.h.orig !== r.h.qty ? '(처음 ' + r.h.orig + ')' : '') + ' / 현재고 ' + r.st
+      + ' · ' + (d.getMonth()+1) + '/' + d.getDate() + (r.h.open ? ' 진행 중' : ' 정리 끝'));
   });
-  if (ks.length > 8) lines.push('  … 외 ' + (ks.length - 8) + '개');
-  lines.push('', '같은 물건을 여기서 또 입고하면 재고가 두 번 잡힙니다.');
+  if (rows.length > 12) lines.push('  … 외 ' + (rows.length - 12) + '개');
+  lines.push('');
+  lines.push('※ 동시입출고는 들어온 물건을 바로 내보내며 입고를 미리 잡아 둔 것입니다.');
+  lines.push('   그 「같은 물건」을 여기서 또 입고하면 두 번 잡히고, 발주 외로 남은 「다른 물건」이면 정상 입고입니다.');
   return lines.join('\n');
 }
 
@@ -693,7 +725,7 @@ function handleExcel(file){
         });
       }
       if (!entries.length) { setMsg('m0','er','❌ 바코드가 있는 행이 없습니다'); return; }
-      var cdW = crossdockWarn(entries.map(function(en){ return en.barcode; }));
+      var cdW = crossdockWarn(entries.map(function(en){ return { barcode: en.barcode, qty: en.qty }; }));
       if (cdW && !confirm(cdW + '\n\n그래도 엑셀 입고를 진행할까요?')) { setMsg('m0','warn','⚠️ 엑셀 입고 취소 — 동시입출고 중복 확인'); return; }
       /* 세션 표시 — 방금 업로드한 항목이 '최근 작업'에 바로 보이게 */
       entries.forEach(function(en){ markSessionBarcode(en.barcode); });
