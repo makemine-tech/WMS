@@ -30,8 +30,16 @@ function pad(n){ return String(n).padStart(2, '0'); }
 function dayOf(ts){ var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function hm(ts){ var d = new Date(ts); return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 var actx = null;
-function beep(ok){ try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); var o = actx.createOscillator(), g = actx.createGain();
-  o.frequency.value = ok ? 1046 : 220; o.type = ok ? 'sine' : 'square'; g.gain.value = .08; o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + (ok ? .09 : .35)); } catch(e){} }
+/* 소리 (대표님 2026-11-14: 휴대폰에서 찍혔는지 모름) — 휴대폰(특히 아이폰)은 손가락으로 누른 순간에 소리 장치를 깨워 둬야
+   카메라가 알아서 읽었을 때도 소리가 남. 화면을 누를 때마다 깨움(백그라운드 다녀오면 다시 잠기므로) */
+function audioOn(){ try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch(e){} return actx; }
+if (typeof document !== 'undefined') ['touchstart', 'pointerdown', 'keydown'].forEach(function(ev){ document.addEventListener(ev, function(){ var c = audioOn(); if (!c) return;
+  try { var b = c.createBuffer(1, 1, 22050), s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start(0); } catch(e){} }, { passive: true, capture: true }); });
+function tone(f, t0, len, type, vol){ var o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + t0; o.type = type; o.frequency.value = f;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + len);
+  o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + len + .02); }
+/* 맞음 = 「삐빅」 높은 두 음 · 틀림 = 낮고 긴 「부-」 */
+function beep(ok){ try { if (!audioOn()) return; if (ok){ tone(1320, 0, .07, 'square', .22); tone(1760, .08, .09, 'square', .22); } else tone(220, 0, .4, 'square', .25); } catch(e){} }
 
 /* ── 판정 ── */
 function starOrders(r){ return (r.orders || []).filter(custOK); }   /* 반영 대상 주문 (스타면 446만, 화물이면 전부) */
