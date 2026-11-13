@@ -831,6 +831,15 @@ function flash(ok){
   f.className = ok ? 'ok' : 'bad'; o.classList.remove('okf', 'badf'); o.classList.add(ok ? 'okf' : 'badf');
   setTimeout(function(){ f.className = ''; o.classList.remove('okf', 'badf'); }, 260);
 }
+/* 맨 마지막 완료 때 「완료」라고 말해 줌 (대표님 2026-11-14) — 휴대폰 음성(한국어), 음성이 없으면 「삐빅」 */
+function say(t){ try {
+  if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined'){ beep(true); return; }
+  speechSynthesis.cancel();
+  var u = new SpeechSynthesisUtterance(t), ko = speechSynthesis.getVoices().filter(function(v){ return /^ko/i.test(v.lang); })[0];
+  u.lang = 'ko-KR'; if (ko) u.voice = ko; u.rate = 1.05; u.volume = 1;
+  speechSynthesis.speak(u);
+} catch(e){ beep(true); } }
+if (window.speechSynthesis) try { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = function(){ speechSynthesis.getVoices(); }; } catch(e){}
 /* 완료 = 「목록 완료」(checked) — 휴대폰은 원송장·이벗 상품을 기다리지 않음. 이벗 주문과 맞추기·반영은 PC 에서 (대표님 2026-10-24) */
 function finish(){
   var r = RECS[CUR]; if (!r) return;
@@ -838,7 +847,7 @@ function finish(){
   if (CFG.vendor && !r.vendor){ beep(false); flash(false); toast('업체를 골라 주세요'); go('vendor'); return; }
   if (labelMissing(r)){ beep(false); flash(false); toast('📷 송장 전체 사진이 없습니다 — 찍어 주세요'); go('orig'); return; }
   upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast('✔ 목록 완료 — PC 에서 이벗에 반영합니다'); });
-  beep(true); vib(60); closeCur();
+  say('완료'); vib(60); closeCur();
   if (!CFG.vendor) openScan('rno');   /* 스타: 누른 손 그대로 다음 송장 카메라 (아이폰은 누른 순간에 열어야 함) — 화물은 첫 화면에서 */
 }
 function retry(){ var r = RECS[CUR]; if (!r) return; if (r.trace !== 'ok'){ upd(r, { trace: 'busy' }); render(); trace(r.rno); } else { upd(r, { look: 'wait' }); render(); toast('PC 에 다시 찾아 달라고 했습니다'); } }
