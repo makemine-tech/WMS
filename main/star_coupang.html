@@ -695,7 +695,7 @@ body.sd-collapsed .sd-fold{top:.3rem}
     <button class="btn btn-s" onclick="exportSessionJson()" id="exportJsonBtn" title="현재 작업 전체를 .json 으로 백업 — 나중에 '세션 가져오기'로 100% 복원 가능 (엑셀보다 안전)">💾 세션 백업(JSON)</button>
     <button class="btn" id="btnPhotoSort" onclick="openPhotoSortModal()" style="display:none;background:var(--p);color:#0f1117;font-weight:800" title="휴대폰으로 찍은 신규 SKU 사진들을 촬영 시간순으로 정렬 → 로그와 매칭 → 바코드명으로 일괄 변경 ZIP 다운로드">📷 신규 사진 일괄 정리</button>
     <button class="btn btn-s" onclick="goTo(0)">← 새 파일 업로드</button>
-    <button class="btn btn-r" onclick="finishWorkAndClear()" id="finishBtn" title="모든 작업이 끝났을 때 — 로컬과 클라우드의 세션을 모두 정리. 다음 작업이 깨끗하게 시작됩니다." style="margin-left:auto">🏁 작업 종료 + 세션 정리</button>
+    <button class="btn btn-r" onclick="finishWorkAndClear()" id="finishBtn" title="모든 작업이 끝났을 때 — 검수 결과를 재고관리에 입고(예정보다 많이 찍힌 수량은 제외)하고 세션을 정리합니다. 미리 보기에서 확인 후 반영됩니다." style="margin-left:auto">🏁 작업 종료 + 입고 잡기 + 세션 종료</button>
     <button class="btn btn-r" onclick="clearSession()">🗑 세션 삭제</button>
   </div>
 
@@ -2260,7 +2260,7 @@ function clearSession() {
    1) 미완료 행이 남아 있으면 한 번 더 경고
    2) 다운로드 받았는지 한 번 더 확인
    3) 동의 → localStorage 삭제 + 클라우드 데이터 삭제 + 새로고침 */
-function finishWorkAndClear() {
+function finishClearOnly(skipConfirm) {
   /* 미완료 행 확인 — classifyRow zone='active' 인 row 갯수 */
   var activeCnt = 0;
   if (rows && rows.length) {
@@ -2279,7 +2279,7 @@ function finishWorkAndClear() {
   warnLines.push('  · 박스 라벨 생성/인쇄 진행은 그대로 유지됩니다');
   warnLines.push('');
   warnLines.push('계속하시겠습니까?  (다운로드를 받지 않았다면 먼저 취소하고 다운로드 후 다시 시도하세요)');
-  if (!confirm(warnLines.join('\n'))) return;
+  if (!skipConfirm && !confirm(warnLines.join('\n'))) return;
 
   /* 클라우드 삭제 (로그인 상태일 때만) */
   var p = (window.WMSync && WMSync.isSignedIn()) ? WMSync.clearRemote() : Promise.resolve();
@@ -2288,6 +2288,121 @@ function finishWorkAndClear() {
     /* 박스 라벨 진행 (star_coupang_labels_v1)은 의도적으로 유지 — 별도 도구 */
     alert('✅ 작업 종료 — 세션 정리 완료. 새 파일 업로드부터 다시 시작합니다.');
     location.reload();
+  });
+}
+
+/* ═══ 🏁 작업 종료 + 입고 잡기 + 세션 종료 ═══
+ * 1) 미리 보기: 입고 수량·불량, 특이사항(초과 잘라냄 / 예정에 없는 신규 바코드 / 동시입출고 겹침 / 같은 박스 이미 입고)
+ * 2) 📥 입고 잡고 종료 → 재고관리(star_instock/logs)에 한 번에 기록 → 세션 정리
+ * 3) 이미 엑셀로 올린 작업 등은 「입고 없이 세션만 정리」 */
+var _ibCtx = null;
+function finishWorkAndClear(){ inboundOpenPreview(); }
+function inboundUser(){ return (wmsAuthState && wmsAuthState.user && (wmsAuthState.user.email || wmsAuthState.user.uid)) || ''; }
+function inboundJobLabel(){ return String(jobName || (typeof fileName !== 'undefined' && fileName) || '').replace(/\.xlsx?$/i, ''); }
+function inboundOpenPreview(){
+  if (!boxes || !boxes.length) { finishClearOnly(); return; }
+  if (!window.WMSync || !WMSync.hasGroup || !WMSync.hasGroup()) { alert('로그인(동기화 ON) 후에 입고를 잡을 수 있습니다.\n입고 없이 정리하려면 확인 후 다음 창에서 진행하세요.'); finishClearOnly(); return; }
+  var gid = WMSync.getGroupId();
+  setMsg('m1', 'inf', '<span>재고관리 기록 확인 중...</span>');
+  firebase.database().ref('wms_sync/groups/' + gid + '/star_instock/logs').once('value').then(function(snap){
+    var v = snap.val() || {};
+    var boxSet = {}, since = Date.now() - 30 * 86400000, cd = {}, stock = {};
+    Object.keys(v).forEach(function(k){
+      var l = v[k] || {}, bc = String(l.barcode || '').trim().toUpperCase();
+      var q = +l.qty || 0;
+      if (bc) stock[bc] = (stock[bc] || 0) + (l.type === 'out' ? -q : q);
+      if (l.type === 'out') return;
+      var bx = String(l.box || '').trim().toUpperCase();
+      if (bx) boxSet[bx] = (boxSet[bx] || 0) + 1;
+      if (l.source === 'crossdock' && (l.ts || 0) >= since && bc) {
+        var h = cd[bc] || (cd[bc] = { qty: 0, open: 0, po: '' });
+        h.qty += q; if (!l.cdSettled) h.open++; h.po = l.cdPoFile || h.po;
+      }
+    });
+    var dupBoxes = boxes.filter(function(b){ return boxSet[String(b.id || '').trim().toUpperCase()]; }).map(function(b){ return b.id; });
+    _ibCtx = { gid: gid, cd: cd, stock: stock, dupBoxes: dupBoxes, ts: Date.now() };
+    hideMsgSafe();
+    inboundRenderPreview();
+  }).catch(function(err){ setMsg('m1', 'er', '❌ 재고관리 기록 읽기 실패: ' + escH(err && err.message || err)); });
+}
+function hideMsgSafe(){ var m = document.getElementById('m1'); if (m) m.style.display = 'none'; }
+function inboundBuildNow(){
+  var inc = document.getElementById('ibIncNew');
+  return inboundBuildEntries({
+    rows: rows, boxes: boxes, startedEmpty: !!startedEmpty, includeNew: !!(inc && inc.checked),
+    batchId: 'B' + _ibCtx.ts, batchName: '입고검수 ' + inboundJobLabel(), by: inboundUser(), ts: _ibCtx.ts
+  });
+}
+function inboundRenderPreview(){
+  var r = inboundBuildNow(), c = _ibCtx;
+  var activeCnt = (rows || []).filter(function(x){ return classifyRow(x).zone === 'active'; }).length;
+  /* 동시입출고 겹침 — 바코드별 이번 입고 수량과 비교 */
+  var inBy = {}; r.entries.forEach(function(e){ var b = e.barcode.toUpperCase(); inBy[b] = (inBy[b] || 0) + e.qty; });
+  var cdRows = Object.keys(inBy).filter(function(b){ return c.cd[b]; }).map(function(b){
+    var h = c.cd[b]; var lv = h.open ? 0 : (inBy[b] === h.qty ? 1 : 2);
+    return { b: b, lv: lv, inQ: inBy[b], cdQ: h.qty, st: c.stock[b] || 0, po: String(h.po || '').replace(/\.xlsx?$/i, '') };
+  }).sort(function(a, b){ return a.lv - b.lv; });
+  var cdN = [0, 0, 0]; cdRows.forEach(function(x){ cdN[x.lv]++; });
+  var notes = [];
+  if (c.dupBoxes.length) notes.push('<div style="color:#ff6b6b;font-weight:800">🔴 재고관리에 같은 박스 입고 기록이 이미 있습니다: ' + c.dupBoxes.length + '박스 (' + escH(c.dupBoxes.slice(0, 6).join(', ')) + (c.dupBoxes.length > 6 ? ' …' : '') + ')<br><span style="font-weight:600;font-size:.78rem">이미 엑셀로 올린 작업이면 「입고 없이 세션만 정리」를 누르세요. 두 번 올리면 재고가 두 번 잡힙니다.</span><br><label style="font-size:.8rem;font-weight:700"><input type="checkbox" id="ibForce" onchange="inboundSyncBtn()"> 그래도 입고 (중복 아님을 확인함)</label></div>');
+  if (r.trimmed.length) {
+    var cutTot = r.trimmed.reduce(function(s, t){ return s + t.cut; }, 0);
+    notes.push('<div>✂ 예정보다 많이 찍힌 ' + r.trimmed.length + '품목 · ' + cutTot + '개는 입고하지 않습니다 (목표 수량까지만)</div><div style="font-size:.74rem;color:var(--mu);max-height:110px;overflow:auto">' + r.trimmed.slice(0, 30).map(function(t){ return escH(t.name || t.barcode) + ' — 찍음 ' + t.recv + ' / 목표 ' + t.target + ' → −' + t.cut; }).join('<br>') + '</div>');
+  }
+  if (r.newRows.length || (document.getElementById('ibIncNew') && document.getElementById('ibIncNew').checked)) {
+    var nAll = inboundBuildEntries({ rows: rows, boxes: boxes, startedEmpty: false, includeNew: false, batchId: '', batchName: '', by: '', ts: 0 }).newRows;
+    notes.push('<div>🆕 예정에 없는 신규 바코드 ' + nAll.length + '품목 · ' + nAll.reduce(function(s, x){ return s + x.qty; }, 0) + '개 — 기본은 입고하지 않습니다 <label style="font-weight:800"><input type="checkbox" id="ibIncNew" onchange="inboundRenderPreview()"' + ((document.getElementById('ibIncNew') && document.getElementById('ibIncNew').checked) ? ' checked' : '') + '> 포함</label></div><div style="font-size:.74rem;color:var(--mu)">' + nAll.slice(0, 10).map(function(x){ return escH(x.name || x.barcode) + ' ' + x.qty + '개'; }).join(', ') + '</div>');
+  }
+  if (cdRows.length) {
+    notes.push('<div>🔁 동시입출고(최근 30일)와 겹치는 바코드 ' + cdRows.length + '개 — 🔴 작업 진행 중 ' + cdN[0] + ' · 🟡 수량 같음(중복 의심) ' + cdN[1] + ' · 🟢 정리 끝·수량 다름 ' + cdN[2] + '</div><div style="font-size:.74rem;color:var(--mu);max-height:110px;overflow:auto">' + cdRows.slice(0, 20).map(function(x){ return ['🔴', '🟡', '🟢'][x.lv] + ' ' + escH(x.b) + ' — 이번 입고 ' + x.inQ + ' / 동시입출고 ' + x.cdQ + ' / 현재고 ' + x.st + (x.po ? ' · ' + escH(x.po.slice(0, 30)) : ''); }).join('<br>') + '</div>');
+  }
+  if (activeCnt) notes.push('<div style="color:var(--y)">⏳ 아직 덜 찍힌(미완료) 행 ' + activeCnt + '건 — 찍힌 만큼만 입고합니다</div>');
+  var h = '<div style="background:var(--s1);border:1px solid var(--br);border-radius:12px;max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;color:var(--tx)">'
+    + '<div style="padding:.85rem 1rem;font-weight:900;border-bottom:1px solid var(--br)">🏁 작업 종료 + 입고 잡기 — ' + escH(inboundJobLabel()) + '</div>'
+    + '<div style="padding:.7rem 1rem;overflow:auto;font-size:.84rem;line-height:1.6">'
+    + '<div style="font-size:1rem;font-weight:800;margin-bottom:.5rem">재고관리에 입고: <span style="color:var(--g)">' + r.totals.qty + '개</span>' + (r.totals.def ? ' · 불량 ' + r.totals.def + '개(재고 미반영)' : '') + ' · ' + r.totals.lines + '줄(박스×품목)</div>'
+    + (notes.length ? '<div style="font-weight:800;margin:.4rem 0 .2rem">특이사항</div>' + notes.join('<div style="height:.45rem"></div>') : '<div style="color:var(--mu)">특이사항 없음</div>')
+    + '<div style="font-size:.74rem;color:var(--mu);margin-top:.7rem">재고관리 「작업별 입출고 기록」에 「입고검수 ' + escH(inboundJobLabel()) + '」 한 줄로 남습니다. 입고 후 이 작업 세션은 정리됩니다.</div>'
+    + '</div><div style="display:flex;gap:.5rem;flex-wrap:wrap;padding:.7rem 1rem;border-top:1px solid var(--br)">'
+    + '<button class="btn" onclick="inboundClose()">취소</button>'
+    + '<button class="btn" style="margin-left:auto" onclick="inboundClose();finishClearOnly()">입고 없이 세션만 정리</button>'
+    + '<button class="btn btn-g" id="ibGo" onclick="inboundCommit()">📥 입고 잡고 종료</button>'
+    + '</div></div>';
+  var back = document.getElementById('ibBack');
+  var force = document.getElementById('ibForce'), forceOn = !!(force && force.checked);
+  if (!back) {
+    back = document.createElement('div'); back.id = 'ibBack';
+    back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(back);
+  }
+  back.innerHTML = h;
+  if (forceOn && document.getElementById('ibForce')) document.getElementById('ibForce').checked = true;
+  inboundSyncBtn();
+}
+function inboundSyncBtn(){
+  var go = document.getElementById('ibGo'); if (!go) return;
+  var f = document.getElementById('ibForce');
+  go.disabled = !!(_ibCtx && _ibCtx.dupBoxes.length && !(f && f.checked));
+  go.style.opacity = go.disabled ? .45 : 1;
+}
+function inboundClose(){ var b = document.getElementById('ibBack'); if (b) b.remove(); }
+function inboundCommit(){
+  if (!_ibCtx) return;
+  var f = document.getElementById('ibForce');
+  if (_ibCtx.dupBoxes.length && !(f && f.checked)) { alert('같은 박스 입고 기록이 이미 있습니다. 중복이 아닌지 확인 후 「그래도 입고」를 체크하세요.'); return; }
+  var r = inboundBuildNow();
+  if (!r.entries.length) { alert('입고할 수량이 없습니다.'); return; }
+  var base = 'wms_sync/groups/' + _ibCtx.gid + '/star_instock/logs/';
+  var ref = firebase.database().ref(base), upd = {};
+  r.entries.forEach(function(e){ upd[base + ref.push().key] = e; });
+  var go = document.getElementById('ibGo'); if (go) { go.disabled = true; go.textContent = '입고 중...'; }
+  firebase.database().ref().update(upd).then(function(){
+    inboundClose();
+    alert('✅ 재고 입고 완료 — ' + r.totals.qty + '개' + (r.totals.def ? ' · 불량 ' + r.totals.def + '개' : '') + ' · ' + r.totals.lines + '줄\n재고관리 「입고검수 ' + inboundJobLabel() + '」\n\n이어서 세션을 정리합니다.');
+    finishClearOnly(true);
+  }).catch(function(err){
+    if (go) { go.disabled = false; go.textContent = '📥 입고 잡고 종료'; }
+    alert('❌ 입고 실패 — 세션은 그대로 둡니다.\n' + (err && err.message || err));
   });
 }
 
