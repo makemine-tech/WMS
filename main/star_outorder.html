@@ -2264,24 +2264,18 @@ function cpParseExcelFile(file, onOk, onErr){
         .filter(function(r){ return r && r.some(function(c){ return c !== '' && c !== null; }); })
         .map(function(r){
           var _bc = String(r[idx.barcode]||'').trim();
-          /* 대체바코드(라벨 출력용) 결정 — 우선순위:
-           * ① '대체바코드' 헤더 열
-           * ② 'SKU Barcode'(F열) 값이 매칭용 바코드(원본)와 다르면 그게 대체바코드 (쿠팡 PO 표준)
-           * ③ 그래도 없으면 행의 모든 열을 훑어 "원본과 숫자코어는 같은데 값은 다르고 알파벳이 든" 셀 자동 채택 */
-          var _alt = idx.altBarcode !== -1 ? String(r[idx.altBarcode]||'').trim() : '';
-          if (!_alt && idx.skuBarcode !== -1) {
+          /* ⚠ 절대 원칙 — 출고 라벨 바코드 = 입고처(쿠팡)와 약속된 이번 발주서의 SKU Barcode 그대로.
+           *   A 앞붙임·뒤붙임·원본 그대로·전혀 다른 번호 — 어떤 모양이든 발주서 값을 그대로 쓰고,
+           *   프로그램이 추측하거나 과거 값으로 바꾸지 않는다.
+           * ① 'SKU Barcode' 열이 있으면 그 값이 기준: 원본과 다르면 대체바코드, 같으면 '원본 그대로'(대체 없음)
+           * ② SKU Barcode 열이 없을 때만 '대체바코드' 열
+           * (예전 ③ '행의 다른 칸에서 A 붙은 값을 찾아 자동 채택' 은 추측이라 없앴다) */
+          var _alt = '';
+          if (idx.skuBarcode !== -1 && String(r[idx.skuBarcode]||'').trim()) {
             var _sku = String(r[idx.skuBarcode]||'').trim();
-            if (_sku && normBarcode(_sku) !== normBarcode(_bc)) _alt = _sku;
-          }
-          if (!_alt) {
-            var _oc = barcodeCore(_bc);
-            if (_oc) {
-              for (var _ci=0; _ci<r.length; _ci++){
-                var _cv = String(r[_ci]==null?'':r[_ci]).trim();
-                /* 대체바코드는 '원본 숫자 + 알파벳 래핑' → 알파벳이 들어있는 값만 채택 */
-                if (_cv && normBarcode(_cv) !== normBarcode(_bc) && barcodeCore(_cv) === _oc && /[A-Za-z]/.test(_cv)) { _alt = _cv; break; }
-              }
-            }
+            if (normBarcode(_sku) !== normBarcode(_bc)) _alt = _sku;
+          } else if (idx.altBarcode !== -1) {
+            _alt = String(r[idx.altBarcode]||'').trim();
           }
           return {
             po:       String(r[idx.po] || '').trim(),
@@ -2905,7 +2899,7 @@ function cpCdRun(){
       batchName: '동시입출고 ' + (cpState.fileName || ''),
       box: '',
       barcode: x.bc,
-      altBarcode: (r.altBarcode || meta.altBarcode || ''),
+      altBarcode: (r.altBarcode || ''),   /* 이번 발주서 SKU Barcode 만 — 재고관리의 과거 대체바코드를 옮겨 적지 않는다 */
       name: x.name, brand: meta.brand || '', code: meta.code || '',
       color: meta.color || '', size: meta.size || '', origin: meta.origin || '', material: meta.material || '',
       qty: e.qty,
@@ -3080,7 +3074,7 @@ function cpSetSubView(v){
 function cpCheckAltBarcodes(){
   var rows = cpState && cpState.rows || [];
   if (!rows.length) { setMsg('cpMsg','warn','⚠️ PO 데이터가 없습니다 — 먼저 엑셀 업로드'); return; }
-  var withAlt = [], withoutAlt = [], notFound = [];
+  var withAlt = [], withoutAlt = [], notFound = [], diffStock = [];
   rows.forEach(function(r, i){
     var bc = normBarcode(r.barcode);
     /* PO 바코드 → 재고 메타 직접, 없으면 stockByAlt 통해 원본 찾기 */
@@ -3091,6 +3085,9 @@ function cpCheckAltBarcodes(){
     if (!meta) { notFound.push({i:i, bc:r.barcode}); return; }
     /* 우선순위: PO F열 대체바코드 > 재고 메타 altBarcode */
     var alt = (r.altBarcode||'').trim() || (r.barcode||'').trim();   /* 발주 F열 기준 (재고관리 대체바코드로 넘어가지 않음) */
+    /* 재고관리에 저장된 대체바코드가 이번 발주서 값과 다르면 — 라벨은 발주서 값으로 찍지만 따로 알려 준다 */
+    var _sa = (meta.altBarcode || '').trim();
+    if (_sa && normBarcode(_sa) !== normBarcode(alt)) diffStock.push({ po: alt, stock: _sa, name: r.skuName || meta.name || '' });
     if (alt && normBarcode(alt) !== normBarcode(srcBc)) {
       withAlt.push({i:i, po:r.barcode, src:srcBc, alt:alt, name:r.skuName||meta.name||''});
     } else {
@@ -3112,6 +3109,12 @@ function cpCheckAltBarcodes(){
     });
     if (withAlt.length > 10) lines.push('  ...외 ' + (withAlt.length-10) + '개');
   }
+  if (diffStock.length) {
+    lines.push('');
+    lines.push('=== ⚠ 재고관리 대체바코드가 이번 발주서와 다른 상품 ' + diffStock.length + '개 — 라벨은 발주서 값으로 찍힙니다 ===');
+    diffStock.slice(0,10).forEach(function(d){ lines.push('  • 발주서 ' + d.po + '  ← 재고관리 ' + d.stock + (d.name ? '  [' + d.name.substring(0,24) + ']' : '')); });
+    if (diffStock.length > 10) lines.push('  ...외 ' + (diffStock.length-10) + '개');
+  }
   if (notFound.length) {
     lines.push('');
     lines.push('=== 재고 메타 없는 라인 (확인 필요) ===');
@@ -3119,8 +3122,8 @@ function cpCheckAltBarcodes(){
     if (notFound.length > 10) lines.push('  ...외 ' + (notFound.length-10) + '개');
   }
   lines.push('');
-  lines.push('※ 라벨 인쇄 시 alt 가 있으면 자동으로 alt 가 인쇄됩니다 (⚠ 빨간 "대체" 배지 표시).');
-  lines.push('※ alt 가 비어있으면 원바코드 그대로 인쇄.');
+  lines.push('※ 라벨 바코드 = 이번 발주서 SKU Barcode 그대로 (A 앞·뒤붙임, 원본 그대로, 다른 번호 모두).');
+  lines.push('※ 재고관리에 저장된 예전 대체바코드는 쓰지 않습니다.');
   alert(lines.join('\n'));
   setMsg('cpMsg','inf','🏷️ 점검 완료 — alt 사용 ' + withAlt.length + '건 · 원바코드 ' + withoutAlt.length + '건' + (notFound.length?' · ⚠ 메타없음 '+notFound.length+'건':''));
 }
