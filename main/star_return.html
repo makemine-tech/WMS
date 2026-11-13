@@ -252,6 +252,7 @@
     <div class="card-h">🗂 반품입고 목록 <span class="sp"></span>
       <button class="btn" id="lookAllBtn" onclick="lookAll()">🔎 주문 조회 대기 <span id="nLook">0</span>건 찾기</button>
       <button class="btn" onclick="readySelected()" title="체크한 미완료 건 중 막힌 것 없는 건을 한 번에 「반영 대기」로">✔ 체크한 건 반영 대기로</button>
+      <button class="btn" onclick="manualDoneSelected()" title="체크한 미완료 건을 이벗 반영 없이 한 번에 「✋ 수동 완료」로 (반영 중인 건은 빼고)">✋ 체크한 건 수동 완료</button>
       <button class="btn p" id="pushBtn" onclick="pushAll()">📤 이벗에 반영 (<span id="nReady">0</span>건)</button>
       <button class="btn" onclick="downloadXlsx()">📥 엑셀</button>
       <button class="btn" id="pdfBtn" onclick="downloadReport()">📄 선택 PDF 보고서</button>
@@ -307,7 +308,7 @@ var VENDORS = {};   /* 화물: 업체명 목록 dict/vendor/{이름} = { name, n
   if (!CFG.vendor) [].forEach.call(document.querySelectorAll('th.vcol, option.vcol'), function(th){ th.remove(); });
   if (CFG.vendor){
     $('cargoRow').style.display = 'block'; $('vfRow').style.display = 'flex';
-    $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국(6077·7077)만 원송장 자동 추적, 다른 택배는 원송장 없이 쌓임';
+    $('rnoLbl').textContent = '① 반품 송장 스캔 — 우체국 송장은 모두 원송장 자동 추적 (6077·7077 은 자동 우체국, 그 밖의 번호는 택배사 「우체국」 선택), 다른 택배는 원송장 없이 쌓임';
     try { $('vendorIn').value = localStorage.getItem('retVendor_' + CFG.db) || ''; } catch(e){}
   }
   if (CFG.relay) document.querySelector('.helper').title = '상시 컴퓨터(AI 물류비서 헤드비서)의 이벗 탭으로 주문 조회·이벗 반영을 합니다. 이 PC 에서 즐겨찾기 도우미를 누르면 이 PC 이벗이 먼저 쓰입니다';
@@ -316,7 +317,7 @@ var CUR_COURIER = '';
 function renderCourierChips(){
   if (!CFG.vendor) return;
   $('courierChips').innerHTML = COURIERS.map(function(c){ return '<span class="chip' + (CUR_COURIER === c ? ' on' : '') + '" onclick="CUR_COURIER=\'' + c + '\';renderCourierChips()">' + c + '</span>'; }).join('')
-    + '<span class="sm dim" style="margin-left:.3rem">(6077·7077 송장은 자동 우체국)</span>';
+    + '<span class="sm dim" style="margin-left:.3rem">(6077·7077 은 자동 우체국 · 우체국이면 번호와 상관없이 원송장 추적)</span>';
 }
 function renderVendorChips(){
   if (!CFG.vendor) return;
@@ -448,15 +449,15 @@ $('rnoIn').addEventListener('keydown', function(e){
   var vendor = CFG.vendor ? $('vendorIn').value.trim() : '', courier = isEpost(no) ? '우체국' : CUR_COURIER;
   if (CFG.vendor && !vendor){ beep(false); toast('업체명을 먼저 넣어 주세요'); $('vendorIn').focus(); return; }
   if (CFG.vendor && !courier){ beep(false); toast('우체국 송장이 아닙니다 — 택배사를 먼저 고르세요'); return; }
-  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no) ? 'busy' : 'skip', items: [], extras: [] };
+  r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no, courier) ? 'busy' : 'skip', items: [], extras: [] };
   if (CFG.vendor){ r.vendor = vendor; r.courier = courier; addVendor(vendor); try { localStorage.setItem('retVendor_' + CFG.db, vendor); } catch(e){} }
   CUR = no; save(r).then(function(){ renderCur(); beep(true); if (r.trace === 'busy') trace(no); else focusItem(); });
 });
 function trace(no){
-  var r = RECS[no]; if (!r) return;
+  var r = RECS[no]; if (!r) return Promise.resolve();
   save(r, { trace: 'busy' }); renderCur();
   var fn = firebase.app().functions('asia-northeast3').httpsCallable('epostReturnOrigin', { timeout: 60000 });
-  fn({ nos: [no] }).then(function(res){
+  return fn({ nos: [no] }).then(function(res){
     var x = ((res.data && res.data.rows) || [])[0] || {};
     if (x.err){ save(RECS[no], { trace: 'err', traceErr: x.err }); }
     else if (x.orig){ save(RECS[no], { trace: 'ok', orig: x.orig, origDate: x.origDate || null, self: false, look: 'wait' }); }
@@ -529,8 +530,17 @@ function waitWhy(r){
   return { c:'y', t:'자동 넘김 대기', h:'펼쳐서 「✔ 검수 완료 → 반영 대기」' };
 }
 function whyHtml(r){ var w = waitWhy(r); return w ? '<div class="why ' + w.c + '"><b>' + esc(w.t) + '</b><span>→ ' + esc(w.h) + '</span></div>' : ''; }
+/* 우체국인데 원송장 추적을 안 한 반품(예전 6077·7077 만 추적하던 때 쌓인 것, 휴대폰에서 택배사를 나중에 고친 것) → 이 화면이 한 건씩 우체국 조회 (화면당 한 번씩만) */
+var TRACED = {}, traceBusy = false;
+function autoTrace(){
+  if (traceBusy) return;
+  var k = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r && !TRACED[k] && !locked(r) && !r.orig && r.trace === 'skip' && needTrace(r.rno, r.courier); })[0];
+  if (!k) return;
+  TRACED[k] = 1; traceBusy = true;
+  trace(k).then(function(){ traceBusy = false; setTimeout(autoTrace, 300); });
+}
 function autoLook(){
-  autoReady();
+  autoReady(); autoTrace();
   if (autoBusy || !H.ok || H.login === false) return;
   var k = Object.keys(RECS).filter(function(k){ var r = RECS[k]; return r && r.orig && !locked(r) && (r.look === 'wait' || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) > 120000)); })
     .sort(function(a, b){ return RECS[a].at - RECS[b].at; })[0];
@@ -602,7 +612,7 @@ function setOrigPC(v){
   if (no === (r.orig || '')) return;
   if (no && !okNo(no)){ toast('원송장 번호가 너무 깁니다'); return; }
   /* 원송장을 넣으면 이벗에서 그 주문 상품을 다시 불러옴(이 PC 의 도우미가 연결돼 있으면 바로) */
-  save(r, no ? { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' } : { orig: null, trace: needTrace(r.rno) ? 'err' : 'skip', look: null });
+  save(r, no ? { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' } : { orig: null, trace: needTrace(r.rno, r.courier) ? 'err' : 'skip', look: null });
   renderCur(); autoLook();
 }
 function toggleTagPC(t){
@@ -944,6 +954,24 @@ function delSelected(){
   if (!confirm('체크한 ' + ks.length + '건을 지울까요?' + delWarn(ks))) return;
   var up = {}; ks.forEach(function(k){ up['recs/' + k] = null; }); dropPhotos(ks);
   base.update(up).then(function(){ if (CUR && SEL[CUR]){ CUR = null; renderCur(); } SEL = {}; toast(ks.length + '건 지웠습니다'); });
+}
+
+/* 체크한 미완료 건을 한 번에 ✋ 수동 완료로 (대표님 2026-11-12 — 전체 선택 후 강제 완료) — 막힘·실패와 상관없이 완료로 넘김.
+   이벗 반영 중(saving)인 건은 결과를 모르니 빼고, 이미 완료된 건은 그대로. 이벗에는 아무것도 넣지 않음 */
+function manualDoneSelected(){
+  var ks = Object.keys(SEL).filter(function(k){ return RECS[k] && RECS[k].state !== 'done'; });
+  if (!ks.length){ toast('수동 완료할 미완료 줄을 먼저 체크하세요'); return; }
+  var go = ks.filter(function(k){ return RECS[k].state !== 'saving'; }), sv = ks.length - go.length;
+  if (!go.length){ alert('체크한 건이 모두 이벗에 반영 중입니다 — 끝난 뒤 다시 하세요.'); return; }
+  var why = prompt('✋ 체크한 ' + go.length + '건을 수동 완료로 넘깁니다.\n이벗에는 넣지 않고 완료로만 표시합니다.' + (sv ? '\n(이벗에 반영 중인 ' + sv + '건은 뺌)' : '') + '\n\n메모(선택):', CFG.db === 'cargo' ? '기록만 (이벗 반영 안 함)' : '이벗에 직접 입력');
+  if (why === null) return;
+  var by = byName(), now = Date.now(), msg = String(why || '').trim() || '수동 완료';
+  var up = {};
+  go.forEach(function(k){ var r = RECS[k], f = { state: 'done', saveAt: null, ebut: { at: now, by: by, mode: 'manual', msg: msg }, upd: now };
+    Object.assign(r, f); markNotes(r); Object.keys(f).forEach(function(n){ up['recs/' + k + '/' + n] = f[n]; }); });
+  base.update(up).then(function(){ go.forEach(function(k){ delete SEL[k]; }); if (CUR && go.indexOf(CUR) >= 0) renderCur(); renderList();
+    toast('✋ ' + go.length + '건 수동 완료' + (sv ? ' · 반영 중 ' + sv + '건은 뺌' : '')); })
+    .catch(function(e){ toast('수동 완료 실패: ' + (e.code || e.message)); });
 }
 
 /* 체크한 미완료 건을 한 번에 「반영 대기」로 (대표님 2026-10-26) — 펼쳐서 「✔ 검수 완료 → 반영 대기」 누르는 것과 같은 판정:

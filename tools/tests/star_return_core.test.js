@@ -49,3 +49,11 @@ test('스타: 예전처럼 스캔이 있어야 하고 주문 외 상품은 사�
   assert.strictEqual(C.ebutLines(r).length, 0);
   assert.strictEqual(C.extrasHold(r), true);
 });
+
+test('화물: 우체국이면 번호 모양과 상관없이 원송장 추적, 다른 택배는 안 함', () => {
+  const C = load('?db=cargo');
+  assert.strictEqual(C.needTrace('6077480000000', ''), true);
+  assert.strictEqual(C.needTrace('3456789012', '우체국'), true);
+  assert.strictEqual(C.needTrace('3456789012', '한진'), false);
+  assert.strictEqual(load('').needTrace('3456789012'), true);
+});
