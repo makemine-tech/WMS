@@ -4460,7 +4460,24 @@ function cpApplyScanModeUI(){
 }
 
 /* 바코드 덧방 라벨 모드 토글 — 켜면 스캔이 출고에 반영되지 않고 한글라벨만 즉시 인쇄 */
+/* ═══ 덧방 인쇄 — 발주서 확인 ═══
+ * 라벨 바코드는 발주서 SKU Barcode(F열)가 기준이다. 발주 파일 없이 덧방하면 재고관리 대체바코드가 찍히는데,
+ * 그 값은 입고 양식에서 들어온 것이라 틀릴 수 있다 (예: 1103 아디다스 'A+원본' 44족 회송).
+ *  - 발주 파일(업로드 또는 진행 중 작업)이 하나도 없으면 → 덧방 켤 때 경고, 스캔마다 주황 경고
+ *  - 발주 파일은 있는데 그 상품이 발주에 없으면 → 인쇄하지 않고 빨간 경고 */
+function cpPoLoaded(){
+  return !!(((workSession && workSession.rows) || []).length || ((cpState && cpState.rows) || []).length);
+}
+function cpPoNameHint(){
+  return (workSession && workSession.poFileName) || (cpState && cpState.fileName) || '';
+}
 function cpSetRelabelMode(on){
+  if (on && !cpPoLoaded()) {
+    if (!confirm('⚠ 발주 파일이 없습니다.\n\n발주 파일 없이 덧방하면 라벨 바코드를 발주서(SKU Barcode)로 확인할 수 없어\n재고관리에 저장된 대체바코드가 그대로 찍힙니다.\n(예: 1103 아디다스 — 재고관리의 A+원본이 찍혀 44족 회송)\n\n먼저 ② 쿠팡 발주 엑셀을 올리거나 작업파일을 열고 덧방하세요.\n\n그래도 발주 파일 없이 덧방을 켤까요?')) {
+      var _c = document.getElementById('cpRelabelChk'); if (_c) _c.checked = false;
+      return;
+    }
+  }
   cpRelabelMode = !!on;
   var chk = document.getElementById('cpRelabelChk');
   var tog = document.getElementById('cpRelabelToggle');
@@ -5154,20 +5171,30 @@ function cpProcessRelabelScan(raw){
       cpSpeak('오류');
       return;
     }
-    var items = [], total = 0;
+    var items = [], total = 0, notInPo = [];
+    var poOn = cpPoLoaded();
     Object.keys(contents).forEach(function(bc){
       var q = +contents[bc] || 0;
       if (q <= 0) return;
+      if (poOn && !cpPoRowFor(bc)) { notInPo.push(bc + ' ' + q + '개'); return; }   /* 발주에 없는 상품 — 바코드를 확인할 수 없어 인쇄 안 함 */
       items.push({ barcode: bc, qty: q, srcIdx: -1, box: boxId });
       total += q;
     });
+    if (notInPo.length) {
+      cpFlash('er','❌ <b>발주서에 없는 상품 ' + notInPo.length + '종은 인쇄하지 않았습니다</b><span class="sub">' + escH(notInPo.join(', ')) + ' — 발주서 「' + escH(cpPoNameHint()) + '」에 없어 라벨 바코드를 확인할 수 없습니다.</span>');
+      cpSpeak('발주 없음');
+      if (!items.length) return;
+    }
     if (!items.length) {
       cpFlash('er','❌ 인쇄할 내품 수량이 없습니다: '+escH(boxId));
       cpSpeak('오류');
       return;
     }
     cpPrintLabelsDirect(items);
-    cpFlash('ok','🏷️ <b>덧방 인쇄</b> — 박스 '+escH(boxId)+' 내품 '+items.length+'종 / 총 '+total+'장 인쇄'+(cpKioskNoteHtml()));
+    if (notInPo.length) return;   /* 위 빨간 경고를 남겨 둔다 */
+    cpFlash(poOn ? 'ok' : 'warn','🏷️ <b>덧방 인쇄</b> — 박스 '+escH(boxId)+' 내품 '+items.length+'종 / 총 '+total+'장 인쇄'
+      + (poOn ? '' : '<span class="sub">⚠ 발주 파일 없음 — 재고관리 대체바코드로 찍었습니다. 발주서 SKU Barcode 와 같은지 확인하세요.</span>')
+      + (cpKioskNoteHtml()));
     cpSpeak('인쇄');
     return;
   }
@@ -5186,6 +5213,13 @@ function cpProcessRelabelScan(raw){
     cpFlash('warn','⚠️ <b>한글표시 미등록</b>: '+escH(raw)+'<span class="sub">재고관리에 이 바코드의 한글표시사항이 없습니다. 바코드만 인쇄됩니다.</span>');
     cpSpeak('미등록');
   }
+  /* 발주서 확인 — 발주 파일이 있는데 그 상품이 없으면 인쇄하지 않는다 */
+  var poOn = cpPoLoaded();
+  if (poOn && !cpPoRowFor(resolved) && !cpPoRowFor(bc)) {
+    cpFlash('er','❌ <b>발주서에 없는 상품 — 인쇄 안 함</b>: '+escH(raw)+'<span class="sub">발주서 「'+escH(cpPoNameHint())+'」에 이 상품이 없어 라벨 바코드(SKU Barcode)를 확인할 수 없습니다. 맞는 발주 파일을 올리거나 작업파일을 바꾸세요.</span>');
+    cpSpeak('발주 없음');
+    return;
+  }
   /* 모아뽑기 ON — 즉시 인쇄하지 않고 누적 큐에 쌓는다 (스캔 순서 유지) */
   if (cpRelabelCollect) {
     cpCollectAdd(resolved, meta, viaAlt);
@@ -5193,8 +5227,10 @@ function cpProcessRelabelScan(raw){
   }
   cpPrintLabelsDirect([{ barcode: resolved, qty: 1, srcIdx: -1 }]);
   var nm = (meta && meta.name) ? meta.name : resolved;
-  cpFlash('ok','🏷️ <b>덧방 인쇄</b> — '+escH(nm)+(viaAlt?' <span style="color:var(--p);font-weight:800">[ALT]</span>':'')+' 1장 인쇄'+(cpKioskNoteHtml()));
-  cpSpeak('인쇄');
+  cpFlash(poOn ? 'ok' : 'warn','🏷️ <b>덧방 인쇄</b> — '+escH(nm)+(viaAlt?' <span style="color:var(--p);font-weight:800">[ALT]</span>':'')+' 1장 인쇄'
+    + (poOn ? '' : '<span class="sub">⚠ 발주 파일 없음 — 재고관리 대체바코드 「'+escH(cpLabelBarcode(resolved, {}))+'」로 찍었습니다. 발주서 SKU Barcode 와 같은지 확인하세요.</span>')
+    + (cpKioskNoteHtml()));
+  cpSpeak(poOn ? '인쇄' : '인쇄, 발주 없음');
 }
 
 /* ═══════════ 모아뽑기 (덧방 상품모드 누적 인쇄) ═══════════
