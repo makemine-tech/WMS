@@ -3767,6 +3767,74 @@ function downloadDone() {
   }
 }
 
+/* ═══ 작업 종료 때 재고 입고 — 입고 기록 계산 (순수 함수) ═══
+ * 검수 결과(rows·boxes)를 재고관리(star_instock) 입고 기록으로 바꾼다. 내용은 「📦 재고 입고용 엑셀」과 같다(박스 × 품목).
+ *  - 초과는 잡지 않는다: 품목마다 정상 입고 = min(실입고, 목표), 목표 = 입고예정 − 기존수량.
+ *    넘친 수량은 마지막에 찍은 박스(ts 큰 순)부터 뺀다. 불량은 자르지 않는다.
+ *  - 예정에 없는 신규 행(isNew)은 기본 제외(newRows 로 알려 줌), includeNew 면 포함.
+ *  - 자료 없이 시작한 작업(startedEmpty)은 목표가 없으므로 자르지 않고 전부 포함.
+ *  - 대체바코드는 행 값 그대로. */
+function inboundBuildEntries(opts){
+  var rows = opts.rows || [], boxes = opts.boxes || [];
+  var nn = function(v){ return (v === null || v === undefined) ? '' : String(v); };
+  var recv = {}, defc = {};
+  boxes.forEach(function(b){
+    (b.items || []).forEach(function(it){ if (it && it.count > 0) recv[it.rowIdx] = (recv[it.rowIdx] || 0) + it.count; });
+    (b.defItems || []).forEach(function(it){ if (it && it.count > 0) defc[it.rowIdx] = (defc[it.rowIdx] || 0) + it.count; });
+  });
+  /* 품목별 잘라낼 수량 */
+  var cut = {}, trimmed = [], newRows = [], skipRow = {};
+  Object.keys(recv).forEach(function(k){
+    var r = rows[k]; if (!r) return;
+    var v = r.vals || [];
+    if (r.isNew && !opts.startedEmpty) {
+      if (!opts.includeNew) { skipRow[k] = 1; newRows.push({ rowIdx: +k, barcode: nn(v[COL.BARCODE]), name: nn(v[COL.NAME]), qty: recv[k] }); }
+      return;
+    }
+    if (opts.startedEmpty) return;
+    var target = Math.max(0, (+v[COL.EXPECT_QTY] || 0) - (+v[COL.EXISTING_QTY] || 0));
+    var c = recv[k] - target;
+    if (c > 0) { cut[k] = c; trimmed.push({ rowIdx: +k, barcode: nn(v[COL.BARCODE]), name: nn(v[COL.NAME]), recv: recv[k], target: target, cut: c }); }
+  });
+  /* 박스별 정상 수량 — 마지막 박스부터 잘라낸다 */
+  var perBox = boxes.map(function(b){
+    var m = {};
+    (b.items || []).forEach(function(it){ if (it && it.count > 0) m[it.rowIdx] = (m[it.rowIdx] || 0) + it.count; });
+    return m;
+  });
+  var order = boxes.map(function(b, i){ return i; });
+  order.slice().sort(function(a, b){ return (boxes[b].ts || 0) - (boxes[a].ts || 0); }).forEach(function(bi){
+    Object.keys(perBox[bi]).forEach(function(k){
+      if (!cut[k]) return;
+      var take = Math.min(cut[k], perBox[bi][k]);
+      perBox[bi][k] -= take; cut[k] -= take;
+    });
+  });
+  var entries = [], tq = 0, td = 0, n = 0;
+  order.sort(function(a, b){ return (boxes[a].ts || 0) - (boxes[b].ts || 0); }).forEach(function(bi){
+    var b = boxes[bi], seen = {}, ord = [];
+    (b.items || []).concat(b.defItems || []).forEach(function(it){ if (it && !seen[it.rowIdx]) { seen[it.rowIdx] = 1; ord.push(it.rowIdx); } });
+    ord.forEach(function(k){
+      if (skipRow[k]) return;
+      var r = rows[k]; if (!r) return;
+      var v = r.vals || [];
+      var q = perBox[bi][k] || 0, dq = 0;
+      (b.defItems || []).forEach(function(it){ if (it && it.rowIdx === k) dq += (it.count || 0); });
+      if (q <= 0 && dq <= 0) return;
+      entries.push({
+        type: 'in', source: 'excel', batchId: opts.batchId, batchName: opts.batchName,
+        box: nn(b.id), brand: nn(v[COL.BRAND]), code: nn(v[COL.CODE]),
+        barcode: nn(v[COL.BARCODE]).trim(), altBarcode: nn(v[COL.ALT_BARCODE]),
+        name: nn(v[COL.NAME]), material: nn(v[COL.MATERIAL]), color: nn(v[COL.COLOR]),
+        size: nn(v[COL.SIZE]), origin: nn(v[COL.ORIGIN]),
+        qty: q, defQty: dq, note: '', ts: (opts.ts || 0) + (n++), by: opts.by || ''
+      });
+      tq += q; td += dq;
+    });
+  });
+  return { entries: entries, trimmed: trimmed, newRows: newRows, totals: { qty: tq, def: td, lines: entries.length } };
+}
+
 /* 재고 입고용 엑셀 — star_instock(재고관리)의 [엑셀 일괄 입고] 12열 양식에 맞춤.
    박스×품목 단위로 한 행씩(같은 SKU가 여러 박스에 있으면 박스별로 분리) →
    star_instock에 올리면 박스바코드까지 살려 재고로 잡힘. 원본 xlsx 불필요. */
