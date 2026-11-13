@@ -535,7 +535,14 @@ function addVendor(name){ name = String(name || '').trim(); if (!name || !base) 
 var toastT = null;
 function toast(t){ var e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ e.classList.remove('on'); }, 2400); }
 function byName(){ return KIOSK ? (WORKER || '신규인원') + '(링크)' : (me && (me.email || '').split('@')[0]) || ''; }
-function vib(ms){ try { navigator.vibrate && navigator.vibrate(ms); } catch(e){} }
+/* 진동 — 안드로이드는 navigator.vibrate, 아이폰(사파리는 vibrate 없음)은 iOS 18 「스위치」 칸을 눌러 주는 톡 하는 진동으로 대신 (대표님 2026-11-14) */
+var hapL = null;
+function iosTap(){ try { if (!hapL){ hapL = document.createElement('label'); hapL.setAttribute('aria-hidden', 'true'); hapL.style.display = 'none';
+  var i = document.createElement('input'); i.type = 'checkbox'; i.setAttribute('switch', ''); hapL.appendChild(i); document.body.appendChild(hapL); } hapL.click(); } catch(e){} }
+function vib(ms){ try {
+  if (navigator.vibrate){ navigator.vibrate(ms); return; }
+  var n = Array.isArray(ms) ? Math.ceil(ms.length / 2) : 1; for (var k = 0; k < n; k++) setTimeout(iosTap, k * 140);
+} catch(e){} }
 
 /* ── 이벗 도우미가 연결된 PC 가 있는지 — PC 반품입고관리가 30초마다 남기는 helperBeat 로 판단 (90초 넘게 없으면 없음) ── */
 var BEAT = null, SKEW = 0;
@@ -552,7 +559,7 @@ function upd(r, fields){
 }
 
 /* ── 카메라 바코드 읽기 ── */
-var scanner = null, scanMode = null, lastCode = '', lastAt = 0;
+var scanner = null, scanMode = null, lastCode = '', lastAt = 0, RNO_HOLD = false;
 var FORMATS = typeof Html5QrcodeSupportedFormats !== 'undefined' ? [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13,
   Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E, Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.CODABAR, Html5QrcodeSupportedFormats.QR_CODE] : [];
 /* ── 빠른 바코드 읽기 (대표님 2026-10-24: 아이폰은 거의 안 읽힘) ──
@@ -606,7 +613,7 @@ function toggleTorch(){
   $('torchBtn').classList.toggle('on', camTorch);
 }
 function openScan(mode){
-  scanMode = mode; lastCode = ''; lastAt = 0;
+  scanMode = mode; lastCode = ''; lastAt = 0; RNO_HOLD = false;
   $('scTitle').textContent = mode === 'rno' ? '반품 송장 찍기' : '상품 찍기 · 계속';
   $('scMsg').innerHTML = mode === 'rno' ? '송장 바코드를 네모 안에 맞춰 주세요' : '상품 바코드를 하나씩 비추면 자동으로 셉니다';
   renderScanBot();
@@ -646,8 +653,12 @@ function onCode(text){
   lastCode = code; lastAt = now;
   if (scanMode === 'rno'){
     var no = digits(code);
-    if (!okNo(no)){ beep(false); flash(false); $('scMsg').textContent = '송장 바코드가 아닙니다: ' + code; return; }
-    closeScan(); startRno(no);
+    if (!okNo(no)){ beep(false); vib([80, 60, 80]); flash(false); $('scMsg').textContent = '송장 바코드가 아닙니다: ' + code; return; }
+    /* 읽힌 순간 바로 「삐빅」+진동+초록 테두리, 번호를 0.6초 크게 보여 준 뒤 닫음 (대표님 2026-11-14: 너무 빨라 찍혔는지 모름) */
+    if (RNO_HOLD) return; RNO_HOLD = true;
+    beep(true); vib(70); flash(true);
+    $('scMsg').innerHTML = '<b style="color:var(--grn);font-size:26px">✔ 찍혔습니다</b><br><span class="nm mono" style="font-size:22px">' + esc(no) + '</span>';
+    setTimeout(function(){ RNO_HOLD = false; closeScan(); startRno(no, true); }, 600);
   } else {
     var r = RECS[CUR]; if (!r || locked(r)) return;
     var pre = !(r.items || []).length && (CFG.db === 'cargo' || r.look !== 'ok');   /* 상품 목록 오기 전 스캔은 그냥 쌓음 (화물·스타 둘 다) */
@@ -665,9 +676,9 @@ function onCode(text){
 
 /* ── ① 반품 송장 ── */
 function manualRno(){ var no = digits($('rnoIn').value); $('rnoIn').value = ''; if (!okNo(no)){ toast('송장번호(숫자)를 넣어 주세요'); return; } startRno(no); }
-function startRno(no){
+function startRno(no, scanned){   /* scanned = 카메라로 읽음(이미 소리·진동 냄) */
   var r = RECS[no];
-  if (r){ openRec(no); beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); return; }
+  if (r){ openRec(no); if (!scanned) beep(true); toast(locked(r) ? '이미 반영된 송장입니다 — 내용만 봅니다' : '이미 스캔한 송장입니다 — 이어서 검수'); return; }
   var courier = isEpost(no) ? '우체국' : CUR_COURIER;   /* 업체명은 다음 화면(② 업체)에서 */
   if (CFG.vendor && !courier){ beep(false); flash(false); vib([80, 60, 80]); toast('우체국 송장이 아닙니다 — 택배사를 먼저 고르세요'); return; }
   /* 휴대폰은 최근 3일만 받아 두므로, 더 오래된 같은 송장 기록이 있는지 서버에서 한 번 더 확인 (덮어쓰기 방지) */
@@ -676,9 +687,10 @@ function startRno(no){
     r = { rno: no, at: Date.now(), by: byName(), state: 'scan', trace: needTrace(no, courier) ? 'busy' : 'skip', items: [], extras: [], dev: 'm-' + OS };
     if (CFG.vendor) r.courier = courier;
     RECS[no] = r;
-    return base.child('recs/' + no).set(r).then(function(){ openRec(no); beep(true); vib(40);
-      if (r.trace === 'busy'){ trace(no); if (!pcAlive()) toast('⚠️ 이벗 도우미 PC 연결 전 — 상품은 먼저 찍어 두세요'); }
-      else if (!CFG.vendor) toast('원송장 추적 없이 등록 — 상품 스캔·사진을 남기고, 원송장은 PC 에서 찾아 넣습니다'); });   /* 화물은 바로 업체 고르기 화면 */
+    return base.child('recs/' + no).set(r).then(function(){ openRec(no); if (!scanned){ beep(true); vib(40); }
+      if (r.trace === 'busy'){ trace(no); if (!CFG.vendor && !pcAlive()) toast('⚠️ 이벗 도우미 PC 연결 전 — 상품은 먼저 찍어 두세요'); }
+      else if (CFG.vendor) toast('📷 ' + (courier || '타 택배') + ' 송장 — 송장 전체가 보이게 사진을 찍어 주세요');
+      else toast('원송장 추적 없이 등록 — 상품 스캔·사진을 남기고, 원송장은 PC 에서 찾아 넣습니다'); });   /* 화물은 ② 원송장 화면(우체국 자동 추적 / 타 택배 송장 사진) */
   });
 }
 function trace(no){
@@ -693,7 +705,7 @@ function trace(no){
 }
 
 /* ── 화면 (대표님 2026-10-24): 한 화면씩, 스크롤 없음 (목록만 스크롤) · 단계마다 번호 붙은 상자(.yb, 유리판 테마)
-   화물: 1 반송장 → 2 업체 → 3 상품(스캔·촬영·직접 입력) → 4 사진 → 5 원송장·사유·메모 → 완료
+   화물: 1 반송장 → 2 원송장(우체국 자동 · 타 택배 송장 전체 사진 필수) → 3 업체 → 4 상품(스캔·촬영·직접 입력) → 5 사진 → 6 사유·메모 → 완료
    스타: 1 반송장 → 2 상품(한 상품씩) → 3 사진·메모 → 완료
    위 단계 이름을 누르면 그 단계로 바로. 목록에서 「수정」으로 들어오면(EDIT) 아래가 〈이전 · 수정 완료 · 다음〉
    내 목록 = 이 휴대폰 작업자가 찍은 것 중 「확정」 안 한 것 — 확정하면 휴대폰 목록에서만 빠지고 PC 에는 그대로 (r.mok)
@@ -702,7 +714,12 @@ function trace(no){
 var STEP = 'start', FOCUS = -1, SHOWALL = false, SCANQ = '1', KFAIL = false, EDIT = false;
 var MEMO_TAGS = ['박스 파손', '구성품 누락', '사용 흔적', '내용물 파손', '오배송'];
 var PHONE_COURIERS = [['우체국', '우체국'], ['한진', '한진'], ['롯데', '롯데'], ['CJ대한통운', 'CJ'], ['기타', '기타']];
-function steps(){ return CFG.vendor ? [['start', '송장'], ['vendor', '업체'], ['items', '상품'], ['photo', '사진'], ['orig', '원송장']] : [['start', '송장'], ['items', '상품'], ['finish', '사진·메모']]; }
+/* 화물 순서 (대표님 2026-11-14): 1 송장 → 2 원송장(우체국 자동 추적 · 타 택배는 송장 전체 사진 필수) → 3 업체 → 4 상품 → 5 사진 → 6 사유·메모 */
+function steps(){ return CFG.vendor ? [['start', '송장'], ['orig', '원송장'], ['vendor', '업체'], ['items', '상품'], ['photo', '사진'], ['reco', '사유']] : [['start', '송장'], ['items', '상품'], ['finish', '사진·메모']]; }
+/* 송장 사진(kind 'label') — 우체국이 아니거나 우체국 원송장 조회가 실패한 건은 꼭 있어야 함 (보내는 사람으로 PC 에서 원송장 찾기) */
+function labelKeys(){ return Object.keys(PHOTOS).filter(function(k){ return PHOTOS[k] && PHOTOS[k].kind === 'label'; }).sort(function(a, b){ return (PHOTOS[a].at || 0) - (PHOTOS[b].at || 0); }); }
+function needLabel(r){ return !!(CFG.vendor && r && !(r.courier === '우체국' && r.trace !== 'err')); }
+function labelMissing(r){ return needLabel(r) && !labelKeys().length && !upCount('label'); }
 function stepNo(step){ return steps().map(function(x){ return x[0]; }).indexOf(step) + 1; }
 function go(step){ STEP = step; SHOWALL = false; render(); }
 function nextOf(step){ var s = steps().map(function(x){ return x[0]; }), i = s.indexOf(step); return s[i + 1]; }
@@ -710,7 +727,7 @@ function prevOf(step){ var s = steps().map(function(x){ return x[0]; }), i = s.i
 function goBack(){ var p = prevOf(STEP); if (!p) closeCur(); else go(p); }
 function openRec(no, edit){
   CUR = no; FOCUS = -1; SHOWALL = false; SCANQ = '1'; ADD = null; EDIT = !!edit;
-  var r = RECS[no]; STEP = CFG.vendor && r && !r.vendor && !locked(r) ? 'vendor' : 'items';
+  var r = RECS[no]; STEP = CFG.vendor && r && !r.vendor && !locked(r) ? 'orig' : 'items';
   if (photoRef) photoRef.off();
   photoRef = base.child('photos/' + no); photoRef.on('value', function(s){ PHOTOS = s.val() || {}; if (!typing()) render(); });
   render();
@@ -760,7 +777,7 @@ function vendorNext(){
 }
 /* ③ 화물 상품 직접 입력 — 바코드 없이 상품명·수량 (촬영은 사진을 남기고 같은 입력 칸) */
 var ADD = null;
-function addOpen(photo){ ADD = { name: '', n: 1, q: '1' }; if (photo) $('camIn').click(); render(); setTimeout(function(){ var e = $('manName'); if (e && !photo) e.focus(); }, 50); }
+function addOpen(photo){ ADD = { name: '', n: 1, q: '1' }; if (photo) shoot(''); render(); setTimeout(function(){ var e = $('manName'); if (e && !photo) e.focus(); }, 50); }
 function addSync(){ var e = $('manName'); if (ADD && e) ADD.name = e.value; }
 function addQty(d){ addSync(); ADD.n = Math.max(1, (ADD.n || 1) + d); vib(20); render(); }
 function addQ(q){ addSync(); ADD.q = q; vib(20); render(); }
@@ -784,7 +801,10 @@ function applyOrig(r){
   if (no && no !== r.orig) upd(r, { orig: no, origDate: null, self: no === r.rno, trace: 'ok', traceErr: null, look: 'wait' });
   return true;
 }
-function origDone(){ var r = RECS[CUR]; if (!r || !applyOrig(r)) return; finish(); }
+/* ② 원송장 → 다음: 타 택배는 송장 사진이 있어야 넘어감 */
+function origNext(){ var r = RECS[CUR]; if (!r || !applyOrig(r)) return;
+  if (!locked(r) && labelMissing(r)){ beep(false); vib([80, 60, 80]); flash(false); toast('📷 송장 전체가 보이게 사진을 찍어 주세요 — 우체국 외 택배는 꼭 필요합니다'); return; }
+  go(nextOf('orig')); }
 /* 내 목록: 지우기 / 확정 (확정 = 휴대폰 목록에서만 빠짐, PC 에는 그대로) */
 function doneLike(r){ return !!(r.checked || r.state === 'ready' || r.state === 'saving' || r.state === 'done' || r.state === 'fail'); }
 function delRec(no){
@@ -816,6 +836,7 @@ function finish(){
   var r = RECS[CUR]; if (!r) return;
   if (!CFG.freeItems && !(r.items || []).some(function(it){ return it.got > 0; }) && !(r.extras || []).length){ beep(false); flash(false); toast('들어온 상품을 하나 이상 넣어 주세요'); return; }   /* 화물은 상품 없이도 — PC 가 이벗 주문 상품으로 채움 */
   if (CFG.vendor && !r.vendor){ beep(false); flash(false); toast('업체를 골라 주세요'); go('vendor'); return; }
+  if (labelMissing(r)){ beep(false); flash(false); toast('📷 송장 전체 사진이 없습니다 — 찍어 주세요'); go('orig'); return; }
   upd(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ toast('✔ 목록 완료 — PC 에서 이벗에 반영합니다'); });
   beep(true); vib(60); closeCur();
   if (!CFG.vendor) openScan('rno');   /* 스타: 누른 손 그대로 다음 송장 카메라 (아이폰은 누른 순간에 열어야 함) — 화물은 첫 화면에서 */
@@ -889,7 +910,7 @@ function render(lastCode){
         : '⚠️ 이벗 도우미 PC 연결 안 됨<small>찍고 기록하는 건 다 됩니다. 이벗 반영은 PC 반품입고관리에서 합니다' + (BEAT && BEAT.at ? ' (마지막 연결 ' + hm(BEAT.at) + ')' : '') + '</small>') + '</div>';
     h += '<div class="yb">' + yh('start', '반송장 찍기')
       + '<button class="ib big" onclick="openScan(\'rno\')">' + ico('scan', 'sico') + '카메라로 찍기</button>'
-      + (CFG.vendor ? segC(CUR_COURIER) + '<div class="yn">우체국 송장(6077·7077)은 안 골라도 우체국 · 그 밖의 우체국 번호는 「우체국」을 골라야 원송장 추적</div>' : '')
+      + (CFG.vendor ? segC(CUR_COURIER) + '<div class="yn">우체국 송장(6077·7077)은 안 골라도 우체국 · 그 밖의 우체국 번호는 「우체국」을 골라야 원송장 추적 · 한진·롯데·CJ·기타는 다음 화면에서 송장 전체 사진 필수</div>' : '')
       + '<div class="man on"><input id="rnoIn" inputmode="numeric" placeholder="또는 송장번호 입력" autocomplete="off" onkeydown="if(event.key===\'Enter\')manualRno()"><button class="ib" onclick="manualRno()">확인</button></div></div>';
     f = '<button class="btn" onclick="go(\'list\')">' + ico('list') + '내 목록 ' + PEND + '건</button>';
   }
@@ -949,30 +970,40 @@ function render(lastCode){
   }
 
   else if (STEP === 'photo' || STEP === 'finish'){   /* 화물 ④ 사진만 / 스타 ③ 사진·메모 */
-    var lk3 = locked(r), pk3 = Object.keys(PHOTOS).sort(function(a, b){ return (PHOTOS[a].at || 0) - (PHOTOS[b].at || 0); }), nu = Object.keys(UPLOADING).length;
+    var lk3 = locked(r), pk3 = Object.keys(PHOTOS).filter(function(k){ return !CFG.vendor || PHOTOS[k].kind !== 'label'; }).sort(function(a, b){ return (PHOTOS[a].at || 0) - (PHOTOS[b].at || 0); });
     h += stepBar() + recHead(r);
-    h += '<div class="yb">' + yh(STEP, '사진을 남겨둘까요?', pk3.length ? pk3.length + '장 찍음' : '안 남겨도 되면 「' + (STEP === 'photo' ? '건너뛰기' : '완료') + '」')
-      + (lk3 ? '' : '<div class="seg two"><button class="ib big" onclick="$(\'camIn\').click()">' + ico('cam', 'sico') + '사진 찍기</button><button class="ib big" onclick="$(\'albumIn\').click()">' + ico('img', 'sico') + '앨범</button></div>') + '</div>';
-    h += '<div class="scroll"><div class="photos sm">' + pk3.map(function(k){ var p = PHOTOS[k];
-        return '<div class="ph"><img src="' + esc(p.url) + '" alt="" onclick="viewPhoto(\'' + esc(p.url) + '\')">' + (lk3 ? '' : '<button class="x" aria-label="사진 지우기" onclick="delPhoto(\'' + k + '\')">×</button>') + '</div>'; }).join('')
-      + Object.keys(UPLOADING).map(function(){ return '<div class="ph"><div class="up">올리는 중</div></div>'; }).join('') + '</div></div>';
+    h += '<div class="yb">' + yh(STEP, CFG.vendor ? '상품 사진을 남겨둘까요?' : '사진을 남겨둘까요?', pk3.length ? pk3.length + '장 찍음' : '안 남겨도 되면 「' + (STEP === 'photo' ? '건너뛰기' : '완료') + '」')
+      + (lk3 ? '' : '<div class="seg two"><button class="ib big" onclick="shoot(\'\')">' + ico('cam', 'sico') + '사진 찍기</button><button class="ib big" onclick="album(\'\')">' + ico('img', 'sico') + '앨범</button></div>') + '</div>';
+    h += '<div class="scroll">' + thumbs(pk3, lk3, CFG.vendor ? upCount('p') : Object.keys(UPLOADING).length) + '</div>';
     if (STEP === 'finish'){   /* 스타: 메모도 여기 */
       var tagsF = memoTags(r.memo);
       h += '<div class="chips sm">' + MEMO_TAGS.map(function(t){ return '<button class="chip' + (tagsF.indexOf(t) >= 0 ? ' on' : '') + '" ' + (lk3 ? 'disabled' : '') + ' onclick="toggleTag(\'' + t + '\')">' + t + '</button>'; }).join('') + '</div>'
         + '<textarea ' + (lk3 ? 'disabled' : '') + ' placeholder="직접 쓰기" onchange="setMemo(this.value)">' + esc(r.memo || '') + '</textarea>';
       f = navFoot(r.state === 'scan' || !r.state ? '<button class="btn y" onclick="finish()">완료 · 다음 송장' + ico('arrow') + '</button>' : '<button class="btn" onclick="closeCur()">' + stOf(r).t + ' · 닫기</button>');
-    } else f = navFoot('<button class="btn ' + (pk3.length ? 'y' : '') + '" onclick="go(\'orig\')">' + (pk3.length ? '다음' : '건너뛰기') + ico('next') + '</button>');
+    } else f = navFoot('<button class="btn ' + (pk3.length ? 'y' : '') + '" onclick="go(\'reco\')">' + (pk3.length ? '다음' : '건너뛰기') + ico('next') + '</button>');
   }
 
-  else if (STEP === 'orig'){   /* 화물 ⑤ 원송장(없으면 비워 두기) · 반품 사유 · 메모 → 완료 */
+  else if (STEP === 'orig'){   /* 화물 ② 원송장 — 우체국: 자동 추적 결과 / 타 택배(·우체국 조회 실패): 송장 전체 사진 필수 + 원송장 번호(알면) */
+    var lk2 = locked(r), dis2 = lk2 ? ' disabled' : '', post = r.courier === '우체국', need = needLabel(r), lks = labelKeys();
+    var tr = !post ? '' : r.trace === 'busy' ? '우체국에서 원송장 찾는 중…' : r.trace === 'err' ? '⚠ 우체국 조회 실패 — 송장 전체 사진을 찍어 주세요'
+      : r.self ? '✔ 반송 (원송장 = 반품 송장)' : r.orig ? '✔ 원송장 ' + esc(r.orig) + ' 찾음' : '';
+    h += stepBar() + recHead(r);
+    h += '<div class="yb">' + yh('orig', need ? '송장 전체 사진 찍기' : '원송장 (우체국 자동 추적)',
+        need ? (post ? tr : '보내는 사람·받는 사람·송장번호가 다 보이게 — PC 에서 원송장을 찾습니다') + (lks.length ? ' · ' + lks.length + '장 찍음' : '') : tr)
+      + (lk2 ? '' : '<div class="seg two"><button class="ib' + (need ? ' big' : '') + '" onclick="shoot(\'label\')">' + ico('cam', need ? 'sico' : 'ico') + '송장 촬영</button><button class="ib' + (need ? ' big' : '') + '" onclick="album(\'label\')">' + ico('img', need ? 'sico' : 'ico') + '앨범</button></div>')
+      + '<input id="origIn" class="win mono" inputmode="numeric" value="' + esc(r.self ? '' : (r.orig || '')) + '" placeholder="원송장 번호 (알면 넣기 · 모르면 비워 두기)" autocomplete="off"' + dis2 + '></div>';
+    h += '<div class="scroll">' + thumbs(lks, lk2, upCount('label')) + '</div>';
+    f = navFoot('<button class="btn ' + (labelMissing(r) && !lk2 ? '' : 'y') + '" onclick="origNext()">다음' + ico('next') + '</button>');
+  }
+
+  else if (STEP === 'reco'){   /* 화물 ⑥ 반품 사유 · 메모 → 완료 */
     var lk4 = locked(r), tags4 = memoTags(r.memo), dis = lk4 ? ' disabled' : '';
     h += stepBar() + recHead(r);
-    h += '<div class="yb fill">' + yh('orig', '원송장 · 사유 · 메모', '원송장을 모르면 비워 두세요 — PC 에서 반영할 때 찾습니다')
-      + '<input id="origIn" class="win mono" inputmode="numeric" value="' + esc(r.self ? '' : (r.orig || '')) + '" placeholder="원송장 번호 (없으면 비워 두기)" autocomplete="off"' + dis + '>'
+    h += '<div class="yb fill">' + yh('reco', '반품 사유 · 메모')
       + '<div class="yl">반품 사유</div><div class="seg four">' + RECOS.map(function(x){ return '<button class="ib' + ((r.reco || '401') === x[0] ? ' on' : '') + '"' + dis + ' onclick="setReco(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>'
       + '<div class="yl">특이사항 · 메모</div><div class="tagw">' + MEMO_TAGS.map(function(t){ return '<button class="ib' + (tags4.indexOf(t) >= 0 ? ' on' : '') + '"' + dis + ' onclick="toggleTag(\'' + t + '\')">' + t + '</button>'; }).join('') + '</div>'
       + '<textarea class="win"' + dis + ' placeholder="메모 직접 쓰기" onchange="setMemo(this.value)">' + esc(r.memo || '') + '</textarea></div>';
-    f = navFoot(r.state === 'scan' || !r.state ? '<button class="btn y" onclick="origDone()">' + (r.checked ? '다시 저장' : '완료') + ico('arrow') + '</button>' : '<button class="btn" onclick="closeCur()">' + stOf(r).t + ' · 닫기</button>');
+    f = navFoot(r.state === 'scan' || !r.state ? '<button class="btn y" onclick="finish()">' + (r.checked ? '다시 저장' : '완료') + ico('arrow') + '</button>' : '<button class="btn" onclick="closeCur()">' + stOf(r).t + ' · 닫기</button>');
   }
 
   pg.innerHTML = h; foot.innerHTML = f;
@@ -1020,16 +1051,23 @@ function shrink(file){
     img.src = url;
   });
 }
+/* PHOTO_KIND: 'label' = ② 송장 사진 / '' = 상품·기타 사진 — 사진 찍기 단추를 누를 때 정함 */
+var PHOTO_KIND = '';
+function shoot(kind){ PHOTO_KIND = kind || ''; $('camIn').click(); }
+function album(kind){ PHOTO_KIND = kind || ''; $('albumIn').click(); }
+function upCount(kind){ return Object.keys(UPLOADING).filter(function(k){ return UPLOADING[k] === (kind || 'p'); }).length; }
 function uploadFiles(files){
-  var r = RECS[CUR]; if (!r || !files || !files.length) return;
+  var r = RECS[CUR], kind = PHOTO_KIND; PHOTO_KIND = '';
+  if (!r || !files || !files.length) return;
   [].forEach.call(files, function(f){
-    var tmp = 'u' + Date.now() + Math.random().toString(36).slice(2, 6); UPLOADING[tmp] = 1; render();
+    var tmp = 'u' + Date.now() + Math.random().toString(36).slice(2, 6); UPLOADING[tmp] = kind || 'p'; render();
     var path = CFG.path + '/' + gid + '/' + r.rno + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg';
     shrink(f).then(function(b){
       var ref = firebase.storage().ref(path);
       return ref.put(b, { contentType: 'image/jpeg' }).then(function(){ return ref.getDownloadURL(); });
     }).then(function(url){
-      return base.child('photos/' + r.rno).push({ path: path, url: url, at: Date.now(), by: byName() });
+      var p = { path: path, url: url, at: Date.now(), by: byName() }; if (kind) p.kind = kind;
+      return base.child('photos/' + r.rno).push(p);
     }).then(function(){ delete UPLOADING[tmp]; vib(30); render(); }, function(e){ delete UPLOADING[tmp]; render(); toast('사진 올리기 실패: ' + (e.code || e.message)); });
   });
 }
@@ -1039,6 +1077,11 @@ function delPhoto(k){
   var p = PHOTOS[k]; if (!p || !confirm('이 사진을 지울까요?')) return;
   base.child('photos/' + CUR + '/' + k).remove();
   if (p.path) firebase.storage().ref(p.path).delete().catch(function(){});
+}
+function thumbs(keys, lk, nUp){
+  return '<div class="photos sm">' + keys.map(function(k){ var p = PHOTOS[k];
+      return '<div class="ph"><img src="' + esc(p.url) + '" alt="" onclick="viewPhoto(\'' + esc(p.url) + '\')">' + (lk ? '' : '<button class="x" aria-label="사진 지우기" onclick="delPhoto(\'' + k + '\')">×</button>') + '</div>'; }).join('')
+    + new Array(nUp + 1).join('<div class="ph"><div class="up">올리는 중</div></div>') + '</div>';
 }
 function viewPhoto(u){ $('viewImg').src = u; $('viewer').style.display = 'flex'; }
 
