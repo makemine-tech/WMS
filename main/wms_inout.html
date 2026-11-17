@@ -319,7 +319,7 @@ function renderList(){
       +'<td><span class="'+slipCls+'"'+(n?' data-act="slipview"'+a:'')+'>'+esc(slipText(r))+'</span></td>'
       +'<td class="memo">'+esc(r.note||'')+(r.src==='voice'?' <span class="note">(음성)</span>':'')+'</td>'
       +'<td class="'+st.c+'">'+st.t+'</td>'
-      +'<td><button class="ib" data-act="slipadd"'+a+' title="전표 사진 추가">📷</button> '
+      +'<td><button class="ib" data-act="slipadd"'+a+' title="전표 사진 추가 (여러 장 가능)">📷</button> '
         +(r.status==='reg'?'<button class="ib" data-act="unreg"'+a+' title="등록 취소 (아직 적치·출고 전일 때)">↩</button> ':'')
         +'<button class="ib" data-act="recdel"'+a+' title="기록 삭제">🗑</button></td>'
     +'</tr>';
@@ -463,13 +463,14 @@ function delRec(wid,rid){
 }
 
 /* 📷 목록에서 전표 사진 추가 — 입고대기에 남은 그 품목 파렛트의 촬영 요구도 함께 풀림 */
+/* 전표가 여러 장이어도 됨 — 사진첩에서 여러 장 한꺼번에, 또는 📷 을 다시 눌러 계속 추가 */
 function slipAdd(wid,rid){
-  WMSSlip.pickFile().then(function(f){
-    if(!f)return;
-    toast('사진 올리는 중…',20000);
-    WMSSlip.upload(db,wid,rid,f,by()).then(function(){
+  WMSSlip.pickFiles(true).then(function(fs){
+    if(!fs.length)return;
+    toast('사진 올리는 중… (0/'+fs.length+')',60000);
+    WMSSlip.uploadAll(db,wid,rid,fs,by(),function(s,n,tot){toast('사진 올리는 중… ('+n+'/'+tot+')',60000);}).then(function(){
       return clearSlipNeed(wid,rid);
-    }).then(function(){toast('📷 전표 사진을 등록했어요');}).catch(fail);
+    }).then(function(){var r=(RECS[wid]||{})[rid];toast('📷 전표 '+fs.length+'장 등록 (모두 '+(r?slipCount(r):fs.length)+'장)');}).catch(fail);
   });
 }
 function clearSlipNeed(wid,rid){
