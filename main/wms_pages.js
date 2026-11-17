@@ -14,6 +14,8 @@ var WMS_PAGES=[
   {group:'핵심 콘솔', items:[
     {key:'wms',          file:'wms.html',          label:'메이크창고 WMS (메인 콘솔)', floor:2, gate:true},
     {key:'wms_inout',    file:'wms_inout.html',    label:'└ 입출고관리 (예정작업 기록·전표촬영·엑셀/PDF)', floor:2, gate:true},
+    {key:'wms_invite_guide', file:'wms_invite_guide.html', label:'└ 초대 안내문 (카톡 발송용 · 로그인·초대코드 방법)', floor:0, gate:false,
+      locked:'항상 공개', self:'업체 담당자가 가입 전에 여는 공개 안내문 — 잠그면 초대받은 사람이 못 읽음'},
     {key:'wms_login',    file:'wms_login.html',    label:'로그인 · 그룹 관리', floor:0, gate:false,
       locked:'항상 공개', self:'로그인 관문 — 잠그면 아무도 로그인할 수 없어 고정입니다'},
     {key:'wms_admin',    file:'wms_admin.html',    label:'관리도구 · 페이지 접근권한 (이 페이지)', floor:3, gate:false,

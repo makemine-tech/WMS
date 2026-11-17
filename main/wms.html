@@ -581,10 +581,22 @@ function MainView(p){
     setOpen(false);setNm('');setRows('10');setCols('10');
   }
 
+  /* 초대 코드는 지금 들어와 있는 그룹으로 (예전엔 makechango 고정이라 업체 담당자가 메인 그룹에 들어갈 뻔했음) */
+  var inviteGid=groupId||noticeGroupId||'';
+  var ic5=useState(false),inviteMsgCopied=ic5[0],setInviteMsgCopied=ic5[1];
+  function inviteMsg(code){
+    return '[메이크창고 창고관리 초대]\n'
+      +'아래 안내대로 로그인한 뒤 초대코드를 넣으면 창고관리 화면을 보실 수 있습니다.\n\n'
+      +'▶ 초대코드: '+code+'\n(24시간 안에 1회만 사용 가능)\n\n'
+      +'▶ 사용 안내(꼭 먼저 읽어 주세요)\n'+window.location.origin+'/wms_invite_guide.html?code='+code+'\n\n'
+      +'▶ 로그인 주소\n'+window.location.origin+'/wms_login.html\n'
+      +'※ Google(Gmail) 계정이 필요합니다.';
+  }
   function createInviteCode(){
-    setInviteLoading(true);setInviteCode(null);setInviteCopied(false);
+    if(!inviteGid){alert('초대할 그룹을 찾지 못했어요.\n그룹에 들어간 뒤 초대코드를 만들어 주세요.');return;}
+    setInviteLoading(true);setInviteCode(null);setInviteCopied(false);setInviteMsgCopied(false);
     var code=genCode();var now=Date.now();
-    fbDb.ref('inviteCodes/'+code).set({groupId:'makechango',createdAt:now,usedBy:null,expiresAt:now+86400000}).then(function(){setInviteCode(code);setInviteLoading(false);}).catch(function(e){alert('코드 생성 실패: '+e.message);setInviteLoading(false);});
+    fbDb.ref('inviteCodes/'+code).set({groupId:inviteGid,createdAt:now,usedBy:null,expiresAt:now+86400000}).then(function(){setInviteCode(code);setInviteLoading(false);}).catch(function(e){alert('코드 생성 실패: '+e.message);setInviteLoading(false);});
   }
 
   return h('div',{style:{background:BG,paddingBottom:'env(safe-area-inset-bottom,80px)'}},
@@ -634,7 +646,8 @@ function MainView(p){
       h('div',{style:{background:CARD,borderRadius:16,padding:28,width:'100%',maxWidth:340,textAlign:'center'},onClick:function(e){e.stopPropagation();}},
         h('div',{style:{fontSize:20,marginBottom:6}},'🔑'),
         h('div',{style:{fontSize:17,fontWeight:700,marginBottom:4}},'초대 코드 생성'),
-        h('div',{style:{fontSize:11,color:SUB,marginBottom:20}},'생성된 코드는 24시간 동안 유효하며 1회만 사용 가능합니다'),
+        h('div',{style:{fontSize:11,color:SUB,marginBottom:10}},'생성된 코드는 24시간 동안 유효하며 1회만 사용 가능합니다'),
+        h('div',{style:{fontSize:12,fontWeight:700,color:inviteGid==='makechango'?'#FBBF24':'#22D3EE',background:'rgba(255,255,255,.05)',border:'1px solid '+BDR,borderRadius:8,padding:'6px 8px',marginBottom:16}},'초대할 그룹: '+(inviteGid||'없음')+(inviteGid==='makechango'?' (메인 — 모든 메인 창고가 보여요)':' — 이 그룹 창고만 보여요')),
         inviteLoading&&h('div',{style:{fontSize:13,color:SUB,padding:'20px 0'}},'생성 중...'),
         !inviteLoading&&!inviteCode&&h('button',{style:S('#059669','#fff',{width:'100%',padding:13,fontSize:15,borderRadius:10}),onClick:createInviteCode},'코드 생성하기'),
         !inviteLoading&&inviteCode&&h(Fragment,null,
@@ -643,6 +656,7 @@ function MainView(p){
             h('div',{style:{fontSize:11,color:SUB,marginTop:6}},'유효시간: 24시간 · 1회 사용')),
           h('div',{style:{display:'flex',gap:8}}),
           h('button',{style:S(inviteCopied?'#059669':'rgba(16,185,129,.15)',inviteCopied?'#fff':'#34D399',{width:'100%',padding:12,fontSize:14,borderRadius:8,border:'1px solid rgba(16,185,129,.3)',marginBottom:8}),onClick:function(){if(copyText(inviteCode))setInviteCopied(true);}},inviteCopied?'✅ 복사됨':'코드 복사'),
+          h('button',{style:S(inviteMsgCopied?'#CA8A04':'rgba(250,204,21,.14)',inviteMsgCopied?'#fff':'#FACC15',{width:'100%',padding:12,fontSize:14,borderRadius:8,border:'1px solid rgba(250,204,21,.35)',marginBottom:8}),onClick:function(){if(copyText(inviteMsg(inviteCode)))setInviteMsgCopied(true);}},inviteMsgCopied?'✅ 카톡 안내문 복사됨 — 카톡에 붙여넣기':'💬 카톡 안내문 복사 (코드+설명서 링크)'),
           h('button',{style:S('rgba(255,255,255,.06)',SUB,{width:'100%',padding:10,fontSize:13,borderRadius:8}),onClick:function(){setInviteCode(null);setInviteCopied(false);}},'새 코드 생성')),
         h('button',{style:{background:'none',border:'none',color:SUB,fontSize:12,marginTop:16,cursor:'pointer',textDecoration:'underline'},onClick:function(){setInviteOpen(false);}},'닫기'))),
 
