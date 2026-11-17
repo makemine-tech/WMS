@@ -153,6 +153,19 @@ function dbListenGroup(wids,cb){
     _listeners.push({ref:ref,evt:'value'});
   });
 }
+/* 🔗 종속 창고 — groupLinks/{보여줄 그룹}/{창고id} = 원래 그룹. 슈퍼관리자만 켜고 끔.
+   그룹 창고 목록 = groups/{gid} 의 창고 + groupLinks/{gid} 의 종속 창고 (데이터는 하나, 미러처럼 같이 씀) */
+function loadGroupWids(gid,cb){
+  Promise.all([
+    fbDb.ref('groups/'+gid).get().then(function(s){return s.exists()?s.val():null;}),
+    fbDb.ref('groupLinks/'+gid).get().then(function(s){return s.val()||{};}).catch(function(){return {};})
+  ]).then(function(r){
+    var own=r[0],links=r[1]||{};
+    var wids=own?Object.keys(own).filter(function(k){return k!=='_init';}):[];
+    var linked={};Object.keys(links).forEach(function(w){if(wids.indexOf(w)<0){wids.push(w);linked[w]=links[w]||true;}});
+    cb(null,{exists:!!own,wids:wids,linked:linked});
+  }).catch(function(e){cb(e);});
+}
 function dbCleanUndoStack(){
   fbDb.ref(WH_PATH).get().then(function(snap){
     var v=snap.val();if(!v)return;
@@ -182,6 +195,7 @@ var CT={rack:{lbl:'랙',clr:'#60A5FA',bg:'#0F172A',bdr:'#254D90'},shelf:{lbl:'�
 var PAL=['#B22222','#FF0000','#FF6666','#FFCCCC','#CC7A00','#FFA500','#FFC04D','#FFE5B3','#B3B300','#FFFF00','#FFFF66','#FFFFCC','#006400','#008000','#4CAF50','#C8E6C9','#00008B','#0000FF','#6666FF','#CCCCFF','#000033','#000080','#333399','#9999CC','#004D40','#008080','#4DB6AC','#B2DFDB','#4B0082','#800080','#B366B3','#E6CCE6','#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF'];
 var PAL_ROWS=[{lbl:'Red',clrs:['#B22222','#FF0000','#FF6666','#FFCCCC']},{lbl:'Orange',clrs:['#CC7A00','#FFA500','#FFC04D','#FFE5B3']},{lbl:'Yellow',clrs:['#B3B300','#FFFF00','#FFFF66','#FFFFCC']},{lbl:'Green',clrs:['#006400','#008000','#4CAF50','#C8E6C9']},{lbl:'Blue',clrs:['#00008B','#0000FF','#6666FF','#CCCCFF']},{lbl:'Navy',clrs:['#000033','#000080','#333399','#9999CC']},{lbl:'Teal',clrs:['#004D40','#008080','#4DB6AC','#B2DFDB']},{lbl:'Purple',clrs:['#4B0082','#800080','#B366B3','#E6CCE6']},{lbl:'Gray',clrs:['#000000','#333333','#666666','#999999','#CCCCCC','#FFFFFF']}];
 var BG='#0F172A',CARD='#1E293B',BDR='#334155',TX='#E2E8F0',SUB='#64748B';
+var LNK_CLR='#22D3EE',LNK_BDR='rgba(34,211,238,.55)',LNK_BG='linear-gradient(160deg,#0C2D38,#1E293B 70%)';   /* 🔗 종속 창고 색 */
 function S(bg,clr,ex){return Object.assign({background:bg,color:clr,border:'none',borderRadius:7,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer'},ex||{});}
 function TabLabel(icon,text){return h('span',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2,lineHeight:1,pointerEvents:'none'}},h('span',{style:{fontSize:16,lineHeight:1}},icon),h('span',{style:{fontSize:10,letterSpacing:'.02em'}},text));}
 var Footer=h('div',{style:{position:'fixed',bottom:0,left:0,right:0,pointerEvents:'none',zIndex:9998,textAlign:'center',padding:'2px 0',background:'transparent',userSelect:'none'}},h('span',{style:{fontSize:9,color:'#334155',fontWeight:500,letterSpacing:'.04em'}},'© 2026 Makemine Design. All rights reserved.  CEO Park Kyoung-woo (PKW)'));
@@ -413,6 +427,7 @@ function App(){
   var s5=useState(null),whId=s5[0],setWhId=s5[1];
   var s6=useState(''),groupId2=s6[0],setGroupId2=s6[1];
   var g1=useState(false),showGuide=g1[0],setShowGuide=g1[1];
+  var lk1=useState({}),linked=lk1[0],setLinked=lk1[1];   /* 이 그룹에 보이는 🔗 종속 창고 {창고id: 원래 그룹} */
   var whsRef=useRef([]);
   whsRef.current=whs;
 
@@ -434,13 +449,14 @@ function App(){
           try{var bk=localStorage.getItem('wms_bak');if(bk)setWhs(JSON.parse(bk));}catch(e){}
           if(savedGid){
             setGroupId2(savedGid);
-            fbDb.ref('groups/'+savedGid).get().then(function(gSnap){
-              var wids=gSnap.exists()?Object.keys(gSnap.val()).filter(function(k){return k!=='_init';}):[]; 
+            loadGroupWids(savedGid,function(err,g){
+              if(err){setAuthSt('ready');return;}
+              var wids=g.wids;setLinked(g.linked);
               if(wids.length===0){setWhs([]);setAuthSt('ready');}
               else{dbListenGroup(wids,function(arr){setWhs(arr);try{localStorage.setItem('wms_bak',JSON.stringify(arr));}catch(e){}});
               if(savedWid){setWhId(savedWid);}
               setAuthSt('ready');}
-            }).catch(function(){setAuthSt('ready');});
+            });
           }else{
             dbListen(function(arr){setWhs(arr);try{localStorage.setItem('wms_bak',JSON.stringify(arr));}catch(e){}});
             if(savedWid){setWhId(savedWid);}
@@ -452,15 +468,16 @@ function App(){
           if(!groupSnap.exists()){window.location.replace(INDEX_PATH);return;}
           var gid=groupSnap.val();
           setGroupId2(gid);
-          fbDb.ref('groups/'+gid).get().then(function(gSnap){
-            if(!gSnap.exists()){window.location.replace(INDEX_PATH);return;}
-            var wids=Object.keys(gSnap.val()).filter(function(k){return k!=='_init';});
+          loadGroupWids(gid,function(err,g){
+            if(err){console.warn('groups read',err);window.location.replace(INDEX_PATH);return;}
+            if(!g.exists){window.location.replace(INDEX_PATH);return;}
+            var wids=g.wids;setLinked(g.linked);
             try{var bk=localStorage.getItem('wms_bak');if(bk)setWhs(JSON.parse(bk));}catch(e){}
             if(wids.length===0){setWhs([]);setAuthSt('ready');}
             else{dbListenGroup(wids,function(arr){setWhs(arr);try{localStorage.setItem('wms_bak',JSON.stringify(arr));}catch(e){}});
             if(wids.length===1){setWhId(wids[0]);}
             setAuthSt('ready');}
-          }).catch(function(e){console.warn('groups read',e);window.location.replace(INDEX_PATH);});
+          });
         }).catch(function(e){console.warn('userGroup read',e);window.location.replace(INDEX_PATH);});
       }).catch(function(e){console.warn('auth error',e);setAuthSt('ready');});
     });
@@ -470,9 +487,10 @@ function App(){
   /* 업체 현황 요약본 갱신 — 재고/그룹 변경 시 (디바운스). 멤버·관리자 권한으로 vendorStatus 작성 */
   useEffect(function(){
     if(window.WMSVendorProjection && groupId2 && whs && whs.length){
-      window.WMSVendorProjection.sync(groupId2, whs, fbDb);
+      /* 🔗 종속 창고는 원래 그룹 소속 — 이 그룹 업체 현황에는 넣지 않음 */
+      window.WMSVendorProjection.sync(groupId2, whs.filter(function(w){return !linked[w.id];}), fbDb);
     }
-  },[whs,groupId2]);
+  },[whs,groupId2,linked]);
 
   function doLogout(){dbOff();localStorage.removeItem('wms_adminWhId');localStorage.removeItem('wms_adminGroupId');fbAuth.signOut().then(function(){window.location.replace(INDEX_PATH);});}
   function persist(nextWhs,deletedId){
@@ -497,14 +515,14 @@ function App(){
 
   var guideEl=showGuide?h(GuideModal,{onClose:closeGuide,onHideToday:hideGuideToday}):null;
   if(authSt==='loading'){return h('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'인증 확인 중...'),Footer);}
-  if(cWh){return h(Fragment,null,h(WHView,{wh:cWh,gid:groupId2||localStorage.getItem('wms_adminGroupId')||'',onUpdate:function(fn){upWh(whId,fn);},onBack:(isAdmin||whs.length>1)?function(){setWhId(null);localStorage.removeItem('wms_adminWhId');}:null,onLogout:doLogout,isAdmin:isAdmin,fbUser:fbUser}),guideEl);}
-  if(authSt==='ready'){return h(Fragment,null,h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId,onLogout:doLogout,fbUser:fbUser,isAdmin:isAdmin,groupId:localStorage.getItem('wms_adminGroupId'),noticeGroupId:groupId2}),guideEl);}
+  if(cWh){return h(Fragment,null,h(WHView,{wh:cWh,gid:groupId2||localStorage.getItem('wms_adminGroupId')||'',onUpdate:function(fn){upWh(whId,fn);},onBack:(isAdmin||whs.length>1)?function(){setWhId(null);localStorage.removeItem('wms_adminWhId');}:null,onLogout:doLogout,isAdmin:isAdmin,fbUser:fbUser,linkedFrom:linked[whId]||null}),guideEl);}
+  if(authSt==='ready'){return h(Fragment,null,h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId,onLogout:doLogout,fbUser:fbUser,isAdmin:isAdmin,groupId:localStorage.getItem('wms_adminGroupId'),noticeGroupId:groupId2,linked:linked}),guideEl);}
   return h('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'창고 로딩 중...'),Footer);
 }
 
 /* ═══ MAIN VIEW ═══ */
 function MainView(p){
-  var whs=p.whs,onPersist=p.onPersist,onEnter=p.onEnter,onLogout=p.onLogout,fbUser=p.fbUser,isAdmin=p.isAdmin,groupId=p.groupId||null,noticeGroupId=p.noticeGroupId||'';
+  var whs=p.whs,onPersist=p.onPersist,onEnter=p.onEnter,onLogout=p.onLogout,fbUser=p.fbUser,isAdmin=p.isAdmin,groupId=p.groupId||null,noticeGroupId=p.noticeGroupId||'',linked=p.linked||{};
   var NOTICE_PATH=noticeGroupId?('notices/'+noticeGroupId):'notice';
   var m1=useState(false),open=m1[0],setOpen=m1[1];
   var m2=useState(''),nm=m2[0],setNm=m2[1];
@@ -594,10 +612,12 @@ function MainView(p){
         shownWhs.map(function(wh){
           var st=calcSt(wh),pg=getPG(wh),po=wh.pendOut||[];
           var dragging=dragIds&&dragRef.current&&dragRef.current.id===wh.id;
-          return h('div',{key:wh.id,'data-whid':wh.id,onClick:function(){if(!dragIds)onEnter(wh.id);},style:{background:CARD,borderRadius:14,padding:18,cursor:'pointer',border:dragging?'2px dashed #60A5FA':'1px solid '+BDR,opacity:dragging?.6:1,transition:'opacity .12s'}},
+          var lnk=linked[wh.id];   /* 🔗 다른 그룹 창고가 이 그룹에 종속으로 보이는 중 → 청록색 카드 */
+          return h('div',{key:wh.id,'data-whid':wh.id,onClick:function(){if(!dragIds)onEnter(wh.id);},style:{background:lnk?LNK_BG:CARD,borderRadius:14,padding:18,cursor:'pointer',border:dragging?'2px dashed #60A5FA':(lnk?'1px solid '+LNK_BDR:'1px solid '+BDR),opacity:dragging?.6:1,transition:'opacity .12s'}},
+            lnk&&h('div',{style:{display:'inline-flex',alignItems:'center',gap:4,fontSize:10,fontWeight:700,color:LNK_CLR,background:'rgba(34,211,238,.1)',border:'1px solid '+LNK_BDR,borderRadius:6,padding:'2px 7px',marginBottom:10}},'🔗 종속 창고'+(typeof lnk==='string'?' · '+lnk:'')),
             h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}},
               h('div',{style:{display:'flex',alignItems:'flex-start',gap:8}},whs.length>1&&h('div',{title:'끌어서 창고 순서 바꾸기',onPointerDown:function(e){startDrag(e,wh.id);},onClick:function(e){e.stopPropagation();},style:{cursor:'grab',touchAction:'none',userSelect:'none',fontSize:20,lineHeight:1,color:'#64748B',padding:'2px 4px',marginLeft:-6,marginTop:-1,borderRadius:6}},'⠿'),h('div',null,h('div',{style:{fontSize:18,fontWeight:700}},wh.name),h('div',{style:{fontSize:11,color:SUB,marginTop:3}},wh.rows+'x'+wh.cols+' 그리드'))),
-              isAdmin&&h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 9px',fontSize:11,borderRadius:5}),onClick:function(e){e.stopPropagation();if(confirm('창고를 삭제하시겠습니까?')&&confirm('⚠️ 정말 삭제합니다.\n되돌릴 수 없습니다.'))onPersist(whs.filter(function(w){return w.id!==wh.id;}),wh.id);}},'삭제')),
+              isAdmin&&!lnk&&h('button',{style:S('rgba(239,68,68,.15)','#F87171',{padding:'4px 9px',fontSize:11,borderRadius:5}),onClick:function(e){e.stopPropagation();if(confirm('창고를 삭제하시겠습니까?')&&confirm('⚠️ 정말 삭제합니다.\n되돌릴 수 없습니다.'))onPersist(whs.filter(function(w){return w.id!==wh.id;}),wh.id);}},'삭제')),
             h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:12}},
               [['전체',st.tot,'#94A3B8'],['사용',st.used,'#60A5FA'],['여유',st.free,'#4ADE80']].map(function(x){return h('div',{key:x[0],style:{background:'rgba(255,255,255,.04)',borderRadius:7,padding:'7px 4px',textAlign:'center'}},h('div',{style:{fontSize:20,fontWeight:700,color:x[2]}},x[1]),h('div',{style:{fontSize:10,color:SUB}},x[0]));})),
             pg.length>0&&h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}},pg.slice(0,4).map(function(p2){return h('span',{key:p2.name,style:{background:p2.clr+'20',color:p2.clr,border:'1px solid '+p2.clr+'44',borderRadius:20,padding:'1px 7px',fontSize:10,fontWeight:600}},p2.name+' '+p2.cnt+'팔');})),
@@ -742,6 +762,58 @@ function ClrNotice(q){
     h('div',{style:{color:SUB}},'자세한 기능은 관리자에게 문의하세요.'),
     q.isAdmin&&q.gid?h('button',{onClick:function(){window.location.href='/wms_vendors.html?gid='+encodeURIComponent(q.gid);},style:S('rgba(124,58,237,.2)','#C4B5FD',{marginTop:6,padding:'5px 10px',fontSize:12,border:'1px solid rgba(124,58,237,.4)'})},'🏷️ 업체등록·상품연결 열기'):null);
 }
+/* 🔗 종속 설정 (슈퍼관리자 전용, 설정 탭) — 켜면 groupLinks/{대상그룹}/{창고id}=원래그룹 → 대상 그룹 사람들도 이 창고를 같이 보고 작업.
+   끄면(기본) 원래 그룹에서만 보임. 원래 그룹 사람들은 언제나 자기 그룹 창고만 봄 */
+var LINK_DEFAULT_GID='makechango';
+function LinkCtl(p){
+  var wid=p.wid;
+  var s1=useState(null),info=s1[0],setInfo=s1[1];   /* {own:[원래 그룹], groups:[전체 그룹], on:[켜진 대상 그룹]} */
+  var s2=useState(LINK_DEFAULT_GID),tgt=s2[0],setTgt=s2[1];
+  var s3=useState(false),busy=s3[0],setBusy=s3[1];
+  function load(){
+    Promise.all([fbDb.ref('groups').get(),fbDb.ref('groupLinks').get().catch(function(){return null;})]).then(function(r){
+      var gs=r[0].val()||{},ls=(r[1]&&r[1].val())||{};
+      var all=Object.keys(gs).sort();
+      var own=all.filter(function(g){return gs[g]&&gs[g][wid];});
+      var on=Object.keys(ls).filter(function(g){return ls[g]&&ls[g][wid];});
+      setInfo({own:own,groups:all,on:on});
+      var cand=all.filter(function(g){return own.indexOf(g)<0;});
+      setTgt(function(t){return on[0]||(cand.indexOf(t)>=0?t:(cand[0]||''));});
+    }).catch(function(e){setInfo({err:(e&&e.message)||String(e)});});
+  }
+  useEffect(load,[wid]);
+  if(!info)return h('div',{style:{padding:'6px 10px',fontSize:11,color:SUB,borderBottom:'1px solid '+BDR}},'🔗 종속 설정 불러오는 중…');
+  if(info.err)return h('div',{style:{padding:'6px 10px',fontSize:11,color:'#F87171',borderBottom:'1px solid '+BDR}},'🔗 종속 설정을 못 불러왔어요: '+info.err);
+  var isOn=info.on.length>0;
+  var cand=info.groups.filter(function(g){return info.own.indexOf(g)<0;});
+  function toggle(){
+    if(busy)return;
+    var src=info.own[0]||'';
+    var u={};
+    if(isOn){
+      if(!confirm('🔗 종속을 끕니다.\n「'+info.on.join(', ')+'」 그룹에서 이 창고가 더 이상 보이지 않습니다.\n(창고 데이터는 그대로)'))return;
+      info.on.forEach(function(g){u['groupLinks/'+g+'/'+wid]=null;});
+    }else{
+      if(!tgt){alert('보여 줄 그룹을 고르세요.');return;}
+      if(info.own.indexOf(tgt)>=0){alert('이미 그 그룹 창고입니다.');return;}
+      u['groupLinks/'+tgt+'/'+wid]=src||true;
+    }
+    setBusy(true);
+    fbDb.ref().update(u).then(function(){setBusy(false);load();}).catch(function(e){setBusy(false);alert('저장 실패: '+((e&&e.message)||e));});
+  }
+  return h('div',{style:{background:isOn?'rgba(34,211,238,.07)':'rgba(15,23,42,.6)',borderBottom:'1px solid '+(isOn?LNK_BDR:BDR),padding:'8px 10px',display:'flex',gap:8,alignItems:'center',overflowX:'auto',flexShrink:0}},
+    h('span',{style:{fontSize:11,color:isOn?LNK_CLR:SUB,flexShrink:0,fontWeight:700}},'🔗 종속'),
+    h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'원래 그룹: '+(info.own.join(', ')||'없음')),
+    h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 2px'}}),
+    isOn?h('span',{style:{fontSize:12,color:LNK_CLR,fontWeight:700,flexShrink:0}},'「'+info.on.join(', ')+'」 그룹에도 보이는 중'):
+      h('select',{value:tgt,onChange:function(e){setTgt(e.target.value);},style:{background:BG,border:'1px solid '+BDR,borderRadius:6,padding:'5px 8px',color:TX,fontSize:12,outline:'none',flexShrink:0}},
+        cand.length?cand.map(function(g){return h('option',{key:g,value:g},g+(g===LINK_DEFAULT_GID?' (메인)':''));}):h('option',{value:''},'고를 그룹 없음')),
+    h('button',{onClick:toggle,disabled:busy,style:{position:'relative',width:44,height:24,borderRadius:12,border:'none',cursor:busy?'wait':'pointer',background:isOn?'#0891B2':'#334155',flexShrink:0,transition:'background .15s'}},
+      h('span',{style:{position:'absolute',top:3,left:isOn?23:3,width:18,height:18,borderRadius:'50%',background:'#fff',transition:'left .15s'}})),
+    h('span',{style:{fontSize:11,fontWeight:700,color:isOn?LNK_CLR:SUB,flexShrink:0}},isOn?'켜짐':'꺼짐 (이 그룹에서만)'),
+    h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'· 슈퍼관리자만 보임'));
+}
+
 function WHView(p){
   var wh=p.wh,onUpdate=p.onUpdate,onBack=p.onBack,onLogout=p.onLogout,isAdmin=p.isAdmin,fbUser=p.fbUser;
   var pendOut=wh.pendOut||[];
@@ -1355,7 +1427,7 @@ function WHView(p){
     h('div',{style:{position:'sticky',top:0,zIndex:10,flexShrink:0}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 8px',height:48,display:'flex',alignItems:'center',gap:5}},
       onBack&&h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:onBack},'< 목록'),
-      h('div',{style:{flex:1,overflow:'hidden'}},h('div',{style:{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},wh.name),h('div',{style:{fontSize:9,color:SUB,whiteSpace:'nowrap'}},'창고관리 시스템 ver 01')),
+      h('div',{style:{flex:1,overflow:'hidden'}},h('div',{style:{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:p.linkedFrom?LNK_CLR:undefined}},(p.linkedFrom?'🔗 ':'')+wh.name),h('div',{style:{fontSize:9,color:SUB,whiteSpace:'nowrap'}},'창고관리 시스템 ver 01')),
       h('button',{style:S('rgba(255,255,255,.07)','#FBBF24',{padding:'5px 7px',fontSize:13}),onClick:doUndo},'↩'),
       h('button',{style:S(saveFlash?'rgba(5,150,105,.35)':'rgba(59,130,246,.2)',saveFlash?'#34D399':'#60A5FA',{padding:'5px 9px',fontSize:12,transition:'all .25s'}),onClick:doSave},saveFlash?'✓ 저장됨':'저장'),
       h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 7px',fontSize:13}),onClick:function(){zBtn(1.25);}},'＋'),
@@ -1475,6 +1547,7 @@ function WHView(p){
         [['bottom','▼ 아래쪽'],['right','▶ 오른쪽']].map(function(x){return h('button',{key:x[0],style:S('rgba(16,185,129,.14)','#34D399',{padding:'6px 10px',fontSize:12,borderRadius:6,flexShrink:0,border:'1px solid rgba(16,185,129,.3)'}),onClick:(function(side){return function(){expandGrid(side,expandN);};})(x[0])},x[1]);}),
         h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'(기존 위치 유지)'),
         h('span',{style:{fontSize:11,color:SUB,flexShrink:0,marginLeft:2}},wh.rows+'×'+wh.cols)),
+      isAdmin&&h(LinkCtl,{wid:wh.id}),
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:0,alignItems:'center',overflowX:'auto',flexShrink:0}},
         h('div',{style:{flexShrink:0,paddingRight:12}},h(DivPicker,{val:sDiv,set:setSDiv})),
         h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 10px'}}),
