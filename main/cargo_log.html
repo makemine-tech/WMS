@@ -438,9 +438,10 @@ function removeVendorChip(name){
 
 /* ── 창고 = 메이크창고(WMS)에 등록된 이 그룹의 창고, 적재 파렛트 많은 순 ── */
 var whList = [];
+/* 🔗 그룹 창고 id = groups/{gid} + groupLinks/{gid}(슈퍼관리자가 켠 종속 창고) */
+function groupWids(db,gid){return Promise.all([db.ref('groups/'+gid).get(),db.ref('groupLinks/'+gid).get().catch(function(){return null;})]).then(function(r){var w=r[0].exists()?Object.keys(r[0].val()).filter(function(k){return k!=='_init';}):[];var l=(r[1]&&r[1].val())||{};Object.keys(l).forEach(function(k){if(w.indexOf(k)<0)w.push(k);});return w;});}
 function loadWarehouses(){
-  return db.ref('groups/' + gid).get().then(function(g){
-    var wids = g.exists() ? Object.keys(g.val()).filter(function(k){ return k !== '_init'; }) : [];
+  return groupWids(db, gid).then(function(wids){
     return Promise.all(wids.map(function(wid){
       return Promise.all([db.ref('warehouses/' + wid + '/name').get(), db.ref('warehouses/' + wid + '/cells').get()]).then(function(r){
         var cells = r[1].val() || {}, used = 0;

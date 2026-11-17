@@ -1494,9 +1494,10 @@ function selectWh(id){
   });
 }
 window.selectWh=selectWh;
+/* 🔗 그룹 창고 id = groups/{gid} + groupLinks/{gid}(슈퍼관리자가 켠 종속 창고) */
+function groupWids(db,gid){return Promise.all([db.ref('groups/'+gid).get(),db.ref('groupLinks/'+gid).get().catch(function(){return null;})]).then(function(r){var w=r[0].exists()?Object.keys(r[0].val()).filter(function(k){return k!=='_init';}):[];var l=(r[1]&&r[1].val())||{};Object.keys(l).forEach(function(k){if(w.indexOf(k)<0)w.push(k);});return w;});}
 function start(){
-  db.ref('groups/'+GID).get().then(function(g){
-    var wids=g.exists()?Object.keys(g.val()).filter(function(k){return k!=='_init';}):[];
+  groupWids(db,GID).then(function(wids){
     if(!wids.length){ app.innerHTML='<div class="center">이 그룹에 창고가 없어요.</div>'; return; }
     return Promise.all(wids.map(function(w){ return db.ref('warehouses/'+w).get().then(function(s){ return {id:w, raw:s.val()}; }).catch(function(){ return null; }); }))
     .then(function(list){
