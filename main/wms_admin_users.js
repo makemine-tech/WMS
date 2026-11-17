@@ -71,7 +71,7 @@
       var wu=r[0].val()||{}, ug=r[1].val()||{}, sa=r[2].val()||{}, ua=r[3].val()||{}, gs=r[4].val()||{};
       var users={};
       function u(uid){ return users[uid]||(users[uid]={uid:uid}); }
-      Object.keys(wu).forEach(function(uid){ var x=wu[uid]||{}; var o=u(uid); o.email=x.email||''; o.name=x.name||''; o.photo=x.photo||''; o.last=x.last||0; });
+      Object.keys(wu).forEach(function(uid){ var x=wu[uid]||{}; var o=u(uid); o.email=x.email||''; o.name=x.name||''; o.photo=x.photo||''; o.last=x.last||0; o.anon=!!x.anon||(!x.email&&!x.name); o.lastPage=x.lastPage||''; });
       Object.keys(ug).forEach(function(uid){ u(uid).gid=ug[uid]; });
       Object.keys(sa).forEach(function(uid){ var o=u(uid); o.super=true; if(sa[uid]&&typeof sa[uid]==='object'&&!o.email) o.email=sa[uid].email||''; });
       D={users:users, groups:Object.keys(gs).sort(), access:ua, warn:(r[0]._e||r[1]._e)?('목록 일부를 못 읽었어요(보안 규칙 배포 전일 수 있음): '+((r[0]._e||r[1]._e).message||'')):''};
@@ -112,8 +112,8 @@
     var av=x.photo?'<img src="'+esc(x.photo)+'" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">':'<div class="av">👤</div>';
     var o=OPEN===x.uid;
     return '<div class="urow'+(o?' open':'')+'" onclick="WAU.toggle(\''+x.uid+'\')">'+av
-      +'<div class="um"><div class="ue">'+esc(x.email||x.name||x.uid)+'</div>'
-      +'<div class="us">'+esc(x.name||'')+(x.gid?' · 그룹 '+esc(x.gid):'')+' · '+when(x.last)+'</div></div>'
+      +'<div class="um"><div class="ue">'+(x.anon&&!x.email?'🔗 로그인 없는 링크 접속':esc(x.email||x.name||x.uid))+'</div>'
+      +'<div class="us">'+(x.anon&&!x.email?'반품 검수 신규인원 링크(?key=) 등 · 이메일 없음 · ':esc(x.name||''))+(x.gid?' · 그룹 '+esc(x.gid):'')+' · '+when(x.last)+'</div></div>'
       +(x.nov?'<span class="ovc">개별 권한 '+x.nov+'</span>':'')
       +'<span class="lvb lv'+x.lv+'">'+lvName(x.lv)+'</span>'
       +'</div>'+(o?detHtml(x):'');

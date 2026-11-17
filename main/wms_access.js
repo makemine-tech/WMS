@@ -128,7 +128,8 @@
       if (localStorage.getItem(k) === day) return;
       firebase.database().ref('wmsUsers/' + u.uid).update({
         email: String(u.email || '').slice(0, 160), name: String(u.displayName || '').slice(0, 80),
-        photo: String(u.photoURL || '').slice(0, 400), last: firebase.database.ServerValue.TIMESTAMP, lastPage: PAGE_KEY
+        photo: String(u.photoURL || '').slice(0, 400), last: firebase.database.ServerValue.TIMESTAMP, lastPage: PAGE_KEY,
+        anon: !!u.isAnonymous   /* 반품 검수 신규인원 링크(?key=) 등 로그인 없는 접속 */
       }).then(function(){ try { localStorage.setItem(k, day); } catch (e) {} }).catch(function(){});
     } catch (e) { /* 목록 기록 실패가 페이지를 막으면 안 된다 */ }
   }
