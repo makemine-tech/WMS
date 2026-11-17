@@ -8,6 +8,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
+<script src="/wms_slip.js"></script>
 <script src="/wms_voice_parse.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -933,6 +935,17 @@ function actPlace(){
   if(!empty){ var o=lc.lv.slots[0].slot;
     return wizNg(lc.label+'에 이미 '+o.name+' ('+V.fmtExp(o.exp)+') 있음', lc.say+'에는 이미 '+josa(o.name,'이/가')+' 있어요'); }
   var item=g.items[0], key=lc.ci.key, sk=empty.sk;
+  /* 📷 입출고관리에서 전표촬영 「유」로 등록한 입고 — 전표 사진을 올려야 적치. 올리면 같은 품목 나머지 파렛트도 풀림 */
+  if(window.WMSSlip&&WMSSlip.need(item)){
+    wizNg('전표사진을 촬영해주세요 — 사진을 등록하면 바로 적치합니다','전표 사진을 촬영해 주세요');
+    WMSSlip.ask({db:db,wid:WHID,item:item,by:(USER&&USER.email)||''}).then(function(ok){
+      if(!ok) return;
+      var arr=inQArr().map(function(x){ if(x.rec===item.rec&&x.slipNeed){ var y=Object.assign({},x); delete y.slipNeed; return y; } return x; });
+      WH.inQ=arr;
+      db.ref(whPath()+'/inQ').set(arr.length?arr:null).then(function(){ actPlace(); }).catch(fail);
+    });
+    return;
+  }
   var nq=inQArr().filter(function(x){ return x.id!==item.id; });
   var upd={}; upd['cells/'+key+'/slots/'+sk]=item; upd.inQ=nq.length?nq:null;
   setSlotLocal(key, sk, item); WH.inQ=nq;
@@ -1034,6 +1047,7 @@ function doUndo(){
       var pp=plansObj()[u.pid];
       if(pp){ pp.registered=false;
         rowIds(pp).forEach(function(rid){ delete pp.rows[rid].ids; delete pp.rows[rid].voId;
+          if(!msg) db.ref('inoutRecs/'+WHID+'/v_'+u.pid+'_'+rid).remove().catch(function(){});
           db.ref(plansPath()+'/'+u.pid+'/rows/'+rid+'/ids').remove().catch(function(){});
           db.ref(plansPath()+'/'+u.pid+'/rows/'+rid+'/voId').remove().catch(function(){}); });
         db.ref(plansPath()+'/'+u.pid+'/registered').set(false).catch(function(){});
@@ -1209,6 +1223,16 @@ function planRegister(pid){
     if(d.voId) save['rows/'+d.rid+'/voId']=d.voId;
   });
   db.ref(plansPath()+'/'+pid).update(save).catch(fail);
+  /* 📋 입출고관리 기록에도 쌓기 (기록 id = v_건_줄 → 되돌리면 같이 지움) */
+  var rnow=Date.now(), ru={}, me=(USER&&USER.email)||'';
+  done.forEach(function(d){
+    var r=p.rows[d.rid], o={bid:pid, type:p.type, date:todayStr(), vehicle:p.vehicle||'', product:r.product, exp:String(r.exp||''),
+      pallets:String(+r.pallets||0), per:String(+r.qty||''), qty:String((+r.qty||0)*(+r.pallets||0)||''), qtyManual:false, ptype:'', slipReq:false, note:'',
+      status:'reg', src:'voice', createdAt:rnow, seq:r.seq||rnow, by:me, regAt:rnow, regBy:me, planId:pid};
+    if(d.ids) o.inIds=d.ids; if(d.txKey) o.txKey=d.txKey; if(d.voId) o.voId=d.voId;
+    ru['v_'+pid+'_'+d.rid]=o;
+  });
+  db.ref('inoutRecs/'+WHID).update(ru).catch(function(e){ console.warn('inoutRecs',e); });
   U.UNDO.push({t:'plan', pid:pid, type:p.type,
     ids:done.reduce(function(a,d){ return a.concat(d.ids||[]); },[]),
     txKeys:done.map(function(d){return d.txKey;}).filter(Boolean),
@@ -1294,6 +1318,7 @@ function renderShell(){
   app.innerHTML=
     '<div class="top">'
       +'<a class="back" href="/wms.html">‹</a>'
+      +'<a class="back" style="color:#FBBF24" href="/wms_inout.html?gid='+encodeURIComponent(GID)+'" onclick="this.href=\'/wms_inout.html?gid='+encodeURIComponent(GID)+'&wid=\'+encodeURIComponent(WHID)" title="입출고관리 (예정작업 기록·전표·엑셀/PDF)">📋</a>'
       +'<select class="whs" id="whSel" onchange="selectWh(this.value)">'
         +WHS.map(function(w){return '<option value="'+esc(w.id)+'"'+(w.id===WHID?' selected':'')+'>'+esc(w.name)+'</option>';}).join('')
       +'</select>'

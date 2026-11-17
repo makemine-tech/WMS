@@ -17,7 +17,9 @@
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
 <script src="/wms_vendor_projection.js"></script>
+<script src="/wms_slip.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
@@ -598,7 +600,9 @@ function MainView(p){
           isAdmin&&h('button',{style:S('rgba(16,185,129,.12)','#34D399',{padding:'7px 12px',fontSize:12,width:'100%',textAlign:'left',border:'1px solid rgba(16,185,129,.25)'}),onClick:function(){setMenuOpen(false);setInviteOpen(true);setInviteCode(null);setInviteCopied(false);}},'🔑 초대코드'),
           isAdmin&&h('button',{style:S('rgba(124,58,237,.12)','#A78BFA',{padding:'7px 12px',fontSize:12,width:'100%',textAlign:'left',border:'1px solid rgba(124,58,237,.25)'}),onClick:function(){setMenuOpen(false);var g=groupId||noticeGroupId;if(!g){alert('업체 관리는 그룹 단위입니다.\n먼저 그룹을 선택해 주세요.');return;}window.location.href='wms_vendors.html?gid='+encodeURIComponent(g);}},'🏷️ 업체등록·상품연결'),
           h('button',{style:S('rgba(52,211,153,.1)','#34D399',{padding:'7px 12px',fontSize:12,width:'100%',textAlign:'left',border:'1px solid rgba(52,211,153,.25)'}),onClick:function(){setMenuOpen(false);var g=groupId||noticeGroupId;if(!g){alert('그룹을 먼저 선택해 주세요.');return;}window.location.href='vendor_list.html?gid='+encodeURIComponent(g);}},'📋 업체 현황·낱개입력'),
-          h('button',{style:S('rgba(59,130,246,.1)','#60A5FA',{padding:'7px 12px',fontSize:12,width:'100%',textAlign:'left',border:'1px solid rgba(59,130,246,.3)'}),onClick:function(){setMenuOpen(false);var g=groupId||noticeGroupId;if(!g){alert('그룹을 먼저 선택해 주세요.');return;}window.location.href='wms_voice.html?gid='+encodeURIComponent(g);}},'🔊 음성명령'),
+          h('div',{style:{display:'flex',gap:4}},
+            h('button',{style:S('rgba(245,158,11,.1)','#FBBF24',{padding:'7px 8px',fontSize:12,flex:1,textAlign:'left',border:'1px solid rgba(245,158,11,.3)',whiteSpace:'nowrap'}),onClick:function(){setMenuOpen(false);var g=groupId||noticeGroupId;if(!g){alert('그룹을 먼저 선택해 주세요.');return;}window.location.href='wms_inout.html?gid='+encodeURIComponent(g);}},'📋 입출고관리'),
+            h('button',{style:S('rgba(59,130,246,.1)','#60A5FA',{padding:'7px 8px',fontSize:12,flex:1,textAlign:'left',border:'1px solid rgba(59,130,246,.3)',whiteSpace:'nowrap'}),onClick:function(){setMenuOpen(false);var g=groupId||noticeGroupId;if(!g){alert('그룹을 먼저 선택해 주세요.');return;}window.location.href='wms_voice.html?gid='+encodeURIComponent(g);}},'🔊 음성명령')),
           h('a',{href:'wms-tutorial.html',target:'_blank',rel:'noreferrer',style:Object.assign(S('rgba(99,102,241,.12)','#A5B4FC',{padding:'7px 12px',fontSize:12,border:'1px solid rgba(99,102,241,.25)',textDecoration:'none',display:'block',textAlign:'left'}),{})},'📖 튜토리얼'),
           h('button',{style:S('rgba(239,68,68,.12)','#F87171',{padding:'7px 12px',fontSize:12,width:'100%',textAlign:'left'}),onClick:function(){if(confirm('로그아웃?')){setMenuOpen(false);onLogout();}}},'🚪 로그아웃')))),
 
@@ -1073,6 +1077,16 @@ function WHView(p){
     return null;
   }
   function assignIn(item){
+    /* 📷 전표촬영 「유」로 등록된 입고 — 전표 사진을 올려야 적치. 올리면 같은 품목의 나머지 파렛트도 풀림 */
+    if(window.WMSSlip&&WMSSlip.need(item)){
+      WMSSlip.ask({db:fbDb,wid:wh.id,item:item,by:(p.fbUser&&p.fbUser.email)||''}).then(function(ok){
+        if(!ok)return;
+        onUpdate(function(w){return Object.assign({},w,{inQ:(w.inQ||[]).map(function(x){if(x&&x.rec===item.rec&&x.slipNeed){var y=Object.assign({},x);delete y.slipNeed;return y;}return x;})});});
+        var it2=Object.assign({},item);delete it2.slipNeed;
+        assignIn(it2);
+      });
+      return;
+    }
     if(selSlots.length>0){
       var t=selSlots[0],cc2=wh.cells[t.cKey];
       if(!cc2||!cc2.slots||cc2.slots[t.sKey]){setSelSlots(function(s){return s.slice(1);});return;}
@@ -1601,7 +1615,7 @@ function WHView(p){
       h('div',{style:{flexShrink:0,overflowY:'scroll',maxHeight:'45dvh',paddingBottom:'env(safe-area-inset-bottom,20px)',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto'}},
       wh.inQ.length>0&&h('div',{style:{background:'rgba(10,20,38,.98)',borderTop:'2px solid #3B82F6',padding:10,paddingBottom:8}},
         h('div',{style:{fontSize:11,fontWeight:700,marginBottom:7,color:'#60A5FA',display:'flex',alignItems:'center',gap:8}},'입고대기 '+wh.inQ.length+'건',selSlots.length>0?h('span',{style:{color:'#4ADE80',fontWeight:700}},selSlots.length+'개 선택'):h('span',{style:{color:SUB,fontSize:10}},'빈슬롯탭 > 위치지정'),h('span',{style:{flex:1}}),h('button',{style:S('rgba(239,68,68,.14)','#F87171',{padding:'3px 10px',fontSize:10,border:'1px solid rgba(239,68,68,.3)',flexShrink:0}),onClick:clearInQ},'🗑 남은목록 비우기')),
-        h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);}},item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));}))  ),
+        h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);},title:item.slipNeed?'📷 전표 촬영 후 적치':undefined},item.slipNeed?'📷 ':null,item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));}))  ),
       renderPendPanel(),renderImmPanel())),
 
     tab==='status'&&h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto',padding:'14px 14px 28px'},onClick:function(){if(colorPick)setColorPick(null);}},

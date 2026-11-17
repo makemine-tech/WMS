@@ -13,6 +13,7 @@
 var WMS_PAGES=[
   {group:'핵심 콘솔', items:[
     {key:'wms',          file:'wms.html',          label:'메이크창고 WMS (메인 콘솔)', floor:2, gate:true},
+    {key:'wms_inout',    file:'wms_inout.html',    label:'└ 입출고관리 (예정작업 기록·전표촬영·엑셀/PDF)', floor:2, gate:true},
     {key:'wms_login',    file:'wms_login.html',    label:'로그인 · 그룹 관리', floor:0, gate:false,
       locked:'항상 공개', self:'로그인 관문 — 잠그면 아무도 로그인할 수 없어 고정입니다'},
     {key:'wms_admin',    file:'wms_admin.html',    label:'관리도구 · 페이지 접근권한 (이 페이지)', floor:3, gate:false,
@@ -111,7 +112,7 @@ var WMS_MENU=[
   ]},
   {section:'WMS PRIMARY', kind:'big', cols:3, tiles:[
     {key:'wms', name:'창고 관리 시스템', eng:'CORE · WAREHOUSE MANAGEMENT', note:'버튼은 로그인 화면을 거쳐 열림',
-      subs:[{key:'wms_login'},{key:'wms_vendors'},{key:'vendor_list'},{key:'vendor_status'}]},
+      subs:[{key:'wms_login'},{key:'wms_vendors'},{key:'vendor_list'},{key:'vendor_status'},{key:'wms_inout'}]},
     {key:'cargo_log', name:'입출고반품관리', eng:'CARGO · IN / OUT LOG'},
     {key:'secretary', name:'AI 물류비서', eng:'AI · LOGISTICS SECRETARY', note:'작업 그룹원 이상에게 보임', subs:[{key:'secretary_match'}]},
   ]},
