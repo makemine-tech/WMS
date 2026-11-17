@@ -203,6 +203,19 @@ h1 em{color:var(--g);font-style:normal}
 .inv-search-res .hit-btn{background:transparent;border:1px solid var(--b);color:var(--b);border-radius:4px;padding:1px 7px;margin:2px 3px 0 0;font-family:var(--mo);font-size:.72rem;cursor:pointer}
 .grp-card.search-hit{outline:3px solid var(--b);outline-offset:2px;opacity:1!important;animation:hitPulse 1s ease-in-out 3}
 @keyframes hitPulse{50%{box-shadow:0 0 0 6px rgba(91,156,246,.35)}}
+/* 관리요청송장(요청사항송장) */
+.req-row{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-left:auto}
+.req-row input{background:#0f0f0f;color:var(--tx);border:1px solid #2a2a2a;border-radius:6px;padding:.35rem .55rem;font-size:.8rem;font-family:var(--mo);width:220px;max-width:60vw}
+.req-row input:focus{outline:none;border-color:#e879f9}
+.req-res{width:100%;font-size:.75rem;line-height:1.55;margin-top:.35rem;display:none;border:1px solid rgba(232,121,249,.35);border-radius:8px;padding:.5rem .6rem;background:rgba(232,121,249,.04)}
+.req-res.open{display:block}
+.req-res table{width:100%;border-collapse:collapse}
+.req-res td,.req-res th{padding:.25rem .35rem;border-bottom:1px solid #1f1f1f;text-align:left;vertical-align:top}
+.req-res th{color:var(--mu);font-weight:600;font-size:.68rem}
+.req-res tr.on td{background:rgba(232,121,249,.08)}
+.tg-req{background:rgba(232,121,249,.16);color:#f0abfc;border:1px solid rgba(232,121,249,.45)}
+
+.grp-card.req-card{border-color:rgba(232,121,249,.55)}
 .inv-hit-tag{display:inline-block;background:var(--b);color:#0f1117;border-radius:4px;padding:1px 7px;font-size:.68rem;font-weight:700;font-family:var(--mo)}
 /* DEBUG RAW */
 .raw-toggle{font-size:.68rem;color:var(--mu);cursor:pointer;padding:.3rem 0;user-select:none}
@@ -438,6 +451,7 @@ h1 em{color:var(--g);font-style:normal}
     <button class="fb on" id="gf-all"    onclick="setGFlt('all',this)">전체</button>
     <button class="fb"    id="gf-multi"  onclick="setGFlt('multi',this)">합포만</button>
     <button class="fb"    id="gf-single" onclick="setGFlt('single',this)">단포만</button>
+    <button class="fb"    id="gf-req"    onclick="setGFlt('req',this)" title="관리요청송장번호 조회에서 「별도관리」 체크한 송장 — 따로 묶어 먼저 출력">📌 요청사항송장<span id="gfReqCnt"></span></button>
     <button class="fb"    id="gf-search" onclick="toggleInvSearch()">🔍 송장검색</button>
     <span id="boxFltBar"></span>
     <label style="font-size:.75rem;color:var(--mu);cursor:pointer;display:flex;align-items:center;gap:.3rem;margin-left:auto">
@@ -454,13 +468,21 @@ h1 em{color:var(--g);font-style:normal}
     <button class="btn btn-s" style="font-size:.78rem;padding:.4rem .9rem" onclick="clearInvSearch()">지우기</button>
     <div class="inv-search-res" id="invSearchRes"></div>
   </div>
-  <div class="frow" id="custRow"style="display:none;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.35rem">
+  <div class="frow" id="custRow" style="display:none;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.35rem">
+    <span id="custWrap" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
     <span style="font-size:.72rem;color:var(--mu);letter-spacing:.02em">주문처 우선출력</span>
     <select id="custFlt" onchange="setCustFlt(this.value)"
       style="background:#0f0f0f;color:var(--tx);border:1px solid #2a2a2a;border-radius:6px;padding:.35rem .55rem;font-size:.78rem;font-family:inherit;cursor:pointer;min-width:160px">
       <option value="all">전체 주문처</option>
     </select>
     <span id="custHint" style="font-size:.66rem;color:var(--mu)"></span>
+    </span>
+    <span class="req-row">
+      <span style="font-size:.72rem;color:#f0abfc;letter-spacing:.02em">관리요청송장번호</span>
+      <input id="reqInp" type="text" inputmode="numeric" placeholder="송장번호 (여러 개는 띄어쓰기·줄바꿈)" title="전체 또는 4자리 이상 · 비우고 조회하면 지금 별도관리 목록" onkeydown="if(event.key==='Enter')doReqSearch()" onpaste="setTimeout(doReqSearch,0)">
+      <button class="btn btn-g" style="font-size:.76rem;padding:.35rem .85rem;background:#c026d3;border-color:#c026d3" onclick="doReqSearch()">조회</button>
+    </span>
+    <div class="req-res" id="reqRes"></div>
   </div>
   <div id="grpList"></div>
 
@@ -499,6 +521,7 @@ var printedInvNums = {}; // { invNum: 1 } — 인쇄완료 송장 집합
 var invCenter = {};      // { invNum: '4355센터' } — 인쇄할 때 고른 센터 (센터별 파렛트 계산)
 var printedMeta = {};    // { invNum: {ts, by} } — 원격 선점 시각 (인쇄 1회 = 같은 ts)
 var printedBatches = []; // [{ts, isMulti, items, customerSummary, invNums, pages}] — 인쇄 단위 스냅샷
+var reqInvNums = {};     // { invNum: 1 } — 관리요청송장(별도관리 체크) → 「📌 요청사항송장」 분류로 따로 묶어 먼저 출력
 var curFlt = 'all', grpFlt = 'all', custFlt = 'all';
 var SESSION_KEY = 'ez_picking_v1';
 
@@ -513,6 +536,7 @@ function saveSession() {
       printedInvNums: JSON.parse(JSON.stringify(printedInvNums)),
       printedBatches: JSON.parse(JSON.stringify(printedBatches)),
       invCenter: JSON.parse(JSON.stringify(invCenter)),
+      reqInvNums: JSON.parse(JSON.stringify(reqInvNums)),
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(data));
   } catch(e){ console.warn('세션 저장 실패:', e); }
@@ -531,6 +555,7 @@ function restoreSession() {
   invoices   = data.invoices   || [];
   locGroups  = data.locGroups  || [];
   invCenter  = data.invCenter  || {};
+  reqInvNums = data.reqInvNums || {};
   /* v2 → 그대로, v1(이전 grpGroups/doneGroups) → 마이그레이션 */
   if (data.v === 2) {
     printedInvNums = data.printedInvNums || {};
@@ -721,7 +746,7 @@ function setMsg(id, cls, html) {
 function resetAll() {
   rawBuffer = null; pdfDoc = null;
   invoices = []; locGroups = [];
-  printedInvNums = {}; printedBatches = []; invCenter = {};
+  printedInvNums = {}; printedBatches = []; invCenter = {}; reqInvNums = {};
 }
 
 /* ─────────────── 드롭존 ─────────────── */
@@ -1125,6 +1150,7 @@ function processAllPages(doc, pw, pf, pl) {
     printedInvNums = {};
     printedBatches = [];
     invCenter = {};
+    reqInvNums = {};
     saveSession(); /* ← 로컬 캐시 저장 */
     pkPublishJob(); /* ← 그룹 DB 로 발행 (이전 작업 교체 · 다른 PC 자동 로드) */
 
@@ -1697,11 +1723,13 @@ function getActiveGroups(opts) {
   var gmap = {};
   active.forEach(function(inv){
     var prodKey = prodKeyOf(inv.items);
-    var key = splitByCustomer ? (prodKey + '@@cust=' + (inv.customer||'')) : prodKey;
+    var isReq = !!reqInvNums[inv.invNum];
+    var key = (splitByCustomer ? (prodKey + '@@cust=' + (inv.customer||'')) : prodKey) + (isReq ? '@@req' : '');
     if (!gmap[key]) {
       gmap[key] = {
         key: key,
         items: inv.items,
+        isReq: isReq,
         isMulti: (inv.totalQty||0) >= 2,
         invoices: [],
         customerCounts: {} /* 그룹 안의 주문처별 송장 수 */
@@ -1712,9 +1740,10 @@ function getActiveGroups(opts) {
     gmap[key].customerCounts[c] = (gmap[key].customerCounts[c]||0) + 1;
   });
 
-  /* 3. 정렬: 합포 우선, 그 다음 건수 많은 순 */
+  /* 3. 정렬: 요청사항송장 맨 위 → 합포 우선 → 건수 많은 순 */
   var groups = Object.keys(gmap).map(function(k){ return gmap[k]; });
   groups.sort(function(a,b){
+    if (a.isReq !== b.isReq) return a.isReq ? -1 : 1;
     if (a.isMulti !== b.isMulti) return a.isMulti ? -1 : 1;
     return b.invoices.length - a.invoices.length;
   });
@@ -1910,7 +1939,7 @@ function renderGrpPage() {
   document.getElementById('pb3').textContent = pages;
   grpFlt = 'all';
   custFlt = 'all';
-  ['gf-all','gf-multi','gf-single'].forEach(function(id){
+  ['gf-all','gf-multi','gf-single','gf-req'].forEach(function(id){
     document.getElementById(id).classList.remove('on');
   });
   document.getElementById('gf-all').classList.add('on');
@@ -2046,6 +2075,7 @@ function doneCardHtml(batch, bi, gi){
   }
   return '<div class="grp-body" style="position:relative">'+
       '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
+        (batch.req || (batch.invNums||[]).length && (batch.invNums||[]).every(function(n){ return !!reqInvNums[n]; }) ? '<span class="tg tg-req" style="font-size:.67rem">📌 요청사항</span>' : '')+
         '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>'+
         custLabel+
         '<span style="font-size:.65rem;color:rgba(240,88,88,.7);font-family:var(--mo)">✓ 인쇄완료</span>'+
@@ -2133,10 +2163,10 @@ function locateInvoice(n) {
     card = Array.prototype.find.call(list.querySelectorAll('.done-card'), hasInv);
   } else {
     /* 합포/단포·주문처 필터 때문에 안 보이면 해제 */
-    var isM = (inv.totalQty||0) >= 2;
-    if ((grpFlt==='multi' && !isM) || (grpFlt==='single' && isM)) {
+    var isM = (inv.totalQty||0) >= 2, isR = !!reqInvNums[n];
+    if ((grpFlt==='multi' && (!isM || isR)) || (grpFlt==='single' && (isM || isR)) || (grpFlt==='req' && !isR)) {
       grpFlt = 'all';
-      ['gf-all','gf-multi','gf-single'].forEach(function(id){ document.getElementById(id).classList.toggle('on', id==='gf-all'); });
+      ['gf-all','gf-multi','gf-single','gf-req'].forEach(function(id){ document.getElementById(id).classList.toggle('on', id==='gf-all'); });
     }
     if (custFlt !== 'all' && (inv.customer||'(미상)') !== custFlt) {
       custFlt = 'all';
@@ -2162,10 +2192,93 @@ function locateInvoice(n) {
   }
 }
 
+/* ─────────────── 관리요청송장(요청사항송장) ───────────────
+   번호 조회 → 목록에서 「별도관리」 체크 → 그 송장은 상품구성이 같아도 따로 묶여
+   [전체] 맨 위 · [📌 요청사항송장] 분류로만 나옴 (합포만/단포만에서는 빠짐) → 먼저 출력 */
+var reqShown = [];   /* 지금 조회 목록에 보이는 송장번호 */
+function updateReqCount() {
+  var n = invoices.filter(function(i){ return reqInvNums[i.invNum] && !printedInvNums[i.invNum]; }).length;
+  var el = document.getElementById('gfReqCnt');
+  if (el) el.textContent = n ? ' ' + n : '';
+}
+function doReqSearch() {
+  var inp = document.getElementById('reqInp');
+  var toks = String(inp.value||'').split(/[\s,;]+/).map(invDigits).filter(Boolean);
+  var res = document.getElementById('reqRes');
+  var found = [], seen = {}, miss = [], short = [];
+  if (!toks.length) {
+    /* 비우고 조회 = 지금 별도관리 목록 */
+    invoices.forEach(function(i){ if (reqInvNums[i.invNum] && !seen[i.invNum]) { seen[i.invNum]=1; found.push(i.invNum); } });
+    if (!found.length) { res.classList.add('open'); res.innerHTML = '<span style="color:var(--mu)">별도관리 송장이 없습니다 — 송장번호를 넣고 조회하세요</span>'; reqShown = []; return; }
+  }
+  toks.forEach(function(q){
+    if (q.length < 4) { short.push(q); return; }
+    var exact = invoices.filter(function(i){ return invDigits(i.invNum) === q; });
+    var hits = exact.length ? exact : invoices.filter(function(i){ return invDigits(i.invNum).indexOf(q) !== -1; });
+    if (!hits.length) miss.push(q);
+    hits.slice(0, 50).forEach(function(i){ if (!seen[i.invNum]) { seen[i.invNum]=1; found.push(i.invNum); } });
+  });
+  reqShown = found;
+  reqWarn = (miss.length ? '<div style="color:var(--r)">❌ 이 작업에 없는 송장: ' + miss.map(escH).join(', ') + '</div>' : '') +
+            (short.length ? '<div style="color:var(--y)">4자리 이상 입력: ' + short.map(escH).join(', ') + '</div>' : '');
+  renderReqRes();
+}
+var reqWarn = '';
+function renderReqRes() {
+  var res = document.getElementById('reqRes');
+  if (!res) return;
+  if (!reqShown.length) { if (reqWarn) { res.classList.add('open'); res.innerHTML = reqWarn + '<div style="text-align:right"><a href="javascript:void 0" onclick="closeReqRes()" style="color:var(--mu)">닫기</a></div>'; } return; }
+  var byNum = {};
+  invoices.forEach(function(i){ byNum[i.invNum] = i; });
+  var rows = reqShown.map(function(n){
+    var inv = byNum[n]; if (!inv) return '';
+    var on = !!reqInvNums[n], pr = !!printedInvNums[n];
+    var items = (inv.items||[]).map(function(it){ return escH(it.prd||'—') + (it.qty>1 ? ' ×'+it.qty : ''); }).join(', ');
+    return '<tr class="' + (on ? 'on' : '') + '">' +
+      '<td style="white-space:nowrap"><label style="cursor:pointer;display:flex;align-items:center;gap:.25rem;color:#f0abfc"><input type="checkbox" data-inv="' + escH(n) + '" ' + (on ? 'checked' : '') + ' onchange="setReq(this.dataset.inv,this.checked)" style="accent-color:#e879f9;cursor:pointer">별도관리</label></td>' +
+      '<td style="font-family:var(--mo);white-space:nowrap">' + escH(n) + '</td>' +
+      '<td style="white-space:nowrap">' + ((inv.totalQty||0) >= 2 ? '<span style="color:var(--y)">합포</span>' : '단포') + '</td>' +
+      '<td>' + escH(inv.customer || '') + '</td>' +
+      '<td style="color:var(--mu)">' + items + '</td>' +
+      '<td style="white-space:nowrap">' + (pr ? '<b style="color:var(--r)">✓ 인쇄완료</b>' : '<span style="color:var(--g)">미인쇄</span>') + '</td>' +
+    '</tr>';
+  }).join('');
+  var onCnt = reqShown.filter(function(n){ return reqInvNums[n]; }).length;
+  res.classList.add('open');
+  res.innerHTML = reqWarn +
+    '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.3rem">' +
+      '<b style="color:#f0abfc">조회 ' + reqShown.length + '건 · 별도관리 ' + onCnt + '건</b>' +
+      '<button class="btn btn-s" style="font-size:.7rem;padding:.2rem .6rem" onclick="setReqAll(true)">모두 별도관리</button>' +
+      '<button class="btn btn-s" style="font-size:.7rem;padding:.2rem .6rem" onclick="setReqAll(false)">모두 해제</button>' +
+      '<button class="btn btn-s" style="font-size:.7rem;padding:.2rem .6rem;border-color:#e879f9;color:#f0abfc" onclick="setGFlt(\'req\',document.getElementById(\'gf-req\'))">📌 요청사항송장 보기 →</button>' +
+      '<a href="javascript:void 0" onclick="closeReqRes()" style="margin-left:auto;color:var(--mu)">닫기</a>' +
+    '</div>' +
+    '<table><tr><th>체크</th><th>송장번호</th><th>구분</th><th>주문처</th><th>상품</th><th>상태</th></tr>' + rows + '</table>';
+}
+function closeReqRes() {
+  reqShown = []; reqWarn = '';
+  var res = document.getElementById('reqRes');
+  res.classList.remove('open'); res.innerHTML = '';
+}
+function setReqMany(nums, on) {
+  var u = {}, ts = Date.now();
+  nums.forEach(function(n){
+    if (on) reqInvNums[n] = 1; else delete reqInvNums[n];
+    u[pkSafeKey(n)] = on ? { inv: n, ts: ts, by: pkUid || '' } : null;
+  });
+  saveSession();
+  if (pkReady && pkBase) pkBase.child('req').update(u).catch(function(err){ alert('별도관리 저장 실패: ' + (err && err.message || err)); });
+  /* 체크가 바뀌면 그룹이 다시 묶이므로 화면의 카드 체크는 해제 */
+  var chkAll = document.getElementById('chkAll'); if (chkAll) chkAll.checked = false;
+  renderGrpList(); updateDoneSection(); renderReqRes();
+}
+function setReq(n, on) { setReqMany([n], on); }
+function setReqAll(on) { setReqMany(reqShown.slice(), on); }
+
 function setGFlt(type, btn) {
   grpFlt = type;
   if (type === 'all') boxFlt = null;   /* [전체] 는 박스 필터도 해제 */
-  ['gf-all','gf-multi','gf-single'].forEach(function(id){
+  ['gf-all','gf-multi','gf-single','gf-req'].forEach(function(id){
     document.getElementById(id).classList.remove('on');
   });
   btn.classList.add('on');
@@ -2198,9 +2311,11 @@ function populateCustomerFilter() {
     cnt[c] = (cnt[c]||0) + 1;
   });
   var keys = Object.keys(cnt);
-  /* 주문처 정보가 전혀 없거나 1개뿐이면 UI 숨김 */
+  /* 줄은 송장이 있으면 항상 보임(관리요청송장번호 조회) — 주문처 선택은 주문처가 2곳 이상일 때만 */
+  row.style.display = invoices.length ? 'flex' : 'none';
+  var cw = document.getElementById('custWrap');
+  if (cw) cw.style.display = keys.length <= 1 ? 'none' : 'flex';
   if (keys.length <= 1) {
-    row.style.display = 'none';
     sel.innerHTML = '<option value="all">전체 주문처</option>';
     custFlt = 'all';
     return;
@@ -2224,8 +2339,11 @@ function renderGrpList() {
   var groups = getActiveGroups({ custFlt: custFlt });
   /* 합포/단포 필터는 그룹화 후 적용 */
   var data = groups;
-  if (grpFlt==='multi')  data = data.filter(function(g){ return g.isMulti; });
-  if (grpFlt==='single') data = data.filter(function(g){ return !g.isMulti; });
+  /* 요청사항송장은 따로 분리 — 합포만/단포만에는 안 나오고 [전체] 맨 위 · [📌 요청사항송장] 에서만 */
+  if (grpFlt==='multi')  data = data.filter(function(g){ return g.isMulti && !g.isReq; });
+  if (grpFlt==='single') data = data.filter(function(g){ return !g.isMulti && !g.isReq; });
+  if (grpFlt==='req')    data = data.filter(function(g){ return g.isReq; });
+  updateReqCount();
   /* 박스별 필터 (버튼은 박스 필터 적용 전 목록 기준으로 집계) */
   boxFltBase = data;
   renderBoxFilter();
@@ -2255,7 +2373,7 @@ function renderGrpList() {
     var pagesAttr = pages.join(',');
 
     var card = document.createElement('div');
-    card.className = 'grp-card'; card.id = 'gg-'+idx;
+    card.className = 'grp-card' + (grp.isReq ? ' req-card' : ''); card.id = 'gg-'+idx;
 
     var ih = grp.items.map(function(it){
       var p = [];
@@ -2284,6 +2402,7 @@ function renderGrpList() {
       '<input class="grp-chk" type="checkbox" id="chk-'+idx+'" data-idx="'+idx+'" data-invs="'+escH(invNumsAttr)+'" data-pages="'+pagesAttr+'" onchange="onChkChange(this)">'+
       '<div class="grp-body" style="position:relative">'+
         '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.28rem">'+
+          (grp.isReq ? '<span class="tg tg-req" style="font-size:.67rem">📌 요청사항</span>' : '')+
           '<span class="tg '+(isM?'tg-m':'tg-s')+'" style="font-size:.67rem">'+(isM?'합포':'단포')+'</span>'+
           custBadge+
         '</div>'+
@@ -2441,6 +2560,7 @@ function markInvoicesPrinted(invNums, pages, opts) {
     by: pkUid || '',
     jobId: opts.jobId || '',
     jobSeq: opts.jobSeq || 0,
+    req: fresh.every(function(n){ return !!reqInvNums[n]; }) || null,
     pages: (pages && pages.length) ? pages.slice() :
            (function(){ var s={}; freshInvs.forEach(function(i){(i.pages||[]).forEach(function(p){s[p]=1;});}); return Object.keys(s).map(Number).sort(function(a,b){return a-b;}); })()
   };
@@ -2956,6 +3076,15 @@ function pkAttach(){
     printedMeta = meta;
     pkRerender();
   }, function(err){ console.warn('[picking] printed 읽기 실패', err); });
+
+  /* req: 관리요청송장(별도관리) — 모든 PC 공유 */
+  pkBase.child('req').on('value', function(snap){
+    if (!pkReady) return;
+    var v = snap.val() || {}, map = {};
+    Object.keys(v).forEach(function(k){ var inv = (v[k] && v[k].inv != null) ? v[k].inv : k; map[inv] = 1; });
+    reqInvNums = map;
+    renderGrpList(); updateDoneSection(); renderReqRes();
+  }, function(err){ console.warn('[picking] req 읽기 실패', err); });
 
   /* center: 인쇄 때 고른 센터 (송장별) → 센터별 파렛트 */
   pkBase.child('center').on('value', function(snap){
