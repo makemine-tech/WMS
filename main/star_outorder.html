@@ -2232,9 +2232,14 @@ function cpDcText(eta, center){
   return cpEtaLabel(eta) + '-' + c;
 }
 /* 날짜-센터 강조 배지 — 입고대기·스캔 화면에서 상품마다 굵은 글씨 + 색 박스 */
-function cpDcBadge(eta, center, big){
+/* 다른센터 전용 색 — 날짜 색(주황·민트…)과 겹치지 않게 꽉 찬 배경 + 검은 글씨로 확연히 구분 */
+var CP_MIX_COLORS = ['#00e5ff','#ff3df2','#c6ff00','#ffffff'];
+function cpDcBadge(eta, center, big, solidCol){
   var t = cpDcText(eta, center);
   if (!t) return '';
+  if (solidCol) {
+    return '<span class="cp-dc-badge solid' + (big ? ' big' : '') + '" style="border-color:' + solidCol + ';color:#0b0e17;background:' + solidCol + ';box-shadow:0 0 10px ' + solidCol + '99">' + escH(t) + '</span>';
+  }
   var col = cpDcColor(eta);
   return '<span class="cp-dc-badge' + (big ? ' big' : '') + '" style="border-color:' + col + ';color:' + col + ';background:' + col + '26">' + escH(t) + '</span>';
 }
@@ -8887,7 +8892,11 @@ function cpRefreshStaging(){
       var c = rr.center || '';
       if (c) ctrCnt[c] = (ctrCnt[c]||0) + 1;
     });
-    var primaryCenter = Object.keys(ctrCnt).sort(function(a,b){return ctrCnt[b]-ctrCnt[a];})[0] || '';
+    var ctrSorted = Object.keys(ctrCnt).sort(function(a,b){return ctrCnt[b]-ctrCnt[a];});
+    var primaryCenter = ctrSorted[0] || '';
+    /* 다른센터마다 전용 색 (메인 센터 색과 확연히 다르게) */
+    var mixColOf = {};
+    ctrSorted.slice(1).forEach(function(c, i){ mixColOf[c] = CP_MIX_COLORS[i % CP_MIX_COLORS.length]; });
     var itemsHtml = items.map(function(it){
       var r = (it.srcIdx >= 0) ? (rows[it.srcIdx] || {}) : (it.overflow ? (rows[it.overIdx] || {}) : {});
       var meta = stockMeta[normBarcode(it.barcode)] || {};
@@ -8897,7 +8906,8 @@ function cpRefreshStaging(){
       var eta  = r.eta || '';
       var nameSmall = (it.unmatched ? [code, ctr, eta] : [code]).filter(Boolean).join(' · ');
       /* 날짜-센터 — 상품마다 굵은 글씨 + 색 박스로 (날짜가 다르면 색도 다르다) */
-      var dcBadge = (!it.unmatched && r.center) ? cpDcBadge(eta, r.center, true) : '';
+      var mixCol = (!it.unmatched && r.center && primaryCenter && r.center !== primaryCenter) ? mixColOf[r.center] : '';
+      var dcBadge = (!it.unmatched && r.center) ? cpDcBadge(eta, r.center, true, mixCol) : '';
       /* 카테고리 판단:
        *   un       — 우리 PO에 없는 SKU
        *   over     — 발주수량 초과 (scans 합 + staging 합 > need)
@@ -8916,11 +8926,17 @@ function cpRefreshStaging(){
       }
       var itemCls = 'cp-staging-item ' + kind;
       var kindChip = '<span class="cp-staging-kind '+kind+'">'+kindLabel+'</span>';
+      /* 다른센터 행 — 왼쪽 굵은 줄·배경·칩까지 그 센터 전용 색으로 */
+      var itemStyle = '';
+      if (kind === 'mix' && mixCol) {
+        itemStyle = ' style="border-left:6px solid '+mixCol+';background:'+mixCol+'1f;box-shadow:inset 0 0 0 1px '+mixCol+'66"';
+        kindChip = '<span class="cp-staging-kind mix" style="background:'+mixCol+';color:#0b0e17">'+kindLabel+'</span>';
+      }
       /* 수량 수정 — input 으로. 0 이면 confirm 후 삭제, 그 외엔 staging 의 qty 갱신 */
       var qtyInput = '<input type="number" class="qty-input" min="0" step="1" value="'+(+it.qty||0)+'" '+
         'onchange="cpStagingUpdateQty(\''+escAttrLocal(it.id)+'\', this.value, this)" '+
         'onclick="this.select()" title="수량 수정 (0 입력 시 삭제)">';
-      return '<div class="'+itemCls+'">'+
+      return '<div class="'+itemCls+'"'+itemStyle+'>'+
         kindChip+
         dcBadge+
         '<span class="nm">'+escH(name)+(nameSmall?'<small>'+escH(nameSmall)+'</small>':'')+'</span>'+
