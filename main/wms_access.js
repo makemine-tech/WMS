@@ -4,15 +4,22 @@
    슈퍼관리자가 wms_admin.html 에서 페이지마다 요구 등급을 설정하면
    이 스크립트가 그 값을 읽어 접근을 통제한다.
 
-   ── 등급 체계 (사용자 레벨) ──
+   ── 등급 체계 (사용자 레벨) — 2026-11-17 5단계로 ──
      0  비회원      : 로그인 안 함 (누구나)
-     1  일반회원    : 구글 로그인됨 (그룹 미가입)
-     2  초대회원    : 초대코드로 그룹 가입 (userGroup 존재)
-     3  슈퍼관리자  : superadmins 등록 (= 대표 본인)
+     1  일반        : 구글 로그인됨 (그룹 미가입)
+     2  초대        : 업체 그룹 초대자 (userGroup 이 메인 그룹이 아님 — dashukorea 등)
+     3  관리자      : 메인 그룹(makechango) 초대자 = 메이크창고 직원
+     4  슈퍼관리자  : superadmins 등록 (= 대표 본인)
 
-   요구 레벨은 Firebase 의 pageAccess/{pageKey} 에 0~3 으로 저장된다.
+   요구 레벨은 Firebase 의 pageAccess/{pageKey} 에 0~4 로 저장된다.
    값이 없으면 0(공개)으로 간주. 단 data-floor 로 페이지별 최소 레벨을 강제할 수 있다.
      실효 요구 = max(설정값, data-floor)
+
+   ── 아이디별 개별 권한 (관리도구 「👤 아이디별 권한」) ──
+     userAccess/{uid}/{pageKey} = true  → 등급이 모자라도 이 페이지 허용
+                                = false → 등급이 돼도 이 페이지 막음
+     슈퍼관리자는 언제나 허용 (자기 자신을 잠그지 않게).
+   로그인한 사람은 하루 한 번 wmsUsers/{uid} 에 이메일·이름·최근 접속을 남긴다 (관리도구 아이디 목록용).
 
    ── 사용법 ──
      <script src="/wms_access.js" data-page="star_coupang" data-floor="2"></script>
@@ -36,6 +43,7 @@
   };
 
   var SDK_VER = "10.13.2";
+  var MAIN_GID = "makechango";   /* 메인 그룹 — 여기 초대된 사람 = 관리자(3) */
   var LOGIN_PATH = "/wms_login.html";
 
   var thisScript = document.currentScript;
@@ -52,7 +60,7 @@
   }
   function parseLevel(v, dflt){
     var n = parseInt(v, 10);
-    return (isNaN(n) || n < 0 || n > 3) ? dflt : n;
+    return (isNaN(n) || n < 0 || n > 4) ? dflt : n;
   }
   function redirectToLogin(){
     var ret = LOGIN_PATH + '?return=' + encodeURIComponent(location.pathname + location.search);
@@ -64,7 +72,7 @@
   function showDenied(level, required, err){
     window.WMSAccess.reason = (level < 0 ? ('확인 실패: ' + (err || '')) : ('등급 부족 (필요 ' + required + ' · 내 등급 ' + level + ')'));
     if (document.getElementById('wmsDeniedBox')) return;   /* 두 번 띄우지 않기 */
-    var lv = ['비회원','로그인 회원','작업 그룹원','슈퍼관리자'];
+    var lv = ['비회원','일반(로그인)','초대(업체 그룹)','관리자(메인 그룹)','슈퍼관리자'];
     var failed = (level < 0);   /* -1 = 권한 확인 자체가 실패 */
     var box = document.createElement('div');
     box.id = 'wmsDeniedBox';
@@ -80,7 +88,7 @@
       +   '필요 등급 <b style="color:#e6e9f0">' + (lv[required] || required) + '</b><br>'
       +   '내 등급 <b style="color:#fbbf24">' + (failed ? '확인 실패' : (lv[level] || level)) + '</b><br><br>'
       +   (failed ? ('오류: <b style="color:#fca5a5">' + String(err || '알 수 없음').replace(/[<>]/g,'') + '</b><br>네트워크·로그인 상태를 확인한 뒤 새로고침해 주세요.')
-                : '관리자에게 작업 그룹 등록 또는 등급 조정을 요청해 주세요.')
+                : (window.WMSAccess.denyByUser ? '이 아이디는 이 페이지가 따로 막혀 있습니다. 메이크창고 관리자에게 문의해 주세요.' : '메이크창고 관리자에게 등급 조정을 요청해 주세요.'))
       + '</div>'
       + '<div style="margin-top:20px;display:flex;gap:8px;justify-content:center">'
       +   '<a href="/index.html" style="background:#1c2331;border:1px solid #2a3040;color:#e6e9f0;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;text-decoration:none">홈으로</a>'
@@ -109,6 +117,22 @@
     })(0);
   }
 
+  /* 관리도구 아이디 목록용 — 로그인한 사람의 이메일·이름·최근 접속 (하루 한 번) */
+  function registerUser(u){
+    try {
+      if (!u || !u.uid) return;
+      var host = location.hostname;
+      if (!host || host === 'localhost' || host === '127.0.0.1' || location.protocol === 'file:') return;
+      var day = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      var k = 'wms_ureg_' + u.uid;
+      if (localStorage.getItem(k) === day) return;
+      firebase.database().ref('wmsUsers/' + u.uid).update({
+        email: String(u.email || '').slice(0, 160), name: String(u.displayName || '').slice(0, 80),
+        photo: String(u.photoURL || '').slice(0, 400), last: firebase.database.ServerValue.TIMESTAMP, lastPage: PAGE_KEY
+      }).then(function(){ try { localStorage.setItem(k, day); } catch (e) {} }).catch(function(){});
+    } catch (e) { /* 목록 기록 실패가 페이지를 막으면 안 된다 */ }
+  }
+
   function run(){
     if (typeof firebase === 'undefined' || !firebase.database) {
       console.warn('[WMSAccess] firebase 미가용 — 게이트 비활성');
@@ -126,7 +150,11 @@
       var required = Math.max(configured, FLOOR);
       window.WMSAccess.required = required;
 
-      if (required <= 0) { window.WMSAccess.level = 0; window.WMSAccess.ready = true; return; }
+      if (required <= 0) {
+        window.WMSAccess.level = 0; window.WMSAccess.ready = true; window.WMSAccess.allowed = true;
+        try { var off0 = (auth0 || firebase.auth()).onAuthStateChanged(function(u){ if (u) { registerUser(u); if (off0) off0(); } }); } catch (e) {}
+        return;
+      }
 
       var auth = auth0 || firebase.auth();
       var decided = false;
@@ -151,23 +179,34 @@
             });
           });
         }
+        registerUser(user);
         getOnce('superadmins/' + user.uid).then(function(adminSnap){
-          if (adminSnap.exists()) { decided = true; finish(3, required); return; }
-          if (required <= 1) { decided = true; finish(1, required); return; }
-          getOnce('userGroup/' + user.uid).then(function(gSnap){
-            var lvl = gSnap.exists() ? 2 : 1;
-            decided = true; finish(lvl, required);
+          if (adminSnap.exists()) { decided = true; finish(4, required, null); return; }
+          Promise.all([
+            getOnce('userGroup/' + user.uid),
+            db.ref('userAccess/' + user.uid + '/' + PAGE_KEY).get().catch(function(){ return null; })
+          ]).then(function(r){
+            var gSnap = r[0], ov = r[1] && r[1].exists() ? r[1].val() : null;
+            var g = gSnap.exists() ? gSnap.val() : null;
+            var lvl = !g ? 1 : (g === MAIN_GID ? 3 : 2);
+            window.WMSAccess.group = g;
+            decided = true; finish(lvl, required, ov);
           }).catch(function(e){ decided = true; console.warn('[WMSAccess] userGroup 조회 실패', e);
             showDenied(-1, required, (e && (e.code || e.message)) || e); });
         }).catch(function(e){ decided = true; console.warn('[WMSAccess] superadmins 조회 실패', e);
           showDenied(-1, required, (e && (e.code || e.message)) || e); });
       });
 
-      function finish(level, req){
+      /* ov = 아이디별 개별 권한 (true 허용 / false 막음 / null 등급대로) */
+      function finish(level, req, ov){
         window.WMSAccess.level = level;
+        window.WMSAccess.override = ov;
         window.WMSAccess.ready = true;
+        var ok = level >= 4 ? true : (ov === true ? true : (ov === false ? false : level >= req));
+        window.WMSAccess.allowed = ok;
+        if (ov === false && level >= req) window.WMSAccess.denyByUser = true;
         /* 로그인 상태에서 등급이 모자라면 튕기지 않고 이유를 보여 준다 (무한 반복 방지) */
-        if (level < req) showDenied(level, req);
+        if (!ok) showDenied(level, req);
       }
     }).catch(function(e){
       /* pageAccess 읽기 실패 — 보안상 floor 만이라도 적용 */

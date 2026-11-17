@@ -35,14 +35,15 @@
     },
     "userWarehouse": {
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".read": "auth != null && (auth.uid === $uid || root.child('superadmins/'+auth.uid).exists())",
+        ".write": "auth != null && root.child('superadmins/'+auth.uid).exists()"
       }
     },
     "userGroup": {
+      ".read": "auth != null && root.child('superadmins/'+auth.uid).exists()",
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && (auth.uid === $uid || root.child('superadmins/'+auth.uid).exists())"
+        ".read": "auth != null && (auth.uid === $uid || root.child('superadmins/'+auth.uid).exists())",
+        ".write": "auth != null && (root.child('superadmins/'+auth.uid).exists() || (auth.uid === $uid && newData.isString() && newData.val() === root.child('inviteCodes/'+root.child('userInvite/'+auth.uid).val()).child('groupId').val() && root.child('inviteCodes/'+root.child('userInvite/'+auth.uid).val()).child('usedBy').val() === auth.uid))"
       }
     },
     "groups": {
@@ -60,9 +61,12 @@
       }
     },
     "inviteCodes": {
-      ".read": "auth != null",
       "$code": {
-        ".write": "auth != null"
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('superadmins/'+auth.uid).exists()",
+        "usedBy": {
+          ".write": "auth != null && !data.exists() && newData.val() === auth.uid && root.child('userInvite/'+auth.uid).val() === $code"
+        }
       }
     },
     "notices": {
@@ -182,8 +186,8 @@
       }
     },
     "secretary": {
-      ".read": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).exists())",
-      ".write": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).exists())",
+      ".read": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).val() === 'makechango')",
+      ".write": "auth != null && (root.child('superadmins/'+auth.uid).exists() || root.child('userGroup/'+auth.uid).val() === 'makechango')",
       "commands": {
         "$id": {
           ".validate": "newData.hasChild('type')",
@@ -324,6 +328,26 @@
       },
       "tokens": {
         ".read": false
+      }
+    },
+    "userInvite": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('superadmins/'+auth.uid).exists())",
+        ".write": "auth != null && (root.child('superadmins/'+auth.uid).exists() || (auth.uid === $uid && newData.isString() && root.child('inviteCodes/'+newData.val()+'/groupId').exists() && !root.child('inviteCodes/'+newData.val()+'/usedBy').exists() && root.child('inviteCodes/'+newData.val()+'/expiresAt').val() > now))"
+      }
+    },
+    "wmsUsers": {
+      ".read": "auth != null && root.child('superadmins/'+auth.uid).exists()",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('superadmins/'+auth.uid).exists())",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "userAccess": {
+      ".read": "auth != null && root.child('superadmins/'+auth.uid).exists()",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('superadmins/'+auth.uid).exists())",
+        ".write": "auth != null && root.child('superadmins/'+auth.uid).exists()"
       }
     }
   }

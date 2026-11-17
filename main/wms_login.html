@@ -377,8 +377,10 @@ async function useInviteCode(){
     if(codeData.expiresAt&&Date.now()>codeData.expiresAt){status.innerHTML='<span style="color:#F87171;font-size:11px;">❌ 만료된 초대 코드입니다</span>';return;}
     var user=auth.currentUser;
     var gid=codeData.groupId;
-    await db.ref('userGroup/'+user.uid).set(gid);
+    /* 보안 규칙 순서(2026-11-17): ① 이 코드를 잡고 ② 코드를 사용 처리 ③ 그 코드의 그룹으로만 가입 */
+    await db.ref('userInvite/'+user.uid).set(code);
     await db.ref('inviteCodes/'+code+'/usedBy').set(user.uid);
+    await db.ref('userGroup/'+user.uid).set(gid);
     status.innerHTML='<span style="color:#34D399;font-size:11px;">✅ 참가 완료!</span>';
     var rUrl=getReturnUrl();
     setTimeout(function(){window.location.replace(rUrl||getWmsPath());},500);
