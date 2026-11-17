@@ -112,7 +112,9 @@ var QS=new URLSearchParams(location.search);
 var GID=QS.get('gid')||localStorage.getItem('wms_adminGroupId')||'', WANT_WID=QS.get('wid')||'';
 var USER=null, WHS=[], SEL='', RECS={}, LIVE={}, PRODUCTS=[];
 var FLT={from:'', to:'', type:''};
-var PTYPES=['KPP','아주','일반(목재)','플라스틱','1회용'];
+var PTYPES=['아주','KPP','기타'];
+/* 엑셀에서 온 값 → 세 가지 중 하나 (비면 그대로 비움) */
+function normPtype(v){v=String(v||'').trim();if(!v)return '';if(/아주/.test(v))return '아주';if(/kpp/i.test(v))return 'KPP';return '기타';}
 var HEAD=['날짜','구분','창고','차량','상품명','유통기한','파렛트수','파렛트당','제품수량','파렛트종류','전표촬영','비고','상태','전표사진'];
 var PAL=['#B22222','#FF0000','#FF6666','#CC7A00','#FFA500','#FFC04D','#B3B300','#006400','#008000','#4CAF50','#00008B','#0000FF','#6666FF','#000080','#333399','#004D40','#008080','#4DB6AC','#4B0082','#800080','#B366B3'];
 
@@ -210,7 +212,6 @@ function render(){
   h+=renderPlans();
   h+=renderList();
   h+='<datalist id="prodList">'+PRODUCTS.map(function(x){return '<option value="'+esc(x)+'">';}).join('')+'</datalist>';
-  h+='<datalist id="ptypeList">'+PTYPES.map(function(x){return '<option value="'+esc(x)+'">';}).join('')+'</datalist>';
   app.innerHTML=h;
   window.scrollTo(0,sy);
 }
@@ -248,7 +249,7 @@ function renderPlans(){
         +'<td data-l="파렛트수"><input class="pi" inputmode="numeric" value="'+esc(r.pallets||'')+'" placeholder="팔" data-f="pallets"'+a+'></td>'
         +'<td data-l="파렛트당"><input class="pi" inputmode="numeric" value="'+esc(r.per||'')+'" placeholder="개/팔" data-f="per"'+a+'></td>'
         +'<td data-l="제품수량"><input class="pi" inputmode="numeric" value="'+esc(r.qty||'')+'" placeholder="자동" data-f="qty"'+a+(r.qtyManual?' style="border-color:#F59E0B"':'')+' title="파렛트수×파렛트당 자동 · 직접 고치면 그 값 유지"></td>'
-        +'<td class="w2" data-l="파렛트종류"><input class="pi" list="ptypeList" value="'+esc(r.ptype||'')+'" placeholder="종류" data-f="ptype"'+a+'></td>'
+        +'<td class="w2" data-l="파렛트종류"><select class="pi" data-f="ptype"'+a+'><option value="">선택</option>'+PTYPES.map(function(x){return '<option value="'+esc(x)+'"'+(r.ptype===x?' selected':'')+'>'+esc(x)+'</option>';}).join('')+(r.ptype&&PTYPES.indexOf(r.ptype)<0?'<option value="'+esc(r.ptype)+'" selected>'+esc(r.ptype)+'</option>':'')+'</select></td>'
         +'<td class="w2" data-l="전표촬영"><label class="ck"><input type="checkbox" data-f="slipReq"'+a+(r.slipReq?' checked':'')+'>'+(r.slipReq?'유':'무')+'</label></td>'
         +'<td class="w3" data-l="비고"><input class="pi" value="'+esc(r.note||'')+'" placeholder="비고" data-f="note"'+a+'></td>'
         +'<td data-l="&nbsp;"><button class="btn del" data-act="rdel"'+a+' title="이 줄 삭제">✕</button></td>'
@@ -517,7 +518,7 @@ function downloadTpl(){
     ['유통기한','YYMMDD (예: 270531) · 비워도 됨'],
     ['파렛트수 / 파렛트당','입고는 둘 다 필수'],
     ['제품수량','비우면 파렛트수×파렛트당'],
-    ['파렛트종류','KPP · 아주 · 일반(목재) · 플라스틱 · 1회용 · 그 밖은 그대로 적기'],
+    ['파렛트종류','아주 · KPP · 기타 중 하나 (그 밖의 이름은 기타로 들어가요)'],
     ['전표촬영','유 / 무 (O·Y·예·있음도 유로 봄)'],
     ['비고','자유'],
     ['상태 · 전표사진','내려받기에만 나오는 칸 — 올릴 땐 무시돼요'],
@@ -569,7 +570,7 @@ function uploadXls(){
           var veh=String(g(row,'veh')||'').trim();
           var k=wid+'|'+d+'|'+type+'|'+veh;
           (groups[k]=groups[k]||{wid:wid,date:d,type:type,veh:veh,rows:[]}).rows.push({product:prod,exp:exp,pallets:pal?String(pal):'',per:per?String(per):'',
-            qty:qty?String(qty):(pal*per?String(pal*per):''),qtyManual:!!qty&&qty!==pal*per,ptype:String(g(row,'pt')||'').trim(),slipReq:slip,note:String(g(row,'note')||'').trim()});
+            qty:qty?String(qty):(pal*per?String(pal*per):''),qtyManual:!!qty&&qty!==pal*per,ptype:normPtype(g(row,'pt')),slipReq:slip,note:String(g(row,'note')||'').trim()});
           cnt++;
         });
         var ks=Object.keys(groups);
