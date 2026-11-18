@@ -9,8 +9,10 @@ var STAR_CUST = '446';   /* 이벗 고객사 — 스타인터내셔널 */
    - 스타(기본): 피킹 화면에서 들어옴. 모든 반품 송장을 우체국 추적, 스타인터내셔널(446)만 반영
    - 화물(?db=cargo): 화물관리에서 들어옴. 한진·롯데 등 다른 택배도 많아 우체국 송장만 추적(6077·7077 은 자동 우체국, 그 밖의 번호는 택배사 「우체국」을 고르면),
      나머지는 원송장 없이 쌓였다가 사진 등으로 원송장을 찾아 ✏️ 수정에 넣으면 이벗 조회·반영. 업체명·택배사 선택. 고객사 제한 없음
-     freeItems: 상품 스캔 필수 아님 (대표님 2026-11-12 — 3PL 반품은 변수가 많음). 스캔·입력이 없으면 이벗에서 불러온 주문 상품 전부를 반품으로 반영,
-       직접 입력(아무 이름)·주문 외 상품은 막지 않고 이벗 반품 메모에 이름을 남김
+     freeItems: 휴대폰에서 상품 스캔 필수 아님 (대표님 2026-11-12 — 3PL 반품은 변수가 많음). 직접 입력(아무 이름)·주문 외 상품은 막지 않고 이벗 반품 메모에 이름을 남김
+     반품 규칙 (대표님 2026-11-18): 원송장으로 이벗 주문을 불러오면 그 주문 줄(여러 줄·여러 개 그대로)이 실제 나간 것 → 그중 들어온 것만 정상·불량 체크해 반영,
+       안 들어온 줄은 0 = 안 넣음. 「주문 상품 전부 반영」은 없앰 (립밤 3+1 주문에 1개 반품이 4개로 들어갈 뻔함).
+       원송장이 없거나 주문을 불러올 수 없으면(조회 실패·못 찾음) 「임의 등록」으로 완료 = 이벗 반영 안 함, 그 뒤 다시 조회하지 않음 → 나중에 직접 검수해 기입
      relay: 이벗 조회·반영을 상시 컴퓨터 헤드비서의 이벗 탭(메이크창고 계정)으로 보냄 (대표님 2026-11-12). 스타는 다른 이벗 계정이라 즐겨찾기 도우미 그대로 */
 var CFG = /[?&]db=cargo(&|$)/.test(location.search)
   ? { db: 'cargo', path: 'cargo_return', title: '3PL 반품입고관리', badge: 'CARGO 3PL RETURN', cust: null, traceAll: false, vendor: true, back: 'cargo_log.html', backLabel: '화물관리로', q: '&db=cargo', relay: true, freeItems: true }
@@ -79,8 +81,7 @@ function judge(r){
     if (!st.length) block.push('다른 고객사 주문 (' + (r.orders || []).map(function(o){ return o.custName || o.cust; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(', ') + ')');
     else if (!(r.items || []).length && st.every(function(o){ return o.ret !== '-'; })) block.push('이벗에서 이미 반품처리됨 (' + st.map(function(o){ return o.ret; }).join(',') + ')');
     else if (!(r.items || []).some(function(it){ return it.got > 0; })){
-      if (!CFG.freeItems) block.push('반품 상품 스캔 없음');
-      else if ((r.items || []).length) info.push('스캔 없음 — 주문 상품 전부 반품으로 반영');
+      if (!CFG.freeItems || (r.items || []).length) block.push('반품 상품 스캔 없음');   /* 불러온 주문 줄 중 들어온 것만 체크 (대표님 2026-11-18) */
       else block.push('이벗 주문에 반품할 상품 없음');
     }
   }
@@ -98,36 +99,56 @@ function judge(r){
   if (r.memo) info.push('메모: ' + r.memo);
   return { block: block, info: info };
 }
-/* 이벗에 넣을 상품 줄 — 반품 온 수량(got)이 있는 줄만. freeItems(화물)에서 하나도 없으면 주문 상품 전부를 정상으로 */
+/* 이벗에 넣을 상품 줄 — 반품 온 수량(got)이 있는 줄만 (안 들어온 줄은 넣지 않음, 대표님 2026-11-18) */
 function ebutLines(r){
-  var items = r.items || [], got = items.filter(function(it){ return it.got > 0; });
-  if (got.length) return got.map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: badOf(it) ? '2' : '1' }; });
-  if (!CFG.freeItems) return [];
-  return items.filter(function(it){ return it.qty > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: it.qty, q: '1' }; });
+  return (r.items || []).filter(function(it){ return it.got > 0; }).map(function(it){ return { bopt: it.bopt, ordlist: it.ordlist, qty: Math.min(it.got, it.qty), q: badOf(it) ? '2' : '1' }; });
 }
-/* 엑셀·PDF 상품 줄 — 이벗에 넣은 것과 같게 (화물에서 스캔이 없으면 주문 상품 전부를 반품 수량으로 보여 줌) */
+/* 엑셀·PDF 상품 줄 — 이벗에 넣은 것과 같게. 11-18 전에 「주문 상품 전부」로 반영된 기록만 그때 넣은 대로 보여 줌 */
 function gotItems(r){
   var items = r.items || [], got = items.filter(function(it){ return it.got > 0; });
-  if (got.length || !CFG.freeItems) return got;
+  if (got.length || !(r.ebut && /주문 상품 전부/.test(r.ebut.memo || ''))) return got;
   return items.filter(function(it){ return it.qty > 0; }).map(function(it){ return Object.assign({}, it, { got: it.qty, bad: 0, q: '1' }); });
 }
+/* 원송장 주문을 불러올 수 없는 반품(화물) → 「임의 등록」으로 끝낼 수 있음 (대표님 2026-11-18)
+   돌려줌: 막힌 이유 | '' (불러오는 중·도우미 대기는 아직 기다림) */
+function freeWhy(r){
+  if (!CFG.freeItems) return '';
+  var b = judge(r).block.filter(function(x){ return !/업체명|택배사/.test(x); })[0] || '';
+  return /원송장 없음|원송장 조회 실패|이벗 주문 조회 실패|못 찾음|반품할 상품 없음/.test(b) ? b : '';
+}
+function isFree(r){ return !!(r.ebut && r.ebut.free); }
 /* 휴대폰 「완료」 건이 저절로 반영 대기로 넘어가도 되는지 — 주문 외 상품이 있으면 스타는 사람이 봄, 화물은 메모로 넘김 */
 function extrasHold(r){ return !CFG.freeItems && !!(r.extras || []).length; }
 function stOf(r){
   if (r.state === 'saving' && Date.now() - (r.saveAt || 0) > 120000) return { k: 'fail', t: '확인 필요' };
-  if (r.state === 'done') return { k: 'done', t: r.ebut && r.ebut.mode === 'manual' ? '수동 완료' : '자동 완료' };
+  if (r.state === 'done') return { k: 'done', t: isFree(r) ? '임의 등록' : r.ebut && r.ebut.mode === 'manual' ? '수동 완료' : '자동 완료' };
   return { scan: { k: 'scan', t: '검수 중' }, ready: { k: 'ready', t: '반영 대기' }, saving: { k: 'saving', t: '반영 중' }, fail: { k: 'fail', t: '반영 실패' } }[r.state] || { k: 'scan', t: '검수 중' };
 }
 /* 이벗에서 상품 목록을 받아 오면, 그 전에 「주문에 없는 상품」으로 쌓아 둔 바코드 중 맞는 것을 상품 수량으로 옮김
    (화물 반품은 원송장을 나중에 찾으므로 상품을 먼저 스캔해 두는 경우가 많음) */
+/* 직접 입력은 상품명이 같거나, 이름 일부(예 「맨솔」)가 한 상품에만 들어 있으면 그 상품 (대표님 2026-11-18)
+   같은 상품이 여러 줄(주문 3개 줄 + 1개 줄)이면 앞 줄부터 주문 수량만큼 채우고 남는 건 마지막 줄 */
 function absorbExtras(r){
-  var left = [];
+  var items = r.items || [], left = [], sq = function(s){ return String(s || '').replace(/\s/g, '').toLowerCase(); };
   (r.extras || []).forEach(function(x){
-    var n = x.n;
-    (r.items || []).forEach(function(it){ if (n > 0 && ((it.nicn && x.code && (it.nicn === x.code || (digits(it.nicn) && digits(it.nicn) === digits(x.code) && digits(x.code).length >= 8)))
-        || (!x.code && x.name && String(it.name || '').replace(/\s/g, '') === String(x.name).replace(/\s/g, '')))){   /* 직접 입력은 상품명이 같으면 */
-      var b = badOf(it) + badOf(x); it.got = (it.got || 0) + n; n = 0; setBad(it, b); } });
-    if (n > 0) left.push(x);
+    var hits = items.filter(function(it){ return it.nicn && x.code && (it.nicn === x.code || (digits(it.nicn) && digits(it.nicn) === digits(x.code) && digits(x.code).length >= 8)); });
+    if (!hits.length && !x.code && x.name){
+      var nm = sq(x.name);
+      hits = items.filter(function(it){ return sq(it.name) === nm; });
+      if (!hits.length && nm.length >= 2){
+        var p = items.filter(function(it){ return sq(it.name).indexOf(nm) >= 0; });
+        if (p.length && p.every(function(it){ return it.bopt === p[0].bopt; })) hits = p;
+      }
+    }
+    var n = x.n || 0, b = badOf(x);
+    if (!hits.length || n <= 0){ if (n > 0) left.push(x); return; }
+    hits.forEach(function(it, i){
+      if (n <= 0) return;
+      var k = i === hits.length - 1 ? n : Math.min(n, Math.max(0, (it.qty || 0) - (it.got || 0)));
+      if (!k) return;
+      var kb = Math.min(b, k), ob = badOf(it);
+      it.got = (it.got || 0) + k; setBad(it, ob + kb); n -= k; b -= kb;
+    });
   });
   r.extras = left;
 }

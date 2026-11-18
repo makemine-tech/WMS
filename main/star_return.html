@@ -478,8 +478,10 @@ function lookup(no){
   var r = RECS[no]; if (!r || !r.orig || (r.look === 'busy' && Date.now() - (r.lookBusyAt || 0) < 120000)) return Promise.resolve();
   patch(no, { look: 'busy', lookBusyAt: Date.now() }); renderCur();
   return hcall('find', { orig: r.orig, origDate: r.origDate, cust: CFG.cust }, 60000).then(function(d){
-    var r2 = RECS[no] || r, old = {}; (r2.items || []).forEach(function(it){ old[it.bopt + '|' + it.ordlist] = it; });
-    var items = (d.items || []).map(function(it){ var o = old[it.bopt + '|' + it.ordlist] || {}, n = { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0 }; setBad(n, badOf(o.got != null ? o : { got: 0 })); return n; });
+    /* 찍어 둔 수량 옮기기: 같은 주문에 같은 상품이 여러 줄(3개 줄 + 1개 줄)이면 상품·주문번호가 같으므로 몇 번째 줄인지까지 맞춤 (예전엔 한 줄 수량이 두 줄에 복사됨) */
+    var r2 = RECS[no] || r, old = {}, seen = {}, kOf = function(it){ var b = it.bopt + '|' + it.ordlist; seen[b] = (seen[b] || 0) + 1; return b + '|' + seen[b]; };
+    (r2.items || []).forEach(function(it){ old[kOf(it)] = it; }); seen = {};
+    var items = (d.items || []).map(function(it){ var o = old[kOf(it)] || {}, n = { bopt: it.bopt, ordlist: it.ordlist, name: it.name, nicn: it.nicn, opt: it.opt, qty: it.qty || 1, got: o.got || 0 }; setBad(n, badOf(o.got != null ? o : { got: 0 })); return n; });
     var tmp = { items: items, extras: (r2.extras || []).slice() }; absorbExtras(tmp);   /* 원송장 찾기 전에 스캔해 둔 상품 → 주문 상품 수량으로 */
     patch(no, { look: (d.orders || []).length ? 'ok' : 'none', orders: d.orders || [], items: tmp.items, extras: tmp.extras, locas: d.locas || {}, lookAt: Date.now(), lookErr: null });
     /* 휴대폰에서 상품 목록 오기 전에 찍어 두고 「목록 완료」한 건: 찍은 상품이 주문 상품과 다 맞으면 바로 반영 대기로 (대표님 2026-10-24) */
@@ -514,13 +516,14 @@ function waitWhy(r){
     if ((r.items || []).filter(isMix).length) return { c:'r', t:'정상·불량 섞인 상품 — 반영하면 멈춤', h:'이벗에서 손으로 나눠 넣고 ✋ 수동 완료' };
     return { c:'b', t:'반영 대기 — 아직 이벗에 안 넣음', h:(H.ok && H.login !== false ? '위 「이벗에 반영」 누르면 완료' : '이벗 도우미 연결(🟢) 후 「이벗에 반영」') };
   }
+  if (freeWhy(r)) return { c:'r', t:'⛔ ' + freeWhy(r), h:'원송장을 알면 넣기 · 모르거나 못 불러오면 들어온 상품을 「직접 입력」 → 「✔ 검수 완료 → 임의 등록」(이벗 반영 없이 끝, 나중에 직접 기입)' };
   if (j.block.length){
     var b0 = j.block[0], how = '펼쳐서 채우기';
     if (/조회 (대기|중)/.test(b0)) how = H.ok ? '이벗에서 찾는 중 — 잠시 기다리기' : '이벗 도우미를 연결하면 자동으로 찾음';
     else if (/조회 실패|못 찾음/.test(b0)) how = '펼쳐서 🔁 다시 조회 · 원송장 번호 확인';
     else if (/원송장/.test(b0)) how = '✏️ 수정에 원송장 번호 넣기';
     else if (/업체명|택배사/.test(b0)) how = '펼쳐서 선택';
-    else if (/스캔 없음/.test(b0)) how = '펼쳐서 반품 상품 스캔';
+    else if (/스캔 없음/.test(b0)) how = CFG.freeItems ? '펼쳐서 주문 줄 중 들어온 것만 정상·불량 체크 (안 온 줄은 0 그대로)' : '펼쳐서 반품 상품 스캔';
     else if (/다른 고객사|이미 반품처리/.test(b0)) how = '반영 대상 아님 — ✋ 수동 완료 또는 🗑';
     return { c:'r', t:'⛔ ' + b0, h:how };
   }
@@ -574,10 +577,15 @@ function setExtraQ(i, q){ var r = RECS[CUR]; if (!r || locked(r)) return; var x 
 function setRecField(f, v){ var r = RECS[CUR]; if (!r || locked(r)) return; var o = {}; o[f] = v; save(r, o); if (f === 'vendor') addVendor(v); renderCur(); }
 function finishCur(){
   var r = RECS[CUR]; if (!r) return;
-  var j = judge(r);
-  /* 화물: 원송장을 아직 못 찾은 반품은 「검수 완료(반영 전)」로 두고 목록에 남김 → 원송장을 찾아 넣으면 반영 대기로 */
-  if (j.block.length && CFG.db === 'cargo' && /원송장|주문 조회|못 찾음/.test(j.block[0]) && (CFG.freeItems || (r.items || []).some(function(it){ return it.got > 0; }) || (r.extras || []).length)){
-    save(r, { checked: true, checkedBy: byName(), checkedAt: Date.now() }).then(function(){ beep(true); toast('✔ 검수 완료 — 원송장을 찾아 ✏️ 수정에 넣으면 반영할 수 있습니다'); CUR = null; renderCur(); $('rnoIn').focus(); });
+  var j = judge(r), fw = freeWhy(r);
+  /* 화물: 원송장이 없거나 주문을 불러올 수 없으면 「임의 등록」으로 끝냄 — 이벗 반영 안 함, 다시 조회 안 함, 나중에 직접 검수해 기입 (대표님 2026-11-18) */
+  if (fw){
+    if (CFG.vendor && !r.vendor){ beep(false); toast('업체명을 먼저 넣어 주세요'); return; }
+    if (!(r.extras || []).length){ beep(false); toast('임의 등록할 상품이 없습니다 — 아래 「직접 입력」으로 들어온 상품·수량·정상/불량을 넣어 주세요'); var mn = $('manName'); if (mn) mn.focus(); return; }
+    if (!confirm('원송장 주문을 불러올 수 없습니다 (' + fw + ').\n\n「임의 등록」으로 완료합니다:\n· 이벗에는 넣지 않습니다\n· 이 건은 다시 조회하지 않고 여기서 끝납니다\n· 나중에 직접 검수해 이벗에 기입하세요\n\n진행할까요?')) return;
+    save(r, { state: 'done', checked: true, checkedBy: byName(), checkedAt: Date.now(), saveAt: null,
+      ebut: { at: Date.now(), by: byName(), mode: 'manual', free: true, msg: '임의 등록 (' + fw + ') — 이벗 직접 기입' } })
+      .then(function(){ beep(true); toast('✔ 임의 등록으로 완료했습니다'); CUR = null; renderCur(); renderList(); $('rnoIn').focus(); });
     return;
   }
   if (j.block.length){ beep(false); toast('이벗에 넣을 수 없습니다: ' + j.block[0]); return; }
@@ -713,10 +721,10 @@ function curHtml(r, lastCode){
   h += g;
   /* 할 일 */
   h += '<div class="acts">';
-  if (r.state === 'scan' || !r.state) h += '<button class="btn p" onclick="finishCur()">✔ 검수 완료 → 반영 대기</button>';
+  if (r.state === 'scan' || !r.state) h += '<button class="btn p" onclick="finishCur()">' + (freeWhy(r) ? '✔ 검수 완료 → 임의 등록' : '✔ 검수 완료 → 반영 대기') + '</button>';
   if (r.state === 'ready' || r.state === 'fail') h += '<button class="btn w" onclick="reopenCur()">✏️ 다시 검수</button>';
   if (r.state !== 'done' && r.state !== 'saving') h += '<button class="btn" onclick="manualDone(\'' + r.rno + '\')" title="이벗에 직접 넣었거나, 이벗 반영 없이 끝낼 때">✋ 수동 완료</button>';
-  if (r.trace === 'err' || r.look === 'err' || r.look === 'none' || r.look === 'wait') h += '<button class="btn" onclick="retryCur()">🔁 다시 조회</button>';
+  if (!lk && (r.trace === 'err' || r.look === 'err' || r.look === 'none' || r.look === 'wait')) h += '<button class="btn" onclick="retryCur()">🔁 다시 조회</button>';
   h += '<button class="btn" onclick="editRec(\'' + r.rno + '\')" title="반품송장 번호 바꾸기 등">✏️ 수정 창</button>';
   if (!lk) h += '<button class="btn r" onclick="delCur()">기록 지우기</button>';
   h += '<span class="sp"></span><button class="btn" onclick="CUR=null;renderCur()">접기 ▲</button></div>';
@@ -755,7 +763,9 @@ function pushAll(){
       var mix = (r.items || []).filter(isMix);
       if (mix.length){ bad++; return save(RECS[k], { state: 'fail', ebut: { at: Date.now(), by: byName(),
         msg: '정상·불량 섞인 상품 (' + mix.map(function(it){ return it.name + ' 정상 ' + goodOf(it) + '·불량 ' + badOf(it); }).join(', ') + ') — 이벗에서 손으로 나눠 넣고 ✋ 수동 완료' } }); }
-      var lines = ebutLines(r);   /* 화물: 스캔·입력이 없으면 주문 상품 전부 (star_return_core.js) */
+      var lines = ebutLines(r);   /* 들어온 것(정상·불량 체크한 줄)만 (star_return_core.js) */
+      /* 예전 규칙(주문 상품 전부)으로 반영 대기에 오른 건: 체크한 줄이 없으면 넣지 않고 검수 중으로 되돌림 */
+      if (!lines.length){ bad++; return save(RECS[k], { state: 'scan', saveAt: null, ebut: { at: Date.now(), by: byName(), msg: '들어온 상품 체크 없음 — 펼쳐서 주문 줄 중 들어온 것만 정상·불량 체크' } }); }
       /* 특이사항(목록 「특이사항」 칸과 같은 내용) → 이벗 반품입고 메모 (대표님 2026-10-25) */
       var memo = judge(r).info.join(' / ');
       return hcall('save', { orig: r.orig, origDate: r.origDate, rno: r.rno, lines: lines, cust: CFG.cust, courier: r.courier || '우체국', reco: r.reco || null, memo: memo }, 60000).then(function(res){
