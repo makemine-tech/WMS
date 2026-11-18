@@ -733,6 +733,7 @@ function UnitPop(p){
           s.exp?fmtExp(s.exp):'기한없음',
           est!=='ok'&&h('span',{style:{fontSize:10,fontWeight:800,borderRadius:4,padding:'0 4px',background:EM[est].bg,color:EM[est].clr}},EM[est].label),
           pend&&h('span',{style:{fontSize:10,fontWeight:800,borderRadius:4,padding:'0 4px',background:'rgba(245,158,11,.2)',color:'#FCD34D'}},'출고대기')),
+        s.lot&&h('div',{style:{fontSize:11,color:'#FCD34D',fontWeight:700,marginTop:2,wordBreak:'break-all'}},'🏷 LOT '+s.lot),
         h('div',{style:{fontSize:14,fontWeight:700,color:TX,marginTop:2}},(+s.qty||0).toLocaleString()+'개')),
       /* 우측 버튼: 즉출(한 번 더 눌러 확정) · 수정 */
       h('div',{style:{display:'flex',flexDirection:'column',gap:4,flexShrink:0}},
@@ -860,7 +861,10 @@ function WHView(p){
   var v6=useState([]),selSlots=v6[0],setSelSlots=v6[1];
   var v7=useState(null),moveFrom=v7[0],setMoveFrom=v7[1];
   var v8=useState(false),showIn=v8[0],setShowIn=v8[1];
-  var v9=useState({name:'',pallets:'1',qty:'1',exp:''}),inForm=v9[0],setInForm=v9[1];
+  var v9=useState({name:'',pallets:'1',qty:'1',exp:'',lot:''}),inForm=v9[0],setInForm=v9[1];
+  /* 🏷 로트번호 — 창고 설정에서 켠 창고만 입력칸이 보인다 (wh.useLot). 슬롯·입고대기·입고기록에 lot 로 남김 */
+  var useLot=!!wh.useLot;
+  function lotOf(v){v=String(v==null?'':v).trim();return v.slice(0,40);}
   var v10=useState(null),editInfo=v10[0],setEditInfo=v10[1];
   var v11=useState(null),histView=v11[0],setHistView=v11[1];
   var v12=useState(false),showExp=v12[0],setShowExp=v12[1];
@@ -908,11 +912,11 @@ function WHView(p){
   var miniRef=useRef(null),miniDrag=useRef(false);   /* 미니맵 — 여기서 난 이벤트는 지도 이동·확대로 넘기지 않는다 */
   var ttSt=useState(null),tip=ttSt[0],setTip=ttSt[1];var lpTimer=useRef(null);
   function _findSlot(e){var t=e.target&&e.target.closest&&e.target.closest('[data-k]');if(!t)return null;var k=t.getAttribute('data-k'),s=t.getAttribute('data-s');var cell=wh.cells[k],slot=cell&&cell.slots&&cell.slots[s];return slot?{slot:slot}:null;}
-  function onTipMove(e){if(didDrag.current){if(tip)setTip(null);return;}var r=_findSlot(e);if(!r){if(tip)setTip(null);return;}setTip({name:r.slot.name,exp:r.slot.exp,qty:r.slot.qty,x:e.clientX,y:e.clientY});}
+  function onTipMove(e){if(didDrag.current){if(tip)setTip(null);return;}var r=_findSlot(e);if(!r){if(tip)setTip(null);return;}setTip({name:r.slot.name,exp:r.slot.exp,qty:r.slot.qty,lot:r.slot.lot,x:e.clientX,y:e.clientY});}
   function onTipLeave(){if(lpTimer.current){clearTimeout(lpTimer.current);lpTimer.current=null;}if(tip)setTip(null);}
   function onTipDown(e,ops){if(e.pointerType!=='touch')return;lpFired.current=false;
     if(ops){var ck=_findCellKey(e);if(!ck)return;if(lpTimer.current)clearTimeout(lpTimer.current);lpTimer.current=setTimeout(function(){lpFired.current=true;setUnitPop({k:ck});},420);return;}   /* 작업탭: 길게누르기 → 유닛 말풍선 */
-    var r=_findSlot(e);if(!r)return;var x=e.clientX,y=e.clientY,slot=r.slot;if(lpTimer.current)clearTimeout(lpTimer.current);lpTimer.current=setTimeout(function(){setTip({name:slot.name,exp:slot.exp,qty:slot.qty,x:x,y:y});},420);}
+    var r=_findSlot(e);if(!r)return;var x=e.clientX,y=e.clientY,slot=r.slot;if(lpTimer.current)clearTimeout(lpTimer.current);lpTimer.current=setTimeout(function(){setTip({name:slot.name,exp:slot.exp,qty:slot.qty,lot:slot.lot,x:x,y:y});},420);}
   function onTipPointerMove(e){if(e.pointerType!=='touch')return;if(lpTimer.current){clearTimeout(lpTimer.current);lpTimer.current=null;}if(tip)setTip(function(t){return t?Object.assign({},t,{x:e.clientX,y:e.clientY}):t;});}
   function onTipUp(){if(lpTimer.current){clearTimeout(lpTimer.current);lpTimer.current=null;}setTip(null);}
   /* ★ 유닛 말풍선 — 누른 칸 옆에 분할 슬롯 구성(상품명·유통기한·수량)을 크게. 잠금: 탭 / 해제: 길게누르기·우클릭 */
@@ -1074,7 +1078,7 @@ function WHView(p){
     setOutQ(function(q){return q.map(function(it){return mapKey[it.cKey]?Object.assign({},it,{cKey:mapKey[it.cKey]}):it;});});
     setBlock(null);
   }
-  function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};});var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:inForm.exp.trim(),pallets:n,qty:(+inForm.qty||1)*n};dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});fillCursor.current=null;setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:''});setTab('ops');}
+  function submitIn(){var nm2=inForm.name.trim();if(!nm2)return;var n=Math.max(1,+inForm.pallets||1),clr=pickClr(wh,nm2);var lot=useLot?lotOf(inForm.lot):'';var items=Array.from({length:n},function(){var it={id:uid(),name:nm2,qty:+inForm.qty||1,exp:inForm.exp.trim()};if(lot)it.lot=lot;return it;});var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:inForm.exp.trim(),pallets:n,qty:(+inForm.qty||1)*n};if(lot)txEntry.lot=lot;dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});fillCursor.current=null;setShowIn(false);setInForm({name:'',pallets:'1',qty:'1',exp:'',lot:''});setTab('ops');}
   function clickSlot(cKey,sKey){if(locked||didDrag.current)return;if(block){handleBlockClick(cKey);return;}if(pendSet.has(cKey+'||'+sKey))return;var cell=wh.cells[cKey];if(!cell||!cell.type||cell.type==='unused')return;if(!cell.slots)return;var slot=cell.slots[sKey]||null;if(outSelMode){if(!slot)return;var meta=outMeta;onUpdate(function(w){var ni={qid:uid(),date:meta.date,loc:meta.loc,cKey:cKey,sKey:sKey,slot:Object.assign({},slot)};return Object.assign({},w,{pendOut:(w.pendOut||[]).concat([ni])});});return;}if(immMode){if(!slot)return;setOutQ(function(q){return q.concat([{qid:uid(),cKey:cKey,sKey:sKey,slot:Object.assign({},slot)}]);});withUndo(function(w){w.cells[cKey].slots[sKey]=null;return w;});return;}if(moveFrom){if(moveFrom.cKey===cKey&&moveFrom.sKey===sKey){setMoveFrom(null);return;}if(!slot){withUndo(function(w){var src=w.cells[moveFrom.cKey]&&w.cells[moveFrom.cKey].slots;if(!src||!src[moveFrom.sKey])return w;w.cells[cKey].slots[sKey]=src[moveFrom.sKey];src[moveFrom.sKey]=null;return w;});}setMoveFrom(null);return;}if(slot&&selSlots.length===0){setMoveFrom({cKey:cKey,sKey:sKey,slot:slot});return;}if(!slot&&(cell.type==='rack'||cell.type==='shelf')){var idx=selSlots.findIndex(function(s){return s.cKey===cKey&&s.sKey===sKey;});if(idx>=0)setSelSlots(function(s){return s.filter(function(_,i){return i!==idx;});});else{if(selSlots.length===0)fillCursor.current=null;setSelSlots(function(s){return s.concat([{cKey:cKey,sKey:sKey}]);});}}}
   /* 그리드 순서(행→열, 셀 내부 서브슬롯)에서 anchor 다음의 첫 빈 슬롯. anchor=null이면 처음부터 */
   function findNextEmpty(cells,rows,cols,anchor){
@@ -1123,7 +1127,7 @@ function WHView(p){
     if(placed)fillCursor.current=placed;
   }
   function dblClick(cKey,sKey){if(locked||didDrag.current||block||pendSet.has(cKey+'||'+sKey))return;var slot=wh.cells[cKey]&&wh.cells[cKey].slots[sKey];if(slot){setCopyN('1');setEditInfo({cKey:cKey,sKey:sKey,data:Object.assign({},slot)});}}
-  function saveEdit(){withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=editInfo.data;return w;});setEditInfo(null);}
+  function saveEdit(){var d=Object.assign({},editInfo.data);var l=lotOf(d.lot);if(l)d.lot=l;else delete d.lot;withUndo(function(w){w.cells[editInfo.cKey].slots[editInfo.sKey]=d;return w;});setEditInfo(null);}
   /* ★ 말풍선 즉시출고 — 출고대기 없이 바로 출고: 출고일지(txLogs) 기록 + 슬롯 비움 + 되돌리기 스냅샷 (confirmPend 와 동일 방식). 출고대기 걸린 슬롯이면 대기도 함께 제거 */
   function instantOut(cKey,sKey){var cell=wh.cells[cKey],slot=cell&&cell.slots&&cell.slots[sKey];if(!slot)return;
     var txEntry={id:uid(),type:'out',date:todayStr(),name:slot.name,exp:slot.exp||'',pallets:1,qty:slot.qty||0};
@@ -1148,9 +1152,10 @@ function WHView(p){
     if(!nm2){alert('상품명이 없습니다');return;}
     var n=Math.max(1,Math.min(999,parseInt(copyN,10)||1));
     var qEach=+d.qty||0,exp=(d.exp||'').trim();
-    var items=Array.from({length:n},function(){return{id:uid(),name:nm2,qty:qEach,exp:exp};});
+    var lot=lotOf(d.lot);
+    var items=Array.from({length:n},function(){var it={id:uid(),name:nm2,qty:qEach,exp:exp};if(lot)it.lot=lot;return it;});
     var clr=pickClr(wh,nm2);
-    var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:exp,pallets:n,qty:qEach*n};
+    var txEntry={id:uid(),type:'in',date:todayStr(),name:nm2,exp:exp,pallets:n,qty:qEach*n};if(lot)txEntry.lot=lot;
     dbSaveTxEntry(wh.id,txEntry);_setTxLog(function(prev){return prev.concat([txEntry]);});
     withUndo(function(w){return Object.assign({},w,{inQ:w.inQ.concat(items),pColors:setClrMap(w.pColors,nm2,clr),txLog:(w.txLog||[]).concat([txEntry])});});
     fillCursor.current=null;setEditInfo(null);setTab('ops');
@@ -1452,7 +1457,7 @@ function WHView(p){
   return h('div',{ref:rootRef,style:{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',flexDirection:'column',overflow:'hidden',background:BG}},
     saveFlash&&h('div',{key:String(toastK.current),className:'toast'},'저장 완료'),
     unitPop&&tab==='ops'&&h(UnitPop,{wh:wh,k:unitPop.k,pendSet:pendSet,onClose:function(){setUnitPop(null);},onOut:function(sk){instantOut(unitPop.k,sk);},onEdit:function(sk){popEdit(unitPop.k,sk);}}),
-    tip&&!unitPop&&h('div',{style:{position:'fixed',left:Math.min(tip.x+14,window.innerWidth-180),top:Math.max(tip.y-70,8),background:'rgba(15,23,42,.97)',border:'1px solid #334155',borderRadius:8,padding:'7px 10px',fontSize:12,color:TX,zIndex:9999,pointerEvents:'none',boxShadow:'0 4px 14px rgba(0,0,0,.45)',whiteSpace:'nowrap',lineHeight:1.45,fontWeight:600}},h('div',{style:{color:TX,marginBottom:2}},tip.name),h('div',{style:{fontSize:11,color:'#94A3B8',fontWeight:500}},(tip.exp?fmtExp(tip.exp):'기한없음')+' · '+tip.qty+'개')),
+    tip&&!unitPop&&h('div',{style:{position:'fixed',left:Math.min(tip.x+14,window.innerWidth-180),top:Math.max(tip.y-70,8),background:'rgba(15,23,42,.97)',border:'1px solid #334155',borderRadius:8,padding:'7px 10px',fontSize:12,color:TX,zIndex:9999,pointerEvents:'none',boxShadow:'0 4px 14px rgba(0,0,0,.45)',whiteSpace:'nowrap',lineHeight:1.45,fontWeight:600}},h('div',{style:{color:TX,marginBottom:2}},tip.name),h('div',{style:{fontSize:11,color:'#94A3B8',fontWeight:500}},(tip.exp?fmtExp(tip.exp):'기한없음')+' · '+tip.qty+'개'),tip.lot&&h('div',{style:{fontSize:11,color:'#FCD34D',fontWeight:600}},'🏷 LOT '+tip.lot)),
     h('div',{style:{position:'sticky',top:0,zIndex:10,flexShrink:0}},
     h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'0 8px',height:48,display:'flex',alignItems:'center',gap:5}},
       onBack&&h('button',{style:S('rgba(255,255,255,.07)',TX,{padding:'5px 9px',fontSize:12}),onClick:onBack},'< 목록'),
@@ -1577,7 +1582,11 @@ function WHView(p){
         h('span',{style:{fontSize:11,color:SUB,flexShrink:0}},'줄'),
         [['bottom','▼ 아래쪽'],['right','▶ 오른쪽']].map(function(x){return h('button',{key:x[0],style:S('rgba(16,185,129,.14)','#34D399',{padding:'6px 10px',fontSize:12,borderRadius:6,flexShrink:0,border:'1px solid rgba(16,185,129,.3)'}),onClick:(function(side){return function(){expandGrid(side,expandN);};})(x[0])},x[1]);}),
         h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'(기존 위치 유지)'),
-        h('span',{style:{fontSize:11,color:SUB,flexShrink:0,marginLeft:2}},wh.rows+'×'+wh.cols)),
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0,marginLeft:2}},wh.rows+'×'+wh.cols),
+        h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 4px'}}),
+        h('label',{title:'켜면 입고 등록·슬롯 수정에 로트번호 칸이 생깁니다',style:{display:'flex',alignItems:'center',gap:6,flexShrink:0,cursor:'pointer',fontSize:12,fontWeight:700,color:useLot?'#FCD34D':SUB,background:useLot?'rgba(251,191,36,.1)':'transparent',border:'1px solid '+(useLot?'rgba(251,191,36,.4)':BDR),borderRadius:6,padding:'5px 9px'}},
+          h('input',{type:'checkbox',checked:useLot,onChange:function(e){var on=e.target.checked;onUpdate(function(w){return Object.assign({},w,{useLot:on});});},style:{width:15,height:15,accentColor:'#F59E0B',cursor:'pointer'}}),
+          '🏷 로트번호 사용')),
       isAdmin&&h(LinkCtl,{wid:wh.id}),
       h('div',{style:{background:CARD,borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:0,alignItems:'center',overflowX:'auto',flexShrink:0}},
         h('div',{style:{flexShrink:0,paddingRight:12}},h(DivPicker,{val:sDiv,set:setSDiv})),
@@ -1632,7 +1641,7 @@ function WHView(p){
       h('div',{style:{flexShrink:0,overflowY:'scroll',maxHeight:'45dvh',paddingBottom:'env(safe-area-inset-bottom,20px)',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto'}},
       wh.inQ.length>0&&h('div',{style:{background:'rgba(10,20,38,.98)',borderTop:'2px solid #3B82F6',padding:10,paddingBottom:8}},
         h('div',{style:{fontSize:11,fontWeight:700,marginBottom:7,color:'#60A5FA',display:'flex',alignItems:'center',gap:8}},'입고대기 '+wh.inQ.length+'건',selSlots.length>0?h('span',{style:{color:'#4ADE80',fontWeight:700}},selSlots.length+'개 선택'):h('span',{style:{color:SUB,fontSize:10}},'빈슬롯탭 > 위치지정'),h('span',{style:{flex:1}}),h('button',{style:S('rgba(239,68,68,.14)','#F87171',{padding:'3px 10px',fontSize:10,border:'1px solid rgba(239,68,68,.3)',flexShrink:0}),onClick:clearInQ},'🗑 남은목록 비우기')),
-        h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);},title:item.slipNeed?'📷 전표 촬영 후 적치':undefined},item.slipNeed?'📷 ':null,item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')));}))  ),
+        h('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},wh.inQ.map(function(item){var clr=wh.pColors[item.name]||'#94A3B8';return h('button',{key:item.id,style:S(clr+'22',clr,{border:'1px solid '+clr+'55',padding:'4px 10px',fontSize:12}),onClick:function(){assignIn(item);},title:item.slipNeed?'📷 전표 촬영 후 적치':undefined},item.slipNeed?'📷 ':null,item.name,h('span',{style:{marginLeft:4,fontSize:10,color:clr+'bb'}},'수량'+item.qty+(item.exp?' '+fmtShort(item.exp):'')+(item.lot?' · '+item.lot:'')));}))  ),
       renderPendPanel(),renderImmPanel())),
 
     tab==='status'&&h('div',{style:{flex:1,minHeight:0,overflowY:'scroll',WebkitOverflowScrolling:'touch',overscrollBehaviorY:'auto',padding:'14px 14px 28px'},onClick:function(){if(colorPick)setColorPick(null);}},
@@ -1675,6 +1684,7 @@ function WHView(p){
           h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},h(Inp,{lbl:'파렛트 수',val:inForm.pallets,set:function(v){setInForm(function(f){return Object.assign({},f,{pallets:v});});},type:'number'}),h(Inp,{lbl:'파렛트당 수량',val:inForm.qty,set:function(v){setInForm(function(f){return Object.assign({},f,{qty:v});});},type:'number'})),
           h(Inp,{lbl:'유통기한 YYMMDD',val:inForm.exp,set:function(v){setInForm(function(f){return Object.assign({},f,{exp:v});});},ph:'260505'}),
           inForm.exp.length===6&&h('div',{style:{fontSize:12,color:'#4ADE80'}},fmtExp(inForm.exp)),
+          useLot&&h(Inp,{lbl:'🏷 로트번호',val:inForm.lot||'',set:function(v){setInForm(function(f){return Object.assign({},f,{lot:v});});},ph:'예: L2611-03'}),
           h('button',{style:S('#059669','#fff',{padding:13,fontSize:15,width:'100%'}),onClick:submitIn},'입고 등록')))),
 
     editInfo&&h('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,.76)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16},onClick:function(){setEditInfo(null);}},
@@ -1685,6 +1695,7 @@ function WHView(p){
           h(Inp,{lbl:'수량',val:String(editInfo.data.qty),set:function(v){setEditInfo(function(i){return Object.assign({},i,{data:Object.assign({},i.data,{qty:+v})});});},type:'number'}),
           h(Inp,{lbl:'유통기한',val:editInfo.data.exp||'',set:function(v){setEditInfo(function(i){return Object.assign({},i,{data:Object.assign({},i.data,{exp:v})});});},ph:'YYMMDD'}),
           editInfo.data.exp&&editInfo.data.exp.length===6&&h('div',{style:{fontSize:12,color:'#4ADE80'}},fmtExp(editInfo.data.exp)),
+          (useLot||editInfo.data.lot)&&h(Inp,{lbl:'🏷 로트번호',val:editInfo.data.lot||'',set:function(v){setEditInfo(function(i){return Object.assign({},i,{data:Object.assign({},i.data,{lot:v})});});},ph:'로트번호'}),
           h('div',{style:{display:'flex',gap:8,alignItems:'center',borderTop:'1px solid '+BDR,paddingTop:12,marginTop:2}},
             h('span',{style:{fontSize:12,color:SUB,flexShrink:0}},'복사'),
             h('input',{type:'number',value:copyN,onChange:function(e){setCopyN(e.target.value);},style:{background:BG,border:'1px solid '+BDR,borderRadius:7,padding:'8px 8px',color:TX,fontSize:14,outline:'none',width:60,textAlign:'center',flexShrink:0}}),
