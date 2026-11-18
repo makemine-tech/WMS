@@ -518,7 +518,7 @@ function App(){
 
   var guideEl=showGuide?h(GuideModal,{onClose:closeGuide,onHideToday:hideGuideToday}):null;
   if(authSt==='loading'){return h('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'인증 확인 중...'),Footer);}
-  if(cWh){return h(Fragment,null,h(WHView,{wh:cWh,gid:groupId2||localStorage.getItem('wms_adminGroupId')||'',onUpdate:function(fn){upWh(whId,fn);},onBack:(isAdmin||whs.length>1)?function(){setWhId(null);localStorage.removeItem('wms_adminWhId');}:null,onLogout:doLogout,isAdmin:isAdmin,fbUser:fbUser,linkedFrom:linked[whId]||null}),guideEl);}
+  if(cWh){return h(Fragment,null,h(WHView,{wh:cWh,gid:groupId2||localStorage.getItem('wms_adminGroupId')||'',onUpdate:function(fn){upWh(whId,fn);},onBack:(isAdmin||whs.length>1)?function(){setWhId(null);localStorage.removeItem('wms_adminWhId');}:null,onLogout:doLogout,isAdmin:isAdmin,fbUser:fbUser,linkedFrom:linked[whId]||null,canSetup:isAdmin||groupId2==='makechango'}),guideEl);}
   if(authSt==='ready'){return h(Fragment,null,h(MainView,{whs:whs,onPersist:persist,onEnter:setWhId,onLogout:doLogout,fbUser:fbUser,isAdmin:isAdmin,groupId:localStorage.getItem('wms_adminGroupId'),noticeGroupId:groupId2,linked:linked}),guideEl);}
   return h('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,background:BG}},h('div',{style:{fontSize:48}},'📦'),h('div',{style:{color:SUB,fontSize:13}},'창고 로딩 중...'),Footer);
 }
@@ -895,6 +895,8 @@ function WHView(p){
   /* ★ 창고명 수정 / 그리드 확장(행·열 추가) */
   var wn1=useState(wh.name),whNameEdit=wn1[0],setWhNameEdit=wn1[1];
   var xg1=useState('1'),expandN=xg1[0],setExpandN=xg1[1];
+  var xg2=useState('1'),shrinkN=xg2[0],setShrinkN=xg2[1];
+  var xg3=useState(''),lineTxt=xg3[0],setLineTxt=xg3[1];
   /* ★ 구획(블록) 이동 — {step:'a'|'b'|'target', a,b,target} */
   var bk1=useState(null),block=bk1[0],setBlock=bk1[1];
   /* ★ 슬롯 복사 수량(입고대기로 복제) */
@@ -998,6 +1000,51 @@ function WHView(p){
     });
     if(dr||dc){setOutQ(function(q){return q.map(function(it){var pr=String(it.cKey||'').split('-');return Object.assign({},it,{cKey:((+pr[0]||0)+dr)+'-'+((+pr[1]||0)+dc)});});});}
     setSel(new Set());setSelSlots([]);setMoveFrom(null);
+  }
+  /* ★ 빈 줄 지우기 — 행(가로줄)·열(세로줄)을 지운다. 파렛트가 하나라도 있으면 거절.
+     맨 아래·맨 오른쪽 줄은 다른 칸 위치가 그대로, 가운데 줄은 뒤쪽 칸 위치(행 번호·열 문자)가 한 칸씩 당겨진다. */
+  function lineHasStock(w,axis,idx){var hit=0;for(var i=0;i<(axis==='row'?w.cols:w.rows);i++){var c=(w.cells||{})[axis==='row'?(idx+'-'+i):(i+'-'+idx)];if(c&&c.slots&&Object.values(c.slots).some(Boolean))hit++;}return hit;}
+  function lineHasLayout(w,axis,idx){for(var i=0;i<(axis==='row'?w.cols:w.rows);i++){var c=(w.cells||{})[axis==='row'?(idx+'-'+i):(i+'-'+idx)];if(c&&c.type)return true;}return false;}
+  function lineName(axis,idx){return axis==='row'?((idx+1)+'행'):(colAlphaG(idx)+'열');}
+  function removeLines(axis,idxs){
+    idxs=idxs.filter(function(x,i,a){return a.indexOf(x)===i;}).sort(function(a,b){return a-b;});
+    if(!idxs.length)return;
+    var total=axis==='row'?wh.rows:wh.cols;
+    if(total-idxs.length<1){alert('최소 한 줄은 남아야 해요.');return;}
+    var busy=idxs.filter(function(i){return lineHasStock(wh,axis,i);});
+    if(busy.length){alert('파렛트가 있는 줄은 지울 수 없어요: '+busy.map(function(i){return lineName(axis,i);}).join(', ')+'\n먼저 옮기거나 출고한 뒤 지워 주세요.');return;}
+    var lay=idxs.filter(function(i){return lineHasLayout(wh,axis,i);});
+    var last=idxs[idxs.length-1]===total-1&&idxs.every(function(x,i){return x===total-idxs.length+i;});
+    var msg=lineName(axis,idxs[0])+(idxs.length>1?' ~ '+lineName(axis,idxs[idxs.length-1])+' ('+idxs.length+'줄)':'')+'을 지울까요?';
+    if(lay.length)msg+='\n\n⚠️ 랙·보관 등 칸 설정이 있는 줄도 있어요(빈 칸). 설정도 함께 지워집니다.';
+    if(!last)msg+='\n\n⚠️ 가운데 줄이라 뒤쪽 칸들의 '+(axis==='row'?'행 번호':'열 문자')+'가 한 칸씩 당겨집니다.';
+    msg+='\n(↩ 되돌리기 가능)';
+    if(!confirm(msg))return;
+    var del={};idxs.forEach(function(i){del[i]=1;});
+    function shift(i){var n=0;idxs.forEach(function(x){if(x<i)n++;});return i-n;}
+    function mapKey(k){var pr=String(k||'').split('-'),r=+pr[0]||0,c=+pr[1]||0;return axis==='row'?(shift(r)+'-'+c):(r+'-'+shift(c));}
+    withUndo(function(w){
+      var nr=axis==='row'?w.rows-idxs.length:w.rows, ncl=axis==='col'?w.cols-idxs.length:w.cols, nc={}, old=w.cells||{};
+      for(var r=0;r<w.rows;r++)for(var c=0;c<w.cols;c++){
+        if(axis==='row'&&del[r])continue;if(axis==='col'&&del[c])continue;
+        var oc=old[r+'-'+c];nc[mapKey(r+'-'+c)]=oc||{type:null,divR:1,divC:1,slots:{'0-0':null}};
+      }
+      var np=(w.pendOut||[]).map(function(p){return Object.assign({},p,{cKey:mapKey(p.cKey)});});
+      return Object.assign({},w,{rows:nr,cols:ncl,cells:nc,pendOut:np});
+    });
+    setOutQ(function(q){return q.map(function(it){return Object.assign({},it,{cKey:mapKey(it.cKey)});});});
+    setSel(new Set());setSelSlots([]);setMoveFrom(null);fillCursor.current=null;
+  }
+  function shrinkGrid(side,n){
+    n=Math.max(1,parseInt(n,10)||1);var axis=side==='bottom'?'row':'col',total=axis==='row'?wh.rows:wh.cols;
+    n=Math.min(n,total-1);var idxs=[];for(var i=total-n;i<total;i++)idxs.push(i);removeLines(axis,idxs);
+  }
+  /* 「5」 = 5행, 「C」·「AA」 = 그 열 */
+  function removeNamedLine(txt){
+    txt=String(txt||'').trim().toUpperCase();if(!txt)return;
+    if(/^\d+$/.test(txt)){var r=+txt-1;if(r<0||r>=wh.rows){alert('1~'+wh.rows+'행 중에서 적어 주세요');return;}removeLines('row',[r]);return;}
+    if(/^[A-Z]{1,2}$/.test(txt)){var c=txt.length===1?txt.charCodeAt(0)-65:(txt.charCodeAt(0)-64)*26+(txt.charCodeAt(1)-65);if(c<0||c>=wh.cols){alert('A~'+colAlphaG(wh.cols-1)+'열 중에서 적어 주세요');return;}removeLines('col',[c]);return;}
+    alert('행은 숫자(예: 5), 열은 영문(예: C)으로 적어 주세요');
   }
   /* ★ 구획(블록) 이동 */
   /* kind: 'frame'(구획이동-설정, 프레임·랙 통째) | 'stock'(재고이동-작업, 유닛 내용만) */
@@ -1519,7 +1566,8 @@ function WHView(p){
         h('button',{onClick:function(){var g=p.gid||localStorage.getItem('wms_adminGroupId')||'';if(!g){alert('그룹 정보를 찾지 못했어요. 창고 목록에서 다시 들어와 주세요.');return;}window.location.href='wms_inout.html?gid='+encodeURIComponent(g)+'&wid='+encodeURIComponent(wh.id);},title:'입출고관리 — 예정작업 기록·전표촬영·엑셀/PDF',style:{background:'rgba(245,158,11,.12)',color:'#FBBF24',border:'none',borderRadius:0,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:'2px solid #F59E0B',borderLeft:'1px solid '+BDR}},TabLabel('📋','입출고관리')),
         /* ★ 음성지원 — 이 창고로 음성 입출고 열기 */
         h('button',{onClick:function(){var g=p.gid||localStorage.getItem('wms_adminGroupId')||'';if(!g){alert('그룹 정보를 찾지 못했어요. 창고 목록에서 다시 들어와 주세요.');return;}window.location.href='wms_voice.html?gid='+encodeURIComponent(g)+'&wid='+encodeURIComponent(wh.id);},title:'음성명령으로 입고·적치·출고·확인',style:{background:'rgba(59,130,246,.12)',color:'#60A5FA',border:'none',borderRadius:0,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer',flexShrink:0,borderBottom:'2px solid #3B82F6',borderLeft:'1px solid '+BDR}},TabLabel('🔊','음성명령'))),
-      h('button',{onClick:function(){setTab('setup');setColorPick(null);setBlock(null);},style:Object.assign({},tS(tab==='setup',true),{borderLeft:'1px solid '+BDR})},TabLabel('⚙️','설정'))),
+      /* ⚙️ 설정은 슈퍼관리자·메인 그룹(makechango) 관리자만 — 업체 그룹 초대자는 눌러도 안내만 */
+      h('button',{onClick:function(){if(!p.canSetup){alert('⚙️ 창고 설정은 관리자만 바꿀 수 있어요.\n메이크창고 관리자에게 문의하세요.');return;}setTab('setup');setColorPick(null);setBlock(null);},title:p.canSetup?'창고 설정':'관리자에게 문의하세요',style:Object.assign({},tS(tab==='setup',true),{borderLeft:'1px solid '+BDR},p.canSetup?{}:{opacity:.45})},TabLabel(p.canSetup?'⚙️':'🔒','설정'))),
 
     /* ★ 유통기한 칩 바 — hlProd 선택 + 유통기한 2가지 이상일 때만 노출 */
     (function(){
@@ -1570,7 +1618,7 @@ function WHView(p){
           })));
     })(),
 
-    tab==='setup'&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
+    tab==='setup'&&p.canSetup&&h('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}},
       /* ★ 창고명 수정 · 그리드 확장 바 */
       h('div',{style:{background:'rgba(15,23,42,.6)',borderBottom:'1px solid '+BDR,padding:'8px 10px',display:'flex',gap:8,alignItems:'center',overflowX:'auto',flexShrink:0}},
         h('span',{style:{fontSize:11,color:SUB,flexShrink:0,fontWeight:600}},'창고명'),
@@ -1583,6 +1631,13 @@ function WHView(p){
         [['bottom','▼ 아래쪽'],['right','▶ 오른쪽']].map(function(x){return h('button',{key:x[0],style:S('rgba(16,185,129,.14)','#34D399',{padding:'6px 10px',fontSize:12,borderRadius:6,flexShrink:0,border:'1px solid rgba(16,185,129,.3)'}),onClick:(function(side){return function(){expandGrid(side,expandN);};})(x[0])},x[1]);}),
         h('span',{style:{fontSize:10,color:SUB,flexShrink:0}},'(기존 위치 유지)'),
         h('span',{style:{fontSize:11,color:SUB,flexShrink:0,marginLeft:2}},wh.rows+'×'+wh.cols),
+        h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 4px'}}),
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0,fontWeight:600}},'빈 줄 지우기'),
+        h('input',{type:'number',min:1,max:30,value:shrinkN,onChange:function(e){setShrinkN(e.target.value);},style:{background:BG,border:'1px solid '+BDR,borderRadius:6,padding:'5px 6px',color:TX,fontSize:13,outline:'none',width:46,flexShrink:0,textAlign:'center'}}),
+        h('span',{style:{fontSize:11,color:SUB,flexShrink:0}},'줄'),
+        [['bottom','▲ 아래쪽'],['right','◀ 오른쪽']].map(function(x){return h('button',{key:'s'+x[0],title:(x[0]==='bottom'?'맨 아래':'맨 오른쪽')+' 빈 줄을 지웁니다 (파렛트 있으면 거절)',style:S('rgba(239,68,68,.12)','#F87171',{padding:'6px 10px',fontSize:12,borderRadius:6,flexShrink:0,border:'1px solid rgba(239,68,68,.3)'}),onClick:(function(side){return function(){shrinkGrid(side,shrinkN);};})(x[0])},x[1]);}),
+        h('input',{value:lineTxt,onChange:function(e){setLineTxt(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'){removeNamedLine(lineTxt);setLineTxt('');}},placeholder:'5 또는 C',title:'가운데 빈 줄: 행 번호(예: 5) 또는 열 문자(예: C)',style:{background:BG,border:'1px solid '+BDR,borderRadius:6,padding:'5px 7px',color:TX,fontSize:13,outline:'none',width:70,flexShrink:0,textAlign:'center'}}),
+        h('button',{title:'적은 행·열 한 줄을 지웁니다 (뒤쪽 위치가 당겨짐)',style:S('rgba(239,68,68,.12)','#F87171',{padding:'6px 10px',fontSize:12,borderRadius:6,flexShrink:0,border:'1px solid rgba(239,68,68,.3)'}),onClick:function(){removeNamedLine(lineTxt);setLineTxt('');}},'줄 지우기'),
         h('div',{style:{width:1,alignSelf:'stretch',background:BDR,flexShrink:0,margin:'0 4px'}}),
         h('label',{title:'켜면 입고 등록·슬롯 수정에 로트번호 칸이 생깁니다',style:{display:'flex',alignItems:'center',gap:6,flexShrink:0,cursor:'pointer',fontSize:12,fontWeight:700,color:useLot?'#FCD34D':SUB,background:useLot?'rgba(251,191,36,.1)':'transparent',border:'1px solid '+(useLot?'rgba(251,191,36,.4)':BDR),borderRadius:6,padding:'5px 9px'}},
           h('input',{type:'checkbox',checked:useLot,onChange:function(e){var on=e.target.checked;onUpdate(function(w){return Object.assign({},w,{useLot:on});});},style:{width:15,height:15,accentColor:'#F59E0B',cursor:'pointer'}}),
