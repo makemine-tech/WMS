@@ -212,8 +212,8 @@ function colNames(){ var c=[]; for(var i=0;i<(WH&&WH.cols||0);i++) c.push(V.colN
 /* ── 대기 목록 ── */
 function inGroups(){
   var m={}, order=[];
-  inQArr().forEach(function(it){ if(!it||!it.name) return; var k=it.name+'|'+String(it.exp||'')+'|'+(+it.qty||0);
-    if(!m[k]){ m[k]={id:k, type:'in', product:it.name, exp:String(it.exp||''), qty:+it.qty||0, items:[]}; order.push(k); } m[k].items.push(it); });
+  inQArr().forEach(function(it){ if(!it||!it.name) return; var k=it.name+'|'+String(it.exp||'')+'|'+(+it.qty||0)+(it.lot?'|'+it.lot:'');   /* 로트가 다르면 다른 묶음 */
+    if(!m[k]){ m[k]={id:k, type:'in', product:it.name, exp:String(it.exp||''), qty:+it.qty||0, lot:it.lot||'', items:[]}; order.push(k); } m[k].items.push(it); });
   return order.map(function(k){ var g=m[k]; g.left=g.items.length; g.total=g.left; return g; });
 }
 function outGroups(){
@@ -229,7 +229,7 @@ function activeGroup(type){
   var nx=groupsOf(type).filter(function(x){return x.left>0;})[0]||null;
   U.ACTIVE[type]=nx?nx.id:null; return nx;
 }
-function groupLine(g){ return g.product+' · '+(g.exp?V.fmtExp(g.exp):'유통기한 무관')+(g.qty?' · '+g.qty+'개':''); }
+function groupLine(g){ return g.product+' · '+(g.exp?V.fmtExp(g.exp):'유통기한 무관')+(g.qty?' · '+g.qty+'개':'')+(g.lot?' · LOT '+g.lot:''); }
 
 /* ── 칸 ── */
 function cellAt(L){
@@ -1282,7 +1282,7 @@ function renderPlans(){
       /* 등록된 줄은 고칠 수 없으니 입력칸 대신 한 줄로 읽기 쉽게 */
       if(reg){
         h+='<div class="pr done"><span class="pdesc">'+esc(r.product)
-          +(r.exp?' · '+V.fmtExp(r.exp):'')+' · '+(+r.pallets||0)+'팔'+(r.qty?' × '+r.qty+'개':'')
+          +(r.exp?' · '+V.fmtExp(r.exp):'')+(r.lot?' · LOT '+esc(r.lot):'')+' · '+(+r.pallets||0)+'팔'+(r.qty?' × '+r.qty+'개':'')
           +'</span><span class="pleft">남은 '+left+'팔</span></div>';
         return;
       }

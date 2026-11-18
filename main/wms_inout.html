@@ -115,7 +115,7 @@ var FLT={from:'', to:'', type:''};
 var PTYPES=['아주','KPP','기타'];
 /* 엑셀에서 온 값 → 세 가지 중 하나 (비면 그대로 비움) */
 function normPtype(v){v=String(v||'').trim();if(!v)return '';if(/아주/.test(v))return '아주';if(/kpp/i.test(v))return 'KPP';return '기타';}
-var HEAD=['날짜','구분','창고','차량','상품명','유통기한','파렛트수','파렛트당','제품수량','파렛트종류','전표촬영','비고','상태','전표사진'];
+var HEAD=['날짜','구분','창고','차량','상품명','유통기한','로트번호','파렛트수','파렛트당','제품수량','파렛트종류','전표촬영','비고','상태','전표사진'];
 var PAL=['#B22222','#FF0000','#FF6666','#CC7A00','#FFA500','#FFC04D','#B3B300','#006400','#008000','#4CAF50','#00008B','#0000FF','#6666FF','#000080','#333399','#004D40','#008080','#4DB6AC','#4B0082','#800080','#B366B3'];
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
@@ -158,6 +158,9 @@ function statusText(r){
   if(l>0)return {t:'등록 · 남은 '+l+'팔',c:'st1'};
   return {t:'완료',c:'st2'};
 }
+/* 🏷 로트번호 — 창고관리 설정에서 「로트번호 사용」을 켠 창고만 입력칸 */
+function lotOn(wid){return !!(LIVE[wid]&&LIVE[wid].useLot);}
+function lotCol(list){return (SEL?lotOn(SEL):WHS.some(function(w){return lotOn(w.id);}))||list.some(function(r){return r.lot;});}
 function slipCount(r){return Object.keys(r.slips||{}).length;}
 function slipText(r){
   var n=slipCount(r);
@@ -172,7 +175,8 @@ function listenAll(){
   WHS.forEach(function(w){
     [['inoutRecs/'+w.id,function(v){RECS[w.id]=v||{};}],
      ['warehouses/'+w.id+'/inQ',function(v){(LIVE[w.id]=LIVE[w.id]||{}).inQ=v;}],
-     ['warehouses/'+w.id+'/voiceOut',function(v){(LIVE[w.id]=LIVE[w.id]||{}).voiceOut=v||{};}]].forEach(function(x){
+     ['warehouses/'+w.id+'/voiceOut',function(v){(LIVE[w.id]=LIVE[w.id]||{}).voiceOut=v||{};}],
+     ['warehouses/'+w.id+'/useLot',function(v){(LIVE[w.id]=LIVE[w.id]||{}).useLot=!!v;}]].forEach(function(x){
       var ref=db.ref(x[0]);
       var cb=ref.on('value',function(s){x[1](s.val());scheduleRender();},function(e){console.warn(x[0],e);});
       _offs.push(function(){ref.off('value',cb);});
@@ -240,12 +244,13 @@ function renderPlans(){
         +'<span class="sp"></span>'
         +'<button class="btn del" data-act="bdel" data-wid="'+b.wid+'" data-bid="'+b.bid+'" title="이 건 삭제">✕ 건 삭제</button>'
       +'</div>'
-      +'<div class="prs"><table class="prt"><thead><tr><th style="width:20%">상품명</th><th style="width:9%">유통기한</th><th style="width:7%">파렛트수</th><th style="width:7%">파렛트당</th><th style="width:9%">제품수량</th><th style="width:11%">파렛트종류</th><th style="width:7%">전표촬영</th><th>비고</th><th style="width:34px"></th></tr></thead><tbody>';
+      +'<div class="prs"><table class="prt"><thead><tr><th style="width:20%">상품명</th><th style="width:9%">유통기한</th>'+(lotOn(b.wid)?'<th style="width:10%">로트번호</th>':'')+'<th style="width:7%">파렛트수</th><th style="width:7%">파렛트당</th><th style="width:9%">제품수량</th><th style="width:11%">파렛트종류</th><th style="width:7%">전표촬영</th><th>비고</th><th style="width:34px"></th></tr></thead><tbody>';
     b.rows.forEach(function(r){
       var a=' data-wid="'+b.wid+'" data-rid="'+r._id+'"';
       h+='<tr>'
         +'<td class="w3" data-l="상품명"><input class="pi" list="prodList" value="'+esc(r.product||'')+'" placeholder="상품명" data-f="product"'+a+'></td>'
         +'<td data-l="유통기한"><input class="pi" inputmode="numeric" value="'+esc(r.exp||'')+'" placeholder="YYMMDD" data-f="exp"'+a+'></td>'
+        +(lotOn(b.wid)?'<td data-l="로트번호"><input class="pi" value="'+esc(r.lot||'')+'" placeholder="로트" data-f="lot"'+a+'></td>':'')
         +'<td data-l="파렛트수"><input class="pi" inputmode="numeric" value="'+esc(r.pallets||'')+'" placeholder="팔" data-f="pallets"'+a+'></td>'
         +'<td data-l="파렛트당"><input class="pi" inputmode="numeric" value="'+esc(r.per||'')+'" placeholder="개/팔" data-f="per"'+a+'></td>'
         +'<td data-l="제품수량"><input class="pi" inputmode="numeric" value="'+esc(r.qty||'')+'" placeholder="자동" data-f="qty"'+a+(r.qtyManual?' style="border-color:#F59E0B"':'')+' title="파렛트수×파렛트당 자동 · 직접 고치면 그 값 유지"></td>'
@@ -301,7 +306,8 @@ function renderList(){
     +(s.slipWait?'<span class="chip" style="color:var(--amber)">📷 전표 촬영 필요 '+s.slipWait+'건</span>':'')
   +'</div>';
   if(!list.length){h+='<div class="note">이 기간에 기록이 없어요.</div></div>';return h;}
-  h+='<div class="tw"><table class="lt"><thead><tr><th>날짜</th><th>구분</th>'+(SEL?'':'<th>창고</th>')+'<th>차량</th><th>상품명</th><th>유통기한</th><th>파렛트수</th><th>파렛트당</th><th>제품수량</th><th>파렛트종류</th><th>전표촬영</th><th>비고</th><th>상태</th><th></th></tr></thead><tbody>';
+  var LC=lotCol(list);
+  h+='<div class="tw"><table class="lt"><thead><tr><th>날짜</th><th>구분</th>'+(SEL?'':'<th>창고</th>')+'<th>차량</th><th>상품명</th><th>유통기한</th>'+(LC?'<th>로트번호</th>':'')+'<th>파렛트수</th><th>파렛트당</th><th>제품수량</th><th>파렛트종류</th><th>전표촬영</th><th>비고</th><th>상태</th><th></th></tr></thead><tbody>';
   list.forEach(function(r){
     var st=statusText(r), n=slipCount(r), a=' data-wid="'+r._wid+'" data-rid="'+r._id+'"';
     var slipCls=n?'slipOk':(r.slipReq?'slipWait':'slipNo');
@@ -312,6 +318,7 @@ function renderList(){
       +'<td>'+esc(r.vehicle||'')+'</td>'
       +'<td><b>'+esc(r.product||'')+'</b></td>'
       +'<td>'+esc(fmtExp(r.exp))+'</td>'
+      +(LC?'<td>'+esc(r.lot||'')+'</td>':'')
       +'<td class="n">'+(num(r.pallets)||'')+'</td>'
       +'<td class="n">'+(num(r.per)?num(r.per).toLocaleString():'')+'</td>'
       +'<td class="n">'+(num(r.qty)?num(r.qty).toLocaleString():'')+'</td>'
@@ -344,6 +351,7 @@ function setField(wid,rid,f,el){
   else{v=el.value;
     if(f==='pallets'||f==='per'||f==='qty')v=v.replace(/[^\d]/g,'');
     if(f==='exp'){v=v.replace(/[^\d]/g,'');if(v.length===8)v=v.slice(2);v=v.slice(0,6);}
+    if(f==='lot')v=v.trim().slice(0,40);
     el.value=v;
   }
   u[f]=v;r[f]=v;
@@ -383,13 +391,15 @@ function register(wid,bid){
       var ids=[];
       for(var i=0;i<num(r.pallets);i++){
         var it={id:uid(),name:String(r.product).trim(),qty:num(r.per),exp:String(r.exp||''),rec:r._id};
+        if(r.lot)it.lot=String(r.lot).trim().slice(0,40);
         if(r.slipReq&&!slipCount(r))it.slipNeed=true;
         items.push(it);ids.push(it.id);
       }
       var txRef=db.ref('txLogs/'+wid).push();
-      txRef.set({id:uid(),type:'in',date:todayStr(),name:String(r.product).trim(),exp:String(r.exp||''),pallets:num(r.pallets),qty:num(r.qty)||num(r.per)*num(r.pallets)}).catch(fail);
+      var txo={id:uid(),type:'in',date:todayStr(),name:String(r.product).trim(),exp:String(r.exp||''),pallets:num(r.pallets),qty:num(r.qty)||num(r.per)*num(r.pallets)};if(r.lot)txo.lot=String(r.lot).trim().slice(0,40);
+      txRef.set(txo).catch(fail);
       recUpd[r._id+'/inIds']=ids;recUpd[r._id+'/txKey']=txRef.key;
-      planRows[r._id]={product:String(r.product).trim(),exp:String(r.exp||''),pallets:String(num(r.pallets)),qty:String(num(r.per)),seq:r.seq||now,ids:ids};
+      planRows[r._id]={product:String(r.product).trim(),exp:String(r.exp||''),pallets:String(num(r.pallets)),qty:String(num(r.per)),seq:r.seq||now,ids:ids};if(r.lot)planRows[r._id].lot=String(r.lot).trim().slice(0,40);
     });
     db.ref('warehouses/'+wid+'/inQ').transaction(function(cur){
       var arr=!cur?[]:(Array.isArray(cur)?cur.filter(Boolean):Object.keys(cur).map(function(k){return cur[k];}).filter(Boolean));
@@ -404,7 +414,7 @@ function register(wid,bid){
       var vref=db.ref('warehouses/'+wid+'/voiceOut').push();
       pr.push(vref.set({product:String(r.product).trim(),exp:String(r.exp||''),qty:num(r.per)||0,total:num(r.pallets),left:num(r.pallets),createdAt:now,by:by()}));
       recUpd[r._id+'/voId']=vref.key;
-      planRows[r._id]={product:String(r.product).trim(),exp:String(r.exp||''),pallets:String(num(r.pallets)),qty:String(num(r.per)||''),seq:r.seq||now,voId:vref.key};
+      planRows[r._id]={product:String(r.product).trim(),exp:String(r.exp||''),pallets:String(num(r.pallets)),qty:String(num(r.per)||''),seq:r.seq||now,voId:vref.key};if(r.lot)planRows[r._id].lot=String(r.lot).trim().slice(0,40);
     });
     Promise.all(pr).then(function(){return finishReg(wid,rows,recUpd,pid,planRows,type,vehicle,now);})
       .then(function(){toast('출고대기에 '+rows.length+'품목 '+tot+'팔 등록했어요');}).catch(fail);
@@ -495,20 +505,20 @@ function slipView(wid,rid){
 
 /* ── 엑셀 ── */
 function rowArr(r){
-  return [r.date||'',r.type==='out'?'출고':'입고',whName(r._wid),r.vehicle||'',r.product||'',r.exp||'',num(r.pallets)||'',num(r.per)||'',num(r.qty)||'',r.ptype||'',r.slipReq?'유':'무',r.note||'',statusText(r).t,slipCount(r)?slipCount(r)+'장':''];
+  return [r.date||'',r.type==='out'?'출고':'입고',whName(r._wid),r.vehicle||'',r.product||'',r.exp||'',r.lot||'',num(r.pallets)||'',num(r.per)||'',num(r.qty)||'',r.ptype||'',r.slipReq?'유':'무',r.note||'',statusText(r).t,slipCount(r)?slipCount(r)+'장':''];
 }
 function fname(base){return base+'_'+(SEL?whName(SEL):'전체창고')+'_'+(FLT.from||'처음')+'~'+(FLT.to||'끝')+'.xlsx';}
 function downloadXls(){
   var list=filtered();
   var aoa=[HEAD].concat(list.map(rowArr));
   var ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:11},{wch:6},{wch:14},{wch:12},{wch:24},{wch:9},{wch:8},{wch:8},{wch:9},{wch:11},{wch:8},{wch:24},{wch:14},{wch:8}];
+  ws['!cols']=[{wch:11},{wch:6},{wch:14},{wch:12},{wch:24},{wch:9},{wch:12},{wch:8},{wch:8},{wch:9},{wch:11},{wch:8},{wch:24},{wch:14},{wch:8}];
   var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'입출고기록');
   XLSX.writeFile(wb,fname('입출고기록'));
 }
 function downloadTpl(){
   var ws=XLSX.utils.aoa_to_sheet([HEAD]);
-  ws['!cols']=[{wch:11},{wch:6},{wch:14},{wch:12},{wch:24},{wch:9},{wch:8},{wch:8},{wch:9},{wch:11},{wch:8},{wch:24},{wch:14},{wch:8}];
+  ws['!cols']=[{wch:11},{wch:6},{wch:14},{wch:12},{wch:24},{wch:9},{wch:12},{wch:8},{wch:8},{wch:9},{wch:11},{wch:8},{wch:24},{wch:14},{wch:8}];
   var guide=XLSX.utils.aoa_to_sheet([
     ['칸','쓰는 법'],
     ['날짜','2026-11-17 / 26.11.17 / 20261117 모두 됨 · 비우면 오늘'],
@@ -517,6 +527,7 @@ function downloadTpl(){
     ['차량','같은 날짜·구분·창고·차량끼리 한 건으로 묶여요'],
     ['상품명','필수'],
     ['유통기한','YYMMDD (예: 270531) · 비워도 됨'],
+    ['로트번호','창고관리에서 「로트번호 사용」을 켠 창고만 쓰면 됨 · 비워도 됨'],
     ['파렛트수 / 파렛트당','입고는 둘 다 필수'],
     ['제품수량','비우면 파렛트수×파렛트당'],
     ['파렛트종류','아주 · KPP · 기타 중 하나 (그 밖의 이름은 기타로 들어가요)'],
@@ -554,7 +565,7 @@ function uploadXls(){
         if(hi<0){toast('「상품명」 칸이 있는 머리줄을 못 찾았어요. 📄 양식을 받아서 써 주세요.',5000);return;}
         var hd=aoa[hi].map(function(x){return String(x).trim();});
         function col(n){return hd.indexOf(n);}
-        var C={date:col('날짜'),type:col('구분'),wh:col('창고'),veh:col('차량'),prod:col('상품명'),exp:col('유통기한'),pal:col('파렛트수'),per:col('파렛트당'),qty:col('제품수량'),pt:col('파렛트종류'),slip:col('전표촬영'),note:col('비고')};
+        var C={date:col('날짜'),type:col('구분'),wh:col('창고'),veh:col('차량'),prod:col('상품명'),exp:col('유통기한'),lot:col('로트번호'),pal:col('파렛트수'),per:col('파렛트당'),qty:col('제품수량'),pt:col('파렛트종류'),slip:col('전표촬영'),note:col('비고')};
         function g(row,k){return C[k]>=0?row[C[k]]:'';}
         var groups={}, errs=[], cnt=0;
         aoa.slice(hi+1).forEach(function(row,ri){
@@ -570,7 +581,7 @@ function uploadXls(){
           var slip=/^(유|o|y|yes|예|있음|1|✓|v|true)$/i.test(String(g(row,'slip')).trim());
           var veh=String(g(row,'veh')||'').trim();
           var k=wid+'|'+d+'|'+type+'|'+veh;
-          (groups[k]=groups[k]||{wid:wid,date:d,type:type,veh:veh,rows:[]}).rows.push({product:prod,exp:exp,pallets:pal?String(pal):'',per:per?String(per):'',
+          (groups[k]=groups[k]||{wid:wid,date:d,type:type,veh:veh,rows:[]}).rows.push({product:prod,exp:exp,lot:String(g(row,'lot')||'').trim().slice(0,40),pallets:pal?String(pal):'',per:per?String(per):'',
             qty:qty?String(qty):(pal*per?String(pal*per):''),qtyManual:!!qty&&qty!==pal*per,ptype:normPtype(g(row,'pt')),slipReq:slip,note:String(g(row,'note')||'').trim()});
           cnt++;
         });
@@ -594,7 +605,8 @@ function pdfReport(){
   var w=window.open('','_blank');
   if(!w){toast('팝업이 막혔어요. 이 사이트 팝업을 허용해 주세요.',4000);return;}
   var now=new Date();
-  var rows=list.map(function(r,i){var st=statusText(r);return '<tr><td>'+(i+1)+'</td><td>'+esc(r.date||'')+'</td><td>'+(r.type==='out'?'출고':'입고')+'</td>'+(SEL?'':'<td>'+esc(whName(r._wid))+'</td>')+'<td>'+esc(r.vehicle||'')+'</td><td class="l"><b>'+esc(r.product||'')+'</b></td><td>'+esc(fmtExp(r.exp))+'</td><td class="r">'+(num(r.pallets)||'')+'</td><td class="r">'+(num(r.per)?num(r.per).toLocaleString():'')+'</td><td class="r">'+(num(r.qty)?num(r.qty).toLocaleString():'')+'</td><td>'+esc(r.ptype||'')+'</td><td>'+esc(slipText(r))+'</td><td class="l">'+esc(r.note||'')+'</td><td>'+st.t+'</td></tr>';}).join('');
+  var LC=lotCol(list);
+  var rows=list.map(function(r,i){var st=statusText(r);return '<tr><td>'+(i+1)+'</td><td>'+esc(r.date||'')+'</td><td>'+(r.type==='out'?'출고':'입고')+'</td>'+(SEL?'':'<td>'+esc(whName(r._wid))+'</td>')+'<td>'+esc(r.vehicle||'')+'</td><td class="l"><b>'+esc(r.product||'')+'</b></td><td>'+esc(fmtExp(r.exp))+'</td>'+(LC?'<td>'+esc(r.lot||'')+'</td>':'')+'<td class="r">'+(num(r.pallets)||'')+'</td><td class="r">'+(num(r.per)?num(r.per).toLocaleString():'')+'</td><td class="r">'+(num(r.qty)?num(r.qty).toLocaleString():'')+'</td><td>'+esc(r.ptype||'')+'</td><td>'+esc(slipText(r))+'</td><td class="l">'+esc(r.note||'')+'</td><td>'+st.t+'</td></tr>';}).join('');
   var photos=[];
   list.forEach(function(r){var sl=r.slips||{};Object.keys(sl).forEach(function(k){photos.push({r:r,s:sl[k]});});});
   var ph=photos.map(function(p){return '<div class="ph"><img src="'+esc(p.s.url)+'"><div>'+esc(p.r.date||'')+' · '+(p.r.type==='out'?'출고':'입고')+' · '+esc(p.r.product||'')+(p.r.vehicle?' · '+esc(p.r.vehicle):'')+'</div></div>';}).join('');
@@ -610,7 +622,7 @@ function pdfReport(){
     +'<h1>입출고 기록 보고서</h1>'
     +'<div class="meta">창고: '+esc(SEL?whName(SEL):'전체 창고')+' · 기간: '+esc(FLT.from||'처음')+' ~ '+esc(FLT.to||'끝')+(FLT.type?' · '+(FLT.type==='in'?'입고만':'출고만'):'')+' · 작성: '+ymd(now)+' '+pad(now.getHours())+':'+pad(now.getMinutes())+' ('+esc(by())+')</div>'
     +'<div class="sum"><div>입고 <b>'+s.in.n+'</b>건 · <b>'+s.in.p+'</b>팔 · <b>'+s.in.q.toLocaleString()+'</b>개</div><div>출고 <b>'+s.out.n+'</b>건 · <b>'+s.out.p+'</b>팔 · <b>'+s.out.q.toLocaleString()+'</b>개</div><div>전표 사진 <b>'+photos.length+'</b>장'+(s.slipWait?' · 촬영 필요 <b>'+s.slipWait+'</b>건':'')+'</div></div>'
-    +'<table><thead><tr><th>No</th><th>날짜</th><th>구분</th>'+(SEL?'':'<th>창고</th>')+'<th>차량</th><th>상품명</th><th>유통기한</th><th>파렛트수</th><th>파렛트당</th><th>제품수량</th><th>파렛트종류</th><th>전표</th><th>비고</th><th>상태</th></tr></thead><tbody>'+(rows||'<tr><td colspan="14">기록 없음</td></tr>')+'</tbody></table>'
+    +'<table><thead><tr><th>No</th><th>날짜</th><th>구분</th>'+(SEL?'':'<th>창고</th>')+'<th>차량</th><th>상품명</th><th>유통기한</th>'+(LC?'<th>로트번호</th>':'')+'<th>파렛트수</th><th>파렛트당</th><th>제품수량</th><th>파렛트종류</th><th>전표</th><th>비고</th><th>상태</th></tr></thead><tbody>'+(rows||'<tr><td colspan="15">기록 없음</td></tr>')+'</tbody></table>'
     +(photos.length?'<h2>전표 사진</h2><div class="grid">'+ph+'</div>':'')
     +'<div class="foot">메이크창고 WMS · 입출고관리 · © 2026 Makemine Design</div>'
     +'<script>(function(){var im=[].slice.call(document.images),n=im.length;function go(){setTimeout(function(){window.focus();window.print();},300);}if(!n)return go();var c=0;im.forEach(function(i){if(i.complete){if(++c===n)go();}else{i.onload=i.onerror=function(){if(++c===n)go();};}});setTimeout(go,8000);})();<\/script>'
