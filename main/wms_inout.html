@@ -77,6 +77,13 @@ table.lt{border-collapse:collapse;width:100%;min-width:1100px;font-size:12px;}
 .ib:hover{color:var(--tx);}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0F172A;border:1px solid var(--bd);color:var(--tx);padding:10px 16px;border-radius:10px;font-size:13px;z-index:9999;display:none;max-width:92vw;white-space:pre-wrap;box-shadow:0 10px 30px rgba(0,0,0,.5);}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;}
+.edl{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
+.edl:hover{color:#93C5FD;}
+.ef{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0;}
+.ef label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--sub);font-weight:700;min-width:0;}
+.ef label.full{grid-column:1/-1;}
+.ef .pi{width:100%;}
+.ewarn{font-size:12px;border-radius:8px;padding:8px 10px;margin:6px 0;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);color:#FCD34D;}
 .ovb{background:var(--card);border:1px solid var(--bd);border-radius:14px;max-width:720px;width:100%;max-height:90vh;overflow:auto;padding:14px;}
 .ovb img{max-width:100%;border-radius:8px;display:block;margin:8px auto;}
 @media (max-width:640px){ .wrap{padding:10px;} .ttl{font-size:15px;} }
@@ -316,7 +323,7 @@ function renderList(){
       +'<td><span class="tg '+(r.type==='out'?'out':'in')+'">'+(r.type==='out'?'출고':'입고')+'</span></td>'
       +(SEL?'':'<td>'+esc(whName(r._wid))+'</td>')
       +'<td>'+esc(r.vehicle||'')+'</td>'
-      +'<td><b>'+esc(r.product||'')+'</b></td>'
+      +'<td><b class="edl" data-act="recedit"'+a+' title="눌러서 수정">'+esc(r.product||'')+'</b></td>'
       +'<td>'+esc(fmtExp(r.exp))+'</td>'
       +(LC?'<td>'+esc(r.lot||'')+'</td>':'')
       +'<td class="n">'+(num(r.pallets)||'')+'</td>'
@@ -326,7 +333,8 @@ function renderList(){
       +'<td><span class="'+slipCls+'"'+(n?' data-act="slipview"'+a:'')+'>'+esc(slipText(r))+'</span></td>'
       +'<td class="memo">'+esc(r.note||'')+(r.src==='voice'?' <span class="note">(음성)</span>':'')+'</td>'
       +'<td class="'+st.c+'">'+st.t+'</td>'
-      +'<td><button class="ib" data-act="slipadd"'+a+' title="전표 사진 추가 (여러 장 가능)">📷</button> '
+      +'<td><button class="ib" data-act="recedit"'+a+' title="수정 (상품명·유통기한·파렛트수·제품수량 등)">✏️</button> '
+        +'<button class="ib" data-act="slipadd"'+a+' title="전표 사진 추가 (여러 장 가능)">📷</button> '
         +(r.status==='reg'?'<button class="ib" data-act="unreg"'+a+' title="등록 취소 (아직 적치·출고 전일 때)">↩</button> ':'')
         +'<button class="ib" data-act="recdel"'+a+' title="기록 삭제">🗑</button></td>'
     +'</tr>';
@@ -462,6 +470,126 @@ function unregister(wid,rid){
   if(pid)ps.push(db.ref('warehouses/'+wid+'/plans/'+pid).remove());
   Promise.all(ps).then(function(){return db.ref('inoutRecs/'+wid).update(u);}).then(function(){toast('예정으로 되돌렸어요');}).catch(fail);
 }
+/* ✏️ 기록 수정 — 파렛트는 규칙적이지 않으니 제품수량은 자동 계산과 상관없이 직접 고칠 수 있다.
+   등록된 입고: 아직 입고대기에 있는 그 품목 파렛트(상품명·유통기한·로트·파렛트당)와 팔 수(늘리면 추가·줄이면 대기분에서 뺌),
+   입고 기록(txLogs)·음성명령 예정까지 같이 맞춘다. 이미 적치된 팔은 창고 화면 「슬롯 수정」에서 고친다.
+   등록된 출고: 출고대기(voiceOut)의 상품·유통기한·팔 수(남은 팔도 같은 만큼)를 맞춘다. */
+function editRec(wid,rid){
+  var r=(RECS[wid]||{})[rid];if(!r)return;
+  var reg=r.status==='reg', isIn=r.type!=='out';
+  var placed=0, waiting=0, lot=lotOn(wid)||!!r.lot;
+  if(reg&&isIn){var have={};inQArr(wid).forEach(function(x){have[x.id]=1;});(r.inIds||[]).forEach(function(id){if(have[id])waiting++;else placed++;});}
+  var outDone=0;
+  if(reg&&!isIn){var vo=(LIVE[wid]&&LIVE[wid].voiceOut||{})[r.voId];if(vo)outDone=Math.max(0,(+vo.total||0)-(+vo.left||0));else outDone=num(r.pallets);}
+  function inp(k,lbl,v,ph,cls,mode){return '<label class="'+(cls||'')+'">'+lbl+'<input class="pi" data-e="'+k+'" value="'+esc(v==null?'':v)+'"'+(ph?' placeholder="'+esc(ph)+'"':'')+(mode?' inputmode="'+mode+'"':'')+'></label>';}
+  var ov=document.createElement('div');ov.className='ov';
+  ov.innerHTML='<div class="ovb" style="max-width:520px">'
+    +'<div class="ch"><h2>✏️ '+(isIn?'입고':'출고')+' 기록 수정</h2><span class="s">'+esc(whName(wid))+' · '+(reg?statusText(r).t:'예정')+'</span><span class="sp"></span><button class="btn" data-x>닫기</button></div>'
+    +(reg&&isIn&&placed?'<div class="ewarn">이미 적치된 <b>'+placed+'팔</b>은 여기서 바뀌지 않아요(창고 화면 「슬롯 수정」에서 고쳐 주세요). 입고대기에 남은 <b>'+waiting+'팔</b>과 기록만 바뀝니다. 파렛트수는 '+placed+'팔 밑으로 줄일 수 없어요.</div>':'')
+    +(reg&&!isIn&&outDone?'<div class="ewarn">이미 <b>'+outDone+'팔</b>이 출고됐어요. 파렛트수는 '+outDone+'팔 밑으로 줄일 수 없어요.</div>':'')
+    +'<div class="ef">'
+      +'<label>날짜<input class="pi" type="date" data-e="date" value="'+esc(r.date||'')+'"></label>'
+      +inp('vehicle','차량',r.vehicle,'차량')
+      +inp('product','상품명',r.product,'상품명','full')
+      +inp('exp','유통기한 (YYMMDD)',r.exp,'270531','', 'numeric')
+      +(lot?inp('lot','🏷 로트번호',r.lot,'로트'):'<span></span>')
+      +inp('pallets','파렛트수',num(r.pallets)||'','팔','','numeric')
+      +inp('per','파렛트당',num(r.per)||'','개/팔','','numeric')
+      +inp('qty','제품수량 (직접 고쳐도 됨)',num(r.qty)||'','자동 = 파렛트수×파렛트당','full','numeric')
+      +'<label>파렛트종류<select class="pi" data-e="ptype"><option value="">선택</option>'+PTYPES.map(function(x){return '<option'+(r.ptype===x?' selected':'')+'>'+esc(x)+'</option>';}).join('')+(r.ptype&&PTYPES.indexOf(r.ptype)<0?'<option selected>'+esc(r.ptype)+'</option>':'')+'</select></label>'
+      +'<label>전표촬영<select class="pi" data-e="slipReq"><option value="0"'+(r.slipReq?'':' selected')+'>무</option><option value="1"'+(r.slipReq?' selected':'')+'>유</option></select></label>'
+      +inp('note','비고',r.note,'비고','full')
+    +'</div>'
+    +'<div class="note" data-msg style="min-height:16px;margin-bottom:8px"></div>'
+    +'<div class="pfoot"><span class="sp"></span><button class="btn" data-x>취소</button><button class="btn go'+(isIn?'':' out')+'" data-save>저장</button></div>'
+  +'</div>';
+  document.body.appendChild(ov);
+  function q(k){return ov.querySelector('[data-e="'+k+'"]');}
+  var qtyTouched=!!r.qtyManual;
+  q('qty').addEventListener('input',function(){qtyTouched=q('qty').value.trim()!=='';});
+  function auto(){if(qtyTouched)return;var a=num(q('pallets').value)*num(q('per').value);q('qty').value=a?String(a):'';}
+  q('pallets').addEventListener('input',auto);q('per').addEventListener('input',auto);
+  function close(){if(ov.parentNode)ov.parentNode.removeChild(ov);}
+  ov.addEventListener('click',function(e){if(e.target===ov||e.target.hasAttribute('data-x'))close();});
+  ov.querySelector('[data-save]').onclick=function(){
+    var exp=q('exp').value.replace(/[^\d]/g,'');if(exp.length===8)exp=exp.slice(2);exp=exp.slice(0,6);
+    var nv={date:q('date').value||r.date||todayStr(),vehicle:q('vehicle').value.trim(),product:q('product').value.trim(),exp:exp,
+      lot:lot?q('lot').value.trim().slice(0,40):(r.lot||''),pallets:String(num(q('pallets').value)||''),per:String(num(q('per').value)||''),
+      qty:String(num(q('qty').value)||''),ptype:q('ptype').value,slipReq:q('slipReq').value==='1',note:q('note').value.trim()};
+    nv.qtyManual=nv.qty!==''&&num(nv.qty)!==num(nv.pallets)*num(nv.per);
+    if(nv.qty===''){var a=num(nv.pallets)*num(nv.per);nv.qty=a?String(a):'';}
+    var msg=ov.querySelector('[data-msg]');
+    function bad(t){msg.style.color='var(--red)';msg.textContent=t;}
+    if(!nv.product)return bad('상품명을 적어 주세요');
+    if(nv.exp&&!validExp(nv.exp))return bad('유통기한은 YYMMDD 로 적어 주세요');
+    if(reg&&!(num(nv.pallets)>0))return bad('파렛트수를 적어 주세요');
+    if(reg&&isIn&&!(num(nv.per)>0))return bad('파렛트당 수량을 적어 주세요');
+    if(reg&&isIn&&num(nv.pallets)<placed)return bad('이미 적치된 '+placed+'팔보다 적게 줄일 수 없어요');
+    if(reg&&!isIn&&num(nv.pallets)<outDone)return bad('이미 출고된 '+outDone+'팔보다 적게 줄일 수 없어요');
+    var btn=ov.querySelector('[data-save]');btn.disabled=true;msg.style.color='var(--sub)';msg.textContent='저장 중…';
+    saveRec(wid,rid,nv).then(function(info){close();toast('✏️ 수정했어요'+(info?' · '+info:''),3500);}).catch(function(e){btn.disabled=false;bad('저장 실패: '+((e&&e.message)||e));});
+  };
+  setTimeout(function(){q('product').focus();},50);
+}
+function saveRec(wid,rid,nv){
+  var r=(RECS[wid]||{})[rid];if(!r)return Promise.reject(new Error('기록이 없어요'));
+  var u={date:nv.date,vehicle:nv.vehicle,product:nv.product,exp:nv.exp,lot:nv.lot||null,pallets:nv.pallets,per:nv.per,qty:nv.qty,qtyManual:nv.qtyManual,ptype:nv.ptype,slipReq:nv.slipReq,note:nv.note};
+  if(r.status!=='reg') return db.ref('inoutRecs/'+wid+'/'+rid).update(u).then(function(){return '';});
+  var ps=[], info='', newP=num(nv.pallets), per=num(nv.per), lot=nv.lot||'';
+  if(r.type!=='out'){
+    var newIds=null, added=0, removed=0;
+    ps.push(db.ref('warehouses/'+wid+'/inQ').transaction(function(cur){
+      var arr=!cur?[]:(Array.isArray(cur)?cur.filter(Boolean):Object.keys(cur).map(function(k){return cur[k];}).filter(Boolean));
+      var ids=r.inIds||[], has={};arr.forEach(function(x){has[x.id]=1;});
+      var placedIds=ids.filter(function(id){return !has[id];});
+      var mine=arr.filter(function(x){return ids.indexOf(x.id)>=0;});
+      var keepN=Math.max(0,newP-placedIds.length), drop={};
+      mine.slice(keepN).forEach(function(x){drop[x.id]=1;});
+      removed=Math.max(0,mine.length-keepN);
+      var needSlip=nv.slipReq&&!slipCount(r);
+      var out=arr.filter(function(x){return !drop[x.id];}).map(function(x){
+        if(ids.indexOf(x.id)<0)return x;
+        var y=Object.assign({},x,{name:nv.product,exp:nv.exp,qty:per,rec:rid});
+        if(lot)y.lot=lot;else delete y.lot;
+        if(needSlip)y.slipNeed=true;else delete y.slipNeed;
+        return y;
+      });
+      added=Math.max(0,keepN-mine.length);
+      var fresh=[];
+      for(var i=0;i<added;i++){var it={id:uid(),name:nv.product,qty:per,exp:nv.exp,rec:rid};if(lot)it.lot=lot;if(needSlip)it.slipNeed=true;fresh.push(it);}
+      newIds=placedIds.concat(mine.slice(0,keepN).map(function(x){return x.id;})).concat(fresh.map(function(x){return x.id;}));
+      out=out.concat(fresh);
+      return out.length?out:null;
+    }).then(function(res){
+      if(!res.committed)throw new Error('입고대기 저장이 취소됐어요');
+      if(added)info='입고대기 '+added+'팔 추가';
+      if(removed)info='입고대기에서 '+removed+'팔 뺌';
+      var p2=[db.ref('inoutRecs/'+wid+'/'+rid+'/inIds').set(newIds)];
+      /* 음성 예정 줄의 ids 도 맞춤 (음성명령 「남은 팔」 계산) */
+      if(r.planId)p2.push(db.ref('warehouses/'+wid+'/plans/'+r.planId+'/rows/'+rid).get().then(function(s){if(s.exists())return db.ref('warehouses/'+wid+'/plans/'+r.planId+'/rows/'+rid+'/ids').set(newIds);}));
+      return Promise.all(p2);
+    }));
+    if(r.txKey)ps.push(db.ref('txLogs/'+wid+'/'+r.txKey).get().then(function(s){
+      if(!s.exists())return;
+      return db.ref('txLogs/'+wid+'/'+r.txKey).update({name:nv.product,exp:nv.exp,lot:lot||null,pallets:newP,qty:num(nv.qty)||per*newP});
+    }));
+  }else if(r.voId){
+    ps.push(db.ref('warehouses/'+wid+'/voiceOut/'+r.voId).transaction(function(v){
+      if(!v)return v;
+      var tot=+v.total||0, left=+v.left||0;
+      return Object.assign({},v,{product:nv.product,exp:nv.exp,qty:per||0,total:newP,left:Math.max(0,left+(newP-tot))});
+    }));
+  }
+  if(r.planId)ps.push(db.ref('warehouses/'+wid+'/plans/'+r.planId+'/rows/'+rid).get().then(function(s){
+    if(!s.exists())return;
+    return db.ref('warehouses/'+wid+'/plans/'+r.planId+'/rows/'+rid).update({product:nv.product,exp:nv.exp,lot:lot||null,pallets:String(newP),qty:String(per||'')});
+  }));
+  return Promise.all(ps).then(function(){
+    if(r.type!=='out'&&nv.product!==r.product)setColors(wid,[{product:nv.product}]);
+    return db.ref('inoutRecs/'+wid+'/'+rid).update(u);
+  }).then(function(){return info;});
+}
+
 function delRec(wid,rid){
   var r=(RECS[wid]||{})[rid];if(!r)return;
   if(r.status==='reg'&&!confirm('등록된 기록입니다. 기록만 지울까요?\n(입고대기·출고대기·적치된 재고는 그대로 남습니다)'))return;
@@ -649,6 +777,7 @@ document.addEventListener('click',function(e){
   else if(a==='unreg'){unregister(wid,rid);}
   else if(a==='recdel'){delRec(wid,rid);}
   else if(a==='slipadd'){slipAdd(wid,rid);}
+  else if(a==='recedit'){editRec(wid,rid);}
   else if(a==='slipview'){slipView(wid,rid);}
   else if(a==='xls'){downloadXls();}
   else if(a==='tpl'){downloadTpl();}
