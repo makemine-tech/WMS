@@ -478,7 +478,9 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 /* PO 진행 라인 */
 .cp-prog-row{display:flex;align-items:center;gap:.4rem;padding:.28rem .42rem;border-bottom:1px solid rgba(37,43,59,.5);font-size:.74rem;font-family:var(--mo)}
 .cp-prog-row:last-child{border-bottom:0}
-.cp-prog-row .bc{color:var(--y);font-weight:800;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-prog-row .bc{color:var(--y);font-weight:800;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;flex-direction:column;line-height:1.25}
+.cp-prog-row .bc small{color:var(--p);font-weight:700;font-size:.66rem}
+.cp-prog-row .nm b{color:var(--b);font-weight:800}
 .cp-prog-row .nm{flex:1;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:80px;font-family:inherit;font-size:.74rem}
 .cp-prog-row .nm small{color:var(--mu);font-size:.65rem;margin-left:.32rem}
 .cp-prog-row .qt{font-weight:800;min-width:64px;text-align:right}
@@ -9062,9 +9064,16 @@ function cpRefreshProgress(){
     var qtyHtml = (waiting>0
       ? doneQ+'<span class="wt">+'+waiting+'</span>/'+p.need
       : doneQ+'/'+p.need) + extraTxt;
-    return '<div class="cp-prog-row '+status+'">'+
-      '<span class="bc" title="PO '+escH(r.poBarcode)+'">'+escH(r.poBarcode)+'</span>'+
-      '<span class="nm">'+escH(name)+'<small>'+escH(r.center||'')+'</small></span>'+
+    /* 바코드 / 대체바코드(라벨에 찍히는 발주서 SKU Barcode) · 브랜드 / 품번 / 상품명(한글표시사항) · 수량
+       긴 쿠팡 SKU 이름 대신 재고관리 한글표시사항 값을 쓰고, 없으면 쿠팡 이름 */
+    var meta = stockMeta[normBarcode(r.srcBarcode || r.poBarcode)] || {};
+    var bc1 = String(r.srcBarcode || r.poBarcode || '').trim();
+    var lbc = cpLabelBarcode(bc1, r);
+    var bc2 = normBarcode(lbc) !== normBarcode(bc1) ? lbc : '';
+    var brand = meta.brand || '', code = meta.code || '', nm2 = meta.name || name;
+    return '<div class="cp-prog-row '+status+'" title="'+escH(name)+'">'+
+      '<span class="bc" title="바코드 '+escH(bc1)+(bc2 ? ' / 대체바코드(라벨) '+escH(bc2) : ' — 대체바코드 없음(원본 그대로 라벨)')+'">'+escH(bc1)+'<small>'+(bc2 ? '/ '+escH(bc2) : '/ -')+'</small></span>'+
+      '<span class="nm">'+(brand ? '<b>'+escH(brand)+'</b> / ' : '')+(code ? escH(code)+' / ' : '')+escH(nm2)+'<small>'+escH(r.center||'')+'</small></span>'+
       '<span class="qt">'+statusIcon+' '+qtyHtml+'</span>'+
     '</div>';
   }).join('');
