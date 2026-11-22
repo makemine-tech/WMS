@@ -1448,6 +1448,8 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
       <button class="cp-asis-btn" id="cpAsIsAllBtn" onclick="cpConfirmAsIsAll()" style="display:none" title="남은 부족·없음 행을 모두 이대로 확정 (출고가능한 만큼만 진행)">✓ 전체 이대로</button>
     </div>
 
+    <div id="cpBcPanel" style="display:none;margin-bottom:.7rem;padding:.6rem .8rem;background:var(--s1);border:1.5px solid var(--br);border-radius:9px"></div>
+
     <div class="items-sec">
       <div class="tbl-wrap" style="max-height:55vh">
         <table class="tbl">
@@ -2132,7 +2134,8 @@ var CP_HEADER_ALIASES = {
   palletN:  ['파렛트번호', '팔레트번호'],
   expiry:   ['유통(소비)기한', '유통기한', '소비기한']
 };
-var cpState = { vendor:'', vendorCode:'', note:'', rows:[], files:[], fileName:'', uploadedAt:0, asIs:{} };
+var cpState = { vendor:'', vendorCode:'', note:'', rows:[], files:[], fileName:'', uploadedAt:0, asIs:{}, bcAck:{}, bcExcl:{} };
+var cpBcBlockedN = 0;   /* 바코드 대조에서 확인 안 된 줄 수 — 스캔 시작 막음 */
 var cpFilter = 'all';  /* 'all'|'fit'|'short'|'zero' — 카운터 카드 클릭 필터 */
 
 /* ─────────────── 쿠팡 스캔 세션 (Step 2) ─────────────── */
@@ -2289,6 +2292,12 @@ function cpParseExcelFile(file, onOk, onErr){
             skuName:  String(r[idx.skuName]||'').trim(),
             barcode:  _bc,
             altBarcode: _alt,
+            /* 바코드 대조표(cpBcCheck)용 — 발주서에 적힌 그대로 보관.
+             * labelSrc: 출력바코드를 어느 열에서 가져오는지 ('sku' = SKU Barcode 열, 'alt' = 대체/출력바코드 열, 'none' = 둘 다 없음)
+             * labelRaw: 그 열의 값 (빈칸이면 '') · origRaw: 원본바코드 열 값 (SKU Barcode 와 다른 열일 때만) */
+            labelSrc: idx.skuBarcode !== -1 ? 'sku' : (idx.altBarcode !== -1 ? 'alt' : 'none'),
+            labelRaw: idx.skuBarcode !== -1 ? String(r[idx.skuBarcode]||'').trim() : (idx.altBarcode !== -1 ? String(r[idx.altBarcode]||'').trim() : ''),
+            origRaw:  (idx.barcode !== idx.skuBarcode) ? _bc : '',
             center:   String(r[idx.center]||'').trim(),
             eta:      cpFmtEta(r[idx.eta]),
             qty:      +r[idx.qty] || 0,
@@ -2344,6 +2353,7 @@ function cpHandleExcelFiles(fileList, append){
     cpState.files = flist;
     cpState.fileName = flist.map(function(x){ return x.name; }).join(' + ');
     cpState.uploadedAt = now;
+    if (!append) { cpState.bcAck = {}; cpState.bcExcl = {}; }   /* 바코드 확인·제외도 새 작업이면 처음부터 */
     if (!append) cpState.asIs = {};   /* 새 작업이면 이전 확정 흔적 초기화 (추가면 기존 줄 번호 그대로라 유지) */
     cpFilter = 'all';
     cpExpandedRow = -1;
@@ -2383,7 +2393,42 @@ function cpRenderFileList(){
       }).join('');
 }
 
+/* 재고 판정 — 같은 재고 바코드가 여러 발주 줄(센터)에 걸리면 재고를 줄 순서대로 나눠 쓴다.
+ * 예전엔 줄마다 같은 전체 재고와 따로 비교해서, 재고 10 에 인천 8·시흥 8 이면 둘 다 '충족'(출고 목표 16)이 됐다.
+ * 이제 앞 줄이 쓴 만큼 빼고 판정 → 시흥은 '부족 6'(출고가능 2). 이유는 sharedPrior 로 화면에 보인다. */
+var _cpAllocCache = null;
+function cpAllocPrior(row){
+  var rows = (cpState && cpState.rows) || [];
+  var excl = (cpState && cpState.bcExcl) || {};
+  var sig = JSON.stringify(excl);
+  if (!_cpAllocCache || _cpAllocCache.rows !== rows || _cpAllocCache.stock !== stockQty || _cpAllocCache.sig !== sig || _cpAllocCache.n !== rows.length) {
+    var prior = new Map(), used = {};
+    rows.forEach(function(r, i){
+      if (excl[i]) return;
+      var b = cpClassifyBase(r);
+      var k = normBarcode(b.matchedBc);
+      if (!k) return;
+      prior.set(r, used[k] || 0);
+      used[k] = (used[k] || 0) + (+r.qty || 0);
+    });
+    _cpAllocCache = { rows: rows, stock: stockQty, sig: sig, n: rows.length, prior: prior };
+  }
+  return _cpAllocCache.prior.get(row) || 0;
+}
 function cpClassify(row){
+  var m = cpClassifyBase(row);
+  var prior = cpAllocPrior(row);
+  if (prior > 0 && m.have > 0) {
+    var need = +row.qty || 0;
+    var avail = Math.max(0, m.have - prior);
+    m.sharedPrior = prior;
+    m.canShip = Math.min(avail, need);
+    m.short = Math.max(0, need - avail);
+    m.status = avail >= need ? 'fit' : 'short';
+  }
+  return m;
+}
+function cpClassifyBase(row){
   /* 재고 매칭: 충족 / 부족 / 없음. PO 바코드 → 직접 → altBarcode fallback */
   var bc = normBarcode(row.barcode);
   var need = +row.qty || 0;
@@ -2641,12 +2686,19 @@ function cpRender(){
   var pendingCount = 0;   /* 사용자 액션 필요한 행 (= fit 아니고 asIs 도 아님) */
   /* 1) 모든 행 분류해서 집계 (필터와 무관) */
   var classified = rows.map(function(r){ return cpClassify(r); });
+  var bcChecks = rows.map(function(r){ return cpBcCheck(r); });
+  var bcBlockedN = 0;
   rows.forEach(function(r, i){
     var m = classified[i];
     sum[m.status]++;
-    var done = (m.status === 'fit') || !!cpState.asIs[i];
+    var excl = !!(cpState.bcExcl && cpState.bcExcl[i]);
+    var bcBlk = cpBcBlocked(i, bcChecks[i]);
+    if (bcBlk) bcBlockedN++;
+    var done = excl || (((m.status === 'fit') || !!cpState.asIs[i]) && !bcBlk);
     if (!done) pendingCount++;
   });
+  cpRenderBcPanel(bcChecks);
+  cpBcBlockedN = bcBlockedN;
   /* 2) 필터링된 행만 표시 */
   var html = '';
   var anyShown = false;
@@ -2658,9 +2710,14 @@ function cpRender(){
     var chipLabel = m.status === 'fit' ? '🟢 충족' : m.status === 'short' ? '🟡 부족 ' + m.short : '🔴 없음';
     var rowCls = m.status === 'zero' ? 'cp-row-zero' : m.status === 'short' ? 'cp-row-short' : '';
     if (asIs) rowCls += ' cp-row-asis';
-    var altBadge = '';
+    var bcC = bcChecks[i], bcL = CP_BC_LV[bcC.lv];
+    var rowExcl = !!(cpState.bcExcl && cpState.bcExcl[i]);
+    if (rowExcl) rowCls += ' cp-row-asis';
+    var altBadge = rowExcl ? '<span class="cp-chip zero" title="바코드 확인 전 — 이번 출고에서 뺌">⛔ 제외</span>'
+      : (bcC.lv !== 'ok' ? '<span class="cp-alt-badge" style="color:var(--tx)" title="' + escH(bcL.t + ' — ' + bcC.msg) + '">' + bcL.ic + (cpBcBlocked(i, bcC) ? ' 확인 필요' : '') + '</span>' : '');
+    if (m.sharedPrior) altBadge += '<span class="cp-alt-badge" title="같은 재고 바코드가 앞 줄(다른 센터)에도 발주됨 — 재고 ' + m.have + ' 중 앞 줄이 ' + m.sharedPrior + ' 사용">재고 나눔 −' + m.sharedPrior + '</span>';
     if (m.matchedVia === 'alt') {
-      altBadge = '<span class="cp-alt-badge" title="대체바코드 매칭: 원본 ' + escH(m.matchedBc) + ' 의 재고를 사용">ALT</span>';
+      altBadge += '<span class="cp-alt-badge" title="대체바코드 매칭: 원본 ' + escH(m.matchedBc) + ' 의 재고를 사용">ALT</span>';
     }
     /* 이 발주로 잡은 동시입고 표시 */
     var cdBcSet = {}; cdBcSet[normBarcode(m.matchedBc)] = 1;
@@ -2772,6 +2829,7 @@ function cpCrossdockPlan(){
   var groups = {}, order = [], skipped = 0;
   (cpState.rows || []).forEach(function(r, i){
     if (cpState.asIs[i]) return;   /* 이대로 확정한 줄은 제외 */
+    if (cpState.bcExcl && cpState.bcExcl[i]) return;   /* 바코드 확인 전이라 뺀 줄 */
     var m = cpClassify(r);
     var bc = normBarcode(m.matchedBc);
     if (!bc) { skipped++; return; }
@@ -3045,7 +3103,7 @@ function cpUpdateProgress(done, total){
   if (allBtn) { allBtn.style.display = pendingLeft > 0 ? '' : 'none'; allBtn.textContent = '✓ 전체 이대로 (' + pendingLeft + '건)'; }
   if (pendingLeft > 0) {
     pg.classList.remove('ready');
-    if (pgHint) pgHint.textContent = '남은 ' + pendingLeft + '건 — 부족·없음 행을 [🔍 대체] 또는 [✓ 이대로 확정] 으로 처리하세요';
+    if (pgHint) pgHint.textContent = '남은 ' + pendingLeft + '건 — 부족·없음 행을 [🔍 대체] 또는 [✓ 이대로 확정] 으로 처리하세요' + (cpBcBlockedN ? ' · 🏷 바코드 확인 ' + cpBcBlockedN + '줄 (위 바코드 대조)' : '');
     btn.disabled = true;
     btn.title = '남은 ' + pendingLeft + '건 처리 필요';
     if (hint) hint.innerHTML = '⏳ <b>' + pendingLeft + '건</b> 처리 필요 — 모두 정리되면 스캔 시작이 활성화됩니다';
@@ -3131,6 +3189,162 @@ function cpCheckAltBarcodes(){
   lines.push('※ 재고관리에 저장된 예전 대체바코드는 쓰지 않습니다.');
   alert(lines.join('\n'));
   setMsg('cpMsg','inf','🏷️ 점검 완료 — alt 사용 ' + withAlt.length + '건 · 원바코드 ' + withoutAlt.length + '건' + (notFound.length?' · ⚠ 메타없음 '+notFound.length+'건':''));
+}
+
+/* ═══════════ 바코드 대조표 — 원본바코드 · SKU Barcode(출력) · 재고바코드 ═══════════
+ * 대표님 규칙 (2026-11-22):
+ *   원본바코드 = 재고바코드, SKU Barcode = 재고 대체바코드 여야 한다. 다르면 SKU Barcode 가 최우선.
+ *   모두 맞으면 점검 없음. 다르면 위험한 순서대로 걸러서 사람이 맞는지 확인한다.
+ *   r1 🔴 SKU Barcode 칸 빈칸(또는 출력바코드 열 없음) — 라벨에 뭘 찍을지 모름 → 제외만 가능
+ *   r2 🔴 SKU Barcode ≠ 재고 대체바코드 — 둘 중 하나가 틀림 → 확인(라벨은 SKU Barcode) 또는 제외
+ *   o3 🟠 원본바코드가 재고에 없어 다른 바코드 재고에 연결됨(숫자만 같음 등) → 같은 상품 확인 또는 제외
+ *   y4 🟡 재고 대체바코드가 비어 있고 SKU Barcode 만 있음 — 동시입출고 가상재고. 확인 없이 SKU Barcode 로 통과
+ *   k5 ⚫ 재고 없음 — 따로 표시 (부족·없음 처리 흐름 그대로)
+ *   ok ✅ 모두 일치
+ * 확인 기록은 그 줄의 바코드 조합(key)과 함께 저장 — 발주·재고가 바뀌면 다시 확인해야 한다. */
+var CP_BC_LV = {
+  r1: { n:1, ic:'🔴', t:'SKU Barcode 빈칸' },
+  r2: { n:2, ic:'🔴', t:'SKU ≠ 재고 대체바코드' },
+  o3: { n:3, ic:'🟠', t:'원본이 재고에 없음' },
+  y4: { n:4, ic:'🟡', t:'재고 대체바코드 없음' },
+  k5: { n:5, ic:'⚫', t:'재고 없음' },
+  ok: { n:9, ic:'✅', t:'일치' }
+};
+function cpBcCheck(r){
+  r = r || {};
+  var base = normBarcode(r.barcode);
+  var legacy = !r.labelSrc;   /* 이 기능 전에 올린 발주 — 출력바코드 원천을 모름 */
+  var sku = legacy ? normBarcode(r.altBarcode || r.barcode)
+          : r.labelSrc === 'none' ? ''
+          : normBarcode(r.labelRaw) || (r.labelSrc === 'alt' ? base : '');
+  var orig = normBarcode(r.origRaw);
+  var out = { lv:'ok', msg:'', sku: sku, stockBc:'', stockAlt:'', orig: orig, via:'' };
+  /* 재고 찾기 — 실제 출고에 쓰는 cpClassify 와 같은 바코드 */
+  var m = cpClassifyBase(r);
+  var sbc = normBarcode(m.matchedBc);
+  if (!stockMeta[sbc]) {
+    /* 재고가 0 이라 cpClassify 가 다른 바코드로 못 넘어갔을 수 있다 — 메타만이라도 찾는다 */
+    var cands = [orig, base, stockByAlt[base], (typeof cpAliasStockBc === 'function') ? cpAliasStockBc(base) : '', stockByCore[barcodeCore(base)]];
+    sbc = '';
+    for (var c = 0; c < cands.length; c++) { var x = normBarcode(cands[c]); if (x && stockMeta[x]) { sbc = x; break; } }
+  }
+  out.stockBc = sbc;
+  if (sbc) {
+    out.stockAlt = normBarcode((stockMeta[sbc] || {}).altBarcode);
+    if (out.stockAlt === sbc) out.stockAlt = '';
+    out.via = (sbc === orig || sbc === base) ? 'direct'
+            : (stockByAlt[base] === sbc) ? 'alt'
+            : ((typeof cpAliasStockBc === 'function') && cpAliasStockBc(base) === sbc) ? 'alias' : 'core';
+  }
+  /* 1) 출력바코드 */
+  if (r.labelSrc === 'none') { out.lv = 'r1'; out.msg = '발주서에 SKU Barcode(출력바코드) 열이 없음 — 라벨 바코드를 정할 수 없음'; return out; }
+  if (r.labelSrc === 'sku' && !normBarcode(r.labelRaw)) { out.lv = 'r1'; out.msg = 'SKU Barcode 칸이 빈칸 — 라벨 바코드를 정할 수 없음'; return out; }
+  /* 2) 재고 없음 */
+  if (!sbc) { out.lv = 'k5'; out.msg = '재고관리에 이 상품 기록이 없음'; return out; }
+  /* 3) SKU ↔ 재고 대체바코드 */
+  if (out.stockAlt && out.stockAlt !== sku) {
+    out.lv = 'r2'; out.msg = '발주서 SKU Barcode ' + sku + ' ≠ 재고 대체바코드 ' + out.stockAlt + ' — 라벨은 SKU Barcode 로 찍힘';
+    return out;
+  }
+  /* 4) 원본 ↔ 재고바코드 */
+  if (orig && sbc !== orig) { out.lv = 'o3'; out.msg = '원본바코드 ' + orig + ' 가 재고에 없음 — 재고 ' + sbc + ' 에 연결됨'; return out; }
+  if (!orig && out.via === 'core' && sbc !== sku) { out.lv = 'o3'; out.msg = '숫자만 같은 재고 ' + sbc + ' 에 연결됨 (발주 ' + sku + ')'; return out; }
+  if (r.labelSrc === 'alt' && !normBarcode(r.labelRaw)) { out.lv = 'o3'; out.msg = '출력바코드 칸이 빈칸 — 원본 ' + base + ' 그대로 찍힘'; return out; }
+  /* 5) 재고 대체바코드 없음 — 동시입출고 가상재고. SKU Barcode 로 통과 */
+  if (!out.stockAlt && sku !== sbc) { out.lv = 'y4'; out.msg = '재고 대체바코드 없음 — 라벨은 SKU Barcode ' + sku; return out; }
+  return out;
+}
+function cpBcKey(c){ return [c.lv, c.sku, c.stockBc, c.stockAlt, c.orig].join('|'); }
+/* 이 줄 때문에 스캔 시작을 막아야 하나 — 🔴🟠 이고, 제외도 확인도 안 됨 */
+function cpBcBlocked(i, c){
+  if (cpState.bcExcl && cpState.bcExcl[i]) return false;
+  c = c || cpBcCheck(cpState.rows[i]);
+  if (c.lv === 'r1') return true;
+  if (c.lv === 'r2' || c.lv === 'o3') return !(cpState.bcAck && cpState.bcAck[i] && cpState.bcAck[i].key === cpBcKey(c));
+  return false;
+}
+function cpBcAck(i){
+  var r = cpState.rows[i]; if (!r) return;
+  var c = cpBcCheck(r);
+  if (c.lv !== 'r2' && c.lv !== 'o3') return;
+  var q = c.lv === 'r2'
+    ? '발주서 SKU Barcode 「' + c.sku + '」 로 라벨을 찍는 게 맞습니까?\n(재고관리 대체바코드 「' + c.stockAlt + '」 는 이번 출고에 쓰지 않습니다)\n\n' + (r.skuName || '')
+    : '재고 「' + c.stockBc + '」 가 발주 상품과 같은 상품이 맞습니까?\n' + c.msg + '\n\n' + (r.skuName || '');
+  if (!confirm(q)) return;
+  if (!cpState.bcAck) cpState.bcAck = {};
+  cpState.bcAck[i] = { key: cpBcKey(c), by: getUserId(), ts: Date.now() };
+  cpSavePersist(); cpRender();
+}
+function cpBcExclude(i, on){
+  if (!cpState.bcExcl) cpState.bcExcl = {};
+  if (on) {
+    var r = cpState.rows[i] || {};
+    if (!confirm('이 줄을 이번 출고에서 뺍니다.\n\n' + (r.center || '') + ' · ' + (r.skuName || '') + ' · 발주 ' + (r.qty || 0) + '개\n\n바코드를 확인한 뒤 다시 넣을 수 있습니다.')) return;
+    cpState.bcExcl[i] = { by: getUserId(), ts: Date.now() };
+  } else delete cpState.bcExcl[i];
+  cpSavePersist(); cpRender();
+}
+/* 🟠 같은 상품 확인을 여러 줄 한꺼번에 — 목록을 보여 주고 한 번 확인 */
+function cpBcAckAll(lv){
+  var list = [];
+  (cpState.rows || []).forEach(function(r, i){
+    if (cpState.bcExcl && cpState.bcExcl[i]) return;
+    var c = cpBcCheck(r);
+    if (c.lv === lv && cpBcBlocked(i, c)) list.push({ i:i, c:c, r:r });
+  });
+  if (!list.length) return;
+  var head = lv === 'r2' ? '아래 줄은 모두 발주서 SKU Barcode 로 라벨을 찍습니다 (재고 대체바코드는 안 씀):' : '아래 줄의 재고가 발주 상품과 같은 상품이 맞습니까?';
+  var lines = list.slice(0, 25).map(function(x){ return '• ' + (x.r.skuName || '').slice(0, 28) + ' — ' + x.c.msg; });
+  if (list.length > 25) lines.push('… 외 ' + (list.length - 25) + '줄');
+  if (!confirm(head + '\n\n' + lines.join('\n') + '\n\n' + list.length + '줄 모두 확인할까요?')) return;
+  if (!cpState.bcAck) cpState.bcAck = {};
+  var by = getUserId(), ts = Date.now();
+  list.forEach(function(x){ cpState.bcAck[x.i] = { key: cpBcKey(x.c), by: by, ts: ts }; });
+  cpSavePersist(); cpRender();
+}
+function cpRenderBcPanel(checks){
+  var el = document.getElementById('cpBcPanel');
+  if (!el) return;
+  var rows = cpState.rows || [];
+  if (!rows.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  var cnt = { r1:0, r2:0, o3:0, y4:0, k5:0, ok:0 }, open = [], excl = 0;
+  rows.forEach(function(r, i){
+    var c = checks[i];
+    if (cpState.bcExcl && cpState.bcExcl[i]) { excl++; if (c.lv !== 'ok') open.push({ i:i, c:c, r:r, excl:true }); return; }
+    cnt[c.lv]++;
+    if (c.lv === 'r1' || c.lv === 'r2' || c.lv === 'o3') open.push({ i:i, c:c, r:r, blocked: cpBcBlocked(i, c) });
+  });
+  var blocked = open.filter(function(x){ return x.blocked; }).length;
+  var chip = function(lv){ var L = CP_BC_LV[lv]; return '<span style="margin-right:.7rem;white-space:nowrap">' + L.ic + ' ' + L.t + ' <b>' + cnt[lv] + '</b></span>'; };
+  var h = '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:' + (open.length ? '.5rem' : '0') + '">'
+    + '<b style="color:' + (blocked ? 'var(--r)' : 'var(--g)') + '">🏷 바코드 대조 (원본 · SKU Barcode · 재고)</b>'
+    + '<span style="font-size:.76rem">' + ['ok','y4','k5','o3','r2','r1'].map(chip).join('') + (excl ? '<span>⛔ 제외 <b>' + excl + '</b></span>' : '') + '</span>'
+    + (blocked ? '<span style="margin-left:auto;color:var(--r);font-weight:800;font-size:.78rem">확인 안 된 ' + blocked + '줄 — 스캔 시작 막힘</span>'
+               : '<span style="margin-left:auto;color:var(--g);font-weight:800;font-size:.78rem">✓ 라벨 바코드 확인 완료</span>')
+    + '</div>';
+  if (open.length) {
+    open.sort(function(a, b){ return (CP_BC_LV[a.c.lv].n - CP_BC_LV[b.c.lv].n) || (a.i - b.i); });
+    var hasR2 = open.some(function(x){ return x.blocked && x.c.lv === 'r2'; });
+    var hasO3 = open.some(function(x){ return x.blocked && x.c.lv === 'o3'; });
+    if (hasR2 || hasO3) h += '<div style="margin-bottom:.4rem">'
+      + (hasR2 ? '<button class="cp-asis-btn" onclick="cpBcAckAll(\'r2\')">🔴 SKU≠대체 전부 SKU Barcode 로 확인</button> ' : '')
+      + (hasO3 ? '<button class="cp-asis-btn" onclick="cpBcAckAll(\'o3\')">🟠 연결된 재고 전부 같은 상품 확인</button>' : '') + '</div>';
+    h += '<div style="max-height:200px;overflow:auto"><table class="tbl" style="font-size:.74rem"><tr><th>#</th><th>상태</th><th>센터</th><th>상품</th><th>발주 SKU Barcode(출력)</th><th>재고바코드</th><th>재고 대체바코드</th><th>내용</th><th></th></tr>'
+      + open.map(function(x){
+          var L = CP_BC_LV[x.c.lv];
+          var act = x.excl ? '<span style="color:var(--mu)">⛔ 제외됨</span> <button class="cp-asis-undo" onclick="cpBcExclude(' + x.i + ',false)">다시 넣기</button>'
+            : !x.blocked ? '<span style="color:var(--g)">✓ 확인됨</span>'
+            : (x.c.lv === 'r1' ? '' : '<button class="cp-asis-btn" onclick="cpBcAck(' + x.i + ')">✓ 확인</button> ')
+              + '<button class="cp-asis-undo" onclick="cpBcExclude(' + x.i + ',true)">⛔ 이 줄 제외</button>';
+          return '<tr' + (x.blocked ? ' style="background:rgba(240,88,88,.08)"' : '') + '><td>' + (x.i + 1) + '</td><td style="white-space:nowrap">' + L.ic + ' ' + L.t + '</td>'
+            + '<td>' + escH(x.r.center || '') + '</td><td class="cell-name" title="' + escH(x.r.skuName || '') + '">' + escH(x.r.skuName || '') + '</td>'
+            + '<td style="font-family:var(--mo)">' + escH(x.c.sku || '(빈칸)') + '</td><td style="font-family:var(--mo)">' + escH(x.c.stockBc || '-') + '</td><td style="font-family:var(--mo)">' + escH(x.c.stockAlt || '-') + '</td>'
+            + '<td>' + escH(x.c.msg) + '</td><td style="white-space:nowrap">' + act + '</td></tr>';
+        }).join('') + '</table></div>';
+  }
+  el.innerHTML = h;
+  el.style.display = '';
+  el.style.borderColor = blocked ? 'var(--r)' : 'var(--br)';
 }
 
 /* ═══════════ 박스별 분류 개괄표 (스캔 전 사전 시뮬레이션) ═══════════
@@ -3541,7 +3755,15 @@ function cpStartScan(){
   } catch(e){ console.warn('[outorder] vendor 자동 등록 실패', e); }
   /* 출고 대상 라인 정리 — fit 또는 asIs 인 행만 */
   var shipRows = [];
+  /* 바코드 대조 — 확인 안 된 🔴🟠 줄이 있으면 시작하지 않는다 (라벨 바코드 = 발주서 SKU Barcode 절대 원칙) */
+  var bcBad = [];
+  cpState.rows.forEach(function(r, i){ if (cpBcBlocked(i)) bcBad.push((i+1) + '번 ' + (r.skuName || r.barcode || '')); });
+  if (bcBad.length) {
+    alert('❌ 바코드 대조에서 확인 안 된 줄이 ' + bcBad.length + '개 있습니다.\n\n' + bcBad.slice(0, 10).join('\n') + (bcBad.length > 10 ? '\n…' : '') + '\n\n위 「🏷 바코드 대조」에서 확인하거나 이 줄을 제외한 뒤 시작하세요.');
+    return;
+  }
   cpState.rows.forEach(function(r, i){
+    if (cpState.bcExcl && cpState.bcExcl[i]) return;   /* 바코드 확인 전이라 뺀 줄 */
     var m = cpClassify(r);
     var isAsIs = !!cpState.asIs[i];
     if (m.status === 'fit' || isAsIs) {
@@ -3785,8 +4007,82 @@ function cpPauseScan(){
   cpSetSubView('po');   /* PO 화면으로 오면 작업파일 목록을 새로 읽는다 (cpSetSubView) */
 }
 
+/* ═══ 작업 종료 대조표 — 라벨 바코드(SKU Barcode)별 발주 · 출고가능 · 출고 스캔 · 라벨 발행 ═══
+ * 다른 줄은 이유를 적는다. 덧방이 1:1 이라 「출고 스캔 = 라벨 발행」이면 기록과 실물이 같다는 뜻.
+ * 나갈 수 있는데 덜 나간 줄(재고는 있는데 목표보다 적게 찍음)도 여기서 보인다. */
+function cpEndReconRows(scans){
+  var ws = workSession || {}, rows = ws.rows || [], lc = ws.labelCnt || {};
+  var g = {}, order = [];
+  function grp(lbc, name){
+    var k = normBarcode(lbc) || '(바코드 없음)';
+    if (!g[k]) { g[k] = { bc:k, name:name || '', po:0, target:0, shipped:0, labels:0, have:null, notes:[] }; order.push(k); }
+    if (!g[k].name && name) g[k].name = name;
+    return g[k];
+  }
+  rows.forEach(function(r, i){
+    var x = grp(r.poAltBarcode || r.poBarcode, r.skuName);
+    x.po += +r.qty || 0; x.target += +r.canShip || 0;
+    if (r.asIs) x.asIs = true;
+    if (x.have === null) x.have = stockQty[normBarcode(r.srcBarcode)] || 0;
+  });
+  scans.forEach(function(s){
+    var r = rows[s.srcIdx] || {};
+    grp(r.poAltBarcode || r.poBarcode || s.barcode, r.skuName).shipped += +s.qty || 0;
+  });
+  order.forEach(function(k){ g[k].labels = +lc[k.replace(/[.#$\[\]\/]/g, '_')] || 0; });
+  /* 이번 작업에 안 들어간 발주 줄 — 바코드 확인 전 제외 / 재고 없음 */
+  var notIn = [];
+  if (cpState && cpState.uploadedAt && cpState.uploadedAt === ws.uploadedAt) {
+    var inSet = {}; rows.forEach(function(r){ inSet[r.srcIdx] = 1; });
+    (cpState.rows || []).forEach(function(r, i){
+      if (inSet[i]) return;
+      var why = (cpState.bcExcl && cpState.bcExcl[i]) ? '바코드 확인 전이라 제외' : (cpClassify(r).have <= 0 ? '재고 없음' : '출고 대상 아님');
+      notIn.push({ name: r.skuName || r.barcode, center: r.center || '', qty: +r.qty || 0, why: why });
+    });
+  }
+  var out = order.map(function(k){
+    var x = g[k];
+    if (x.target < x.po) x.notes.push('재고 부족 — 출고가능 ' + x.target + (x.asIs ? ' (이대로 확정)' : ''));
+    if (x.shipped < x.target) x.notes.push('출고가능보다 ' + (x.target - x.shipped) + '개 덜 찍음');
+    if (x.shipped > x.target) x.notes.push('출고가능보다 ' + (x.shipped - x.target) + '개 많이 찍힘');
+    if (x.labels < x.shipped) x.notes.push('라벨 ' + (x.shipped - x.labels) + '장 적게 발행 — 덧방 확인');
+    else if (x.labels > x.shipped) x.notes.push('라벨 ' + (x.labels - x.shipped) + '장 더 발행(재출력 포함) — 남은 라벨 확인');
+    x.bad = x.notes.length > 0;
+    return x;
+  });
+  out.sort(function(a, b){ return (b.bad - a.bad) || a.name.localeCompare(b.name, 'ko', {numeric:true}); });
+  return { list: out, notIn: notIn };
+}
+function cpShowEndRecon(scans){
+  var R = cpEndReconRows(scans), L = R.list;
+  var bad = L.filter(function(x){ return x.bad; });
+  var sum = function(f){ return L.reduce(function(s, x){ return s + x[f]; }, 0); };
+  var h = '<div class="cd-modal" role="dialog" style="max-width:980px"><h3>📋 작업 종료 대조표 — 라벨 바코드(SKU Barcode)별</h3><div class="cd-body">'
+    + '<div class="cd-tip">발주 ' + sum('po') + ' · 출고가능 ' + sum('target') + ' · <b>출고 스캔 ' + sum('shipped') + '</b> · 라벨 발행 ' + sum('labels') + ' (재출력 포함, 인쇄창 취소도 셈)</div>'
+    + (bad.length ? '<div style="color:#ff6b6b;font-weight:800;margin:.3rem 0">⚠ 확인할 줄 ' + bad.length + '개 — 아래 빨간 줄의 이유를 보고 실물과 맞춰 보세요</div>'
+                  : '<div style="color:var(--g);font-weight:800;margin:.3rem 0">✓ 모든 상품이 출고가능 수량대로 찍혔고, 라벨 발행 수도 같습니다</div>')
+    + '<table><tr><th>상품</th><th>라벨 바코드</th><th class="n">발주</th><th class="n">출고가능</th><th class="n">출고 스캔</th><th class="n">라벨</th><th>이유</th></tr>'
+    + L.map(function(x){
+        return '<tr' + (x.bad ? ' style="background:rgba(240,88,88,.10)"' : '') + '><td>' + escH((x.name || '').slice(0, 40)) + '</td><td style="font-family:var(--mo)">' + escH(x.bc) + '</td>'
+          + '<td class="n">' + x.po + '</td><td class="n">' + x.target + '</td><td class="n"><b>' + x.shipped + '</b></td><td class="n">' + x.labels + '</td>'
+          + '<td style="font-size:.74rem">' + escH(x.notes.join(' · ') || '✓') + '</td></tr>';
+      }).join('') + '</table>';
+  if (R.notIn.length) {
+    h += '<div class="cd-sec" style="margin-top:.8rem">이번 작업에 안 들어간 발주 줄 ' + R.notIn.length + '개</div><table><tr><th>상품</th><th>센터</th><th class="n">발주</th><th>이유</th></tr>'
+      + R.notIn.map(function(x){ return '<tr><td>' + escH((x.name || '').slice(0, 40)) + '</td><td>' + escH(x.center) + '</td><td class="n">' + x.qty + '</td><td>' + escH(x.why) + '</td></tr>'; }).join('') + '</table>';
+  }
+  h += '</div><div class="cd-foot"><span class="tot"></span><button class="btn" onclick="cpCdClose()">돌아가기</button>'
+    + '<button class="btn btn-g" onclick="cpCdClose();cpEndScan(true)">확인 — 작업 종료 계속</button></div></div>';
+  var back = document.createElement('div');
+  back.className = 'cd-modal-back'; back.id = 'cdModalBack';
+  back.innerHTML = h;
+  back.addEventListener('click', function(ev){ if (ev.target === back) cpCdClose(); });
+  cpCdClose();
+  document.body.appendChild(back);
+}
+
 /* ── 작업 종료 — 세션을 completed 처리 ── */
-function cpEndScan(){
+function cpEndScan(reconDone){
   if (!workSession || !workSessionRef) { cpSetSubView('po'); return; }
   /* ════ Step E-1: 작업종료 — 검증 → 자동마감 → 재고차감 → orders 저장 ════ */
   var scans = (workSession.scans||[]).filter(function(s){return !s.undone;});
@@ -3810,6 +4106,8 @@ function cpEndScan(){
     alert('❌ 종료 차단 — 처리 대기 ' + pending.length + '건이 남아 있습니다.\n\n모든 대기 SKU 를 [출고처리] 또는 [보류] 처리한 후 다시 시도하세요.');
     return;
   }
+  /* 대조표 먼저 — 확인을 눌러야 아래(보류 확인 → 재고 차감)로 간다 */
+  if (reconDone !== true) { cpShowEndRecon(scans); return; }
   /* 검증 3: 보류 풀 — 안내 후 확인 (보류는 출고에서 빠진 상태라 OK 가능) */
   if (holdPool.length) {
     if (!confirm('⚠️ 보류 항목 ' + holdPool.length + '건이 있습니다.\n\n보류된 박스는 이번 출고에 포함되지 않습니다 (재고에서 차감 안 됨).\n\n그대로 작업종료할까요?')) return;
@@ -5199,6 +5497,7 @@ function cpProcessRelabelScan(raw){
       return;
     }
     cpPrintLabelsDirect(items);
+    if (cpLabelBlocked) return;   /* 바코드 검사에서 막힘 — 빨간 안내를 남겨 둔다 */
     if (notInPo.length) return;   /* 위 빨간 경고를 남겨 둔다 */
     cpFlash(poOn ? 'ok' : 'warn','🏷️ <b>덧방 인쇄</b> — 박스 '+escH(boxId)+' 내품 '+items.length+'종 / 총 '+total+'장 인쇄'
       + (poOn ? '' : '<span class="sub">⚠ 발주 파일 없음 — 재고관리 대체바코드로 찍었습니다. 발주서 SKU Barcode 와 같은지 확인하세요.</span>')
@@ -5230,10 +5529,16 @@ function cpProcessRelabelScan(raw){
   }
   /* 모아뽑기 ON — 즉시 인쇄하지 않고 누적 큐에 쌓는다 (스캔 순서 유지) */
   if (cpRelabelCollect) {
-    cpCollectAdd(resolved, meta, viaAlt);
+    var _pc = poOn ? (cpPoRowFor(bc) || cpPoRowFor(resolved)) : null;
+    cpCollectAdd(resolved, meta, viaAlt, _pc ? String(_pc.alt || _pc.po || '').trim() : '');
     return;
   }
-  cpPrintLabelsDirect([{ barcode: resolved, qty: 1, srcIdx: -1 }]);
+  /* 라벨 바코드 = 발주 줄의 SKU Barcode — 찍은 바코드(bc)로 찾은 발주 줄이 먼저, 없으면 재고 바코드(resolved)로.
+     예전엔 재고에서 다시 찾은 resolved 로만 찍어서, 원본↔A 짝이 없으면 원바코드가 찍혔다 (미즈노 회송) */
+  var _pr = poOn ? (cpPoRowFor(bc) || cpPoRowFor(resolved)) : null;
+  var _lbc = _pr ? String(_pr.alt || _pr.po || '').trim() : '';
+  cpPrintLabelsDirect([{ barcode: resolved, qty: 1, srcIdx: -1, labelBc: _lbc || undefined }]);
+  if (cpLabelBlocked) return;
   var nm = (meta && meta.name) ? meta.name : resolved;
   cpFlash(poOn ? 'ok' : 'warn','🏷️ <b>덧방 인쇄</b> — '+escH(nm)+(viaAlt?' <span style="color:var(--p);font-weight:800">[ALT]</span>':'')+' 1장 인쇄'
     + (poOn ? '' : '<span class="sub">⚠ 발주 파일 없음 — 재고관리 대체바코드 「'+escH(cpLabelBarcode(resolved, {}))+'」로 찍었습니다. 발주서 SKU Barcode 와 같은지 확인하세요.</span>')
@@ -5258,7 +5563,7 @@ function cpSetCollectMode(on){
   }
 }
 
-function cpCollectAdd(barcode, meta, viaAlt){
+function cpCollectAdd(barcode, meta, viaAlt, labelBc){
   var bc = normBarcode(barcode);
   if (!bc) return;
   var nm = (meta && meta.name) ? meta.name : bc;
@@ -5267,7 +5572,7 @@ function cpCollectAdd(barcode, meta, viaAlt){
     if (cpRelabelQueue[i].barcode === bc){ found = cpRelabelQueue[i]; break; }
   }
   if (found) { found.qty += 1; }
-  else { cpRelabelQueue.push({ barcode: bc, name: nm, qty: 1 }); }
+  else { cpRelabelQueue.push({ barcode: bc, name: nm, qty: 1, labelBc: labelBc || '' }); }
   cpCollectRender();
   var total = cpRelabelQueue.reduce(function(s,q){ return s + q.qty; }, 0);
   cpFlash('ok','📚 <b>누적</b> — '+escH(nm)+(viaAlt?' <span style="color:var(--p);font-weight:800">[ALT]</span>':'')+' <b>'+(found?found.qty:1)+'장</b> · 합계 '+cpRelabelQueue.length+'종 / '+total+'장');
@@ -5328,10 +5633,11 @@ function cpCollectClear(ask){
 
 function cpCollectPrint(){
   if (!cpRelabelQueue.length){ cpFlash('warn','⚠️ 모아뽑기 목록이 비어 있습니다 — 먼저 상품을 스캔하세요'); cpSpeak('비어있음'); return; }
-  var items = cpRelabelQueue.map(function(q){ return { barcode: q.barcode, qty: q.qty, srcIdx: -1 }; });
+  var items = cpRelabelQueue.map(function(q){ return { barcode: q.barcode, qty: q.qty, srcIdx: -1, labelBc: q.labelBc || undefined }; });
   var kinds = cpRelabelQueue.length;
   var total = cpRelabelQueue.reduce(function(s,q){ return s + q.qty; }, 0);
   cpPrintLabelsFromItems(items);
+  if (cpLabelBlocked) return;   /* 막혔으면 목록을 지우지 않는다 */
   var kiosk = cpIsKioskPrinting();
   cpFlash('ok','🖨 <b>모아 인쇄</b> — '+kinds+'종 / 총 '+total+'장 (스캔 순서대로)'+
     (kiosk ? '<span class="sub">무인인쇄로 즉시 출력 후 목록을 비웠습니다.</span>'
@@ -6301,10 +6607,44 @@ function cpOrderItemsByScan(items){
   return out;
 }
 
-/* 라벨 HTML 배열 생성 — items: [{barcode, qty, srcIdx, box, seqs?, ts?}, ...] (인쇄 함수들이 공유) */
+/* ═══ 라벨 인쇄 직전 공통 검사 — 찍을 바코드가 이번 발주서의 SKU Barcode(출력바코드) 중 하나인가 ═══
+ * 상품라벨은 어느 화면에서 뽑든 cpBuildProdLabels 를 지난다. 여기서 한 번 더 보고, 아니면 한 장도 찍지 않는다.
+ * (예: 덧방 상품 모드가 재고에서 다시 찾은 원바코드로 찍어 미즈노 7족 회송) */
+function cpValidLabelSet(){
+  var set = {};
+  ((workSession && workSession.rows) || []).forEach(function(r){
+    var v = normBarcode(r.poAltBarcode || r.poBarcode); if (v) set[v] = 1;
+  });
+  ((cpState && cpState.rows) || []).forEach(function(r, i){
+    if (cpState.bcExcl && cpState.bcExcl[i]) return;
+    var c = cpBcCheck(r);
+    if (c.lv === 'r1') return;   /* SKU Barcode 빈칸 줄은 라벨 바코드가 아니다 */
+    var v = normBarcode(r.altBarcode || r.barcode); if (v) set[v] = 1;
+  });
+  return set;
+}
+/* 작업 세션에 라벨 발행 장수를 라벨 바코드별로 더한다 (재출력 포함) — 작업 종료 대조표에서 출고 스캔 수와 비교 */
+function cpCountLabels(cnt){
+  if (!cnt || !workSessionRef || !workSession) return;
+  Object.keys(cnt).forEach(function(bc){
+    var key = bc.replace(/[.#$\[\]\/]/g, '_');
+    workSessionRef.child('labelCnt/' + key).transaction(function(n){ return (+n || 0) + cnt[bc]; }).catch(function(){});
+  });
+}
+var cpLabelBlocked = false;       /* 마지막 라벨 만들기가 바코드 검사에서 막혔나 */
+function cpLabelBlockMsg(list){
+  return '❌ 라벨 인쇄 막음 — 이번 발주서의 SKU Barcode(출력바코드)가 아닌 바코드가 ' + list.length + '종 있습니다.\n\n'
+    + list.slice(0, 10).join('\n') + (list.length > 10 ? '\n…' : '')
+    + '\n\n발주 화면 「🏷 바코드 대조」를 확인하거나, 맞는 발주 파일·작업파일로 바꾼 뒤 다시 인쇄하세요.';
+}
+var cpLabelCountPending = null;   /* 마지막으로 만든 라벨 — {라벨바코드: 장수}. 인쇄로 보낼 때 세션에 더한다 */
+/* 라벨 HTML 배열 생성 — items: [{barcode, qty, srcIdx, box, seqs?, ts?, labelBc?}, ...] (인쇄 함수들이 공유)
+ * labelBc 가 있으면 그 값(발주 줄에서 찾은 SKU Barcode)을 그대로 쓴다. */
 function cpBuildProdLabels(items){
   var rows = (workSession && workSession.rows) || [];
   var labels = [];
+  var guardOn = cpPoLoaded(), validSet = guardOn ? cpValidLabelSet() : null, bad = [], cnt = {};
+  cpLabelBlocked = false; cpLabelCountPending = null;
   cpOrderItemsByScan(items).forEach(function(it){
     var meta = stockMeta[normBarcode(it.barcode)] || {};
     var r = rows[it.srcIdx] || {};
@@ -6320,7 +6660,9 @@ function cpBuildProdLabels(items){
      * stockMeta.altBarcode 가 있으면 그 alt 로 인쇄해야 함 (잘못 인쇄 시 전량 회수).
      * 비어있으면 원바코드 사용. 사장님 정책: '공란은 원바코드를 alt 로 그대로'.
      * 우선순위: PO F열 대체바코드(직접 연결 > 바코드 역추적) > 재고 메타 altBarcode > 원바코드. */
-    var labelBc = cpLabelBarcode(origBc, r);
+    var labelBc = it.labelBc ? String(it.labelBc).trim() : cpLabelBarcode(origBc, r);
+    if (guardOn && !validSet[normBarcode(labelBc)]) { bad.push((name || origBc) + ' — 찍힐 바코드 ' + labelBc); return; }
+    cnt[normBarcode(labelBc)] = (cnt[normBarcode(labelBc)] || 0) + (+it.qty || 1);
     var altBc = normBarcode(labelBc) !== normBarcode(origBc) ? labelBc : '';
     var hasAlt = !!(altBc && normBarcode(altBc) !== normBarcode(origBc));
     var qty = +it.qty || 1;
@@ -6373,6 +6715,15 @@ function cpBuildProdLabels(items){
       );
     }
   });
+  if (bad.length) {
+    /* 한 장이라도 발주서 SKU Barcode 가 아니면 전부 찍지 않는다 — 섞여 나가면 회송 */
+    cpLabelBlocked = true;
+    var msg = cpLabelBlockMsg(bad);
+    try { cpFlash('er', escH(msg.split('\n')[0])); cpSpeak('바코드 확인'); } catch(e){}
+    alert(msg);
+    return [];
+  }
+  cpLabelCountPending = cnt;
   return labels;
 }
 
@@ -6391,19 +6742,34 @@ function cpPrintLabelsFromItems(items){
  * 폰트 자동축소는 부모 함수 소스를 iframe 안에서 실행(단일 출처). --kiosk-printing 이면 대화상자 없이 즉시 출력. */
 var _cpDirectIfr = null;
 function cpPrintLabelsDirect(items){
+  /* 바코드 검사는 미루지 않고 지금 — 많은 장수(미뤄서 만드는 경우)도 호출한 쪽이 막힘을 바로 알 수 있게 */
+  cpLabelBlocked = false;
+  if (cpPoLoaded()) {
+    var rows0 = (workSession && workSession.rows) || [], vs = cpValidLabelSet(), bad0 = [];
+    (items||[]).forEach(function(it){
+      var lb = it.labelBc ? String(it.labelBc).trim() : cpLabelBarcode(it.barcode || '', rows0[it.srcIdx] || {});
+      if (!vs[normBarcode(lb)]) bad0.push(((stockMeta[normBarcode(it.barcode)] || {}).name || it.barcode) + ' — 찍힐 바코드 ' + lb);
+    });
+    if (bad0.length) {
+      cpLabelBlocked = true;
+      try { cpFlash('er','❌ 라벨 인쇄 막음 — 발주서 SKU Barcode 가 아닌 바코드 ' + bad0.length + '종'); cpSpeak('바코드 확인'); } catch(e){}
+      alert(cpLabelBlockMsg(bad0));
+      return 0;
+    }
+  }
   /* 장수가 많으면 「준비 중」을 먼저 화면에 띄운 뒤 작업 — 눌렸는지 몰라 또 누르는 일 방지 */
   var total = (items||[]).reduce(function(s, it){ return s + (+it.qty || 1); }, 0);
   if (total >= CP_PRINT_DEFER_MIN) {
     cpFlash('ok','🖨 인쇄 준비 중… '+total+'장');
     setTimeout(function(){
       var r = cpRenderProdLabelsHtml(items);
-      if (!r.n){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+      if (!r.n){ if (!r.blocked) cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
       cpPrintInIframe(r.html);
     }, 30);
     return total;
   }
   var r = cpRenderProdLabelsHtml(items);
-  if (!r.n){ cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
+  if (!r.n){ if (!r.blocked) cpFlash('warn','⚠️ 라벨이 없습니다'); return 0; }
   cpPrintInIframe(r.html);
   return r.n;
 }
@@ -6411,7 +6777,8 @@ var CP_PRINT_DEFER_MIN = 20;   /* 이 장수 이상이면 준비 중 안내 먼�
 /* 상품 라벨 → 바코드·글씨맞춤까지 끝난 인쇄용 HTML ({html, n}) — 동시출력(상품+혼적 한 번에)에서도 쓴다 */
 function cpRenderProdLabelsHtml(items){
   var labels = cpBuildProdLabels(items);
-  if (!labels.length) return { html:'', n:0 };
+  if (!labels.length) return { html:'', n:0, blocked: cpLabelBlocked };
+  cpCountLabels(cpLabelCountPending);
 
   /* 1) 바코드를 부모에서 렌더 (오프스크린) → SVG 가 그려진 상태로 직렬화 */
   var tmp = document.createElement('div');
@@ -6957,6 +7324,7 @@ function cpPrintDoneScanLabels(ts, barcode, srcBoxBarcode){
   var item = { barcode: s.barcode, qty: qty, srcIdx: s.srcIdx, box: s.srcBoxBarcode || s.boxBarcode || s.shipBoxNo || '' };
   if (typeof cpPrintLabelsDirect === 'function') cpPrintLabelsDirect([item]);
   else cpPrintLabelsFromItems([item]);
+  if (cpLabelBlocked) return;
   cpFlash('ok','🖨 ' + escH(s.barcode || '') + ' 라벨 ' + qty + '장 인쇄');
 }
 
@@ -6978,6 +7346,7 @@ function cpPrintDoneBoxLabels(boxNo){
   if (total > 50 && !confirm('박스 ' + boxNo + ' — 상품 ' + items.length + '종 라벨 ' + total + '장을 인쇄합니다.\n\n계속할까요?')) return;
   if (typeof cpPrintLabelsDirect === 'function') cpPrintLabelsDirect(items);
   else cpPrintLabelsFromItems(items);
+  if (cpLabelBlocked) return;
   cpFlash('ok','🖨 박스 ' + escH(boxNo) + ' 전체 라벨 ' + items.length + '종 · ' + total + '장 인쇄');
 }
 
@@ -9404,17 +9773,20 @@ function cpStagingPrintBoth(){
 function cpStagingPrintBothRun(byBatch, order){
   var rows = workSession.rows || [];
   var vendor = workSession.vendor || '';
-  var html = '', nProd = 0, nBox = 0;
+  var html = '', nProd = 0, nBox = 0, blockedAll = false;
   order.forEach(function(k){
+    if (blockedAll) return;
     var items = byBatch[k];
     var pr = cpRenderProdLabelsHtml(items.map(function(it){
       return { barcode: it.barcode, qty: it.qty, srcIdx: it.srcIdx, box: it.srcBoxBarcode || '', seqs: it.seqs, ts: it.ts };
     }));
+    if (pr.blocked) { html = ''; blockedAll = true; return; }
     html += pr.html; nProd += pr.n;
     var center = (rows[items[0].srcIdx] || {}).center || '';
     var mix = cpBuildMixLabelHtmlForBox(items[0].srcBoxBarcode || '?', items, vendor, center);
     if (mix) { html += mix; nBox++; }
   });
+  if (blockedAll) return;   /* 바코드 검사에서 막힘 — 혼적 라벨만 따로 나가지 않게 전부 안 찍음 */
   if (!html) { cpFlash('warn','⚠️ 라벨이 없습니다'); return; }
   cpPrintInIframe(html);
   cpFlash('ok','🖨 동시출력 — 상품라벨 '+nProd+'장 + 혼적라벨 '+nBox+'박스');
@@ -9519,7 +9891,7 @@ function cpReset(){
   if (cpState.rows.length || cpState.vendor) {
     if (!confirm('업로드된 쿠팡 데이터와 업체정보를 모두 비웁니다. 계속할까요?')) return;
   }
-  cpState = { vendor:'', vendorCode:'', note:'', rows:[], files:[], fileName:'', uploadedAt:0, asIs:{}, _headerTs:0 };
+  cpState = { vendor:'', vendorCode:'', note:'', rows:[], files:[], fileName:'', uploadedAt:0, asIs:{}, bcAck:{}, bcExcl:{}, _headerTs:0 };
   cpFilter = 'all';
   cpExpandedRow = -1;
   cpSavePersist();
@@ -9551,6 +9923,8 @@ function cpLoadPersist(){
       cpState.uploadedAt = +v.uploadedAt || 0;
       cpApplyDateCenters(cpState.rows);   /* 예전 저장본엔 origCenter 가 없다 — 지금 센터를 원래 이름으로 */
       cpState.asIs       = (v.asIs && typeof v.asIs==='object') ? v.asIs : {};
+      cpState.bcAck      = (v.bcAck && typeof v.bcAck==='object') ? v.bcAck : {};
+      cpState.bcExcl     = (v.bcExcl && typeof v.bcExcl==='object') ? v.bcExcl : {};
       cpState._headerTs  = +v._headerTs || 0;
     }
   } catch(e){}
