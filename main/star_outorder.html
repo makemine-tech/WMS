@@ -2727,7 +2727,7 @@ function cpRender(){
     var asIsChip = '';
     var findBtn = '', asIsBtn = '', undoBtn = '';
     if (asIs) {
-      asIsChip = ' <span class="cp-chip asis" title="이대로 확정됨 — 출고가능한 만큼만 진행 (' + m.canShip + '개)">✓ 확정</span>';
+      asIsChip = ' <span class="cp-chip asis" title="이대로 확정됨 — 확정 ' + m.canShip + '개. 실제 재고가 더 있으면 발주 ' + r.qty + '개까지는 더 찍혀도 초과로 막지 않음">✓ 확정</span>';
       undoBtn = '<button class="cp-asis-undo" onclick="cpUndoAsIs('+i+')" title="확정 해제">취소</button>';
     } else if (m.status !== 'fit') {
       var openCls = (cpExpandedRow === i) ? ' open' : '';
@@ -4042,12 +4042,14 @@ function cpEndReconRows(scans){
   }
   var out = order.map(function(k){
     var x = g[k];
-    if (x.target < x.po) x.notes.push('재고 부족 — 출고가능 ' + x.target + (x.asIs ? ' (이대로 확정)' : ''));
+    if (x.target < x.po && x.shipped < x.po) x.notes.push('재고 부족 — 출고가능 ' + x.target + (x.asIs ? ' (이대로 확정)' : ''));
     if (x.shipped < x.target) x.notes.push('출고가능보다 ' + (x.target - x.shipped) + '개 덜 찍음');
-    if (x.shipped > x.target) x.notes.push('출고가능보다 ' + (x.shipped - x.target) + '개 많이 찍힘');
+    var extraOk = x.asIs && x.shipped > x.target && x.shipped <= x.po;
+    if (x.shipped > x.target && !extraOk) x.notes.push('출고가능보다 ' + (x.shipped - x.target) + '개 많이 찍힘');
     if (x.labels < x.shipped) x.notes.push('라벨 ' + (x.shipped - x.labels) + '장 적게 발행 — 덧방 확인');
     else if (x.labels > x.shipped) x.notes.push('라벨 ' + (x.labels - x.shipped) + '장 더 발행(재출력 포함) — 남은 라벨 확인');
     x.bad = x.notes.length > 0;
+    if (extraOk) x.notes.push('재고보다 ' + (x.shipped - x.target) + '개 더 나감(발주 안) — 재고관리 입고 기록 확인');
     return x;
   });
   out.sort(function(a, b){ return (b.bad - a.bad) || a.name.localeCompare(b.name, 'ko', {numeric:true}); });
@@ -5862,13 +5864,13 @@ function cpCheckOverflow(items){
     var add = addBySrc[k];
     var p = cpComputeRowProgress(idx);
     var r = rows[idx] || {};
-    if (p.shipped + add > p.need) {
+    if (p.shipped + add > p.cap) {
       violations.push({
         srcIdx: idx, row: r,
         barcode: r.srcBarcode || r.poBarcode || '',
         skuName: r.skuName || '',
-        current: p.shipped, addQty: add, need: p.need,
-        overBy: (p.shipped + add) - p.need
+        current: p.shipped, addQty: add, need: p.cap,
+        overBy: (p.shipped + add) - p.cap
       });
     }
   });
@@ -5963,7 +5965,7 @@ function cpRowReserved(idx){ return cpRowStaged(idx) + cpRowPending(idx); }
 function cpRowRemaining(idx, reserve){
   var prog = cpComputeRowProgress(idx);
   var res = (reserve && reserve[idx]) ? reserve[idx] : 0;
-  return Math.max(0, prog.need - prog.shipped - cpRowReserved(idx) - res);
+  return Math.max(0, prog.cap - prog.shipped - cpRowReserved(idx) - res);
 }
 
 /* ── 박스 모드: 박스바코드 → 박스 안 SKU 처리
@@ -6218,7 +6220,7 @@ function cpProcessItemScan(raw){
     var totNeed = 0, totHave = 0, ctrList = [];
     match.idxs.forEach(function(ii){
       var p = cpComputeRowProgress(ii);
-      totNeed += p.need; totHave += (p.shipped + cpRowReserved(ii));
+      totNeed += p.cap; totHave += (p.shipped + cpRowReserved(ii));
       var c=(sessRows[ii]||{}).center; if(c) ctrList.push(c);
     });
     var nm0 = (sessRows[match.idxs[0]]||{}).skuName || raw;
@@ -9031,10 +9033,14 @@ function cpComputeRowProgress(idx){
     if (s.undone) return;
     if (s.srcIdx === idx) shipped += (+s.qty||0);
   });
-  /* 박스 단위로 들어와서 shipped 가 need 를 넘을 수 있음 (박스 통째) → 'over' 표시 */
+  /* 박스 단위로 들어와서 shipped 가 need 를 넘을 수 있음 (박스 통째) → 'over' 표시
+   * need = 출고가능(확정 수량). cap = 스캔 상한.
+   *   「이대로 확정」 줄(재고 < 발주)은 확정은 있는 재고만큼이지만, 실제로 재고가 더 있으면(입고 때 덜 잡힌 것)
+   *   발주수량까지는 더 찍혀도 초과로 막지 않는다 — 대표님 요청 (발주 78 · 재고 77 → 78 까지 출고 가능). */
   var need = +row.canShip || 0;
-  var status = (shipped===0) ? 'pending' : (shipped < need) ? 'partial' : (shipped === need) ? 'done' : 'over';
-  return { shipped:shipped, need:need, status:status };
+  var cap = row.asIs ? Math.max(need, +row.qty || 0) : need;
+  var status = (shipped===0) ? 'pending' : (shipped < need) ? 'partial' : (shipped <= cap) ? 'done' : 'over';
+  return { shipped:shipped, need:need, cap:cap, status:status };
 }
 
 /* ── PO 진행률 패널 ── */
@@ -9049,12 +9055,13 @@ function cpRefreshProgress(){
     var doneQ = p.shipped + cpRowPending(i);
     var waiting = cpRowStaged(i);
     var have = doneQ + waiting;
-    var status = have===0 ? 'pending' : (have < p.need) ? 'partial' : (have === p.need) ? 'done' : 'over';
+    var status = have===0 ? 'pending' : (have < p.need) ? 'partial' : (have <= p.cap) ? 'done' : 'over';
     var statusIcon = status==='done' ? '✓' : status==='partial' ? '◐' : status==='over' ? '⚠' : '○';
     var name = r.skuName || '';
-    var qtyHtml = waiting>0
+    var extraTxt = (have > p.need && have <= p.cap) ? '<small title="확정(재고) ' + p.need + '보다 더 나감 — 발주 ' + p.cap + ' 안이라 출고. 재고관리 입고 기록 확인">+' + (have - p.need) + ' 재고 외</small>' : '';
+    var qtyHtml = (waiting>0
       ? doneQ+'<span class="wt">+'+waiting+'</span>/'+p.need
-      : doneQ+'/'+p.need;
+      : doneQ+'/'+p.need) + extraTxt;
     return '<div class="cp-prog-row '+status+'">'+
       '<span class="bc" title="PO '+escH(r.poBarcode)+'">'+escH(r.poBarcode)+'</span>'+
       '<span class="nm">'+escH(name)+'<small>'+escH(r.center||'')+'</small></span>'+
@@ -9180,7 +9187,7 @@ function cpRefreshCenterSummary(){
  * q = { need, done, staged, total, diff } (cpRefreshStaging 의 rowQ) */
 function cpStagingRqHtml(q){
   var st = q.diff > 0 ? 'over' : (q.diff === 0 ? 'full' : 'left');
-  var tail = q.diff > 0 ? q.diff + '개 초과' : (q.diff === 0 ? '마감' : (-q.diff) + '개 남음');
+  var tail = q.diff > 0 ? q.diff + '개 초과' : (q.diff === 0 ? ('마감' + (q.extra ? ' (+' + q.extra + ' 재고 외 · 발주 안)' : '')) : (-q.diff) + '개 남음');
   return '<span class="rq ' + st + '" title="출고총수량 ' + q.need + ' 기준 — 완료(처리대기 포함) ' + q.done
     + ' + 입고대기 ' + q.staged + ' = ' + q.total + '">'
     + '완료 <b>' + q.done + '</b> + 대기 <b>' + q.staged + '</b> = <b>' + q.total + '</b>'
@@ -9232,8 +9239,10 @@ function cpRefreshStaging(){
   function rowQ(idx){
     if (rqMemo[idx]) return rqMemo[idx];
     var p = cpComputeRowProgress(idx);
-    var done = p.shipped + cpRowPending(idx), staged = cpRowStaged(idx);
-    return (rqMemo[idx] = { need:p.need, done:done, staged:staged, total:done + staged, diff:done + staged - p.need });
+    var done = p.shipped + cpRowPending(idx), staged = cpRowStaged(idx), tot = done + staged;
+    /* 확정(재고)보다 많아도 발주(cap) 안이면 초과가 아니다 — diff 는 cap 을 넘은 만큼만, extra = 재고 외로 더 나간 수 */
+    var diff = tot > p.cap ? tot - p.cap : (tot >= p.need ? 0 : tot - p.need);
+    return (rqMemo[idx] = { need:p.need, done:done, staged:staged, total:tot, diff:diff, extra: (tot > p.need && tot <= p.cap) ? tot - p.need : 0 });
   }
   list.innerHTML = order.map(function(k){
     var items = byBatch[k];
