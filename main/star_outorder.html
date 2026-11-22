@@ -480,6 +480,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 .cp-prog-row:last-child{border-bottom:0}
 .cp-prog-row .bc{color:var(--y);font-weight:800;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;flex-direction:column;line-height:1.25}
 .cp-prog-row .bc small{color:var(--p);font-weight:700;font-size:.66rem}
+.cp-prog-row.pat-odd{background:rgba(255,140,90,.14);box-shadow:inset 3px 0 0 var(--o)}
+.cp-prog-row.pat-odd .bc small{color:var(--o);font-weight:900}
+.cp-prog-row.pat-bad{background:rgba(240,88,88,.18);box-shadow:inset 3px 0 0 var(--r)}
+.cp-prog-row.pat-bad .bc small{color:#ff6b6b;font-weight:900;text-decoration:underline}
+.cp-prog-row .pat-tag{font-style:normal;font-size:.6rem;font-weight:900;color:#0f1117;background:var(--o);border-radius:3px;padding:0 .25rem;margin-top:.1rem;align-self:flex-start}
+.cp-prog-row.pat-bad .pat-tag{background:var(--r);color:#fff}
 .cp-prog-row .nm b{color:var(--b);font-weight:800}
 .cp-prog-row .nm{flex:1;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:80px;font-family:inherit;font-size:.74rem}
 .cp-prog-row .nm small{color:var(--mu);font-size:.65rem;margin-left:.32rem}
@@ -9046,11 +9052,28 @@ function cpComputeRowProgress(idx){
 }
 
 /* ── PO 진행률 패널 ── */
+/* 바코드 ↔ 대체바코드(라벨) 모양 — 'same'(대체 없음) · 'A+'(앞에 A) · '+A'(뒤에 A) · 'other'(그 밖 — 다른 번호·다른 글자)
+ * PO 진행 요약에서 'other' 는 빨강, 이 작업에서 가장 많은 모양과 다른 줄은 주황으로 도드라지게 보인다. */
+function cpBcPattern(bc, alt){
+  var a = normBarcode(bc), b = normBarcode(alt);
+  if (!b || a === b) return 'same';
+  if (b === 'A' + a) return 'A+';
+  if (b === a + 'A') return '+A';
+  return 'other';
+}
+var CP_BC_PAT_TXT = { 'same':'대체바코드 없음(원본 그대로)', 'A+':'앞에 A', '+A':'뒤에 A', 'other':'다른 번호·다른 글자' };
 function cpRefreshProgress(){
   var el = document.getElementById('cpScanProgress');
   if (!el || !workSession) return;
   var rows = workSession.rows || [];
   if (!rows.length) { el.innerHTML = '<div class="cp-prog-empty">세션 라인 없음</div>'; return; }
+  var pats = rows.map(function(r){
+    var b1 = String(r.srcBarcode || r.poBarcode || '').trim();
+    return cpBcPattern(b1, cpLabelBarcode(b1, r));
+  });
+  var patCnt = {}; pats.forEach(function(x){ patCnt[x] = (patCnt[x] || 0) + 1; });
+  var majPat = Object.keys(patCnt).filter(function(k){ return k !== 'other'; })
+    .sort(function(a, b){ return patCnt[b] - patCnt[a]; })[0] || '';
   var html = rows.map(function(r, i){
     var p = cpComputeRowProgress(i);
     /* 완료 = 스캔 완료 + 처리대기(박스만 합치면 끝) · 대기 = 입고대기만. 둘 다 진행률에 반영 */
@@ -9071,8 +9094,13 @@ function cpRefreshProgress(){
     var lbc = cpLabelBarcode(bc1, r);
     var bc2 = normBarcode(lbc) !== normBarcode(bc1) ? lbc : '';
     var brand = meta.brand || '', code = meta.code || '', nm2 = meta.name || name;
-    return '<div class="cp-prog-row '+status+'" title="'+escH(name)+'">'+
-      '<span class="bc" title="바코드 '+escH(bc1)+(bc2 ? ' / 대체바코드(라벨) '+escH(bc2) : ' — 대체바코드 없음(원본 그대로 라벨)')+'">'+escH(bc1)+'<small>'+(bc2 ? '/ '+escH(bc2) : '/ -')+'</small></span>'+
+    var pat = pats[i];
+    var patCls = pat === 'other' ? ' pat-bad' : (majPat && pat !== majPat ? ' pat-odd' : '');
+    var patTip = pat === 'other' ? ' ⚠ 바코드와 대체바코드가 다른 번호입니다 — 발주서 SKU Barcode 를 확인하세요'
+               : (patCls ? ' ⚠ 이 작업 대부분은 「' + CP_BC_PAT_TXT[majPat] + '」인데 이 줄은 「' + CP_BC_PAT_TXT[pat] + '」' : '');
+    var patTag = patCls ? '<em class="pat-tag">' + (pat === 'other' ? '⚠ 다른 번호' : '⚠ 규칙 다름') + '</em>' : '';
+    return '<div class="cp-prog-row '+status+patCls+'" title="'+escH(name)+'">'+
+      '<span class="bc" title="바코드 '+escH(bc1)+(bc2 ? ' · 대체바코드(라벨) '+escH(bc2) : ' — 대체바코드 없음(원본 그대로 라벨)')+' · 모양: '+escH(CP_BC_PAT_TXT[pat])+patTip+'">'+escH(bc1)+'<small>'+(bc2 ? escH(bc2) : '-')+'</small>'+patTag+'</span>'+
       '<span class="nm">'+(brand ? '<b>'+escH(brand)+'</b> / ' : '')+(code ? escH(code)+' / ' : '')+escH(nm2)+'<small>'+escH(r.center||'')+'</small></span>'+
       '<span class="qt">'+statusIcon+' '+qtyHtml+'</span>'+
     '</div>';
