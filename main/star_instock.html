@@ -257,10 +257,10 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
   <button class="btn btn-s" onclick="downloadOutTemplate()">📄 출고 양식</button>
   <a class="btn btn-y" href="/star_outorder.html" style="text-decoration:none;color:#0f1117;display:inline-flex;align-items:center">📋 출고지시서</a>
   <span style="margin-left:auto;font-size:.7rem;color:var(--mu);font-family:var(--mo)" id="syncInfo"></span>
-  <span class="btn dz-mini" style="background:linear-gradient(135deg,#c91d2f,#e6394e);color:#fff;border:1.5px solid #8c1422;box-shadow:0 4px 12px rgba(201,29,47,.35);font-weight:900" title="한글표시사항 엑셀 업로드 — 바코드 기준으로 기존 입고 로그의 대체바코드·상품명·품번·사이즈·재질·색상·제조국을 덮어씁니다">📋 한글표시사항 입력
+  <span class="btn dz-mini" style="background:linear-gradient(135deg,#c91d2f,#e6394e);color:#fff;border:1.5px solid #8c1422;box-shadow:0 4px 12px rgba(201,29,47,.35);font-weight:900" title="한글표시사항 엑셀 업로드 — 원본바코드(또는 대체바코드) 기준으로 기존 입고 로그의 대체바코드·브랜드·상품명·품번·사이즈·재질·색상·제조국·최초출시년도·취급상 주의사항·표시자를 덮어씁니다 (수량은 반영 안 함)">📋 한글표시사항 입력
     <input type="file" accept=".xlsx,.xls" onchange="handleKoLabelExcel(this.files[0]);this.value='';">
   </span>
-  <button class="btn btn-s" onclick="downloadKoLabelTemplate()" title="한글표시사항 입력 양식 다운로드 — 바코드·대체바코드·상품명·품번·사이즈·재질·색상·제조국 8열">📄 한글표시사항 양식</button>
+  <button class="btn btn-s" onclick="downloadKoLabelTemplate()" title="한글표시사항 입력 양식 다운로드 — 브랜드·품번·상품명·사이즈·원본바코드·대체바코드·수량·색상·제조국·재질·최초출시년도·취급상 주의사항·표시자 주소 및 연락처 13열">📄 한글표시사항 양식</button>
 </div>
 
 <!-- 스캔 패널 -->
@@ -792,15 +792,20 @@ function handleKoLabelExcel(file){
       var headers = (aoa[headerRow]||[]).map(function(h){return String(h||'').trim();});
 
       var ALIAS = {
-        barcode:    ['바코드','상품바코드','SKU Barcode','Barcode','BARCODE','대체바코드','대비바코드'],
+        barcode:    ['원본바코드','원바코드','바코드','상품바코드','SKU Barcode','Barcode','BARCODE','대체바코드','대비바코드'],
         altBarcode: ['대체바코드','대비바코드','보조바코드','Alt Barcode','ALT BARCODE','AltBarcode'],
         name:     ['상품명','품명','Name','품목명','제품명'],
         code:     ['품번','모델','모델명','Code','품목코드','품목번호','상품코드','모델번호'],
         size:     ['사이즈','Size','크기','치수','규격'],
         material: ['재질','소재','Material','성분','원재료'],
         color:    ['색상','컬러','Color','Colour'],
-        origin:   ['제조국','원산지','Origin','생산국','제조원','수입국']
+        origin:   ['제조국','원산지','Origin','생산국','제조원','수입국'],
+        brand:    ['브랜드','Brand','BRAND'],
+        releaseYear: ['최초출시년도','최초 출시년도','출시년도','출시연도'],
+        careNote: ['취급상 주의사항','취급상주의사항','주의사항'],
+        labeler:  ['표시자 주소 및 연락처','표시자주소및연락처','표시자']
       };
+      /* 수량 열은 읽지 않는다 — 한글표시사항은 상품 정보만 덮어쓴다 (재고 수량은 그대로) */
       function findCol(aliases){
         for (var i=0; i<aliases.length; i++){
           var a = aliases[i];
@@ -817,7 +822,7 @@ function handleKoLabelExcel(file){
       if (idx.altBarcode === idx.barcode) idx.altBarcode = -1;
 
       /* 엑셀 행 파싱 */
-      var META_FIELDS = ['name','code','size','material','color','origin','altBarcode'];
+      var META_FIELDS = ['name','code','size','material','color','origin','altBarcode','brand','releaseYear','careNote','labeler'];
       var sheetItems = [];
       for (var i=headerRow+1; i<aoa.length; i++){
         var row = aoa[i]; if (!row) continue;
@@ -889,7 +894,7 @@ function handleKoLabelExcel(file){
       }
 
       /* 어떤 필드들이 채워질지 안내 */
-      var FIELD_LABEL = { altBarcode:'대체바코드', name:'상품명', code:'품번', size:'사이즈', material:'재질', color:'색상', origin:'제조국' };
+      var FIELD_LABEL = { altBarcode:'대체바코드', name:'상품명', code:'품번', size:'사이즈', material:'재질', color:'색상', origin:'제조국', brand:'브랜드', releaseYear:'최초출시년도', careNote:'취급상 주의사항', labeler:'표시자 주소 및 연락처' };
       var willFillFields = META_FIELDS.filter(function(k){
         return idx[k] >= 0;
       }).map(function(k){ return FIELD_LABEL[k] || k; });
@@ -901,7 +906,7 @@ function handleKoLabelExcel(file){
         '\n채울 필드: ' + willFillFields.join(', ') +
         '\n업데이트할 입고 로그: ' + updatedLogs + '건' +
         '\n총 셀 업데이트: ' + matchedFieldCount + '개\n\n' +
-        '※ 기존 메타 (대체바코드/상품명/품번/사이즈/재질/색상/제조국) 가 덮어쓰기됩니다.\n' +
+        '※ 기존 메타 (' + willFillFields.join('/') + ') 가 덮어쓰기됩니다. 수량 열은 반영하지 않습니다.\n' +
         '※ 출고지시서 상품 라벨 인쇄 시 이 정보가 사용됩니다.\n\n' +
         '계속하시겠습니까?';
       if (!confirm(confirmMsg)) { setMsg('m0','warn','⚠️ 한글표시사항 입력 취소'); return; }
@@ -1141,21 +1146,23 @@ function downloadOutTemplate(){
   }
 }
 
-/* 한글표시사항 입력 양식 다운로드 — handleKoLabelExcel 파서가 인식하는 8열.
-   1행 헤더, 2행부터 데이터. 바코드 필수, 나머지는 채운 컬럼만 덮어씀.
-   대체바코드는 값을 채우면 (1) 그 바코드로도 입고 로그를 찾고 (2) 로그의 대체바코드로 저장됨. */
+/* 한글표시사항 입력 양식 다운로드 — 스타인터내셔널 한글표시사항 13열 양식 그대로 (AG-813 1126 출고 한글표시사항.xlsx 기준).
+   1행 헤더, 2행부터 데이터. 원본바코드 필수, 나머지는 채운 칸만 덮어씀.
+   대체바코드는 값을 채우면 (1) 그 바코드로도 입고 로그를 찾고 (2) 로그의 대체바코드로 저장됨. 수량 열은 반영하지 않음. */
 function downloadKoLabelTemplate(){
   try {
-    var headers = ['바코드','대체바코드','상품명','품번','사이즈','재질','색상','제조국'];
-    var sample1 = ['4570158735506','8801234567890','슬림핏 반팔 티셔츠','ABC-1001','M','면 100%','블랙','베트남'];
-    var sample2 = ['4570158735476','','와이드 데님 팬츠','ABC-1002','L','면 98% 폴리우레탄 2%','인디고','중국'];
+    var headers = ['브랜드','품번','상품명','사이즈','원본바코드','대체바코드','수량','색상','제조국','재질','최초출시년도','취급상 주의사항','표시자 주소 및 연락처'];
+    var care = '※ 소비자부주의로 인한 제품 보상은 되지 않으니, 소재에 맞는 세탁법 꼭 확인해 주십시오.';
+    var addr = '경기도 남양주시 화도읍 녹촌로 105-13 ㈜스타인터내셔널 02-420-9645';
+    var sample1 = ['아디다스','HP6450','골레토 VIII IN 키즈 + 신발끈 세트',180,'4066748426119','A4066748426119',6,'Core Black/Cloud White/Core Black','캄보디아','갑피: 합성 소재, 안감 깔창: 섬유, 밑창: 고무',2023,care,addr];
+    var sample2 = ['아디다스','HP6450','골레토 VIII IN 키즈 + 신발끈 세트',200,'4066748426102','A4066748426102',20,'Core Black/Cloud White/Core Black','캄보디아','갑피: 합성 소재, 안감 깔창: 섬유, 밑창: 고무',2023,care,addr];
     var aoa = [headers, sample1, sample2];
     var ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{wch:16},{wch:16},{wch:24},{wch:14},{wch:8},{wch:22},{wch:12},{wch:10}];
+    ws['!cols'] = [10.5,7.83,37.67,5.67,15,16,6.5,40.5,9.5,55.67,14.5,27,57.33].map(function(w){ return { wch: w }; });
     var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '한글표시사항양식');
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     XLSX.writeFile(wb, 'STAR_한글표시사항_입력양식.xlsx');
-    setMsg('m0','ok','✅ 한글표시사항 양식을 다운로드했습니다 — 바코드·대체바코드·상품명·품번·사이즈·재질·색상·제조국 8열. 바코드는 필수, 나머지는 채운 컬럼만 덮어씁니다. 대체바코드는 비워두면 기존 값이 유지됩니다.');
+    setMsg('m0','ok','✅ 한글표시사항 양식을 다운로드했습니다 — 브랜드·품번·상품명·사이즈·원본바코드·대체바코드·수량·색상·제조국·재질·최초출시년도·취급상 주의사항·표시자 주소 및 연락처 13열. 원본바코드는 필수, 나머지는 채운 칸만 덮어씁니다(수량은 반영 안 함). 대체바코드는 비워두면 기존 값이 유지됩니다.');
   } catch(err){
     setMsg('m0','er','❌ 양식 생성 실패: '+(err&&err.message||err));
   }
