@@ -85,6 +85,14 @@ h1 em{color:var(--g);font-style:normal}
 .tbl tbody td{padding:.42rem .55rem;border-bottom:1px solid rgba(37,43,59,.5);vertical-align:middle}
 .tbl tbody tr:hover{background:rgba(74,240,168,.03)}
 .cell-bc{font-family:var(--mo);color:var(--y);font-size:.76rem}
+/* 저장된 지시서 — 파일명 앞, 지시서 번호는 작고 흐리게 */
+.ol-file{max-width:340px}
+.ol-fn{font-weight:700;color:var(--tx);font-size:.82rem;line-height:1.35;word-break:break-all}
+.ol-fn-none{font-weight:400;color:var(--mu);font-style:italic}
+.ol-id{font-family:var(--mo);color:var(--mu);font-size:.64rem;opacity:.55;margin-top:.15rem}
+.ol-dl{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.35rem}
+.ol-dl .btn{padding:.22rem .5rem;font-size:.68rem}
+.ol-noorig{font-size:.66rem;color:var(--mu);border:1px dashed var(--mu);border-radius:4px;padding:.15rem .4rem;opacity:.7}
 .cell-box{font-family:var(--mo);color:var(--b);font-size:.74rem}
 .cell-num{text-align:right;font-family:var(--mo);font-weight:800}
 .cell-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1698,12 +1706,12 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
         <option value="cancelled">취소됨 (cancelled)</option>
       </select>
       <span style="font-size:.74rem;color:var(--mu);font-family:var(--mo);margin-left:.5rem">검색</span>
-      <input type="text" id="filterQ" placeholder="거래처/번호" oninput="renderList()" style="width:180px">
+      <input type="text" id="filterQ" placeholder="파일명/거래처/번호" oninput="renderList()" style="width:200px">
     </div>
     <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr>
-          <th>지시서 번호</th><th>출고일자</th><th>거래처/받는곳</th>
+          <th>작업 파일</th><th>출고일자</th><th>거래처/받는곳</th>
           <th style="text-align:right">종수</th><th style="text-align:right">총 파렛트</th>
           <th style="text-align:right">박스수</th><th style="text-align:right">총수량</th>
           <th>상태</th><th>작성</th><th></th>
@@ -1808,6 +1816,7 @@ tr.cp-cand-row td{background:rgba(192,132,252,.04);padding:.7rem .85rem;border-t
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script src="wms_sync.js"></script>
 <script src="/wms_access.js" data-page="star_outorder" data-floor="2"></script>
 <script>
@@ -2354,8 +2363,9 @@ function cpHandleExcelFiles(fileList, append){
       var rows = results[i] || [];
       base = base.concat(rows);
       added += rows.length;
-      flist.push({ name: f.name, lines: rows.length, uploadedAt: now });
+      flist.push({ name: f.name, lines: rows.length, uploadedAt: now, size: f.size || 0 });
     });
+    cpUploadPoOriginals(files, flist.slice(flist.length - files.length), now);
     var nDates = cpApplyDateCenters(base);
     cpState.rows = base;
     cpState.files = flist;
@@ -2374,6 +2384,36 @@ function cpHandleExcelFiles(fileList, append){
   }
 }
 /* 이 작업에 묶인 파일 목록 (예전 저장본은 fileName 하나) */
+/* ═══ 발주 원본 파일 보관 — 나중에 「저장된 지시서」에서 원본·원본대비 출고 파일을 받으려고 ═══
+ * Storage star_outorder/{그룹}/po_{올린시각}_{순번}.{확장자} 에 그대로 올리고,
+ * 파일 목록(cpState.files[i].path)에 경로를 적는다. 작업 세션·지시서는 이 목록(poFiles)을 물려받는다.
+ * 올리기가 실패해도 작업은 그대로 진행 (원본 받기만 안 됨). */
+function cpPoStore(){ return (groupId && window.firebase && firebase.storage) ? firebase.storage() : null; }
+function cpUploadPoOriginals(files, entries, upAt){
+  var st = cpPoStore(); if (!st) return;
+  files.forEach(function(f, i){
+    var ent = entries[i]; if (!ent) return;
+    var ext = (String(f.name || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.xlsx'])[0].toLowerCase();
+    var path = 'star_outorder/' + groupId + '/po_' + upAt + '_' + i + ext;
+    st.ref(path).put(f, { contentType: f.type || 'application/octet-stream' }).then(function(){
+      ent.path = path;
+      (cpState.files || []).forEach(function(x){ if (x.uploadedAt === upAt && x.name === ent.name && !x.path) x.path = path; });
+      cpSavePersist();
+      /* 올리는 사이에 작업이 시작됐으면 그 세션 기록에도 경로를 넣는다 */
+      if (workSession && workSessionRef && workSession.uploadedAt === upAt && Array.isArray(workSession.poFiles)) {
+        workSession.poFiles.forEach(function(x){ if (x.name === ent.name && !x.path) x.path = path; });
+        workSessionRef.child('poFiles').set(workSession.poFiles).catch(function(){});
+      }
+    }).catch(function(e){ console.warn('[outorder] 원본 보관 실패', f.name, e); });
+  });
+}
+function cpPoFilesForSave(){
+  return cpFileList().map(function(x){
+    var o = { name: x.name || '', lines: +x.lines || 0, uploadedAt: +x.uploadedAt || cpState.uploadedAt || 0 };
+    if (x.path) o.path = x.path;
+    return o;
+  });
+}
 function cpFileList(){
   var files = cpState.files || [];
   if (!files.length && cpState.fileName) files = [{ name: cpState.fileName, lines: cpState.rows.length }];
@@ -3803,6 +3843,7 @@ function cpStartScan(){
     vendorCode: cpState.vendorCode || '',
     note: cpState.note || '',
     poFileName: cpState.fileName || '',
+    poFiles: cpPoFilesForSave(),
     uploadedAt: cpState.uploadedAt || 0,
     rows: shipRows,
     scans: [],
@@ -4256,6 +4297,8 @@ function cpEndScan(reconDone){
       vendorCode: workSession.vendorCode || '',
       note: workSession.note || '',
       poFileName: workSession.poFileName || '',
+      poFiles: Array.isArray(workSession.poFiles) ? workSession.poFiles : [],
+      uploadedAt: workSession.uploadedAt || 0,
       shipBoxes: shipBoxes,
       pallets: pallets,
       holdPool: holdPool,
@@ -4663,6 +4706,7 @@ function cpBuildMergedSession(list, newSid, by){
     vendorCode: uniqJoin(list.map(function(s){ return s.vendorCode; }), ' / '),
     note: uniqJoin(list.map(function(s){ return s.note; }), ' / '),
     poFileName: uniqJoin(list.map(function(s){ return s.poFileName; }), ' + '),
+    poFiles: [].concat.apply([], list.map(function(s){ return Array.isArray(s.poFiles) ? s.poFiles : []; })),
     uploadedAt: Math.min.apply(null, list.map(function(s){ return s.uploadedAt || now; })),
     uploadedAts: list.map(function(s){ return s.uploadedAt || 0; }),
     rows: rows, scans: scans, staging: staging, pending: pending,
@@ -10201,6 +10245,21 @@ function handleExcelAdd(file){
         added++;
       }
       if (!added) { setMsg('m0','er','❌ 추가할 행이 없습니다'); return; }
+      /* 어떤 파일로 만든 지시서인지 — 목록에 파일명으로 보이고, 원본도 받을 수 있게 보관 */
+      if (!Array.isArray(curOrder.srcFiles)) curOrder.srcFiles = [];
+      var _ent = { name: file.name, lines: added, uploadedAt: Date.now() };
+      curOrder.srcFiles.push(_ent);
+      var _oid = curOrder.orderId;
+      cpUploadOrderSrcFile(file, _ent, function(){
+        if (curOrder && curOrder.orderId === _oid) { scheduleDraftSave(); }
+        else if (ordersRef && _oid) {
+          var _o = allOrders.find(function(x){ return x.orderId === _oid; });
+          if (_o && Array.isArray(_o.srcFiles)) {
+            _o.srcFiles.forEach(function(x){ if (x.uploadedAt === _ent.uploadedAt && x.name === _ent.name) x.path = _ent.path; });
+            ordersRef.child(_oid).child('srcFiles').set(_o.srcFiles).catch(function(){});
+          }
+        }
+      });
       renderItems();
       scheduleDraftSave();
       var msg = '✅ '+added+'행 추가됨';
@@ -10598,7 +10657,7 @@ function renderList(){
   var rows = allOrders.filter(function(o){
     if (sel !== 'all' && (o.status||'draft') !== sel) return false;
     if (q) {
-      var hay = ((o.orderId||'') + ' ' + (o.customer||'')).toLowerCase();
+      var hay = ((o.orderId||'') + ' ' + (o.customer||'') + ' ' + orderSrcFiles(o).map(function(f){ return f.name; }).join(' ')).toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -10610,8 +10669,20 @@ function renderList(){
   }
   tb.innerHTML = rows.map(function(o){
     var t = orderListTotals(o);
+    var files = orderSrcFiles(o);
+    var hasOrig = files.some(function(f){ return f.path; });
+    var isCp = !!(o.coupang && o.coupang.sessionId);
+    var fileCell = files.length
+      ? files.map(function(f){ return '<div class="ol-fn" title="' + escH(f.name) + '">📄 ' + escH(f.name) + '</div>'; }).join('')
+      : '<div class="ol-fn ol-fn-none">' + (isCp ? '(파일명 기록 없음)' : '직접 작성') + '</div>';
     return '<tr>'+
-      '<td class="cell-bc">'+escH(o.orderId)+'</td>'+
+      '<td class="ol-file">' + fileCell +
+        '<div class="ol-id" title="지시서 번호 (내부 관리용)">' + escH(o.orderId) + '</div>' +
+        ((files.length && (hasOrig || isCp)) ? '<div class="ol-dl">' +
+          (hasOrig ? '<button class="btn btn-s" onclick="downloadOrderOriginal(\''+escH(o.orderId)+'\')" title="이 작업에 쓴 원본 파일을 올렸던 그대로 받기">⬇ 원본</button>' : '<span class="ol-noorig" title="원본 보관 기능이 생기기 전(2026-11-22 이전)에 올린 파일이라 원본이 없습니다">원본 없음</span>') +
+          (isCp ? '<button class="btn btn-g" onclick="downloadOrderVsOriginal(\''+escH(o.orderId)+'\')" title="원본 발주 줄마다 실제 출고수량·차이를 붙인 엑셀 (원본이 있으면 원본 열 그대로 + 출고 열 추가)">⬇ 원본대비 출고</button>' : '') +
+        '</div>' : '') +
+      '</td>'+
       '<td>'+escH(o.outboundDate||'')+'</td>'+
       '<td class="cell-name" title="'+escH(o.customer)+'">'+escH(o.customer||'')+'</td>'+
       '<td class="cell-num">'+t.skus+'</td>'+
@@ -10631,6 +10702,153 @@ function renderList(){
       '</td>'+
     '</tr>';
   }).join('');
+}
+/* ═══ 저장된 지시서 — 작업에 쓴 파일 · 원본 받기 · 원본대비 출고 ═══
+ * 지시서 번호는 내부 규약 코드라 어떤 작업이었는지 알아보기 어렵다 → 목록 앞에는 파일명을 보인다.
+ * 쿠팡 작업: coupang.poFiles(경로 있으면 원본 받기) · 예전 지시서는 poFileName(' + ' 로 묶인 이름)만.
+ * 직접 작성: 엑셀로 품목을 넣었으면 srcFiles. */
+function fbList(v){ return Array.isArray(v) ? v.filter(Boolean) : (v && typeof v === 'object' ? Object.keys(v).map(function(k){ return v[k]; }).filter(Boolean) : []); }
+function orderSrcFiles(o){
+  if (!o) return [];
+  if (o.coupang) {
+    var pf = fbList(o.coupang.poFiles);
+    if (pf.length) return pf;
+    var nm = String(o.coupang.poFileName || '').trim();
+    return nm ? nm.split(' + ').map(function(x){ return { name: x.trim() }; }).filter(function(x){ return x.name; }) : [];
+  }
+  return fbList(o.srcFiles);
+}
+function cpUploadOrderSrcFile(file, ent, onDone){
+  var st = cpPoStore(); if (!st || !file) return;
+  var ext = (String(file.name || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.xlsx'])[0].toLowerCase();
+  var path = 'star_outorder/' + groupId + '/ord_' + ent.uploadedAt + ext;
+  st.ref(path).put(file, { contentType: file.type || 'application/octet-stream' }).then(function(){
+    ent.path = path; if (onDone) onDone();
+  }).catch(function(e){ console.warn('[outorder] 원본 보관 실패', file.name, e); });
+}
+function olFetchFile(path){
+  var ref = firebase.storage().ref(path);
+  var viaUrl = function(){ return ref.getDownloadURL().then(function(url){ return fetch(url).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.blob(); }); }); };
+  return (typeof ref.getBlob === 'function') ? ref.getBlob().catch(viaUrl) : viaUrl();
+}
+function olSaveBlob(blob, name){
+  var url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name || 'file'; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+}
+function downloadOrderOriginal(orderId){
+  var o = allOrders.find(function(x){ return x.orderId === orderId; });
+  var files = orderSrcFiles(o).filter(function(f){ return f.path; });
+  if (!files.length) { setMsg('m0','warn','⚠️ 이 지시서는 원본 파일이 보관돼 있지 않습니다 (원본 보관 기능 전에 올린 파일)'); return; }
+  if (!window.firebase || !firebase.storage) { setMsg('m0','er','❌ 파일 저장소 연결 안 됨 — 새로고침 후 다시 시도'); return; }
+  setMsg('m0','inf','⏳ 원본 받는 중… ' + files.map(function(f){ return escH(f.name); }).join(', '));
+  var i = 0, fails = [];
+  (function next(){
+    if (i >= files.length) {
+      if (fails.length) setMsg('m0','er','❌ 원본 받기 실패: ' + fails.map(escH).join(', '));
+      else setMsg('m0','ok','✅ 원본 ' + files.length + '개 받음');
+      return;
+    }
+    var f = files[i++];
+    olFetchFile(f.path).then(function(b){ olSaveBlob(b, f.name); }).catch(function(e){ console.warn(e); fails.push(f.name); }).then(function(){ setTimeout(next, 400); });
+  })();
+}
+/* 원본대비 출고 — 원본 발주 줄마다 출고수량·차이를 붙인다.
+ * 줄 맞추기 = PO번호 + SKU ID + 바코드 + 입고예정일 + 센터(작업 중 붙인 「날짜-」 뗀 것).
+ * 출고수량 = 작업 세션의 스캔(되돌린 것 제외) 합. 같은 열쇠가 여러 줄이면 위 줄부터 발주수량만큼 채운다.
+ * 원본이 보관돼 있으면 원본 시트의 모든 열 그대로 + 오른쪽에 출고 열, 없으면 작업 기록(출고 대상 줄)으로 표를 만든다. */
+function olCtrBase(c){ return String(c || '').trim().replace(/^((?:\d{1,2}\/)?\d{1,2}일)-/, ''); }
+function olRowKey(po, skuId, bc, eta, center){
+  var e = String(eta||'').trim(), c = olCtrBase(center);
+  if (e && c.indexOf(e + '-') === 0) c = c.slice(e.length + 1);   /* 날짜를 못 읽어 입고일 그대로 붙인 경우 */
+  return [String(po||'').trim(), String(skuId||'').trim(), normBarcode(bc), e, c].join('|');
+}
+function downloadOrderVsOriginal(orderId){
+  var o = allOrders.find(function(x){ return x.orderId === orderId; });
+  var sid = o && o.coupang && o.coupang.sessionId;
+  if (!sid) { setMsg('m0','er','❌ 쿠팡 작업 기록이 없는 지시서입니다'); return; }
+  if (typeof XLSX === 'undefined') { setMsg('m0','er','❌ 엑셀 라이브러리 로딩 실패 — 새로고침 후 다시 시도'); return; }
+  if (!groupId || typeof firebase === 'undefined') { setMsg('m0','er','❌ Firebase 연결 안 됨'); return; }
+  setMsg('m0','inf','⏳ 원본대비 출고 파일 만드는 중… ' + escH(orderId));
+  var files = orderSrcFiles(o);
+  firebase.database().ref('wms_sync/groups/' + groupId + '/star_outorder/coupangSessions/' + sid).once('value').then(function(snap){
+    var sess = snap.val();
+    if (!sess) throw new Error('작업 기록(세션 ' + sid + ')을 찾지 못했습니다');
+    var rows = fbList(sess.rows), scans = fbList(sess.scans).filter(function(s){ return !s.undone; });
+    var shipBy = {};
+    scans.forEach(function(s){ shipBy[s.srcIdx] = (shipBy[s.srcIdx] || 0) + (+s.qty || 0); });
+    /* 열쇠별 출고 풀 */
+    var pool = {}, poolOrder = [];
+    rows.forEach(function(r, i){
+      var k = olRowKey(r.po, r.skuId, r.poBarcode, r.eta, r.center);
+      if (!pool[k]) { pool[k] = { ship: 0, can: 0, asIs: false, r: r }; poolOrder.push(k); }
+      pool[k].ship += shipBy[i] || 0; pool[k].can += +r.canShip || 0; if (r.asIs) pool[k].asIs = true;
+    });
+    var sessFiles = fbList(sess.poFiles);
+    var withPath = files.filter(function(f){ return f.path; });
+    if (!withPath.length && sessFiles.some(function(f){ return f.path; })) withPath = sessFiles.filter(function(f){ return f.path; });
+    return Promise.all(withPath.map(function(f){
+      return olFetchFile(f.path).then(function(b){ return b.arrayBuffer(); }).then(function(buf){ return { f: f, buf: buf }; }).catch(function(e){ console.warn(e); return { f: f, err: true }; });
+    })).then(function(got){
+      var wb = XLSX.utils.book_new(), usedNames = {}, totPo = 0, totShip = 0, nSheets = 0;
+      function sheetName(n){
+        var b = String(n || '시트').replace(/\.[^.]+$/, '').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 28) || '시트', x = b, c = 2;
+        while (usedNames[x]) x = b.slice(0, 25) + '_' + (c++);
+        usedNames[x] = 1; return x;
+      }
+      got.forEach(function(g){
+        if (g.err) return;
+        var wb0 = XLSX.read(g.buf, { type: 'array' });
+        var ws0 = wb0.Sheets[wb0.SheetNames[0]];
+        var aoa = XLSX.utils.sheet_to_json(ws0, { header: 1, defval: '' });
+        if (!aoa.length) return;
+        var headers = aoa[0].map(function(h){ return (h || '').toString().trim(); });
+        var idx = {};
+        Object.keys(CP_HEADER_ALIASES).forEach(function(k){ idx[k] = cpFindCol(headers, CP_HEADER_ALIASES[k]); });
+        var w = headers.length;
+        var out = [headers.concat(['출고수량', '차이(출고-발주)', '출고 메모'])];
+        aoa.slice(1).forEach(function(r){
+          var line = r.slice(); while (line.length < w) line.push('');
+          var empty = !r.some(function(c){ return c !== '' && c !== null; });
+          var bc = idx.barcode !== -1 ? r[idx.barcode] : '', sku = idx.skuId !== -1 ? r[idx.skuId] : '';
+          if (empty || !(String(bc).trim() || String(sku).trim())) { out.push(line); return; }
+          var q = idx.qty !== -1 ? (+r[idx.qty] || 0) : 0;
+          var k = olRowKey(idx.po !== -1 ? r[idx.po] : '', sku, bc, idx.eta !== -1 ? cpFmtEta(r[idx.eta]) : '', idx.center !== -1 ? r[idx.center] : '');
+          var p = pool[k], take = 0, memo = '';
+          if (!p) memo = '이번 작업에 안 들어감 (재고 없음·제외)';
+          else {
+            take = Math.min(q, p.ship); p.ship -= take;
+            if (take < q) memo = p.asIs ? '재고만큼 확정(이대로)' : '덜 나감';
+          }
+          totPo += q; totShip += take;
+          out.push(line.concat([take, take - q, memo]));
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(out), sheetName(g.f.name));
+        nSheets++;
+      });
+      /* 원본에서 못 맞춘 출고(남은 풀) 또는 원본이 없을 때 → 작업 기록으로 표 */
+      var left = poolOrder.filter(function(k){ return pool[k].ship > 0; });
+      if (!nSheets || left.length) {
+        var keys = nSheets ? left : poolOrder;
+        var t = [['PO번호', 'SKU ID', '상품명', '바코드', 'SKU Barcode(라벨)', '센터', '입고예정일', '발주수량', '출고가능', '출고수량', '차이(출고-발주)', '출고 메모']];
+        keys.forEach(function(k){
+          var p = pool[k], r = p.r, q = 0;
+          rows.forEach(function(x){ if (olRowKey(x.po, x.skuId, x.poBarcode, x.eta, x.center) === k) q += +x.qty || 0; });
+          var sh = p.ship;
+          if (!nSheets) { totPo += q; totShip += sh; }
+          t.push([r.po || '', r.skuId || '', r.skuName || '', r.poBarcode || '', r.poAltBarcode || '', r.center || '', r.eta || '', q, p.can, sh, sh - q,
+            nSheets ? '원본 발주수량보다 더 나갔거나 원본에서 같은 줄을 못 찾은 출고' : (sh < q ? (p.asIs ? '재고만큼 확정(이대로)' : '덜 나감') : '')]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t), nSheets ? '원본에없는출고' : '작업기록기준');
+      }
+      var base = (files[0] && files[0].name ? files[0].name.replace(/\.[^.]+$/, '') : orderId).replace(/[\\/:*?"<>|]/g, '_');
+      XLSX.writeFile(wb, base + (files.length > 1 ? '_외' + (files.length - 1) : '') + '_원본대비출고.xlsx');
+      var note = nSheets ? '원본 ' + nSheets + '개 기준' : '원본이 보관돼 있지 않아 작업 기록(출고 대상 줄)으로 만듦';
+      if (got.some(function(g){ return g.err; })) note += ' · 일부 원본 받기 실패';
+      if (nSheets && left.length) note += ' · 원본 줄에 다 못 담은 출고 ' + left.length + '줄 → 「원본에없는출고」 시트 확인';
+      setMsg('m0', (nSheets && left.length) ? 'warn' : 'ok', '✅ 원본대비 출고 받음 — 발주 ' + totPo + ' · 출고 ' + totShip + ' (' + note + ')');
+    });
+  }).catch(function(e){ setMsg('m0','er','❌ 원본대비 출고 실패: ' + escH(e && e.message || e)); });
 }
 function loadOrder(orderId){
   var o = allOrders.find(function(x){ return x.orderId === orderId; });
