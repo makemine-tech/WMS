@@ -1191,6 +1191,7 @@ var jobName = null;         // 작업군 이름 — 작업의 고유 식별자(�
 var headers = [];           // 헤더 행 배열 (인덱스 = 컬럼 인덱스)
 var rows = [];              // [{r:행번호, vals:{컬럼명->값}, sizeMod:bool, originMod:bool, qtyReceived:N}, ...]
 var byBarcode = {};         // {바코드문자열: rowIndex}
+var bcDups = {};            // {바코드: [rowIdx…]} — 원본에서 같은 바코드가 여러 줄(사이즈 복사 실수 등)
 var currentBox = null;
 var boxes = [];             // [{id, ts(시작시각), lastTs(마지막 작업시각), items:[{barcode, rowIdx, count}], closed}]
 
@@ -1851,6 +1852,7 @@ function handleFile(file) {
       var msg = '✅ '+headers.filter(Boolean).length+'컬럼 · '+rows.length+'행 인식';
       var without = rows.filter(function(r){ return !getBarcodeKey(r); }).length;
       if (without) msg += ' ⚠️ '+without+'행에 바코드(D열)가 없습니다';
+      msg += bcDupNotice();
       var afterCloud = function(){
         saveSession();
         /* 클라우드에 현재 작업 1회 등록/갱신 (새 작업이면 등록, 복원이면 현 상태 반영) */
@@ -1914,7 +1916,7 @@ function parseWorkbook(wb) {
   /* 1행 = 헤더. 2행부터 데이터 */
   headers = aoa[0].map(function(h){ return h===null||h===undefined ? '' : String(h); });
   rows = [];
-  byBarcode = {};
+  byBarcode = {}; bcDups = {};
   noteAck = {}; noteAlways = {};   /* 새 파일 = 새 작업 — 검수요청사항 확인 기록 초기화 */
   for (var i=1; i<aoa.length; i++) {
     var rawRow = aoa[i];
@@ -1938,8 +1940,8 @@ function parseWorkbook(wb) {
     };
     var rowIdx = rows.length;
     rows.push(row);
-    if (bc !== null && bc !== undefined && String(bc) !== '') byBarcode[normBarcode(bc)] = rowIdx;
-    if (ab !== null && ab !== undefined && String(ab) !== '') byBarcode[normBarcode(ab)] = rowIdx;
+    if (bc !== null && bc !== undefined && String(bc) !== '') bcIndexAdd(normBarcode(bc), rowIdx);
+    if (ab !== null && ab !== undefined && String(ab) !== '') bcIndexAdd(normBarcode(ab), rowIdx);
   }
 }
 
@@ -1958,7 +1960,7 @@ function parseResultWorkbook(aoa) {
   if (!aoa.length) throw new Error('빈 시트');
   headers = aoa[0].map(function(h){ return h===null||h===undefined ? '' : String(h); });
   rows = [];
-  byBarcode = {};
+  byBarcode = {}; bcDups = {};
   noteAck = {}; noteAlways = {};   /* 결과 파일 복원 = 새 작업 — 검수요청사항 확인 기록 초기화 */
   var rowMap = {};      /* 정규화 바코드 → rowIdx */
   var boxMap = {};      /* 박스ID → box */
@@ -2034,6 +2036,51 @@ function getBarcodeKey(row) {
   var a = row.vals[COL.ALT_BARCODE];
   if (a !== null && a !== undefined && String(a) !== '') return normBarcode(a);
   return '';
+}
+
+/* 같은 바코드가 원본에 여러 줄 — 예전엔 마지막 줄이 이겨서(AG-813 JR5408 300·305·310 이 모두 4067903907665)
+   찍은 300 사이즈 5족이 예정 0 인 310 줄로 가고, 작업 종료 때 「예정보다 많음」으로 잘려 입고가 안 잡혔다.
+   이제: 예정 수량이 있는 줄을 기본으로 잡고, 스캔은 아직 덜 찬 줄부터 채운다. */
+function bcRowTarget(idx) {
+  var r = rows[idx]; if (!r || !r.vals) return 0;
+  return Math.max(0, (+r.vals[COL.EXPECT_QTY] || 0) - (+r.vals[COL.EXISTING_QTY] || 0));
+}
+function bcIndexAdd(key, idx) {
+  if (!key) return;
+  var cur = byBarcode[key];
+  if (cur === undefined || cur === idx) { byBarcode[key] = idx; return; }
+  var list = bcDups[key] || (bcDups[key] = [cur]);
+  if (list.indexOf(idx) < 0) list.push(idx);
+  if (!(bcRowTarget(cur) > 0) && bcRowTarget(idx) > 0) byBarcode[key] = idx;
+}
+function bcIndexRebuild() {
+  byBarcode = {}; bcDups = {};
+  rows.forEach(function(r, idx){
+    if (!r || !r.vals) return;
+    var b1 = r.vals[COL.BARCODE], b2 = r.vals[COL.ALT_BARCODE];
+    if (b1!==null && b1!==undefined && String(b1)!=='') bcIndexAdd(normBarcode(b1), idx);
+    if (b2!==null && b2!==undefined && String(b2)!=='') bcIndexAdd(normBarcode(b2), idx);
+  });
+}
+/* 스캔할 줄 — 같은 바코드 여러 줄이면 목표 수량이 덜 찬 줄 먼저(원본 순서), 다 찼으면 기본 줄 */
+function bcPickRow(key) {
+  var def = byBarcode[key];
+  var list = bcDups[key];
+  if (def === undefined || !list) return def;
+  for (var i = 0; i < list.length; i++) {
+    var r = rows[list[i]]; if (!r) continue;
+    var t = bcRowTarget(list[i]);
+    if (t > 0 && ((r.qtyReceived || 0) + (r.qtyDefective || 0)) < t) return list[i];
+  }
+  return def;
+}
+function bcDupNotice() {
+  var ks = Object.keys(bcDups);
+  if (!ks.length) return '';
+  var desc = ks.slice(0, 5).map(function(k){
+    return escH(k) + ' (' + bcDups[k].map(function(i){ var v = rows[i].vals; return '사이즈 ' + escH(v[COL.SIZE] == null ? '?' : v[COL.SIZE]) + '·예정 ' + (+v[COL.EXPECT_QTY] || 0); }).join(' / ') + ')';
+  }).join('<br>');
+  return '<div style="margin-top:.35rem;color:#ffb020;font-weight:700">⚠️ 원본에 같은 바코드가 여러 줄인 곳이 ' + ks.length + '곳 있습니다 — 스캔은 예정 수량이 있는 줄부터 채웁니다. 업체 파일 바코드 복사 실수일 수 있으니 확인하세요.<br><span style="font-weight:500;font-size:.8rem">' + desc + (ks.length > 5 ? '<br>…' : '') + '</span></div>';
 }
 
 /* ─────────────── 세션 저장 ─────────────── */
@@ -2202,12 +2249,7 @@ function restoreSession() {
   startedEmpty = !!data.startedEmpty;
   headers = data.headers || [];
   rows = (data.rowsLite || []).map(function(r){ return r; });
-  byBarcode = {};
-  rows.forEach(function(r, idx){
-    var b1 = r.vals[COL.BARCODE], b2 = r.vals[COL.ALT_BARCODE];
-    if (b1!==null && b1!==undefined && String(b1)!=='') byBarcode[normBarcode(b1)] = idx;
-    if (b2!==null && b2!==undefined && String(b2)!=='') byBarcode[normBarcode(b2)] = idx;
-  });
+  bcIndexRebuild();
   boxes = data.boxes || [];
   currentBox = data.currentBox || null;
   shipPlan = data.shipPlan || null;
@@ -2245,7 +2287,7 @@ function restoreSession() {
   if (startedEmpty) {
     setMsg('m1','ok','↩ 진행 중 작업을 복원했습니다 — 이어서 스캔하세요. (자료 없이 시작 모드 · 작업 내용 보존됨)');
   } else {
-    setMsg('m1','warn','↩ 진행 중 작업을 복원했습니다 — 이어서 스캔하세요. 결과 다운로드 시에만 같은 .xlsx를 다시 업로드하면 됩니다. (작업 내용 보존됨)');
+    setMsg('m1','warn','↩ 진행 중 작업을 복원했습니다 — 이어서 스캔하세요. 결과 다운로드 시에만 같은 .xlsx를 다시 업로드하면 됩니다. (작업 내용 보존됨)' + bcDupNotice());
   }
 }
 
@@ -2544,7 +2586,7 @@ function addUnknownBarcode() {
   if (byBarcode[key] !== undefined) {
     pendingUnknownBarcode = null; pendingUnknownRaw = null;
     /* 그냥 일반 스캔처럼 처리 */
-    handleNormalScan(byBarcode[key], key);
+    handleNormalScan(bcPickRow(key), key);
     return;
   }
   /* 새 row 생성 — vals는 헤더 길이만큼 빈 배열, D열에 바코드 값 세팅 */
@@ -2701,7 +2743,7 @@ function onProdKey(ev) {
     return;
   }
   pendingProdOverride = null;
-  var rowIdx = byBarcode[key];
+  var rowIdx = bcPickRow(key);
   if (rowIdx === undefined) {
     /* 자료 없이 시작 모드 — 매번 묻지 않고 자동 신규 등록 */
     if (startedEmpty) {
@@ -4222,7 +4264,7 @@ function buildInspectReport(plan) {
         diff = tot - ln.expect;
         row.getCell(cS).value = { formula: L(cR)+rn+'-'+L(qtyPos + 1)+rn, result: diff };
         if (!ln.isNew) {
-          if (tot === 0) notes.unshift('미입고 (예정 '+ln.expect+'개)');
+          if (tot === 0) { if (ln.expect > 0) notes.unshift('미입고 (예정 '+ln.expect+'개)'); }
           else if (diff > 0) notes.unshift('예정보다 '+diff+'개 많음');
           else if (diff < 0) notes.unshift('예정보다 '+(-diff)+'개 부족');
         }
@@ -4426,7 +4468,7 @@ function doStartEmpty(chosenName){
   workbookRaw = null;
   jobName = null;
   rows = [];
-  byBarcode = {};
+  byBarcode = {}; bcDups = {};
   boxes = [];
   currentBox = null;
   lastScans = [];
