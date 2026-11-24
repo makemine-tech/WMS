@@ -1972,9 +1972,29 @@ function wmsHandleAuthState(state){
   }
   groupId = state.groupId;
   isAdmin = !!state.isAdmin;
+  cpShowGroupNotice();
   attachRefs();
   /* admin 여부에 따라 작성 화면 액션바 갱신 */
   refreshActionBar();
+}
+
+/* ─── 슈퍼관리자가 창고관리(wms.html)에서 다른 업체 그룹을 골라 둔 채 들어오면
+ *     (localStorage wms_adminGroupId) 이 페이지도 그 그룹 데이터를 읽어 지시서·작업파일이 하나도 안 보인다.
+ *     → 메인 그룹(makechango)이 아니면 맨 위에 어느 그룹을 보고 있는지 크게 알리고 바로 되돌리는 버튼을 둔다. */
+function cpShowGroupNotice(){
+  var old = document.getElementById('cpGroupNotice'); if (old) old.remove();
+  if (!isAdmin || !groupId || groupId === 'makechango') return;
+  var d = document.createElement('div');
+  d.id = 'cpGroupNotice';
+  d.style.cssText = 'position:sticky;top:0;z-index:9999;background:#7a2e0e;color:#fff;padding:.6rem 1rem;font-size:.9rem;font-weight:700;display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;border-bottom:2px solid #f0c44a';
+  d.innerHTML = '⚠️ 지금 「' + escH(groupId) + '」 그룹 데이터를 보고 있습니다 — 메인 그룹(makechango)의 저장된 지시서·작업파일은 여기 안 보입니다. ' +
+    '<button style="background:#f0c44a;color:#222;border:0;border-radius:5px;padding:.35rem .8rem;font-weight:800;cursor:pointer" onclick="cpBackToMainGroup()">메인 그룹(makechango)으로 보기</button>' +
+    '<span style="font-weight:400;font-size:.78rem;opacity:.85">(창고관리에서 다른 업체 그룹을 골라 둔 상태가 이 페이지에도 이어진 것)</span>';
+  document.body.insertBefore(d, document.body.firstChild);
+}
+function cpBackToMainGroup(){
+  try { localStorage.setItem('wms_adminGroupId', 'makechango'); } catch(_){}
+  location.reload();
 }
 
 /* ─────────────── Firebase 연결 ─────────────── */
