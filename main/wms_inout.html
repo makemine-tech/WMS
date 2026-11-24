@@ -301,6 +301,7 @@ function renderList(){
     +'<button class="btn" data-act="upl">⬆ 예정 업로드</button>'
     +'<button class="btn" data-act="tpl">📄 양식</button>'
     +'<button class="btn a" data-act="pdf">🖨 PDF 보고서</button>'
+    +'<button class="btn g" data-act="fee" title="위 기간의 시작 달 기준 · 파렛트당 1일 '+FEE_DAY+'원 · 입출고 파렛트당 '+FEE_IO.toLocaleString()+'원">💰 보관료 엑셀</button>'
   +'</div>';
   h+='<div class="flt">'
     +'<input type="date" data-flt="from" value="'+esc(FLT.from)+'"> ~ <input type="date" data-flt="to" value="'+esc(FLT.to)+'">'
@@ -758,6 +759,84 @@ function pdfReport(){
   w.document.open();w.document.write(html);w.document.close();
 }
 
+/* ── 💰 보관료 계산 엑셀 — 다슈 보관비 양식 그대로 (보관일·입고파렛·출고파렛·보관파렛·금액·입출고비·비고 + 아래 합계표)
+   달 = 위 기간의 시작 달 · 보관파렛 = 전날 + 입고 − 출고 (수식) · 금액 = 보관파렛 × 1일 단가 · 입출고비 = (입고+출고) × 파렛트당
+   전달마감수량 = 그 달 1일 전까지 기록된 입고 − 출고 파렛트 (엑셀에서 고치면 아래가 다 따라 바뀜)
+   아직 [등록] 안 한 예정 줄도 넣되 비고에 「예정·미등록」 표시 + 맨 아래 특이사항 */
+var FEE_DAY=500, FEE_IO=3000;
+var EXCELJS_SRC='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+function loadExcelJS(){
+  if(window.ExcelJS)return Promise.resolve(window.ExcelJS);
+  return new Promise(function(ok,no){var s=document.createElement('script');s.src=EXCELJS_SRC;s.onload=function(){window.ExcelJS?ok(window.ExcelJS):no(new Error('ExcelJS 없음'));};s.onerror=function(){no(new Error('ExcelJS를 불러오지 못했어요'));};document.head.appendChild(s);});
+}
+function feeXls(){
+  var base=FLT.from||FLT.to||todayStr();
+  var Y=+base.slice(0,4), M=+base.slice(5,7), days=new Date(Y,M,0).getDate();
+  var mFrom=Y+'-'+pad(M)+'-01', mTo=Y+'-'+pad(M)+'-'+pad(days);
+  var recs=allRecs().filter(function(r){return r.date&&num(r.pallets)>0;});
+  var open=0, byDay={}, planN=0;
+  recs.forEach(function(r){
+    var p=num(r.pallets), d=r.date;
+    if(d<mFrom){open+=(r.type==='out'?-p:p);return;}
+    if(d>mTo)return;
+    var x=byDay[d]=byDay[d]||{i:0,o:0,notes:[]};
+    if(r.type==='out')x.o+=p;else x.i+=p;
+    if(r.status!=='reg')planN++;
+    x.notes.push({t:r.type==='out'?1:0,c:r.createdAt||0,s:r.seq||0,txt:(r.type==='out'?'출고':'입고')+' '+(r.product||'(상품명 없음)')+' '+p+'파렛'+(num(r.qty)?' '+num(r.qty).toLocaleString()+'개':'')+(r.ptype?' '+r.ptype:'')+(r.status!=='reg'?' (예정·미등록)':'')});
+  });
+  loadExcelJS().then(function(ExcelJS){
+    var wb=new ExcelJS.Workbook();
+    var ws=wb.addWorksheet(Y+'_'+M+'월',{pageSetup:{paperSize:9,orientation:'portrait',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+    ws.columns=[{width:11},{width:12.4},{width:10.9},{width:12.4},{width:13},{width:14.4},{width:60}];
+    var thin={style:'thin',color:{argb:'FF000000'}}, BD={top:thin,left:thin,bottom:thin,right:thin};
+    var AR={name:'Arial',size:10}, YEL={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}}, BLU={type:'pattern',pattern:'solid',fgColor:{argb:'FFDDEBF7'}};
+    var WON='_-"₩"* #,##0_-;\\-"₩"* #,##0_-;_-"₩"* "-"_-;_-@_-';
+    function put(addr,v,o){var c=ws.getCell(addr);c.value=v;c.border=BD;c.font=(o&&o.font)||AR;c.alignment=(o&&o.al)||{horizontal:'center',vertical:'middle'};if(o&&o.fill)c.fill=o.fill;if(o&&o.fmt)c.numFmt=o.fmt;return c;}
+    ['','입고파렛','출고파렛','보관파렛','금액','입출고비','비고'].forEach(function(h,i){put(String.fromCharCode(65+i)+'1',h||null,{fill:YEL,font:i>=4?{name:'돋움',size:10}:AR});});
+    put('A2','전달마감수량',{fill:YEL});put('B2',null);put('C2',null);put('D2',open);put('E2',null);put('F2',null);put('G2',null);
+    var stor=open;
+    for(var i=0;i<31;i++){
+      var r=3+i;
+      if(i>=days){['A','B','C','D','E','F','G'].forEach(function(c){put(c+r,null);});continue;}
+      var d=Y+'-'+pad(M)+'-'+pad(i+1), x=byDay[d]||{i:0,o:0,notes:[]};
+      stor+=x.i-x.o;
+      put('A'+r,new Date(Date.UTC(Y,M-1,i+1)),{fmt:'yyyy-mm-dd'});
+      put('B'+r,x.i||null);put('C'+r,x.o||null);
+      put('D'+r,{formula:'D'+(r-1)+'+B'+r+'-C'+r,result:stor});
+      put('E'+r,{formula:'D'+r+'*'+FEE_DAY,result:stor*FEE_DAY},{fmt:WON});
+      put('F'+r,{formula:'(B'+r+'+C'+r+')*'+FEE_IO,result:(x.i+x.o)*FEE_IO},{fmt:WON});
+      var nt=x.notes.sort(function(a,b){return a.t-b.t||a.c-b.c||a.s-b.s;}).map(function(n){return n.txt;});
+      put('G'+r,nt.length?nt.join('\n'):null,{al:{horizontal:'left',vertical:'middle',wrapText:true}});
+      if(nt.length>1)ws.getRow(r).height=Math.min(15*nt.length,160);
+    }
+    var totE=0,totF=0;stor=open;
+    for(var j=0;j<days;j++){var x2=byDay[Y+'-'+pad(M)+'-'+pad(j+1)]||{i:0,o:0};stor+=x2.i-x2.o;totE+=stor*FEE_DAY;totF+=(x2.i+x2.o)*FEE_IO;}
+    put('E34',{formula:'SUM(E3:E33)',result:totE},{fmt:WON});put('F34',{formula:'SUM(F3:F33)',result:totF},{fmt:WON});
+    var BOLD={name:'맑은 고딕',size:11,bold:true}, MG={name:'맑은 고딕',size:11};
+    ['보관비','입출고비','공급가액','부가세','합계'].forEach(function(h,i){put(String.fromCharCode(66+i)+'36',h,{fill:BLU,font:MG});});
+    var sup=totE+totF, vat=Math.round(sup*10/100);
+    put('A37','금액',{font:MG});
+    put('B37',{formula:'E34',result:totE},{fmt:WON,font:MG,al:{vertical:'middle'}});
+    put('C37',{formula:'F34',result:totF},{fmt:WON,font:MG,al:{vertical:'middle'}});
+    put('D37',{formula:'SUM(B37:C37)',result:sup},{fmt:WON,font:MG,al:{vertical:'middle'}});
+    put('E37',{formula:'D37*10/100',result:vat},{fmt:WON,font:MG,al:{vertical:'middle'}});
+    put('F37',{formula:'SUM(D37:E37)',result:sup+vat},{fmt:WON,font:BOLD,al:{vertical:'middle'}});
+    var info=['※ '+(SEL?whName(SEL):'전체 창고')+' · '+Y+'년 '+M+'월 · 보관료 파렛트당 1일 '+FEE_DAY+'원 · 입출고비 파렛트당 '+FEE_IO.toLocaleString()+'원',
+      '※ 전달마감수량 = '+M+'월 1일 전까지 입출고관리에 기록된 입고 − 출고 파렛트 ('+open+') — 실제와 다르면 D2만 고치면 아래가 다 바뀜'];
+    if(planN)info.push('⚠ 특이사항: 아직 [등록] 안 한 예정 줄 '+planN+'개가 들어가 있어요 (비고에 「예정·미등록」 표시)');
+    if(open<0)info.push('⚠ 특이사항: 전달마감수량이 마이너스예요 — 이전 입고 기록이 빠졌는지 확인하세요');
+    info.forEach(function(t,k){var c=ws.getCell('A'+(39+k));c.value=t;c.font={name:'맑은 고딕',size:9,color:{argb:/⚠/.test(t)?'FFC00000':'FF666666'},bold:/⚠/.test(t)};});
+    ws.views=[{state:'frozen',ySplit:1}];
+    return wb.xlsx.writeBuffer().then(function(buf){
+      var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+      a.download=(Y+'_'+M+'월_입출고 내역('+(SEL?whName(SEL):'전체창고')+')_보관비.xlsx').replace(/[\\/:*?"<>|]/g,'_');
+      document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);
+      toast(Y+'년 '+M+'월 보관료 엑셀을 내려받았어요 · 공급가액 '+sup.toLocaleString()+'원'+(planN?'\n⚠ 예정·미등록 줄 '+planN+'개 포함':''),4500);
+    });
+  }).catch(fail);
+}
+
 /* ── 이벤트 ── */
 document.addEventListener('change',function(e){
   var t=e.target;
@@ -783,6 +862,7 @@ document.addEventListener('click',function(e){
   else if(a==='tpl'){downloadTpl();}
   else if(a==='upl'){uploadXls();}
   else if(a==='pdf'){pdfReport();}
+  else if(a==='fee'){feeXls();}
   else if(a==='mon'){var m=t.getAttribute('data-m');if(m==='all'){FLT.from='';FLT.to='';}else{var d=new Date();d.setDate(1);d.setMonth(d.getMonth()+(+m));FLT.from=ymd(d);var e2=new Date(d.getFullYear(),d.getMonth()+1,0);FLT.to=ymd(e2);}render();}
 });
 
