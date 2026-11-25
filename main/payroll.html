@@ -1229,7 +1229,7 @@ function renderEmp(){
       '<td>' + esc([e.dept, e.title].filter(Boolean).join(' · ')) + '</td><td>' + esc(e.joined || '') + '</td>' +
       '<td style="font-family:var(--mo)">' + fmt((e.defaults || {}).base) + '</td><td>' + (e.fam || 1) + ' / ' + (e.kids || 0) + (e.taxPct && e.taxPct != 100 ? ' <span class="note">(' + e.taxPct + '%)</span>' : '') + '</td>' +
       '<td class="note">' + (flags.join(' · ') || '전체 적용') + '</td><td class="note">' + esc(e.bank || '') + ' ' + esc(maskAcct(e.account)) + '</td>' +
-      '<td style="white-space:nowrap"><button class="btn btn-sm" title="Word(.doc) 파일로 받기" onclick="contractWord(\'' + e.id + '\', event)">📄 Word</button> <button class="btn btn-sm" title="바로 인쇄" onclick="contractPrint(\'' + e.id + '\', event)">🖨 인쇄</button></td></tr>';
+      '<td style="white-space:nowrap">' + contractCell(e) + '</td></tr>';
   });
   $('empBody').innerHTML = h + '</tbody></table></div>';
 }
@@ -1271,9 +1271,9 @@ function openEmp(id){
         '<span class="note" id="empMh"></span></div></div>' +
     '</div><div class="fsec">매월 기본값 (새 달 만들 때 채워짐)</div><div class="fg">' +
       money('base', '기본급') + money('pos', '직책수당') + money('ot', '고정 연장수당 (포괄일 때)') + money('etc', '기타수당') + money('meal', '식대 (비과세 20만)') + money('car', '자가운전보조금 (비과세 20만)') + money('child', '보육수당 (비과세 20만)') + money('dedEtc', '기타공제') +
-    '</div><div class="fsec">메모</div><div class="fg"><label class="full"><textarea data-f="memo" rows="2">' + esc(e.memo || '') + '</textarea></label></div>' +
+    '</div>' + (id ? '<div class="fsec">📝 근로계약서</div><div id="ctBox">' + contractBox(id) + '</div><div class="note">양식은 저장된 사원 정보(입사일·급여·스케줄)로 채워집니다.</div>' : '') +
+    '<div class="fsec">메모</div><div class="fg"><label class="full"><textarea data-f="memo" rows="2">' + esc(e.memo || '') + '</textarea></label></div>' +
     '<div class="modal-ft">' + (id ? '<button class="btn btn-r" style="margin-right:auto" onclick="deleteEmp(\'' + e.id + '\')">삭제</button>' : '') +
-      (id ? '<button class="btn" title="저장된 사원 정보로 만듭니다" onclick="contractWord(\'' + e.id + '\')">📄 근로계약서</button><button class="btn" onclick="contractPrint(\'' + e.id + '\')">🖨 계약서 인쇄</button>' : '') +
       '<button class="btn" onclick="closeModal()">취소</button><button class="btn btn-p" id="empSave">저장</button></div></div></div>';
   $('modalRoot').innerHTML = h;
   /* 모드에 따라 스케줄을 풀어 보여 주고, 직접 입력일 때만 시각 칸을 연다 */
@@ -1313,6 +1313,7 @@ function openEmp(id){
     m.querySelectorAll('[data-d]').forEach(function(el){ e.defaults[el.dataset.d] = num(el.value); });
     if (!e.name){ toast('성명을 입력하세요'); return; }
     if (e.fam < 1) e.fam = 1;
+    var saved = empById(e.id); if (saved && saved.contract) e.contract = saved.contract; else delete e.contract;   /* 창을 연 뒤 올린·지운 원본 정보 유지 */
     var i = S.employees.findIndex(function(x){ return x.id === e.id; });
     if (i >= 0) S.employees[i] = e; else S.employees.push(e);
     saveEmployees().then(function(){ closeModal(); renderEmp(); toast('저장했습니다'); }).catch(function(er){ toast('저장 실패: ' + er.message); });
@@ -1396,12 +1397,114 @@ function contractPrint(id, ev){
   var w = f.contentWindow; w.document.open(); w.document.write(contractDoc(contractHtml(e), false)); w.document.close();
   setTimeout(function(){ w.focus(); w.print(); setTimeout(function(){ f.remove(); }, 1500); }, 200);
 }
+/* ── 작성·서명한 계약서 원본 업로드: 파일 바이트를 DEK 로 암호화해 enc/contracts/{사원id}, 정보(파일명·형식·크기·시각)는 사원 정보 e.contract ── */
+var CT_MAX = 7 * 1024 * 1024;
+function ctKind(c){
+  var t = (c && c.type) || '', n = ((c && c.name) || '').toLowerCase();
+  if (t === 'application/pdf' || /\.pdf$/.test(n)) return 'pdf';
+  if (/^image\//.test(t) || /\.(jpe?g|png|gif|webp|bmp)$/.test(n)) return 'img';
+  return 'file';
+}
+function ctSize(b){ return b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB'; }
+function contractUpload(id, ev){
+  if (ev) ev.stopPropagation();
+  var e = empById(id); if (!e) return;
+  if (e.contract && !confirm(e.name + ' 사원은 이미 올린 원본(' + e.contract.name + ')이 있습니다.\n새 파일로 바꿀까요?')) return;
+  var inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.pdf,.doc,.docx,.hwp,.hwpx,image/*';
+  inp.onchange = function(){
+    var f = inp.files[0]; if (!f) return;
+    if (f.size > CT_MAX){ toast('파일이 너무 큽니다 (' + ctSize(f.size) + ') — 7MB 이하로 올려 주세요'); return; }
+    toast('암호화해서 올리는 중…');
+    f.arrayBuffer().then(function(buf){
+      var iv = rnd(12);
+      return crypto.subtle.encrypt({ name:'AES-GCM', iv: iv, additionalData: TE.encode('contracts/' + id) }, DEK, buf).then(function(ct){
+        return ref('enc/contracts/' + id).set({ iv: b64(iv), ct: b64(ct), t: Date.now() });
+      });
+    }).then(function(){
+      var cur = empById(id);
+      cur.contract = { name: f.name, type: f.type || '', size: f.size, t: Date.now() };
+      return saveEmployees();
+    }).then(function(){
+      audit('contract-upload', { emp: e.name });
+      renderEmp(); if ($('ctBox')) $('ctBox').innerHTML = contractBox(id);
+      toast(e.name + ' 근로계약서 원본을 올렸습니다');
+    }).catch(function(er){ toast('업로드 실패: ' + er.message); });
+  };
+  inp.click();
+}
+function contractFile(id){
+  var e = empById(id), c = e && e.contract;
+  if (!c) return Promise.reject(new Error('올린 원본이 없습니다'));
+  return ref('enc/contracts/' + id).get().then(function(s){
+    if (!s.exists()) throw new Error('원본 파일을 찾지 못했습니다');
+    var box = s.val();
+    return crypto.subtle.decrypt({ name:'AES-GCM', iv: ub64(box.iv), additionalData: TE.encode('contracts/' + id) }, DEK, ub64(box.ct));
+  }).then(function(buf){ return new Blob([buf], { type: c.type || 'application/octet-stream' }); });
+}
+function contractOrigDown(id, ev){
+  if (ev) ev.stopPropagation();
+  var e = empById(id);
+  contractFile(id).then(function(blob){
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = e.contract.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+  }).catch(function(er){ toast(er.message); });
+}
+function contractOrigPrint(id, ev){
+  if (ev) ev.stopPropagation();
+  var e = empById(id), k = ctKind(e && e.contract);
+  if (k === 'file'){ toast('Word·한글 파일은 브라우저에서 바로 인쇄할 수 없어 내려받습니다 — 열어서 인쇄하세요'); return contractOrigDown(id); }
+  contractFile(id).then(function(blob){
+    var url = URL.createObjectURL(blob), f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    document.body.appendChild(f);
+    var done = function(){ setTimeout(function(){ try { f.contentWindow.focus(); f.contentWindow.print(); } catch (er){ window.open(url); } setTimeout(function(){ f.remove(); URL.revokeObjectURL(url); }, 60000); }, 300); };
+    if (k === 'pdf'){ f.onload = done; f.src = url; }
+    else {
+      var w = f.contentWindow; w.document.open();
+      w.document.write('<html><head><style>@page{size:A4;margin:8mm}html,body{margin:0}img{display:block;max-width:100%;max-height:277mm;margin:0 auto}</style></head><body><img src="' + url + '"></body></html>');
+      w.document.close();
+      var im = w.document.images[0]; if (im.complete) done(); else im.onload = done;
+    }
+  }).catch(function(er){ toast(er.message); });
+}
+function contractDelete(id){
+  var e = empById(id); if (!e || !e.contract) return;
+  if (!confirm(e.name + ' 사원의 근로계약서 원본(' + e.contract.name + ')을 지울까요?\n지우면 되살릴 수 없습니다.')) return;
+  ref('enc/contracts/' + id).remove().then(function(){ delete e.contract; return saveEmployees(); }).then(function(){
+    audit('contract-delete', { emp: e.name });
+    renderEmp(); if ($('ctBox')) $('ctBox').innerHTML = contractBox(id);
+    toast('원본을 지웠습니다');
+  }).catch(function(er){ toast('삭제 실패: ' + er.message); });
+}
+/* 목록 칸 — 원본이 있으면 원본 받기·인쇄, 없으면 양식 받기·인쇄 + 업로드 */
+function contractCell(e){
+  var q = '\'' + e.id + '\', event';
+  if (e.contract) return '<span title="' + esc(e.contract.name) + ' · ' + new Date(e.contract.t).toLocaleDateString('ko-KR') + ' 올림" style="color:#16a34a;font-weight:700">✅ 원본</span> ' +
+    '<button class="btn btn-sm" onclick="contractOrigDown(' + q + ')">⬇ 받기</button> <button class="btn btn-sm" onclick="contractOrigPrint(' + q + ')">🖨 인쇄</button>';
+  return '<span class="note">양식</span> <button class="btn btn-sm" title="Word(.doc) 양식 받기" onclick="contractWord(' + q + ')">📄 Word</button> <button class="btn btn-sm" onclick="contractPrint(' + q + ')">🖨 인쇄</button> ' +
+    '<button class="btn btn-sm" title="작성·서명한 계약서 올리기 (PDF·사진·Word)" onclick="contractUpload(' + q + ')">⬆ 업로드</button>';
+}
+/* 사원 정보 창 칸 */
+function contractBox(id){
+  var e = empById(id), c = e && e.contract, q = '\'' + id + '\'';
+  var h = c
+    ? '<div style="margin-bottom:.4rem"><b style="color:#16a34a">✅ 원본 있음</b> — ' + esc(c.name) + ' <span class="note">(' + ctSize(c.size) + ' · ' + new Date(c.t).toLocaleString('ko-KR') + ' 올림)</span></div>' +
+      '<div class="bar"><button class="btn" onclick="contractOrigDown(' + q + ')">⬇ 원본 받기</button><button class="btn" onclick="contractOrigPrint(' + q + ')">🖨 원본 인쇄</button><button class="btn" onclick="contractUpload(' + q + ')">⬆ 새 원본으로 교체</button><button class="btn btn-r" onclick="contractDelete(' + q + ')">원본 지우기</button></div>'
+    : '<div class="note" style="margin-bottom:.4rem">아직 올린 원본이 없습니다 — 양식을 받아 작성·서명한 뒤 스캔본(PDF)·사진·Word 파일을 올리면 그 파일이 원본이 됩니다.</div>' +
+      '<div class="bar"><button class="btn btn-p" onclick="contractUpload(' + q + ')">⬆ 작성한 계약서 업로드</button></div>';
+  return h + '<div class="bar" style="margin-top:.4rem"><span class="note">빈 양식:</span><button class="btn btn-sm" onclick="contractWord(' + q + ')">📄 양식 Word</button><button class="btn btn-sm" onclick="contractPrint(' + q + ')">🖨 양식 인쇄</button></div>' +
+    '<div class="note">원본은 2차 비밀번호 키로 암호화해 보관합니다 (7MB 이하).</div>';
+}
 function deleteEmp(id){
   var e = empById(id);
   var used = Object.keys(S.runs).filter(function(k){ return S.runs[k].rows.some(function(r){ return r.empId === id; }); });
   if (used.length && !confirm(e.name + ' 님은 ' + used.length + '개월 급여 기록이 있습니다.\n삭제 대신 퇴사일을 넣는 것을 권장합니다. 그래도 삭제할까요?\n(과거 급여 기록은 남습니다)')) return;
   if (!used.length && !confirm(e.name + ' 님을 삭제할까요?')) return;
+  if (e.contract && !confirm('올려 둔 근로계약서 원본(' + e.contract.name + ')도 함께 지워집니다. 필요하면 먼저 [⬇ 원본 받기]로 받아 두세요.\n계속 삭제할까요?')) return;
   S.employees = S.employees.filter(function(x){ return x.id !== id; });
+  if (e.contract) ref('enc/contracts/' + id).remove().catch(function(){});
   saveEmployees().then(function(){ closeModal(); renderEmp(); toast('삭제했습니다'); });
 }
 function closeModal(){ $('modalRoot').innerHTML = ''; }
@@ -1560,8 +1663,8 @@ function renderSet(){
 
   ref('audit').orderByChild('t').limitToLast(15).get().then(function(s){
     var a = []; s.forEach(function(c){ a.push(c.val()); }); a.reverse();
-    var L = { unlock:'잠금 해제', 'unlock-fail':'❌ 비밀번호 실패', setup:'최초 설정', recover:'복구코드로 재설정', 'recover-fail':'❌ 복구코드 실패', 'pw-change':'비밀번호 변경', 'recovery-reissue':'복구코드 재발급', 'run-close':'급여 확정', 'run-reopen':'확정 해제', import:'엑셀 가져오기' };
-    $('auditBox').innerHTML = a.length ? a.map(function(x){ return new Date(x.t).toLocaleString('ko-KR') + ' · ' + esc(L[x.ev] || x.ev) + (x.ym ? ' (' + esc(x.ym) + ')' : '') + ' · ' + esc(x.email); }).join('<br>') : '기록 없음';
+    var L = { unlock:'잠금 해제', 'unlock-fail':'❌ 비밀번호 실패', setup:'최초 설정', recover:'복구코드로 재설정', 'recover-fail':'❌ 복구코드 실패', 'pw-change':'비밀번호 변경', 'recovery-reissue':'복구코드 재발급', 'contract-upload':'근로계약서 원본 업로드', 'contract-delete':'근로계약서 원본 삭제', 'run-close':'급여 확정', 'run-reopen':'확정 해제', import:'엑셀 가져오기' };
+    $('auditBox').innerHTML = a.length ? a.map(function(x){ return new Date(x.t).toLocaleString('ko-KR') + ' · ' + esc(L[x.ev] || x.ev) + (x.ym ? ' (' + esc(x.ym) + ')' : '') + (x.emp ? ' (' + esc(x.emp) + ')' : '') + ' · ' + esc(x.email); }).join('<br>') : '기록 없음';
   }).catch(function(){ $('auditBox').textContent = '기록을 불러오지 못했습니다'; });
 }
 function saveSet(){
