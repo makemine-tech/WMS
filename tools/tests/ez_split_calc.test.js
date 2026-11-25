@@ -302,3 +302,31 @@ test('막대 % 는 묶음 기준, 100 은 print_end 때만', () => {
   assert.strictEqual(Z.printPct(s({ done: 1, end: true }), 90), 100);
   assert.strictEqual(Z.printPct(s({}), 0), 0);
 });
+
+/* ── 직접 나누기 (대표님 2026-11-25: 서리태30 + 21곡15 + 말차15 → 서리태30 / 21곡15+말차15 두 박스) ── */
+const G21 = '21곡 가득두유 15입 [곡물도감]★';
+test('splitCustom: 상품별 박스 번호대로 송장을 만듦', () => {
+  const o = Z.buildOrders([row(80, S30, 1), row(80, G21, 1), row(80, M15, 1)])[0];
+  const invs = Z.splitCustom(o, { '서리태 가득콩물 30입 [곡물도감]': [1], '21곡 가득두유 15입 [곡물도감]': [2], '말차 가득콩물 15입 [곡물도감]': [2] });
+  assert.deepStrictEqual(invs.map(i => i.lines.map(l => l.prd + '×' + l.qty)), [
+    ['서리태 가득콩물 30입 [곡물도감]×1'], ['21곡 가득두유 15입 [곡물도감]×1', '말차 가득콩물 15입 [곡물도감]×1']]);
+});
+test('splitCustom: 같은 상품 여러 개는 하나씩 다른 박스로, 빈 번호는 건너뜀, 정하지 않은 건 박스 1', () => {
+  const o = Z.buildOrders([row(81, S15, 3), row(81, GR, 2), row(81, M15, 1)])[0];
+  const invs = Z.splitCustom(o, { '서리태 가득콩물 15입 [곡물도감]': [1, 3, 3], '소형': [3] });
+  assert.deepStrictEqual(invs.map(i => i.lines.map(l => l.prd + '×' + l.qty)), [
+    ['서리태 가득콩물 15입 [곡물도감]×1', '말차 가득콩물 15입 [곡물도감]×1'], ['서리태 가득콩물 15입 [곡물도감]×2', 'Granola 오리지널×2']]);
+});
+test('splitCustom: 오리진케어는 늘 따로 한 장', () => {
+  const o = Z.buildOrders([row(82, S30, 1), row(82, M15, 1), row(82, '1병_당쉼 검은콩', 1)])[0];
+  const invs = Z.splitCustom(o, { '서리태 가득콩물 30입 [곡물도감]': [2], '말차 가득콩물 15입 [곡물도감]': [1] });
+  assert.strictEqual(invs.length, 3);
+  assert.strictEqual(invs[0].lines[0].prd, '말차 가득콩물 15입 [곡물도감]');
+  assert.strictEqual(invs[2].lines[0].prd, '1병_당쉼 검은콩');
+});
+test('assignOf: 지금 나눈 결과를 박스 번호로 되돌림 → splitCustom 하면 같은 결과', () => {
+  const o = Z.buildOrders([row(83, S30, 1), row(83, S15, 2), row(83, GR, 1), row(83, '1병_당쉼 검은콩', 1)])[0];
+  const max = Z.splitMax(o), a = Z.assignOf(o, max);
+  assert.deepStrictEqual(Z.splitCustom(o, a), max);
+  assert.deepStrictEqual(Z.customUnits(o).map(u => u.key), ['서리태 가득콩물 30입 [곡물도감]', '서리태 가득콩물 15입 [곡물도감]', '서리태 가득콩물 15입 [곡물도감]', '소형']);
+});

@@ -72,6 +72,12 @@
   tr.grp { cursor:pointer; }
   tr.grp:hover td { background:var(--surface2); }
   tr.sub td { background:#11141b; color:var(--muted); font-size:.72rem; }
+  /* 직접 나누기 — 박스 번호마다 색 */
+  tr.cu-row td { background:var(--surface2); }
+  .cu-wrap { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .cu-chip { display:inline-flex; align-items:center; gap:.35rem; border:1px solid var(--border); border-left-width:4px; border-radius:8px; padding:.2rem .3rem .2rem .5rem; font-size:.76rem; background:var(--surface); }
+  .cu-chip.cu1 { border-left-color:#3b82f6; } .cu-chip.cu2 { border-left-color:#4af0a8; } .cu-chip.cu3 { border-left-color:#f0a84a; }
+  .cu-chip.cu4 { border-left-color:#f05050; } .cu-chip.cu5 { border-left-color:#a78bfa; } .cu-chip.cu6 { border-left-color:#94a3b8; }
   .tag { display:inline-block; border:1px solid var(--border); border-radius:6px; padding:.05rem .35rem; margin:.1rem .15rem .1rem 0; font-family:'Space Mono',monospace; font-size:.7rem; }
   .tag.b15 { border-color:#3b82f6; color:#93c5fd; } .tag.b30 { border-color:#4af0a8; color:#86efac; }
   .tag.b45 { border-color:#f0a84a; color:#fcd34d; } .tag.b60 { border-color:#f05050; color:#fca5a5; }
@@ -426,6 +432,7 @@ function applyRows(r, keepResult){
     if (!keepResult) $('fillResult').innerHTML = '';
     var err = r.rows.length !== r.total ? '이지어드민에는 ' + r.total + '줄이 있는데 ' + r.rows.length + '줄만 읽혔습니다. 이지어드민 화면에서 한 페이지에 전부 보이게 다시 검색한 뒤 불러와 주세요. (채우기 막힘)' : '';
     $('errBox').style.display = err ? '' : 'none'; $('errBox').textContent = err;
+    CUSTOM = {}; applySaved();
     rebuild(true);
     MODE = 'existing';
     $('loadInfo').textContent = '주문 ' + ORDERS.length + '건 · ' + r.rows.length + '줄 · ' + new Date(LOADED_AT).toLocaleTimeString('ko-KR');
@@ -455,7 +462,27 @@ function nearestStep(count){
 }
 
 /* ── 지금 결과 = 막대(또는 기존대로) + 묶음별 바꾸기 ── */
-var GRP_MODES = [['', '전체 설정 따름'], ['max', '전부 분리'], ['min', '전부 합포'], ['existing', '기존대로'], ['keep', '나누지 않음']];
+var GRP_MODES = [['', '전체 설정 따름'], ['max', '전부 분리'], ['min', '전부 합포'], ['existing', '기존대로'], ['keep', '나누지 않음'], ['custom', '✋ 직접 나누기 (상품별 박스)']];
+/* 직접 나누기 — CUSTOM[구성] = { 상품명: [단위마다 박스 번호] } (대표님 2026-11-25: 서리태30 / 21곡15+말차15 처럼 상품 따라 골라 나누기)
+   고른 나누기는 구성마다 기억(ez_split/splits/{키}) → 다음에 불러올 때 같은 구성이면 그대로 씀. 다른 처리를 고르면 기억도 지움.
+   상품명에 [ ] 가 있어 Firebase 키로 못 쓰므로 박스 번호는 글자(JSON)로 저장 */
+var CUSTOM = {}, SAVED = {};
+function ruleKey(o){ return Z.boxKeyOf(o.lines); }
+function saveRule(g){
+  if (!base) return;
+  var k = ruleKey(g.orders[0]), v = CUSTOM[g.key] ? { comp: g.key, assign: JSON.stringify(CUSTOM[g.key]), by: me ? (me.email || '').split('@')[0] : '', at: firebase.database.ServerValue.TIMESTAMP } : null;
+  if (v) SAVED[k] = v; else delete SAVED[k];
+  base.child('splits/' + k).set(v).catch(function(e){ toast('나누기 저장 실패: ' + e.message); });
+}
+/* 불러온 뒤 기억해 둔 구성은 직접 나누기로 */
+function applySaved(){
+  ORDERS.forEach(function(o){
+    if (!Z.canSplit(o)) return;
+    var r = SAVED[ruleKey(o)], k = compKey(o);
+    if (!r || OVR[k]) return;
+    try { CUSTOM[k] = JSON.parse(r.assign); OVR[k] = 'custom'; } catch(e){}
+  });
+}
 function groupsOf(){
   var g = {}, list = [];
   ORDERS.forEach(function(o){ if (!Z.canSplit(o)) return; var k = compKey(o); if (!g[k]){ g[k] = { key: k, orders: [] }; list.push(g[k]); } g[k].orders.push(o); });
@@ -473,13 +500,50 @@ function currentPlan(){
     else if (m === 'min') byPack[o.pack] = Z.splitMin(o);
     else if (m === 'existing') byPack[o.pack] = Z.existing(o, BOXES) || Z.splitMin(o);
     else if (m === 'keep') byPack[o.pack] = Z.original(o);
+    else if (m === 'custom') byPack[o.pack] = Z.splitCustom(o, CUSTOM[compKey(o)]);
   });
   return { byPack: byPack, totals: Z.totalsOf(byPack, c) };
 }
 /* 「기존대로 맞추기」 → 막대도 기준점 자리로 이동 (대표님 2026-10-27: 눌러도 막대가 안 움직여 헷갈림) */
 function setMode(m){ MODE = m; if (m === 'existing') $('slider').value = EXIST_POS; render(); }
 var GROUPS = [];   /* 지금 화면의 묶음 — select 는 번호로 가리킴 (상품명에 따옴표가 있어도 안전) */
-function setGrp(i, v){ var g = GROUPS[i]; if (!g) return; if (v) OVR[g.key] = v; else delete OVR[g.key]; render(); }
+function setGrp(i, v){
+  var g = GROUPS[i]; if (!g) return;
+  if (v === 'custom'){
+    /* 지금 보이는 모양에서 시작 — 바꾸고 싶은 상품의 박스 번호만 고치면 됨 */
+    if (!CUSTOM[g.key]){ var o = g.orders[0]; CUSTOM[g.key] = Z.assignOf(o, currentPlan().byPack[o.pack]); }
+    OVR[g.key] = v; saveRule(g);
+  } else {
+    if (OVR[g.key] === 'custom'){ delete CUSTOM[g.key]; saveRule(g); }
+    if (v) OVR[g.key] = v; else delete OVR[g.key];
+  }
+  render();
+}
+/* 직접 나누기: 묶음 i 의 j 번째 단위를 박스 no 로 */
+function setUnit(i, j, no){
+  var g = GROUPS[i]; if (!g || !CUSTOM[g.key]) return;
+  var us = Z.customUnits(g.orders[0]), u = us[j]; if (!u) return;
+  var nth = us.slice(0, j).filter(function(x){ return x.key === u.key; }).length;
+  var a = CUSTOM[g.key], arr = a[u.key] = (a[u.key] || []).slice();
+  while (arr.length <= nth) arr.push(1);
+  arr[nth] = Number(no) || 1;
+  saveRule(g); render();
+}
+function customRow(g, i, invs){
+  var us = Z.customUnits(g.orders[0]), a = CUSTOM[g.key] || {}, seen = {}, n = us.length, kan = {};
+  var chips = us.map(function(u, j){
+    var nth = seen[u.key] || 0; seen[u.key] = nth + 1;
+    var no = Number((a[u.key] || [])[nth]) || 1;
+    kan[no] = (kan[no] || 0) + u.kan;
+    var opts = ''; for (var b = 1; b <= n; b++) opts += '<option value="' + b + '"' + (b === no ? ' selected' : '') + '>박스 ' + b + '</option>';
+    return '<span class="cu-chip cu' + Math.min(no, 6) + '"><span>' + esc(short(u.label)) + '</span><select onchange="setUnit(' + i + ',' + j + ',this.value)">' + opts + '</select></span>';
+  }).join('');
+  var over = Object.keys(kan).filter(function(b){ return kan[b] > 4; });
+  return '<tr class="cu-row"><td colspan="4"><div class="sm dim" style="margin-bottom:.4rem">✋ 상품마다 들어갈 박스를 고르세요 — 같은 번호끼리 송장 1장 · 이 구성 ' + g.orders.length + '건 모두에 똑같이 · 다음에 불러와도 이 구성이면 그대로 씀</div>'
+    + '<div class="cu-wrap">' + chips + '</div>'
+    + (over.length ? '<div class="sm" style="color:var(--red);margin-top:.4rem">⚠️ 박스 ' + over.join('·') + ' 이(가) 60박스(4칸)를 넘습니다</div>' : '')
+    + '<div class="sm" style="margin-top:.4rem">→ 송장 <b>' + invs.length + '</b>장</div></td></tr>';
+}
 function toggleGrp(i){ OPEN[i] = !OPEN[i]; render(); }
 
 /* ── 그리기 ── */
@@ -523,6 +587,7 @@ function render(){
     var sel = '<select onclick="event.stopPropagation()" onchange="setGrp(' + i + ', this.value)">'
       + GRP_MODES.map(function(m){ return '<option value="' + m[0] + '"' + ((OVR[g.key] || '') === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'; }).join('') + '</select>';
     var head = '<tr class="grp" onclick="toggleGrp(' + i + ')"><td>' + (OPEN[i] ? '▾ ' : '▸ ') + esc(g.key) + '</td><td class="mono">' + g.orders.length + '</td><td>' + res + '</td><td>' + sel + '</td></tr>';
+    if (OVR[g.key] === 'custom') head += customRow(g, i, invs);
     if (!OPEN[i]) return head;
     return head + g.orders.map(function(o){ return '<tr class="sub"><td colspan="4">' + esc(o.recv || '') + ' · 묶음 ' + esc(o.pack) + ' → ' + cur.byPack[o.pack].length + '장</td></tr>'; }).join('');
   }).join('');
@@ -894,6 +959,7 @@ WMSync.onAuth(function(st){
   $('autoRow').style.display = isSuper ? '' : 'none';
   base.child('settings').on('value', function(s){ var v = s.val(); SET = v ? { ship: Object.assign(defaults().ship, v.ship), sec: Object.assign(defaults().sec, v.sec), autoCommit: !!v.autoCommit } : defaults(); paintSettings(); rebuild(); });
   base.child('times').on('value', function(s){ TIMES = s.val() || {}; rebuild(); });
+  base.child('splits').once('value', function(s){ SAVED = s.val() || {}; if (ORDERS.length){ applySaved(); render(); } });
   db.ref('wms_sync/groups/' + gid + '/picking_ez/boxes').on('value', function(s){ BOXES = s.val() || {}; rebuild(); });
   if (REMOTE) watchRemote();
 });

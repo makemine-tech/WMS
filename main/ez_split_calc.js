@@ -112,6 +112,41 @@
     }
     return withOri(order, bins.map(function(b){ return toInvoice(b.us); }));
   }
+  /* ── 직접 나누기 ── 구성별 묶음에서 사람이 단위마다 박스 번호를 고름 (대표님 2026-11-25)
+     예: 서리태30 + 21곡15 + 말차15 → 서리태30 / 21곡15+말차15 두 장.
+     assign = { [상품명]: [단위마다 박스 번호…], 소형: [번호] }. 상품명 기준이라 같은 구성의 주문 모두에 똑같이 씀.
+     정하지 않은 단위는 박스 1, 빈 번호는 건너뜀, 오리진케어는 늘 따로 한 장 */
+  var SMALL_KEY = '소형';
+  function unitKey(x){ return x.small ? SMALL_KEY : x.prd; }
+  function customUnits(order){
+    return units(order).map(function(x){ return { key: unitKey(x), label: x.small ? x.lines.map(function(l){ return l.prd + (l.qty > 1 ? '×' + l.qty : ''); }).join(' + ') : x.prd, kan: x.small ? 1 : x.kan }; });
+  }
+  function splitCustom(order, assign){
+    var seen = {}, bins = {};
+    units(order).forEach(function(x){
+      var k = unitKey(x), i = seen[k] || 0; seen[k] = i + 1;
+      var no = Number(((assign || {})[k] || [])[i]) || 1;
+      (bins[no] = bins[no] || []).push(x);
+    });
+    var nos = Object.keys(bins).map(Number).sort(function(a, b){ return a - b; });
+    return withOri(order, nos.map(function(n){ return toInvoice(bins[n]); }));
+  }
+  /* 지금 나눈 송장들 → 박스 번호 (직접 나누기를 고를 때 지금 모양에서 시작) */
+  function assignOf(order, invs){
+    var a = {}, k = 0;
+    invs.forEach(function(inv){
+      if (inv.lines.every(function(l){ return isOri(l.prd); })) return;
+      k++;
+      inv.lines.forEach(function(l){
+        var c = classify(l.prd);
+        if (c.kind === 'ori') return;
+        if (c.kind === 'main'){ var arr = a[l.prd] = a[l.prd] || []; for (var i = 0; i < l.qty; i++) arr.push(k); }
+        else if (!a[SMALL_KEY]) a[SMALL_KEY] = [k];
+      });
+    });
+    return a;
+  }
+
   /* 송장 박스 크기: 피킹이지 기록 → 없으면 규칙 (소형만 15, 그 외 칸×15) */
   function boxSize(inv, boxes){
     var rec = boxes && boxes[boxKeyOf(inv.lines)];
@@ -325,7 +360,7 @@
     return Math.min(99, Math.round(Math.min(count, st.done * 30) / count * 100));
   }
 
-  var api = { printPct: printPct, printState: printState, problems: problems, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
+  var api = { splitCustom: splitCustom, assignOf: assignOf, customUnits: customUnits, printPct: printPct, printState: printState, problems: problems, verifyAfter: verifyAfter, summary: summary, existing: existing, planExisting: planExisting, fillPayload: fillPayload, normName: normName, classify: classify, boxKeyOf: boxKeyOf, buildOrders: buildOrders, canSplit: canSplit,
               units: units, toInvoice: toInvoice, kanOf: kanOf, hasSeori60: hasSeori60, splitMax: splitMax, splitMin: splitMin, boxSize: boxSize,
               invCost: invCost, original: original, buildSteps: buildSteps, totalsOf: totalsOf, planAt: planAt };
   if (typeof window !== 'undefined') window.EZ_SPLIT = api;
