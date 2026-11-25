@@ -437,6 +437,9 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
 .au-cnt{width:68px;background:#0a0d13;color:var(--tx);border:1px solid var(--br);border-radius:5px;padding:.25rem .35rem;font-size:.9rem;font-family:var(--mo);text-align:right;font-weight:800}
 .au-mini{padding:.2rem .45rem;font-size:.72rem;border-radius:5px}
 .au-raw{font-size:.66rem;color:var(--p);font-family:var(--mo)}
+.au-tg{background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.55rem .75rem;margin-bottom:.55rem}
+.au-tg.on{border-color:var(--o);background:rgba(255,140,90,.06)}
+.au-last.pass{border-color:var(--mu);background:rgba(124,131,153,.1);color:var(--mu)}
 </style>
 <div id="auditModal" style="position:fixed;inset:0;z-index:10003;background:rgba(0,0,0,.72);display:none;align-items:flex-start;justify-content:center;padding:1rem;overflow:auto">
   <div style="background:var(--s1);border:1.5px solid var(--g);border-radius:12px;max-width:1080px;width:100%;margin:2vh auto;padding:1.1rem 1.25rem">
@@ -449,6 +452,22 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
       A가 붙거나 빠진 바코드처럼 <b style="color:var(--p)">거의 같은 바코드</b>가 읽히면 「이 상품이 맞나요?」라고 묻고, 맞다고 하면 같은 상품으로 합쳐 셉니다(다음부터는 묻지 않음).
       다 셌으면 불일치 줄을 <b style="color:var(--g)">전산일치화</b> — 재고 수정 조정 기록으로 남습니다(원본 기록은 그대로).
     </p>
+    <div class="au-tg" id="auditTgBox">
+      <label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;font-weight:800;font-size:.86rem;color:var(--o)">
+        <input type="checkbox" id="auditTgOn" onchange="setAuditTarget(this.checked)" style="width:18px;height:18px;accent-color:#ff8c5a">
+        🎯 특정상품 재고조사 <span style="font-weight:400;font-size:.72rem;color:var(--mu)">— 체크하면 아래에 넣은 상품만 확인리스트에 올리고, 그 상품만 셉니다 (나머지는 「해당 안 됨」으로 패스)</span>
+      </label>
+      <div id="auditTgPanel" style="display:none;margin-top:.5rem">
+        <div style="display:flex;gap:.5rem;align-items:flex-start;flex-wrap:wrap">
+          <textarea id="auditTgInp" placeholder="찾을 상품 바코드 (원본·대체 아무거나, 줄바꿈으로 여러 개)&#10;스캐너로 찍어도 됩니다" style="flex:1;min-width:240px;height:64px;background:#0a0d13;color:var(--tx);border:1px solid var(--o);border-radius:6px;padding:.45rem .6rem;font-size:.84rem;font-family:var(--mo);outline:none;resize:vertical"></textarea>
+          <div style="display:flex;flex-direction:column;gap:.35rem">
+            <button class="btn au-mini" style="background:var(--o);color:#0f1117;padding:.45rem .8rem;font-size:.8rem" onclick="addAuditTargets()">➕ 확인리스트에 올리기</button>
+            <button class="btn btn-s au-mini" style="padding:.4rem .8rem" onclick="clearAuditTargets()">대상 비우기</button>
+          </div>
+        </div>
+        <div id="auditTgMsg" style="font-size:.74rem;color:var(--mu);font-family:var(--mo);margin-top:.35rem;line-height:1.5"></div>
+      </div>
+    </div>
     <div class="au-top">
       <input id="auditInp" type="text" class="scan-inp" style="flex:1;min-width:240px" placeholder="바코드를 스캔하세요 (1번 = 1개)" autocomplete="off" onkeydown="onAuditKey(event)">
       <span style="font-size:.72rem;color:var(--mu)">스캔당</span>
@@ -2203,14 +2222,74 @@ var auditPending = null;   /* { raw, step, cands:[g] } — 「이 상품이 맞�
 var auditFilter = 'all';
 var auditLoadedFor = null;
 var _auGm = null, _auGmSrc = null;
+/* 🎯 특정상품 재고조사 — 켜면 auditTargets(원본바코드 norm) 상품만 확인리스트에 올리고 그 상품만 센다 */
+var auditTgOn = false;
+var auditTargets = {};
 
 function isAuditOpen(){ var m = document.getElementById('auditModal'); return !!(m && m.style.display === 'flex'); }
 function auditStoreKey(){ return 'star_audit_v1_' + (groupId || 'x'); }
-function auditSave(){ try { localStorage.setItem(auditStoreKey(), JSON.stringify({ rows: auditRows })); } catch(e){} }
+function auditSave(){ try { localStorage.setItem(auditStoreKey(), JSON.stringify({ rows: auditRows, tgOn: auditTgOn, targets: auditTargets })); } catch(e){} }
 function auditLoad(){
-  auditRows = [];
-  try { var o = JSON.parse(localStorage.getItem(auditStoreKey()) || 'null'); if (o && o.rows) auditRows = o.rows; } catch(e){}
+  auditRows = []; auditTgOn = false; auditTargets = {};
+  try {
+    var o = JSON.parse(localStorage.getItem(auditStoreKey()) || 'null');
+    if (o && o.rows) auditRows = o.rows;
+    if (o && o.targets) auditTargets = o.targets;
+    if (o && o.tgOn) auditTgOn = true;
+  } catch(e){}
   auditLoadedFor = groupId;
+}
+function refreshAuditTgUI(){
+  var cb = document.getElementById('auditTgOn'); if (cb) cb.checked = auditTgOn;
+  var p = document.getElementById('auditTgPanel'); if (p) p.style.display = auditTgOn ? '' : 'none';
+  var b = document.getElementById('auditTgBox'); if (b) b.classList.toggle('on', auditTgOn);
+  var inp = document.getElementById('auditInp');
+  if (inp) inp.placeholder = auditTgOn ? '🎯 확인리스트 상품만 셉니다 — 바코드를 스캔하세요' : '바코드를 스캔하세요 (1번 = 1개)';
+  var msg = document.getElementById('auditTgMsg');
+  if (msg && auditTgOn) {
+    var ks = Object.keys(auditTargets), done = 0;
+    ks.forEach(function(k){ var r = auditRows.find(function(x){ return x.k === k; }); if (r && r.scanned) done++; });
+    if (!msg.dataset.keep) msg.innerHTML = ks.length ? '확인리스트 <b style="color:var(--o)">' + ks.length + '</b>종 · 스캔 시작 <b style="color:var(--g)">' + done + '</b>종 · 남음 <b>' + (ks.length - done) + '</b>종' : '찾을 상품 바코드를 넣고 「확인리스트에 올리기」를 누르세요';
+  }
+}
+function setAuditTarget(on){
+  auditTgOn = !!on; auditPending = null; renderAuditAsk();
+  auditSave(); refreshAuditTgUI(); renderAudit();
+  auditFlash('', auditTgOn ? '🎯 특정상품 재고조사 — 확인리스트에 올린 상품만 셉니다' : '전체 재고조사 — 찍는 상품을 모두 셉니다');
+  setTimeout(function(){ document.getElementById(auditTgOn && !Object.keys(auditTargets).length ? 'auditTgInp' : 'auditInp').focus(); }, 30);
+}
+/* 대상 바코드 → 원본바코드 상품으로 찾아 확인리스트(수량 0, 확인 대기)에 올린다 */
+function addAuditTargets(){
+  var el = document.getElementById('auditTgInp'), msg = document.getElementById('auditTgMsg');
+  var toks = parseMulti(el.value).map(normBarcode).filter(Boolean);
+  if (!toks.length) { el.focus(); return; }
+  var added = [], dup = [], miss = [], ask = [];
+  toks.forEach(function(t){
+    var r = auditFind(t), g = r.g;
+    if (!g && r.cands && r.cands.length === 1) g = r.cands[0];   /* 거의 같은 후보가 하나뿐이면 그 상품 */
+    if (!g) { (r.cands ? ask : miss).push(t + (r.cands ? '(후보 ' + r.cands.length + '개 — 원본바코드로 넣어 주세요)' : '')); return; }
+    var k = normBarcode(g.barcode);
+    if (auditTargets[k]) { dup.push(t); return; }
+    auditTargets[k] = 1; added.push(k);
+    if (!auditRows.some(function(x){ return x.k === k; })) auditRows.push({ k: k, bc: k, count: 0, raws: {}, unknown: false, ts: Date.now(), scanned: false });
+  });
+  el.value = '';
+  auditSave(); renderAudit();
+  if (msg) {
+    msg.dataset.keep = '1';
+    msg.innerHTML = '➕ 올림 <b style="color:var(--g)">' + added.length + '</b>종' + (dup.length ? ' · 이미 있음 ' + dup.length : '') +
+      (miss.length ? '<br><span style="color:var(--r)">❌ 전산에 없음: ' + escH(miss.join(', ')) + '</span>' : '') +
+      (ask.length ? '<br><span style="color:var(--y)">❔ 여러 상품과 비슷함: ' + escH(ask.join(', ')) + '</span>' : '') +
+      '<br>확인리스트 <b style="color:var(--o)">' + Object.keys(auditTargets).length + '</b>종';
+    setTimeout(function(){ delete msg.dataset.keep; refreshAuditTgUI(); }, 6000);
+  }
+  document.getElementById('auditInp').focus();
+}
+function clearAuditTargets(){
+  var ks = Object.keys(auditTargets); if (!ks.length) return;
+  if (!confirm('확인리스트 대상 ' + ks.length + '종을 비울까요?\n(아직 한 번도 안 찍은 대기 줄은 목록에서 빠지고, 이미 센 줄은 남습니다)')) return;
+  auditRows = auditRows.filter(function(r){ return !(auditTargets[r.k] && !r.scanned); });
+  auditTargets = {}; auditSave(); renderAudit();
 }
 function openAuditModal(){
   if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
@@ -2224,6 +2303,7 @@ function openAuditModal(){
     });
   }
   document.getElementById('auditModal').style.display = 'flex';
+  refreshAuditTgUI();
   renderAudit();
   setTimeout(function(){ document.getElementById('auditInp').focus(); }, 50);
 }
@@ -2288,6 +2368,17 @@ function onAuditKey(ev){
   var step = parseInt(document.getElementById('auditStep').value, 10) || 1;
   if (step < 1) step = 1;
   var r = auditFind(val);
+  if (auditTgOn) {
+    /* 🎯 확인리스트 상품만 — 나머지는 「해당 안 됨」으로 패스 (목록에 안 올림) */
+    if (!Object.keys(auditTargets).length) { auditFlash('er', '🎯 확인리스트가 비어 있습니다 — 위에 찾을 상품 바코드를 먼저 올려 주세요'); return; }
+    if (r.g && !auditTargets[normBarcode(r.g.barcode)]) r = {};
+    if (r.cands) { r.cands = r.cands.filter(function(g){ return auditTargets[normBarcode(g.barcode)]; }); if (!r.cands.length) r = {}; }
+    if (!r.g && !r.cands) {
+      var pm = (auditGm().byBc[normBarcode(val)] || {}).meta || {};
+      auditFlash('pass', '⏭ 해당 안 됨 — 패스 · <b class="big">' + escH(val) + '</b>' + (pm.name ? ' ' + escH(pm.name) : '') + ' <span style="font-size:.74rem">(확인리스트에 없는 상품, 세지 않음)</span>');
+      return;
+    }
+  }
   if (r.g) auditAdd(normBarcode(r.g.barcode), val, step, false);
   else if (r.cands) { auditPending = { raw: val, step: step, cands: r.cands }; renderAuditAsk(); auditFlash('bad', '❔ <b class="big">' + escH(val) + '</b> — 정확히 같은 바코드는 없고 거의 같은 상품이 있습니다. 아래에서 골라 주세요'); }
   else auditAdd('U:' + normBarcode(val), val, step, true);
@@ -2295,7 +2386,7 @@ function onAuditKey(ev){
 function auditAdd(k, raw, step, unknown){
   var i = auditRows.findIndex(function(r){ return r.k === k; });
   var row = i >= 0 ? auditRows.splice(i, 1)[0] : { k: k, bc: unknown ? normBarcode(raw) : k, count: 0, raws: {}, unknown: !!unknown, ts: 0 };
-  row.count += step;
+  row.count += step; row.scanned = true;
   var rn = normBarcode(raw);
   if (rn !== row.bc) row.raws[rn] = 1;
   row.ts = Date.now();
@@ -2320,6 +2411,7 @@ function auditPick(ci){
 function auditPickNone(){
   var p = auditPending; if (!p) return;
   auditPending = null; renderAuditAsk();
+  if (auditTgOn) { auditFlash('pass', '⏭ 해당 안 됨 — 패스 · <b class="big">' + escH(p.raw) + '</b>'); document.getElementById('auditInp').focus(); return; }
   auditAdd('U:' + normBarcode(p.raw), p.raw, p.step, true);
   document.getElementById('auditInp').focus();
 }
@@ -2341,7 +2433,7 @@ function renderAuditAsk(){
         '<span style="color:var(--mu)">전산 ' + g.stock + '개</span>' +
         '<span style="font-size:.68rem;color:' + (same ? 'var(--g)' : 'var(--y)') + '">' + (same ? '숫자 부분 같음' : '일부 포함') + '</span></div>';
     }).join('') +
-    '<div class="au-cand"><button class="btn btn-s au-mini" onclick="auditPickNone()">✕ 아니요, 다른 상품 (전산에 없는 바코드로 따로 셈)</button></div></div>';
+    '<div class="au-cand"><button class="btn btn-s au-mini" onclick="auditPickNone()">✕ 아니요, 다른 상품 ' + (auditTgOn ? '(해당 안 됨 — 패스)' : '(전산에 없는 바코드로 따로 셈)') + '</button></div></div>';
 }
 function auditFlash(cls, html){ var el = document.getElementById('auditLast'); if (el) { el.className = 'au-last ' + cls; el.innerHTML = html; } }
 function auditStockOf(row){
@@ -2367,20 +2459,23 @@ function setAuditFilter(f){
 }
 function renderAudit(){
   var body = document.getElementById('auditBody'); if (!body) return;
-  var nOk = 0, nBad = 0, nUn = 0, tot = 0;
+  var nOk = 0, nBad = 0, nUn = 0, nWait = 0, tot = 0;
   var html = auditRows.map(function(r, i){
+    if (auditTgOn && !auditTargets[r.k]) return '';      /* 🎯 켜면 확인리스트 상품만 */
     var g = auditStockOf(r), m = (g && g.meta) || {};
     tot += r.count;
-    var st = g ? g.stock : null, ok = g && r.count === st;
-    if (!g) nUn++; else if (ok) nOk++; else nBad++;
-    if (auditFilter === 'bad' && (ok || !g)) return '';
+    var wait = r.scanned === false;                      /* 확인리스트에 올렸지만 아직 안 찍음 */
+    var st = g ? g.stock : null, ok = g && !wait && r.count === st;
+    if (wait) nWait++; else if (!g) nUn++; else if (ok) nOk++; else nBad++;
+    if (auditFilter === 'bad' && (ok || !g || wait)) return '';
     if (auditFilter === 'ok' && !ok) return '';
-    var d = g ? r.count - st : null;
+    var d = (g && !wait) ? r.count - st : null;
     var raws = Object.keys(r.raws || {});
-    var judge = !g ? '<span style="color:var(--r)">❓ 전산에 없음</span>'
+    var judge = wait ? '<span style="color:var(--o)">⏳ 확인 대기</span>'
+      : !g ? '<span style="color:var(--r)">❓ 전산에 없음</span>'
       : ok ? '✅ 일치' + (r.applied ? ' <span style="font-size:.68rem;color:var(--mu)">(정정 ' + r.applied.from + '→' + r.applied.to + ')</span>' : '')
       : '⚠ 불일치';
-    var act = (g && !ok) ? '<button class="btn btn-g au-mini" onclick="applyAuditOne(' + i + ')" title="전산재고 ' + st + ' → ' + r.count + '">전산일치화</button> ' : '';
+    var act = (g && !ok && !wait) ?'<button class="btn btn-g au-mini" onclick="applyAuditOne(' + i + ')" title="전산재고 ' + st + ' → ' + r.count + '">전산일치화</button> ' : '';
     return '<tr>' +
       '<td class="cell-bc">' + escH(g ? g.barcode : r.bc) + (raws.length ? '<div class="au-raw">읽힘: ' + escH(raws.join(', ')) + '</div>' : '') + '</td>' +
       '<td class="cell-alt">' + escH(g ? (g.altList || []).join(', ') : '') + '</td>' +
@@ -2393,31 +2488,32 @@ function renderAudit(){
       '<td style="white-space:nowrap">' + act + '<button class="btn btn-r au-mini" onclick="auditDel(' + i + ')" title="이 줄 빼기">✕</button></td>' +
     '</tr>';
   }).join('');
-  body.innerHTML = html || '<tr><td colspan="9" style="padding:1.2rem;text-align:center;color:var(--mu)">' + (auditRows.length ? '해당하는 줄이 없습니다' : '아직 스캔한 상품이 없습니다') + '</td></tr>';
+  body.innerHTML = html || '<tr><td colspan="9" style="padding:1.2rem;text-align:center;color:var(--mu)">' + (auditTgOn && !Object.keys(auditTargets).length ? '🎯 확인리스트가 비어 있습니다 — 위에 찾을 상품 바코드를 올려 주세요' : auditRows.length ? '해당하는 줄이 없습니다' : '아직 스캔한 상품이 없습니다') + '</td></tr>';
   var s = document.getElementById('auditSum');
-  if (s) s.innerHTML = '조사 <b>' + auditRows.length + '</b>종 · 스캔 합계 <b>' + tot + '</b>개 · <span style="color:var(--g)">일치 <b>' + nOk + '</b></span> · <span style="color:var(--r)">불일치 <b>' + nBad + '</b></span>' + (nUn ? ' · 전산에 없음 <b>' + nUn + '</b>' : '');
+  refreshAuditTgUI();
+  if (s) s.innerHTML = (auditTgOn ? '<span style="color:var(--o)">🎯 확인리스트만</span> · ' + (nWait ? '<span style="color:var(--o)">대기 <b>' + nWait + '</b></span> · ' : '') : '') + '조사 <b>' + (nOk + nBad + nUn) + '</b>종 · 스캔 합계 <b>' + tot + '</b>개 · <span style="color:var(--g)">일치 <b>' + nOk + '</b></span> · <span style="color:var(--r)">불일치 <b>' + nBad + '</b></span>' + (nUn ? ' · 전산에 없음 <b>' + nUn + '</b>' : '');
 }
 function auditInc(i, d){
   var r = auditRows[i]; if (!r) return;
-  r.count = Math.max(0, r.count + d); auditSave(); renderAudit();
+  r.count = Math.max(0, r.count + d); r.scanned = true; auditSave(); renderAudit();
   document.getElementById('auditInp').focus();
 }
 function auditSetCount(i, v){
   var r = auditRows[i]; if (!r) return;
   var n = parseInt(v, 10); if (isNaN(n) || n < 0) n = 0;
-  r.count = n; auditSave(); renderAudit();
+  r.count = n; r.scanned = true; auditSave(); renderAudit();
   document.getElementById('auditInp').focus();
 }
 function auditDel(i){
   var r = auditRows[i]; if (!r) return;
   if (!confirm('이 줄을 재고조사 목록에서 뺄까요?\n\n' + r.bc + ' · 재고조사 ' + r.count + '개\n(전산재고는 바뀌지 않습니다)')) return;
-  auditRows.splice(i, 1); auditSave(); renderAudit();
+  auditRows.splice(i, 1); delete auditTargets[r.k]; auditSave(); renderAudit();
 }
 function clearAudit(){
   if (!auditRows.length) return;
   var bad = auditRows.filter(function(r){ var g = auditStockOf(r); return g && g.stock !== r.count; }).length;
-  if (!confirm('재고조사 목록 ' + auditRows.length + '종을 모두 비울까요?' + (bad ? '\n\n⚠ 아직 전산일치화 안 한 불일치 ' + bad + '종이 있습니다.' : '') + '\n(전산재고는 바뀌지 않습니다)')) return;
-  auditRows = []; auditPending = null; renderAuditAsk(); auditSave(); renderAudit();
+  if (!confirm('재고조사 목록 ' + auditRows.length + '종을 모두 비울까요?' + (Object.keys(auditTargets).length ? '\n🎯 확인리스트 대상도 함께 비웁니다.' : '') + (bad ? '\n\n⚠ 아직 전산일치화 안 한 불일치 ' + bad + '종이 있습니다.' : '') + '\n(전산재고는 바뀌지 않습니다)')) return;
+  auditRows = []; auditTargets = {}; auditPending = null; renderAuditAsk(); auditSave(); renderAudit();
   auditFlash('', '목록을 비웠습니다 — 상품 바코드를 스캔하세요');
 }
 /* 전산일치화 — 지금 전산재고와의 차이만큼 조정 로그 (재고 수정과 같은 방식) */
@@ -2452,7 +2548,11 @@ function applyAuditOne(i){
 }
 function applyAuditAll(){
   var list = [];
-  auditRows.forEach(function(r){ var g = auditStockOf(r); if (g && g.stock !== r.count) list.push({ r: r, g: g }); });
+  auditRows.forEach(function(r){
+    if (r.scanned === false) return;                       /* 확인 대기(안 찍음)는 빼고 */
+    if (auditTgOn && !auditTargets[r.k]) return;           /* 🎯 켜면 확인리스트 상품만 */
+    var g = auditStockOf(r); if (g && g.stock !== r.count) list.push({ r: r, g: g });
+  });
   if (!list.length) { auditFlash('ok', '불일치 줄이 없습니다 — 모두 일치'); return; }
   var plus = 0, minus = 0;
   list.forEach(function(x){ var d = x.r.count - x.g.stock; if (d > 0) plus += d; else minus -= d; });
@@ -2471,7 +2571,7 @@ function dlAudit(){
   auditRows.forEach(function(r){
     var g = auditStockOf(r), m = (g && g.meta) || {};
     rows.push([g ? g.barcode : r.bc, g ? (g.altList || []).join(', ') : '', m.name || '', m.size || '', r.count,
-      g ? g.stock : '', g ? r.count - g.stock : '', !g ? '전산에 없음' : (r.count === g.stock ? '일치' : '불일치'),
+      g ? g.stock : '', (g && r.scanned !== false) ? r.count - g.stock : '', r.scanned === false ? '확인 대기' : !g ? '전산에 없음' : (r.count === g.stock ? '일치' : '불일치'),
       Object.keys(r.raws || {}).join(', '), r.applied ? (r.applied.from + '→' + r.applied.to) : '']);
   });
   saveXlsx(rows, 'STAR_재고조사_' + ymd(Date.now()), '재고조사', [{wch:16},{wch:16},{wch:30},{wch:8},{wch:9},{wch:9},{wch:7},{wch:10},{wch:18},{wch:10}]);
