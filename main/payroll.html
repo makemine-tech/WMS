@@ -1219,7 +1219,7 @@ function renderEmp(){
   var f = $('empFlt').value;
   var list = S.employees.filter(function(e){ return f === 'all' ? true : f === 'on' ? !e.left : !!e.left; });
   if (!list.length){ $('empBody').innerHTML = '<div class="card empty">사원이 없습니다.<br><span class="note">[+ 사원 등록] 또는 [설정 → 기존 엑셀 가져오기]</span></div>'; return; }
-  var h = '<div class="card" style="padding:0;overflow:auto"><table class="list"><thead><tr><th>성명</th><th>부서·직책</th><th>입사일</th><th>기본급</th><th>가족/자녀</th><th>4대보험</th><th>계좌</th></tr></thead><tbody>';
+  var h = '<div class="card" style="padding:0;overflow:auto"><table class="list"><thead><tr><th>성명</th><th>부서·직책</th><th>입사일</th><th>기본급</th><th>가족/자녀</th><th>4대보험</th><th>계좌</th><th>근로계약서</th></tr></thead><tbody>';
   list.forEach(function(e){
     var ex = e.ex || {}, flags = [];
     if (ex.pension) flags.push('연금✕'); if (ex.health) flags.push('건보✕'); if (ex.emp) flags.push('고용✕'); if (ex.tax) flags.push('소득세✕');
@@ -1228,7 +1228,8 @@ function renderEmp(){
     h += '<tr class="click' + (e.left ? ' left' : '') + '" onclick="openEmp(\'' + e.id + '\')"><td><b>' + esc(e.name) + '</b>' + (e.left ? ' <span class="note">퇴사 ' + esc(e.left) + '</span>' : '') + '</td>' +
       '<td>' + esc([e.dept, e.title].filter(Boolean).join(' · ')) + '</td><td>' + esc(e.joined || '') + '</td>' +
       '<td style="font-family:var(--mo)">' + fmt((e.defaults || {}).base) + '</td><td>' + (e.fam || 1) + ' / ' + (e.kids || 0) + (e.taxPct && e.taxPct != 100 ? ' <span class="note">(' + e.taxPct + '%)</span>' : '') + '</td>' +
-      '<td class="note">' + (flags.join(' · ') || '전체 적용') + '</td><td class="note">' + esc(e.bank || '') + ' ' + esc(maskAcct(e.account)) + '</td></tr>';
+      '<td class="note">' + (flags.join(' · ') || '전체 적용') + '</td><td class="note">' + esc(e.bank || '') + ' ' + esc(maskAcct(e.account)) + '</td>' +
+      '<td style="white-space:nowrap"><button class="btn btn-sm" title="Word(.doc) 파일로 받기" onclick="contractWord(\'' + e.id + '\', event)">📄 Word</button> <button class="btn btn-sm" title="바로 인쇄" onclick="contractPrint(\'' + e.id + '\', event)">🖨 인쇄</button></td></tr>';
   });
   $('empBody').innerHTML = h + '</tbody></table></div>';
 }
@@ -1272,6 +1273,7 @@ function openEmp(id){
       money('base', '기본급') + money('pos', '직책수당') + money('ot', '고정 연장수당 (포괄일 때)') + money('etc', '기타수당') + money('meal', '식대 (비과세 20만)') + money('car', '자가운전보조금 (비과세 20만)') + money('child', '보육수당 (비과세 20만)') + money('dedEtc', '기타공제') +
     '</div><div class="fsec">메모</div><div class="fg"><label class="full"><textarea data-f="memo" rows="2">' + esc(e.memo || '') + '</textarea></label></div>' +
     '<div class="modal-ft">' + (id ? '<button class="btn btn-r" style="margin-right:auto" onclick="deleteEmp(\'' + e.id + '\')">삭제</button>' : '') +
+      (id ? '<button class="btn" title="저장된 사원 정보로 만듭니다" onclick="contractWord(\'' + e.id + '\')">📄 근로계약서</button><button class="btn" onclick="contractPrint(\'' + e.id + '\')">🖨 계약서 인쇄</button>' : '') +
       '<button class="btn" onclick="closeModal()">취소</button><button class="btn btn-p" id="empSave">저장</button></div></div></div>';
   $('modalRoot').innerHTML = h;
   /* 모드에 따라 스케줄을 풀어 보여 주고, 직접 입력일 때만 시각 칸을 연다 */
@@ -1315,6 +1317,84 @@ function openEmp(id){
     if (i >= 0) S.employees[i] = e; else S.employees.push(e);
     saveEmployees().then(function(){ closeModal(); renderEmp(); toast('저장했습니다'); }).catch(function(er){ toast('저장 실패: ' + er.message); });
   };
+}
+/* ═══════════ 표준근로계약서(프리랜서) — 사원 정보(급여·입사일·스케줄)로 채워 Word(.doc) 받기 / 인쇄 ═══════════ */
+var CT_CO = { name: '메이크마인디자인(주)', tel: '02-845-7798', addr: '경기도 김포시 양촌읍 황금3로 7번길 42, 102호', ceo: '박 경 우' };
+function ctDate(d){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '');
+  return m ? m[1] + ' 년 ' + (+m[2]) + ' 월 ' + (+m[3]) + ' 일' : '&nbsp;&nbsp;&nbsp;&nbsp; 년 &nbsp;&nbsp; 월 &nbsp;&nbsp; 일';
+}
+function ctTime(t){ var m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? (+m[1]) + ' 시 ' + m[2] + ' 분' : '&nbsp;&nbsp; 시 &nbsp;&nbsp; 분'; }
+function contractHtml(e){
+  var s = effSched(e), d = e.defaults || {}, mh = C.monthHours(s);
+  var base = num(d.base), pos = num(d.pos), hr = base ? C.hourly({ base: base, pos: pos }, mh) : 0;
+  var brk = (s.brkFrom && s.brkTo) ? ctTime(s.brkFrom) + ' ~ ' + ctTime(s.brkTo) : (s.brk != null ? s.brk : 60) + '분';
+  var extras = [['pos','직책수당'],['ot','고정 연장수당'],['etc','기타수당'],['meal','식대'],['car','자가운전보조금'],['child','보육수당']]
+    .filter(function(x){ return num(d[x[0]]) > 0; }).map(function(x){ return x[1] + ' ' + fmt(num(d[x[0]])) + '원'; });
+  var wage = '최저시급에 준함' + (base ? ' (월 기본급 ' + fmt(base) + '원 · 월 소정근로 ' + mh + '시간 기준 시간급 ' + fmt(hr) + '원)' : '');
+  var payDay = +S.company.payDay || 26;
+  var nm = esc(e.name || ''), sp = '&nbsp;';
+  var P = 'style="margin:0 0 5pt 0"', I = 'style="margin:0 0 3pt 14pt"';
+  return '<h1 style="text-align:center;font-size:20pt;letter-spacing:2pt;margin:0 0 22pt 0">표준근로계약서(프리랜서)</h1>' +
+    '<p style="margin:0 0 14pt 0;line-height:1.7">' + sp + sp + CT_CO.name + '(이하 “갑”이라 함)과(와) <u>' + sp + sp + nm + sp + sp + '</u> (이하 “을”이라 함)은 다음과 같이 근로계약을 체결한다.</p>' +
+    '<p ' + P + '>1. 근로개시일 : ' + ctDate(e.joined) + '부터 회사가 정하는 날 까지</p>' +
+    '<p ' + P + '>2. 근 무 장 소 : ' + CT_CO.name + ' (또는 회사가 지정하는 장소)</p>' +
+    '<p ' + P + '>3. 업무의 내용 : 포장 및 임가공</p>' +
+    '<p ' + P + '>4. 소정근로시간 : ' + ctTime(s.in) + '부터 ' + ctTime(s.out) + '까지 (휴게시간 : ' + brk + ')</p>' +
+    '<p ' + P + '>5. 근무일/휴일 : 매주 ' + (s.days.length || 5) + '일(또는 매일단위)근무</p>' +
+    '<p ' + P + '>6. 임' + sp + sp + '금</p>' +
+    '<p ' + I + '>- 시간급 : ' + wage + '</p>' +
+    '<p ' + I + '>- 기타급여(제수당 등) : 있음 (' + (extras.length ? ' o ' : sp + sp + sp + sp) + '),' + sp + sp + ' 없음 (' + (extras.length ? sp + sp + sp + sp : ' o ') + ')' + (extras.length ? ' — ' + extras.join(', ') : '') + '</p>' +
+    '<p ' + I + '>- 임금지급일 : 매월 ' + payDay + '일(휴일의 경우는 업무일 지급)</p>' +
+    '<p ' + I + '>- 지급방법 : 근로자에게 직접지급(' + sp + sp + sp + sp + '),' + sp + sp + ' 근로자 명의 예금통장에 입금( o )</p>' +
+    '<p ' + P + '>7. 근로계약서 교부</p>' +
+    '<p ' + I + '>- 사업주는 근로계약을 체결함과 동시에 본 계약서를 사본하여 근로자의 교부요구와 관계없이 근로자에게 교부함(근로기준법 제17조 이행)</p>' +
+    '<p ' + P + '>8. 근로계약, 취업규칙 등의 성실한 이행의무</p>' +
+    '<p ' + I + '>- 사업주와 근로자는 각자가 근로계약, 취업규칙, 단체협약을 지키고 성실하게 이행하여야 함</p>' +
+    '<p ' + P + '>9. 비밀유지</p>' +
+    '<p ' + I + '>- “을”은 본 작업과 관련된 일체의 정보를 외부에 누설하거나 유출해서는 안되며 이로인해 발생되는 모든 책임은 “을”이 가진다.</p>' +
+    '<p ' + P + '>10. 기' + sp + sp + '타</p>' +
+    '<p ' + I + '>- 이 계약에 정함이 없는 사항은 근로기준법령에 의함</p>' +
+    '<p style="text-align:center;margin:22pt 0 22pt 0;font-size:12pt">' + ctDate(e.joined) + '</p>' +
+    '<table style="border-collapse:collapse;width:100%;font-size:10.5pt" cellpadding="3">' +
+      '<tr><td style="width:18%;vertical-align:top"><b>(사업주)</b></td><td>사업체명 : ' + CT_CO.name + sp + sp + sp + '(전화 : ' + CT_CO.tel + ')</td></tr>' +
+      '<tr><td></td><td>주' + sp + sp + sp + sp + '소 : ' + CT_CO.addr + '</td></tr>' +
+      '<tr><td></td><td>대 표 자 : ' + CT_CO.ceo + sp + sp + sp + sp + sp + sp + sp + sp + sp + sp + '(서명)</td></tr>' +
+      '<tr><td style="height:14pt"></td><td></td></tr>' +
+      '<tr><td style="vertical-align:top"><b>(프리랜서)</b></td><td>주' + sp + sp + sp + sp + '소 : ' + esc(e.addr || '') + '</td></tr>' +
+      '<tr><td></td><td>연 락 처 : ' + esc(e.phone || '') + '</td></tr>' +
+      '<tr><td></td><td>성' + sp + sp + sp + sp + '명 : ' + nm + sp + sp + sp + sp + sp + sp + sp + sp + sp + sp + '(서명)</td></tr>' +
+    '</table>';
+}
+function contractDoc(body, forWord){
+  return '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>표준근로계약서</title>' +
+    (forWord ? '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->' : '') +
+    '<style>@page{size:21cm 29.7cm;margin:2cm 2cm 2cm 2cm;mso-page-orientation:portrait}' +
+    'body{font-family:"맑은 고딕","Malgun Gothic",sans-serif;font-size:11pt;line-height:1.55;color:#000}p{margin:0}</style></head><body>' + body + '</body></html>';
+}
+function contractCheck(e){
+  var miss = [];
+  if (!e.joined) miss.push('입사일'); if (!num((e.defaults || {}).base)) miss.push('기본급'); if (!e.addr) miss.push('주소'); if (!e.phone) miss.push('연락처');
+  return !miss.length || confirm(e.name + ' 사원의 ' + miss.join('·') + ' 정보가 비어 있습니다.\n빈 칸으로 두고 만들까요? (나중에 손으로 적어도 됩니다)');
+}
+function contractWord(id, ev){
+  if (ev) ev.stopPropagation();
+  var e = empById(id); if (!e || !contractCheck(e)) return;
+  var blob = new Blob(['﻿', contractDoc(contractHtml(e), true)], { type: 'application/msword' });
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = '표준근로계약서_' + (e.name || '사원') + (e.joined ? '_' + e.joined.replace(/-/g, '') : '') + '.doc';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 3000);
+  toast('근로계약서를 내려받았습니다');
+}
+function contractPrint(id, ev){
+  if (ev) ev.stopPropagation();
+  var e = empById(id); if (!e || !contractCheck(e)) return;
+  var f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(f);
+  var w = f.contentWindow; w.document.open(); w.document.write(contractDoc(contractHtml(e), false)); w.document.close();
+  setTimeout(function(){ w.focus(); w.print(); setTimeout(function(){ f.remove(); }, 1500); }, 200);
 }
 function deleteEmp(id){
   var e = empById(id);
