@@ -519,6 +519,21 @@ td.cell-stock.hist:hover{background:rgba(74,240,168,.1)}
       <div id="boxRenameMsg" style="font-size:.72rem;color:var(--mu);font-family:var(--mo);margin-top:.4rem"></div>
     </div>
 
+    <!-- 원본바코드 일괄 교체 -->
+    <div style="background:var(--s2);border:1px solid var(--br);border-radius:8px;padding:.6rem .75rem;margin-bottom:.75rem">
+      <div style="font-size:.8rem;font-weight:800;color:var(--p);margin-bottom:.35rem;cursor:pointer" onclick="var b=document.getElementById('bcRepBody');b.style.display=b.style.display==='none'?'':'none'">🔁 원본바코드 일괄 교체 — 엑셀 두 열(기존 원본바코드 ⇥ 새 원본바코드)을 붙여넣기 <span style="font-weight:400;color:var(--mu)">▾</span></div>
+      <div id="bcRepBody" style="display:none">
+        <div style="font-size:.72rem;color:var(--mu);line-height:1.55;margin-bottom:.35rem">기록의 <b style="color:var(--tx)">원본바코드만</b> 바꿉니다 — <b style="color:var(--y)">대체바코드·수량·박스·상품정보는 그대로</b>. 머리줄(원본바코드/원본바코드교체)은 있어도 됩니다. 미리 보기에서 확인한 뒤 교체하세요.</div>
+        <textarea id="bcRepInp" oninput="bcRepPreview()" placeholder="19848157440715&#9;198481574407&#10;19848158025515&#9;198481580255" style="width:100%;height:90px;background:#0a0d13;color:var(--tx);border:1px solid var(--p);border-radius:6px;padding:.45rem .6rem;font-size:.8rem;font-family:var(--mo);outline:none;resize:vertical"></textarea>
+        <div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;margin-top:.4rem">
+          <button class="btn btn-b" onclick="bcRepPreview()" style="padding:.4rem .8rem">👀 미리 보기</button>
+          <button class="btn" style="background:var(--p);color:#0f1117;padding:.4rem .9rem" onclick="bcRepRun()">🔁 교체 실행</button>
+          <span id="bcRepMsg" style="font-size:.72rem;color:var(--mu);font-family:var(--mo)"></span>
+        </div>
+        <div id="bcRepPrev" style="max-height:38vh;overflow:auto;margin-top:.45rem"></div>
+      </div>
+    </div>
+
     <!-- 검색 -->
     <div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem">
       <input id="editSearchInp" type="text" placeholder="바코드 또는 박스번호 (부분일치). 비우면 전체" oninput="renderEditResults()" style="flex:1;min-width:220px;background:#0a0d13;color:var(--tx);border:1px solid var(--g);border-radius:6px;padding:.5rem .7rem;font-size:.88rem;font-family:var(--mo)">
@@ -1804,6 +1819,100 @@ function saveInfoEdit(){
     if (newBc !== t.bc) document.getElementById('editSearchInp').value = nv.barcode;
     if (isEditModalOpen()) renderEditResults();
   }).catch(function(err){ say('❌ 실패: '+(err&&err.message||err)); });
+}
+
+/* ─────────────── 원본바코드 일괄 교체 ───────────────
+ * 붙여넣은 두 열(기존 원본 → 새 원본)대로 logs 의 barcode 만 바꾼다. altBarcode·수량·메타는 건드리지 않음.
+ * 🎯 재고조사 확인리스트(auditTargets)에 기존 바코드가 있으면 새 바코드로 옮긴다. */
+var bcRepPlan = null;
+function bcRepParse(text){
+  var pairs = [], seen = {};
+  String(text || '').split(/\r?\n/).forEach(function(line){
+    var p = line.split(/[\t,;]+|\s{2,}|\s+/).map(normBarcode).filter(Boolean);
+    if (p.length < 2) return;
+    if (!/\d/.test(p[0]) || !/\d/.test(p[1])) return;          /* 머리줄 건너뜀 */
+    pairs.push({ from: p[0], to: p[1], dup: !!seen[p[0]] });
+    seen[p[0]] = 1;
+  });
+  return pairs;
+}
+function bcRepPreview(){
+  var box = document.getElementById('bcRepPrev'), msg = document.getElementById('bcRepMsg');
+  var pairs = bcRepParse(document.getElementById('bcRepInp').value);
+  bcRepPlan = null;
+  if (!pairs.length) { box.innerHTML = ''; msg.textContent = '붙여넣은 두 열이 없습니다'; return; }
+  var byBc = {}; logs.forEach(function(lg){ var b = normBarcode(lg.barcode); if (b) (byBc[b] = byBc[b] || []).push(lg); });
+  var stockOf = {}; stockGroups.forEach(function(g){ stockOf[normBarcode(g.barcode)] = g; });
+  var froms = {}; pairs.forEach(function(p){ froms[p.from] = 1; });
+  var ok = 0, miss = 0, warn = 0, nLogs = 0;
+  pairs.forEach(function(p){
+    p.logs = byBc[p.from] || [];
+    p.g = stockOf[p.from] || null;
+    p.notes = [];
+    if (p.dup) p.notes.push('🔁 같은 기존 바코드가 위에 또 있음 — 건너뜀');
+    else if (p.from === p.to) p.notes.push('= 기존과 같음 — 건너뜀');
+    else if (!p.logs.length) p.notes.push(byBc[p.to] ? '✅ 이미 새 바코드로 되어 있음' : '❌ 재고에 없는 바코드');
+    if (!p.dup && p.from !== p.to && p.logs.length) {
+      p.go = true;
+      if (byBc[p.to] && !froms[p.to]) { p.notes.push('⚠ 새 바코드가 이미 재고에 있음 — 재고가 합쳐짐 (' + (stockOf[p.to] ? stockOf[p.to].stock : 0) + '개)'); p.merge = true; }
+      var altHit = (p.g && p.g.altList || []).indexOf(p.to) >= 0;
+      if (altHit) p.notes.push('ℹ 새 바코드 = 지금 대체바코드와 같음 (대체바코드는 그대로 둠)');
+    }
+    if (p.go) { ok++; nLogs += p.logs.length; if (p.merge) warn++; } else if (!p.logs.length && !byBc[p.to]) miss++;
+  });
+  bcRepPlan = pairs;
+  msg.innerHTML = '총 ' + pairs.length + '줄 · <b style="color:var(--g)">교체 ' + ok + '종 (기록 ' + nLogs + '건)</b>' + (warn ? ' · <b style="color:var(--y)">합쳐짐 ' + warn + '</b>' : '') + (miss ? ' · <b style="color:var(--r)">재고에 없음 ' + miss + '</b>' : '');
+  box.innerHTML = '<table class="tbl" style="font-size:.74rem"><thead><tr><th>기존 원본바코드</th><th>새 원본바코드</th><th>품명</th><th>대체바코드 (그대로)</th><th style="text-align:right">재고</th><th style="text-align:right">기록</th><th>확인</th></tr></thead><tbody>' +
+    pairs.map(function(p){
+      var m = (p.g && p.g.meta) || {};
+      return '<tr style="' + (p.go ? '' : 'opacity:.55') + '"><td class="cell-bc">' + escH(p.from) + '</td><td class="cell-bc" style="color:var(--p)">' + escH(p.to) + '</td>' +
+        '<td class="cell-name">' + escH(m.name || '') + '</td><td class="cell-alt">' + escH(p.g ? (p.g.altList || []).join(', ') : '') + '</td>' +
+        '<td class="cell-num">' + (p.g ? p.g.stock : '—') + '</td><td class="cell-num">' + p.logs.length + '</td>' +
+        '<td style="font-size:.7rem">' + (p.go && !p.notes.length ? '<span style="color:var(--g)">교체</span>' : escH(p.notes.join(' · '))) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function bcRepRun(){
+  if (!dbRef) { setMsg('m0','er','❌ 로그인 후 사용하세요'); return; }
+  bcRepPreview();
+  var plan = (bcRepPlan || []).filter(function(p){ return p.go; });
+  var msg = document.getElementById('bcRepMsg');
+  if (!plan.length) { msg.textContent = '⚠ 교체할 줄이 없습니다'; return; }
+  var nLogs = 0, merges = plan.filter(function(p){ return p.merge; }).length;
+  plan.forEach(function(p){ nLogs += p.logs.length; });
+  if (!confirm('🔁 원본바코드 일괄 교체 — ' + plan.length + '종 · 기록 ' + nLogs + '건\n\n' +
+    plan.slice(0, 12).map(function(p){ return '  • ' + p.from + ' → ' + p.to; }).join('\n') + (plan.length > 12 ? '\n  … 외 ' + (plan.length - 12) + '종' : '') +
+    (merges ? '\n\n⚠ ' + merges + '종은 새 바코드가 이미 재고에 있어 재고가 합쳐집니다.' : '') +
+    '\n\n원본바코드만 바뀌고 대체바코드·수량·상품정보는 그대로입니다. 진행할까요?')) return;
+  var now = Date.now(), u = {}, keys = [];
+  plan.forEach(function(p){ p.logs.forEach(function(lg){ keys.push([lg.key, p]); }); });
+  var chunks = []; for (var c = 0; c < keys.length; c += 400) chunks.push(keys.slice(c, c + 400));
+  msg.textContent = '교체 중...';
+  var chain = Promise.resolve();
+  chunks.forEach(function(part){
+    chain = chain.then(function(){
+      var u = {};
+      part.forEach(function(x){ u[x[0] + '/barcode'] = x[1].to; u[x[0] + '/bcReplacedFrom'] = x[1].from; u[x[0] + '/infoEditTs'] = now; });
+      return dbRef.update(u);
+    });
+  });
+  /* 🎯 확인리스트에 있던 기존 바코드 → 새 바코드로 옮김 */
+  chain = chain.then(function(){
+    if (!auditTgRef) return;
+    var up = {};
+    plan.forEach(function(p){
+      var t = auditTargets[p.from]; if (!t || auditTargets[p.to]) return;
+      var rec = auditTgClean(Object.assign({}, t, { k: p.to, bc: p.to }));
+      up[auditTgId(p.from)] = null; up[auditTgId(p.to)] = rec;
+    });
+    if (Object.keys(up).length) return auditTgRef.update(up);
+  });
+  chain.then(function(){
+    plan.forEach(function(p){ markSessionBarcode(p.to); });
+    msg.innerHTML = '<span style="color:var(--g)">✅ 교체 완료 — ' + plan.length + '종 · 기록 ' + nLogs + '건</span>';
+    setMsg('m0','ok','✅ 원본바코드 일괄 교체 — ' + plan.length + '종 (기록 ' + nLogs + '건, 대체바코드는 그대로)');
+    bcRepPreview();
+    if (isEditModalOpen()) renderEditResults();
+  }).catch(function(err){ msg.textContent = '❌ 실패: ' + (err && err.message || err) + ' — 미리 보기를 다시 눌러 남은 줄을 확인하세요'; });
 }
 
 /* 보기 모드 전환 (최근 작업 / 전체) */
