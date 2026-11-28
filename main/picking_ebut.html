@@ -30,6 +30,11 @@ h1 em{color:var(--b);font-style:normal}
 .step.done{color:var(--b);background:rgba(91,156,246,.03)}
 .step-n{font-family:var(--mo);font-size:.56rem;display:block;margin-bottom:.05rem;opacity:.6}
 .pg{display:none}.pg.on{display:block}
+/* ─── 맨 위로(TOP) 버튼 — 인쇄 단계에서 스크롤 시 우측하단 표시 ─── */
+.to-top{position:fixed;right:20px;bottom:24px;z-index:9990;width:48px;height:48px;border-radius:50%;border:none;background:var(--b);color:#fff;font-size:1.5rem;line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;opacity:0;transform:translateY(12px) scale(.9);pointer-events:none;transition:opacity .22s,transform .22s,background .18s}
+.to-top:hover{background:#7ab0ff}
+.to-top.show{opacity:1;transform:none;pointer-events:auto}
+@media(max-width:640px){.to-top{right:14px;bottom:16px;width:44px;height:44px;font-size:1.3rem}}
 .pg-t{font-size:1.1rem;font-weight:900;margin-bottom:.25rem}
 .pg-s{color:var(--mu);font-size:.8rem;margin-bottom:1.2rem}
 .msg{border-radius:7px;padding:.58rem .95rem;font-size:.82rem;margin:.55rem 0}
@@ -224,6 +229,7 @@ h1 em{color:var(--b);font-style:normal}
   .dlm-advanced,.rule-bar,.auto-card,.auto-actions,
   .manual-mode,
   #dbgOut,#m1,#mpdf,#pw2,#pw2dbg,
+  .to-top,
   #pickHdr{display:none!important}
   /* 다른 STEP 페이지 숨김, 현재 보이는 페이지만 표시 */
   .pg{display:none!important}
@@ -1552,6 +1558,27 @@ function renderDbg(){
   box.textContent=lines.join('\n');
 }
 </script>
+
+<!-- 맨 위로(TOP) 버튼 — 인쇄 단계에서 스크롤 시 우측하단에 표시 -->
+<button id="toTopBtn" class="to-top" onclick="scrollToTop()" aria-label="맨 위로" title="맨 위로">↑</button>
+<script>
+(function(){
+  function updateToTop(){
+    var btn=document.getElementById('toTopBtn'); if(!btn) return;
+    var pg3=document.getElementById('pg3');
+    var onPrint=!!(pg3 && pg3.classList.contains('on'));
+    var y=window.pageYOffset||document.documentElement.scrollTop||0;
+    if(onPrint && y>240) btn.classList.add('show'); else btn.classList.remove('show');
+  }
+  window.scrollToTop=function(){ window.scrollTo({top:0,behavior:'smooth'}); };
+  window.addEventListener('scroll',updateToTop,{passive:true});
+  window.addEventListener('resize',updateToTop,{passive:true});
+  /* STEP 전환 시에도 표시상태 갱신 (goTo 래핑) */
+  if(typeof window.goTo==='function'){ var _g=window.goTo; window.goTo=function(n){ _g(n); setTimeout(updateToTop,0); }; }
+  updateToTop();
+})();
+</script>
+
 <div class="unified-ftr">
   © 2026 <a href="https://makewon.com" style="color:rgba(255,255,255,.5);text-decoration:none;">Makemine Design</a>. All rights reserved. 본 시스템의 무단 복제, 배포 및 도용을 금지합니다.
 </div>
